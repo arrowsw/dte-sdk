@@ -1,0 +1,24 @@
+# dte-sdk
+
+> A TypeScript SDK (work in progress) for Chilean DTE (Documento Tributario Electrónico) as defined by the SII.
+
+dte-sdk is currently a placeholder package. Its only export is `hello()`, which returns the string `'dte-sdk is coming'`. The DTE API will be added in future releases. The package is fully typed, tree-shakeable, supports both ESM and CommonJS, and runs in Node.js (>= 20), the browser, Deno, and Bun.
+
+Key technical details:
+- **Zero dependencies**: Pure TypeScript implementation
+- **Dual package**: Native ESM with CommonJS fallback
+- **Type definitions**: Full TypeScript support
+
+## Getting Started
+
+- [Package on npm](https://www.npmjs.com/package/dte-sdk): npm registry page with version history
+- [GitHub Repository](https://github.com/arrowsw/dte-sdk): Source code, issues, and contribution guidelines
+- [README](https://github.com/arrowsw/dte-sdk/blob/canary/README.md): Quick reference with code examples
+
+## API
+
+- `hello(): string` — returns `'dte-sdk is coming'`
+
+## Optional
+
+- [CHANGELOG](https://github.com/arrowsw/dte-sdk/blob/canary/CHANGELOG.md): Release history
