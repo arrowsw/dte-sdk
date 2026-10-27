@@ -70,7 +70,7 @@
     "typescript"
   ],
   "repository": {
-    "url": "https://github.com/arrowsw/dte-sdk.git",
+    "url": "git+https://github.com/arrowsw/dte-sdk.git",
     "type": "git"
   },
   "bugs": {
