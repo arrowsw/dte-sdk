@@ -1443,6 +1443,13 @@ declare const SII_RUT_BRAND: unique symbol
  */
 export type SiiRut = string & { readonly [SII_RUT_BRAND]: true }
 
+// rut.ts formats '' as '' instead of rejecting it, so emptiness is checked here before delegating.
+const normalize = (value: unknown): SiiRut | null => {
+  if (typeof value !== 'string' || value.trim() === '') return null
+  const formatted = format(value.trim(), { dots: false, throwOnError: false })
+  return formatted === null || formatted === '' ? null : (formatted as SiiRut)
+}
+
 /**
  * EN: Validates a RUT with rut.ts (Modulo 11) and returns it in SII shape. Accepts dotted, hyphenated or compact input.
  * ES: Valida un RUT con rut.ts (módulo 11) y lo devuelve en forma SII. Acepta entrada con puntos, con guión o compacta.
@@ -1451,17 +1458,16 @@ export type SiiRut = string & { readonly [SII_RUT_BRAND]: true }
  * @throws {DteError} EN: `INVALID_RUT`; the value is never echoed in the message. ES: `INVALID_RUT`; el valor nunca va en el mensaje.
  */
 export const toSiiRut = (value: string, field = 'rut'): SiiRut => {
-  const formatted = typeof value === 'string' ? format(value.trim(), { dots: false, throwOnError: false }) : null
+  const formatted = normalize(value)
   if (formatted === null) throw new DteError('INVALID_RUT', { field })
-  return formatted as SiiRut
+  return formatted
 }
 
 /**
  * EN: Type guard: true when `value` is already a valid RUT in SII shape.
  * ES: Guarda de tipo: true cuando `value` ya es un RUT válido en forma SII.
  */
-export const isSiiRut = (value: unknown): value is SiiRut =>
-  typeof value === 'string' && format(value, { dots: false, throwOnError: false }) === value
+export const isSiiRut = (value: unknown): value is SiiRut => typeof value === 'string' && normalize(value) === value
 
 /**
  * EN: Splits a SII RUT into body and verifier (what the SII multipart fields `rutSender`/`dvSender` need).

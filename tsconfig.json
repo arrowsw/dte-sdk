@@ -20,7 +20,8 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "types": [
-      "node"
+      "node",
+      "jest"
     ]
   },
   "include": [
