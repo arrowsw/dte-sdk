@@ -64,7 +64,9 @@ const MESSAGES: Readonly<Record<DteErrorCode, string>> = {
 const SAFE_DETAIL_KEYS = ['field', 'maxLength', 'length', 'type', 'folio', 'from', 'to', 'kind', 'index'] as const
 
 const formatMessage = (code: DteErrorCode, details: DteErrorDetails): string => {
-  const shown = SAFE_DETAIL_KEYS.filter((key) => details[key] !== undefined).map((key) => `${key}=${String(details[key])}`)
+  const shown = SAFE_DETAIL_KEYS.filter((key) => details[key] !== undefined).map(
+    (key) => `${key}=${String(details[key])}`,
+  )
   return shown.length === 0 ? MESSAGES[code] : `${MESSAGES[code]} (${shown.join(', ')})`
 }
 

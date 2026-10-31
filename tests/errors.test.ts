@@ -7,7 +7,9 @@ describe('DteError', () => {
     expect(err.name).toBe('DteError')
     expect(err.code).toBe('FIELD_TOO_LONG')
     expect(err.details).toEqual({ field: 'NmbItem', maxLength: 80, length: 83 })
-    expect(err.message).toBe('Field exceeds the maximum length allowed by the SII schema (field=NmbItem, maxLength=80, length=83)')
+    expect(err.message).toBe(
+      'Field exceeds the maximum length allowed by the SII schema (field=NmbItem, maxLength=80, length=83)',
+    )
   })
 
   test('never echoes free text details into the message', () => {

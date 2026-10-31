@@ -49,7 +49,12 @@ export type DispatchType = (typeof DISPATCH_TYPES)[keyof typeof DISPATCH_TYPES]
  * EN: Service indicator (`IdDoc/IndServicio`), mandatory on receipts (3 is the common case).
  * ES: `IndServicio` — 1 servicios periódicos, 2 servicios periódicos domiciliarios, 3 ventas y servicios (el habitual), 4 espectáculos.
  */
-export const SERVICE_INDICATORS = { periodicServices: 1, periodicHomeServices: 2, salesAndServices: 3, shows: 4 } as const
+export const SERVICE_INDICATORS = {
+  periodicServices: 1,
+  periodicHomeServices: 2,
+  salesAndServices: 3,
+  shows: 4,
+} as const
 /** EN: Union of `SERVICE_INDICATORS` values. ES: Unión de los valores de `SERVICE_INDICATORS`. */
 export type ServiceIndicator = (typeof SERVICE_INDICATORS)[keyof typeof SERVICE_INDICATORS]
 

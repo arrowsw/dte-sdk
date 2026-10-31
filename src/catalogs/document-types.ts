@@ -45,10 +45,18 @@ type NameVariants = { readonly long: string; readonly short: string; readonly pr
 
 const NAMES: Readonly<Record<DocumentType, NameVariants>> = {
   33: { long: 'Factura Electrónica', short: 'FACTURA', printed: 'FACTURA ELECTRÓNICA' },
-  34: { long: 'Factura Exenta Electrónica', short: 'FACTURA EXENTA', printed: 'FACTURA NO AFECTA O EXENTA ELECTRÓNICA' },
+  34: {
+    long: 'Factura Exenta Electrónica',
+    short: 'FACTURA EXENTA',
+    printed: 'FACTURA NO AFECTA O EXENTA ELECTRÓNICA',
+  },
   39: { long: 'Boleta Electrónica', short: 'BOLETA', printed: 'BOLETA ELECTRÓNICA' },
   41: { long: 'Boleta Exenta Electrónica', short: 'BOLETA EXENTA', printed: 'BOLETA EXENTA ELECTRÓNICA' },
-  43: { long: 'Liquidación Factura Electrónica', short: 'LIQUIDACION FACTURA', printed: 'LIQUIDACIÓN FACTURA ELECTRÓNICA' },
+  43: {
+    long: 'Liquidación Factura Electrónica',
+    short: 'LIQUIDACION FACTURA',
+    printed: 'LIQUIDACIÓN FACTURA ELECTRÓNICA',
+  },
   46: { long: 'Factura de Compra Electrónica', short: 'FACTURA COMPRA', printed: 'FACTURA DE COMPRA ELECTRÓNICA' },
   52: { long: 'Guía de Despacho Electrónica', short: 'GUIA DESPACHO', printed: 'GUÍA DE DESPACHO ELECTRÓNICA' },
   56: { long: 'Nota de Débito Electrónica', short: 'NOTA DEBITO', printed: 'NOTA DE DÉBITO ELECTRÓNICA' },
@@ -96,4 +104,5 @@ export const isTransferable = (type: DocumentType): boolean => TRANSFERABLE_TYPE
  * EN: Official Spanish name of a document type: `long` (default), `short` (uppercase, no accents) or `printed` (uppercase per the SII printed-samples manual).
  * ES: Nombre oficial del tipo: `long` (por defecto), `short` (mayúsculas sin tildes) o `printed` (mayúsculas según el manual de muestras impresas del SII).
  */
-export const documentTypeName = (type: DocumentType, variant: keyof NameVariants = 'long'): string => NAMES[type][variant]
+export const documentTypeName = (type: DocumentType, variant: keyof NameVariants = 'long'): string =>
+  NAMES[type][variant]

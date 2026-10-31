@@ -2,7 +2,13 @@
  * EN: Outcome class of an envelope status code (`QueryEstUp` ESTADO or the receipts REST `estado`).
  * ES: Clase de resultado de un código de estado de envío: aceptado, aceptado con reparos, intermedio, rechazado, error de consulta o desconocido.
  */
-export type UploadStatusClass = 'accepted' | 'acceptedWithObjections' | 'pending' | 'rejected' | 'queryError' | 'unknown'
+export type UploadStatusClass =
+  | 'accepted'
+  | 'acceptedWithObjections'
+  | 'pending'
+  | 'rejected'
+  | 'queryError'
+  | 'unknown'
 
 /**
  * EN: Channel the status came from: `soap` (QueryEstUp / DTEUpload) or `rest` (receipts API). `RLV` means success on REST and rejection on SOAP.

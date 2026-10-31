@@ -33,7 +33,14 @@ export type ChileDateTimeParts = {
 export const chileDateTimeParts = (now: Date = new Date()): ChileDateTimeParts => {
   const parts = FORMATTER.formatToParts(now)
   const get = (type: Intl.DateTimeFormatPartTypes): string => parts.find((part) => part.type === type)?.value ?? ''
-  return { year: get('year'), month: get('month'), day: get('day'), hour: get('hour'), minute: get('minute'), second: get('second') }
+  return {
+    year: get('year'),
+    month: get('month'),
+    day: get('day'),
+    hour: get('hour'),
+    minute: get('minute'),
+    second: get('second'),
+  }
 }
 
 /**
@@ -67,7 +74,11 @@ export const isIsoDate = (value: string): boolean => {
   if (!match) return false
   const [, year, month, day] = match
   const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)))
-  return date.getUTCFullYear() === Number(year) && date.getUTCMonth() === Number(month) - 1 && date.getUTCDate() === Number(day)
+  return (
+    date.getUTCFullYear() === Number(year) &&
+    date.getUTCMonth() === Number(month) - 1 &&
+    date.getUTCDate() === Number(day)
+  )
 }
 
 /**

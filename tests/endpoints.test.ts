@@ -1,4 +1,10 @@
-import { SII_HOSTS, SOAP_ENDPOINTS, REST_ENDPOINTS, CLAIM_WS_ENDPOINTS, UPLOAD_USER_AGENT } from '../src/catalogs/endpoints'
+import {
+  SII_HOSTS,
+  SOAP_ENDPOINTS,
+  REST_ENDPOINTS,
+  CLAIM_WS_ENDPOINTS,
+  UPLOAD_USER_AGENT,
+} from '../src/catalogs/endpoints'
 
 describe('endpoints', () => {
   test('hosts per environment', () => {
@@ -7,7 +13,8 @@ describe('endpoints', () => {
 
   test.each(['certification', 'production'] as const)('%s SOAP and REST URLs are https', (env) => {
     for (const url of Object.values(SOAP_ENDPOINTS[env])) expect(url).toMatch(/^https:\/\/(maullin|palena)\.sii\.cl\//)
-    for (const url of Object.values(REST_ENDPOINTS[env])) expect(url).toMatch(/^https:\/\/(apicert|api|pangal|rahue)\.sii\.cl\//)
+    for (const url of Object.values(REST_ENDPOINTS[env]))
+      expect(url).toMatch(/^https:\/\/(apicert|api|pangal|rahue)\.sii\.cl\//)
     expect(CLAIM_WS_ENDPOINTS[env]).toMatch(/^https:\/\/ws[12]\.sii\.cl\//)
   })
 

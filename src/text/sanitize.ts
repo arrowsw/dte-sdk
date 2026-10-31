@@ -20,22 +20,22 @@ export const sanitizeText = (text: string | null | undefined): string => {
 }
 
 const LIGATURES: Readonly<Record<string, string>> = {
-  'ﬀ': 'ff',
-  'ﬁ': 'fi',
-  'ﬂ': 'fl',
-  'ﬃ': 'ffi',
-  'ﬄ': 'ffl',
-  'Œ': 'OE',
-  'œ': 'oe',
-  'Æ': 'AE',
-  'æ': 'ae',
-  'Ø': 'O',
-  'ø': 'o',
-  'Ð': 'D',
-  'ð': 'd',
-  'Þ': 'TH',
-  'þ': 'th',
-  'ß': 'ss',
+  ﬀ: 'ff',
+  ﬁ: 'fi',
+  ﬂ: 'fl',
+  ﬃ: 'ffi',
+  ﬄ: 'ffl',
+  Œ: 'OE',
+  œ: 'oe',
+  Æ: 'AE',
+  æ: 'ae',
+  Ø: 'O',
+  ø: 'o',
+  Ð: 'D',
+  ð: 'd',
+  Þ: 'TH',
+  þ: 'th',
+  ß: 'ss',
 }
 
 /**
