@@ -1645,7 +1645,7 @@ export const sanitizeText = (text: string | null | undefined): string => {
     .replace(/"/g, '')
     .replace(/[—–]/g, '-')
     .replace(/…/g, '...')
-    .replace(/[^\u0000-ÿ]/g, '')
+    .replace(/[\u0100-\uFFFF]/g, '')
     .trim()
 }
 
@@ -3067,6 +3067,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```ts
 import { createDocument, FIELD_LIMITS } from '../src/document/create'
 import { DteError } from '../src/errors'
+import type { DocumentInput } from '../src/model/document'
 import { FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from './support/fixtures'
 
 const issuer = { rut: ISSUER_RUT, businessName: 'Empresa Ejemplo SpA', businessActivity: 'Desarrollo de software', address: 'Av. Ejemplo 123', commune: 'Santiago', activityCode: 620200 }
@@ -3201,7 +3202,8 @@ describe('createDocument', () => {
       [{ references: [{ documentType: 33, folio: 1, date: '2026-01-01', reason: 'x'.repeat(91) }] }, 'FIELD_TOO_LONG', { field: 'RazonRef' }],
       [{ transport: { carrierRut: 'nope' } }, 'INVALID_RUT', { field: 'transport.carrierRut' }],
     ] as const)('%p → %s', (override, code, details) => {
-      expectError(() => createDocument({ type: 33, folio: 1, issueDate: '2026-11-15', issuer, receiver, items, ...override }), code, details)
+      const input = { type: 33, folio: 1, issueDate: '2026-11-15', issuer, receiver, items, ...override } as unknown as DocumentInput
+      expectError(() => createDocument(input), code, details)
     })
   })
 
@@ -4189,7 +4191,7 @@ describe('parseXml', () => {
 
   test('without namespaces strips SII: prefixes', () => {
     expect(parseXmlWithoutNamespaces('<SII:RESPUESTA xmlns:SII="x"><SII:RESP_BODY><TOKEN>abc</TOKEN></SII:RESP_BODY></SII:RESPUESTA>')).toEqual({
-      RESPUESTA: { '@_xmlns:SII': 'x', RESP_BODY: { TOKEN: 'abc' } },
+      RESPUESTA: { RESP_BODY: { TOKEN: 'abc' } },
     })
   })
 

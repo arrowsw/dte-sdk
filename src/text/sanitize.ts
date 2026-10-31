@@ -15,7 +15,7 @@ export const sanitizeText = (text: string | null | undefined): string => {
     .replace(/"/g, '')
     .replace(/[—–]/g, '-')
     .replace(/…/g, '...')
-    .replace(/[^\u0000-ÿ]/g, '')
+    .replace(/[\u0100-\uFFFF]/g, '')
     .trim()
 }
 
