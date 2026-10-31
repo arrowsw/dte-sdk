@@ -1,7 +1,2 @@
-/**
- * Placeholder entry point. The real DTE (Documento Tributario Electrónico)
- * API will land here in future releases.
- */
-export function hello(): string {
-  return 'dte-sdk is coming'
-}
+// Public API is assembled in Task 21. Kept empty so the build and lint stay green meanwhile.
+export {}

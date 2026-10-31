@@ -11,7 +11,7 @@ import globals from 'globals'
 //   - dist/, minified bundles and local Claude Code worktrees (.claude/) excluded
 export default tseslint.config(
   {
-    ignores: ['dist/', '**/*.min.js', '.claude/'],
+    ignores: ['dist/', '**/*.min.js', '.claude/', 'research_notes/', 'reports/'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

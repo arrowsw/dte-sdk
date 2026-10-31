@@ -2,7 +2,7 @@
   "name": "dte-sdk",
   "version": "0.0.2",
   "type": "module",
-  "description": "TypeScript SDK for Chilean electronic tax documents (DTE). Coming soon.",
+  "description": "TypeScript SDK for Chilean electronic tax documents (DTE): build, stamp (TED), sign and envelope DTEs for the SII.",
   "author": "arrowsw",
   "sideEffects": false,
   "main": "./dist/cjs/index.min.js",
@@ -22,16 +22,18 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "npm run build:esm && npm run build:cjs && node scripts/postbuild.mjs",
-    "build:esm": "tsc",
-    "build:cjs": "tsc --module commonjs --outDir dist/cjs",
+    "build": "node scripts/build.mjs && npm run build:types",
     "lint": "eslint \"{**/*,*}.{js,ts,jsx,tsx}\"",
     "prettier": "prettier --write \"{src,tests}/**/*.{js,ts,jsx,tsx}\"",
     "test": "jest --config jest.config.cjs",
     "size": "size-limit",
     "mutation": "stryker run",
     "prepare": "npm run build",
-    "prepublishOnly": "npm run test && npm run prettier && npm run lint"
+    "prepublishOnly": "npm run scan && npm run test && npm run prettier && npm run lint",
+    "build:types": "tsc --emitDeclarationOnly --outDir dist/esm && tsc --emitDeclarationOnly --outDir dist/cjs",
+    "scan": "node scripts/scan-real-data.mjs",
+    "fixtures": "node scripts/make-fixtures.mjs",
+    "test:differential": "RUN_DIFFERENTIAL=1 jest --config jest.config.cjs tests/differential.test.ts"
   },
   "license": "MIT",
   "devDependencies": {
@@ -39,14 +41,17 @@
     "@stryker-mutator/core": "9.6.1",
     "@stryker-mutator/jest-runner": "9.6.1",
     "@types/jest": "30.0.0",
+    "@types/node": "26.6.6",
+    "@types/node-forge": "1.3.14",
+    "esbuild": "0.28.2",
     "eslint": "9.39.2",
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-prettier": "5.5.5",
     "expect-type": "1.3.0",
+    "fast-check": "4.10.2",
     "jest": "30.2.0",
     "prettier": "3.8.1",
     "size-limit": "12.1.0",
-    "terser": "5.46.0",
     "ts-jest": "29.4.6",
     "typescript": "5.9.3",
     "typescript-eslint": "8.53.1"
@@ -85,5 +90,11 @@
     "LICENSE",
     "README.md",
     "llms.txt"
-  ]
+  ],
+  "dependencies": {
+    "@xmldom/xmldom": "0.8.15",
+    "fast-xml-parser": "5.11.2",
+    "node-forge": "1.4.2",
+    "rut.ts": "5.0.0"
+  }
 }
