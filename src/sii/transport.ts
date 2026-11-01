@@ -12,7 +12,9 @@ export type HttpMethod = 'GET' | 'POST'
  * ES: Una petición HTTP tal como el cliente la entrega al transporte: bytes, nunca texto.
  */
 export type HttpRequest = {
+  /** EN: HTTP method. ES: Método HTTP. */
   readonly method: HttpMethod
+  /** EN: Absolute URL. ES: URL absoluta. */
   readonly url: string
   /** EN: Header names as the SII expects them (`User-Agent`, `Cookie`…). ES: Cabeceras tal como las espera el SII. */
   readonly headers: Readonly<Record<string, string>>
@@ -31,9 +33,11 @@ export type HttpRequest = {
  * las fallas de red, TLS, timeout y cancelación se lanzan.
  */
 export type HttpResponse = {
+  /** EN: HTTP status; 4xx and 5xx are returned, not thrown. ES: Estado HTTP; 4xx y 5xx se devuelven, no se lanzan. */
   readonly status: number
   /** EN: Lower-cased names; repeated headers joined with `, `. ES: Nombres en minúsculas; cabeceras repetidas unidas con `, `. */
   readonly headers: Readonly<Record<string, string>>
+  /** EN: Body bytes; the caller decodes them. ES: Bytes del cuerpo; los decodifica quien llama. */
   readonly body: Uint8Array
 }
 
@@ -73,8 +77,11 @@ export const encodeUtf8 = (text: string): Uint8Array => new TextEncoder().encode
  * ES: Un signal que se dispara al vencer el timeout o cuando se dispara el del llamador, y recuerda cuál fue.
  */
 export type RequestSignal = {
+  /** EN: Fires on the timeout or on the caller's abort. ES: Se dispara con el timeout o con la cancelación del llamador. */
   readonly signal: AbortSignal
+  /** EN: True when the timeout fired. ES: True si venció el timeout. */
   readonly timedOut: () => boolean
+  /** EN: Clears the timer and the listener. ES: Limpia el temporizador y el listener. */
   readonly cleanup: () => void
 }
 

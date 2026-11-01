@@ -7,7 +7,9 @@ const SOAP_ENVELOPE_NS = 'http://schemas.xmlsoap.org/soap/envelope/'
  * ES: Un parámetro rpc, en el orden que declara el WSDL (Axis los asocia por posición).
  */
 export type SoapParam = {
+  /** EN: Parameter name. ES: Nombre del parámetro. */
   readonly name: string
+  /** EN: Parameter value; escaped when the envelope is built. ES: Valor del parámetro; se escapa al armar el sobre. */
   readonly value: string
 }
 
@@ -94,8 +96,11 @@ export type SoapFault = {
  * vacío, así que su valor es un string vacío.
  */
 export type SoapResponse = {
+  /** EN: The SOAP fault, or null. ES: El fault SOAP, o null. */
   readonly fault: SoapFault | null
+  /** EN: Text of the return element with its entities decoded, or null. ES: Texto del elemento de retorno con sus entidades decodificadas, o null. */
   readonly returnValue: string | null
+  /** EN: Inner XML of `<return>` as received, or null. ES: XML interno de `<return>` tal como llegó, o null. */
   readonly returnXml: string | null
 }
 

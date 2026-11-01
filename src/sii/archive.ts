@@ -13,8 +13,11 @@ export type UploadKind = 'dte' | 'receipt' | 'book' | 'folioConsumption'
  * ES: Un envío que obtuvo respuesta del SII, tal como se entrega al puerto `archive`.
  */
 export type UploadRecord = {
+  /** EN: Environment the upload went to. ES: Ambiente al que se subió el envío. */
   readonly environment: Environment
+  /** EN: What was uploaded. ES: Qué se subió: `dte`, `receipt`, `book` o `folioConsumption`. */
   readonly kind: UploadKind
+  /** EN: Channel used for the upload. ES: Canal usado para la subida. */
   readonly channel: TokenChannel
   /** EN: TrackID, or null when the SII rejected the upload. ES: `TRACKID`, o null si el SII rechazó el envío. */
   readonly trackId: string | null

@@ -6,8 +6,11 @@ import type { TokenChannel } from './token-cache'
  * ES: La mitad "petición" de un intercambio capturado, con los cuerpos ya decodificados a texto.
  */
 export type HttpExchangeRequest = {
+  /** EN: HTTP method. ES: Método HTTP. */
   readonly method: string
+  /** EN: Absolute URL, redacted. ES: URL absoluta, tachada. */
   readonly url: string
+  /** EN: Request headers, redacted. ES: Cabeceras de la solicitud, tachadas. */
   readonly headers: Readonly<Record<string, string>>
   /** EN: Decoded body or null (GET). ES: Cuerpo decodificado o null (GET). */
   readonly body: string | null
@@ -18,8 +21,11 @@ export type HttpExchangeRequest = {
  * ES: La mitad "respuesta" de un intercambio capturado.
  */
 export type HttpExchangeResponse = {
+  /** EN: HTTP status. ES: Estado HTTP. */
   readonly status: number
+  /** EN: Response headers with lower-cased names, redacted. ES: Cabeceras de la respuesta con nombres en minúscula, tachadas. */
   readonly headers: Readonly<Record<string, string>>
+  /** EN: Body decoded with the channel charset and redacted; null when there is none. ES: Cuerpo decodificado con el charset del canal y tachado; null si no hay. */
   readonly body: string | null
 }
 
@@ -30,6 +36,7 @@ export type HttpExchangeResponse = {
 export type HttpExchangeError = {
   /** EN: `DteError.code` or `UNKNOWN`. ES: `DteError.code` o `UNKNOWN`. */
   readonly code: string
+  /** EN: OS or OpenSSL code, or the failure text, redacted. ES: Código del SO u OpenSSL, o el texto de la falla, tachado. */
   readonly reason: string
 }
 
@@ -40,14 +47,19 @@ export type HttpExchangeError = {
 export type HttpExchange = {
   /** EN: Operation name (`getSeed`, `uploadEnvelope`, `registerClaim`…). ES: Nombre de la operación. */
   readonly operation: string
+  /** EN: Channel of the call. ES: Canal de la llamada. */
   readonly channel: TokenChannel
   /** EN: Attempt number within the retry loop (1-based). ES: Número de intento dentro del ciclo de reintentos (desde 1). */
   readonly attempt: number
+  /** EN: The request as sent, redacted. ES: La solicitud enviada, tachada. */
   readonly request: HttpExchangeRequest
+  /** EN: The response, or null when none arrived. ES: La respuesta, o null si no llegó. */
   readonly response: HttpExchangeResponse | null
+  /** EN: The failure, or null when a response arrived. ES: La falla, o null si llegó respuesta. */
   readonly error: HttpExchangeError | null
   /** EN: ISO 8601 UTC. ES: ISO 8601 UTC. */
   readonly startedAt: string
+  /** EN: Duration of the attempt, ms. ES: Duración del intento, ms. */
   readonly durationMs: number
 }
 

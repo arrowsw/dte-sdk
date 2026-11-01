@@ -35,6 +35,7 @@ export type NodeTlsOptions = {
  * ES: Opciones de `createNodeHttpsTransport`.
  */
 export type NodeHttpsTransportOptions = {
+  /** EN: TLS options; verification stays on unless `tls.rejectUnauthorized` is false. ES: Opciones TLS; la verificación sigue activa salvo que `tls.rejectUnauthorized` sea false. */
   readonly tls?: NodeTlsOptions
   /** EN: Reuse sockets (default true). ES: Reutilizar sockets (por defecto true). */
   readonly keepAlive?: boolean
@@ -42,7 +43,9 @@ export type NodeHttpsTransportOptions = {
 
 /** EN: The two OpenSSL flags behind `legacyRenegotiation`. ES: Los dos flags de OpenSSL detrás de `legacyRenegotiation`. */
 export type SslConstants = {
+  /** EN: OpenSSL flag for legacy renegotiation. ES: Bandera de OpenSSL para renegociación antigua. */
   readonly SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION: number
+  /** EN: OpenSSL flag for legacy servers. ES: Bandera de OpenSSL para servidores antiguos. */
   readonly SSL_OP_LEGACY_SERVER_CONNECT: number
 }
 
@@ -51,7 +54,9 @@ export type SslConstants = {
  * ES: Lo que el adaptador carga de Node de forma perezosa.
  */
 export type NodeModules = {
+  /** EN: The `node:https` module. ES: Módulo `node:https`. */
   readonly https: typeof import('node:https')
+  /** EN: The OpenSSL flags of `node:crypto`. ES: Banderas de OpenSSL de `node:crypto`. */
   readonly constants: SslConstants
   /** EN: The bundled public roots (`tls.rootCertificates`), PEM. ES: Las raíces públicas incluidas en Node (`tls.rootCertificates`), PEM. */
   readonly rootCertificates: readonly string[]

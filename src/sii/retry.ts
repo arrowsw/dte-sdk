@@ -95,10 +95,15 @@ export const retryDelayMs = (policy: RetryPolicy, attempt: number, random: () =>
  * cuando tanto este como el `retryOn` de la política (`isRetryableError` por defecto) lo aceptan.
  */
 export type RetryOptions = {
+  /** EN: Wait between attempts. ES: Espera entre intentos. */
   readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>
+  /** EN: Caller cancellation, handed to `sleep`. ES: Cancelación del llamador, se entrega a `sleep`. */
   readonly signal?: AbortSignal
+  /** EN: Jitter source, 0 to 1; `Math.random` by default. ES: Fuente del jitter, de 0 a 1; `Math.random` por defecto. */
   readonly random?: () => number
+  /** EN: Narrows which errors are retried; the policy must accept them too. ES: Restringe qué errores se reintentan; la política también debe aceptarlos. */
   readonly retryOn?: (error: DteError) => boolean
+  /** EN: Observer called before each wait. ES: Observador llamado antes de cada espera. */
   readonly onRetry?: (error: DteError, attempt: number, delayMs: number) => void
 }
 

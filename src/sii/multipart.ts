@@ -6,7 +6,9 @@ import { decodeLatin1, encodeLatin1 } from '../text/latin1'
  * ES: Un campo multipart simple (`rutSender`, `dvSender`, `rutCompany`, `dvCompany`).
  */
 export type MultipartField = {
+  /** EN: Field name. ES: Nombre del campo, p. ej. `rutSender`. */
   readonly name: string
+  /** EN: Field value, in ASCII. ES: Valor del campo, en ASCII. */
   readonly value: string
 }
 
@@ -15,9 +17,13 @@ export type MultipartField = {
  * ES: La parte archivo (`archivo`): bytes ya codificados en el charset que declara el XML.
  */
 export type MultipartFile = {
+  /** EN: Part name. ES: Nombre de la parte: `archivo`. */
   readonly name: string
+  /** EN: File name sent in the part. ES: Nombre del archivo enviado, p. ej. `EnvioDTE.xml`. */
   readonly fileName: string
+  /** EN: Content type of the part. ES: Tipo de contenido de la parte: `text/xml`. */
   readonly contentType: string
+  /** EN: File bytes, copied untouched. ES: Bytes del archivo, copiados sin cambios. */
   readonly bytes: Uint8Array
 }
 
@@ -26,8 +32,11 @@ export type MultipartFile = {
  * ES: Entrada de `buildMultipartBody`.
  */
 export type MultipartBodyInput = {
+  /** EN: Boundary; must not occur in any field or in the file. ES: Separador; no debe aparecer en ningún campo ni en el archivo. */
   readonly boundary: string
+  /** EN: Text fields, in order. ES: Campos de texto, en orden. */
   readonly fields: readonly MultipartField[]
+  /** EN: The file part, sent last. ES: La parte del archivo, enviada al final. */
   readonly file: MultipartFile
 }
 
