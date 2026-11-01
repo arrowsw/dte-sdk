@@ -1,24 +1,10 @@
 # dte-sdk
 
-> A TypeScript SDK (work in progress) for Chilean DTE (Documento Tributario Electrónico) as defined by the SII.
+> TypeScript SDK for Chilean electronic tax documents (DTE): build, stamp (TED), sign (XMLDSig) and envelope documents for the SII, with an English domain model, bilingual EN/ES JSDoc and RUT handling delegated to rut.ts.
 
-dte-sdk is currently a placeholder package. Its only export is `hello()`, which returns the string `'dte-sdk is coming'`. The DTE API will be added in future releases. The package is fully typed, tree-shakeable, supports both ESM and CommonJS, and runs in Node.js (>= 20), the browser, Deno, and Bun.
+dte-sdk covers document types 33, 34, 39, 41, 43, 46, 52, 56 and 61. `createDocument` validates and normalizes input (RUTs via rut.ts, text sanitized, schema lengths enforced, totals computed with per-line rounding, VAT-included prices via `MntBruto`, withholding for purchase invoices, receipt defaults). `toSiiDocument`/`fromSiiDocument` map the English model (`totalAmount`, `issuer.businessName`) to the official SII tags (`MntTotal`, `RznSoc`) in schema order. `stampDocument` builds the exact `<DD>` string and signs it with the CAF private key (SHA1withRSA over ISO-8859-1 bytes). `signDocument` applies the enveloped XMLDSig signature (C14N 1.0, RSA-SHA1) the SII validates. `createEnvelope`/`signEnvelope` produce `EnvioDTE`/`EnvioBOLETA`. Certificates load from PKCS#12 or PEM; CAF files are parsed and checked for range and the 6-month expiry of invoice/note CAFs. Status codes from the SII web services are classified (`accepted`, `pending`, `rejected`, `queryError`). Errors are `DteError` with stable codes and no personal data in messages. All clock-dependent functions accept `{ now }`.
 
-Key technical details:
-- **Zero dependencies**: Pure TypeScript implementation
-- **Dual package**: Native ESM with CommonJS fallback
-- **Type definitions**: Full TypeScript support
-
-## Getting Started
-
-- [Package on npm](https://www.npmjs.com/package/dte-sdk): npm registry page with version history
-- [GitHub Repository](https://github.com/arrowsw/dte-sdk): Source code, issues, and contribution guidelines
-- [README](https://github.com/arrowsw/dte-sdk/blob/canary/README.md): Quick reference with code examples
-
-## API
-
-- `hello(): string` — returns `'dte-sdk is coming'`
-
-## Optional
-
-- [CHANGELOG](https://github.com/arrowsw/dte-sdk/blob/canary/CHANGELOG.md): Release history
+- [README](https://github.com/arrowsw/dte-sdk/blob/canary/README.md): installation and quick start
+- [Package on npm](https://www.npmjs.com/package/dte-sdk)
+- [rut.ts](https://github.com/arrowsw/rut.ts): the RUT library dte-sdk depends on
+- [Changelog](https://github.com/arrowsw/dte-sdk/blob/canary/CHANGELOG.md)
