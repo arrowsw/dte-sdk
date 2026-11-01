@@ -206,6 +206,10 @@ src/
     archive.ts             UploadArchive, UploadRecord, createMemoryUploadArchive
     node-archive.ts        createDirectoryUploadArchive (lazy node:fs/promises)
     logger.ts              Logger, silentLogger
+    send.ts                one HTTP exchange: timeout, Content-Length, capture, logging
+    operation.ts           helpers shared by the operations (HTTP status, Retry-After, SII:RESPUESTA, soapCall, restCall)
+    lazy.ts                memoize: load `node:` modules once, on first use
+    node-fs.ts             lazy node:fs/promises + node:path loader for the directory adapters
   catalogs/
     reception-status.ts    DTEUpload RECEPCIONDTE STATUS table: RECEPTION_STATUS, receptionStatusMessage,
                            classifyReceptionStatus
