@@ -1,6 +1,6 @@
 # dte-sdk — Arquitectura general y diseño de la Fase 1 (core de emisión)
 
-Fecha: 2026-10-31 · Estado: **borrador para revisión** · Autor: Claude (con Hans)
+Fecha: 2026-10-31 · Estado: **aprobado; fase 1 implementada en la rama feat/core-issuance** · Autor: Claude (con Hans)
 
 Base del port: la implementación de referencia analizada en la investigación previa (no se nombra en el repositorio).
 Referencia de calidad: `rut.ts` 5.0.0 (mismo scaffolding: dual ESM/CJS, Jest 100 %, ESLint,
