@@ -11,7 +11,7 @@ import type { UploadKind } from './archive'
 import { withToken } from './auth'
 import { resolveCompanyRut, resolveSenderRut, retryFor, timeoutFor, type CallOverrides, type SiiClient } from './client'
 import { buildMultipartBody, generateBoundary, multipartContentType, type MultipartField } from './multipart'
-import { bodyExcerpt, httpError, isSuccess, parseJson, retryOptions, siiTimestampToIso } from './operation'
+import { bodyExcerpt, httpError, isNoAnswer, isSuccess, parseJson, retryOptions, siiTimestampToIso } from './operation'
 import { withRetry } from './retry'
 import { send } from './send'
 import type { TokenChannel } from './token-cache'
@@ -369,14 +369,10 @@ const attemptUpload = async (
   }
 }
 
-// An upload is sent again only when no SII response arrived (connection failure, timeout before the first byte). Once
-// the SII answered, whatever the HTTP status or `STATUS`, the file is not re-sent: it may be in already, and a second
-// copy is exactly the duplicate upload this client has to recover from. Only a transport error can be thrown before a
-// response exists, so these two codes are the whole list; a retry policy's own `retryOn` cannot widen it.
-const isNoAnswer = (error: DteError): boolean => error.code === 'TRANSPORT_FAILED' || error.code === 'REQUEST_TIMEOUT'
-
-// The one exception to "never re-send after an answer" lives in `withToken`: when the SII refuses the token (`STATUS`
-// 5, HTTP 401) it did not take the file, so the call runs once more with a fresh token.
+// An upload is sent again only while no SII response has arrived (`isNoAnswer`): once the SII answered, whatever the
+// HTTP status or `STATUS`, the file may be in already, and a second copy is exactly the duplicate upload this client has
+// to recover from. The one exception to "never re-send after an answer" lives in `withToken`: when the SII refuses the
+// token (`STATUS` 5, HTTP 401) it did not take the file, so the call runs once more with a fresh token.
 const performUpload = (sii: SiiClient, job: UploadJob, overrides?: CallOverrides): Promise<UploadReceipt> => {
   const form = buildForm(job)
   return withToken(sii, job.channel, overrides, (token) =>

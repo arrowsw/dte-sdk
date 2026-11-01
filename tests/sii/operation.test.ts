@@ -3,6 +3,7 @@ import { createMemoryCapture } from '../../src/sii/capture'
 import {
   bodyExcerpt,
   httpError,
+  isNoAnswer,
   isSuccess,
   parseJson,
   readSiiResponse,
@@ -265,5 +266,22 @@ describe('retryOptions', () => {
       ['warn', 'sii retrying', { operation: 'getSeed', attempt: 2, delayMs: 3600, code: 'TRANSPORT_FAILED' }],
     ])
     expect(retryOptions(sii, 'getSeed').signal).toBeUndefined()
+  })
+})
+
+describe('isNoAnswer', () => {
+  test.each(['TRANSPORT_FAILED', 'REQUEST_TIMEOUT'] as const)('%s happens before any SII response', (code) => {
+    expect(isNoAnswer(new DteError(code))).toBe(true)
+  })
+
+  test.each([
+    'SII_HTTP_ERROR',
+    'SII_RESPONSE_INVALID',
+    'SII_SOAP_FAULT',
+    'SII_UPLOAD_REJECTED',
+    'TRANSPORT_TLS',
+    'REQUEST_ABORTED',
+  ] as const)('%s is not retryable for a request that changes state', (code) => {
+    expect(isNoAnswer(new DteError(code, { httpStatus: 503, status: '9' }))).toBe(false)
   })
 })
