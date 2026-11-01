@@ -1,5 +1,6 @@
 import { DteError } from '../errors'
 import { extractTagContent } from '../xml/parse'
+import { redactText } from './capture'
 import { retryFor, timeoutFor, type CallOverrides, type SiiClient } from './client'
 import type { RetryOptions } from './retry'
 import { send } from './send'
@@ -10,10 +11,14 @@ import { decodeBody, encodeUtf8, type HttpMethod, type HttpResponse } from './tr
 const EXCERPT_CHARS = 2000
 
 /**
- * EN: First 2 000 characters of a body, for `details.body` (never part of a message).
- * ES: Primeros 2 000 caracteres de un cuerpo, para `details.body` (nunca parte de un mensaje).
+ * EN: First 2 000 characters of a body with its secrets redacted, for `details.body` (never part of a message).
+ * Consumers log `details`, and a reply that fails to parse can still carry a token. Redacting comes first, so a cut
+ * cannot split a secret away from the tag that identifies it.
+ * ES: Primeros 2 000 caracteres de un cuerpo con sus secretos tachados, para `details.body` (nunca parte de un mensaje).
+ * Los consumidores registran `details`, y una respuesta que no se puede interpretar igual puede traer un token. Se tacha
+ * primero, así un corte no puede separar un secreto de la etiqueta que lo identifica.
  */
-export const bodyExcerpt = (text: string): string => text.slice(0, EXCERPT_CHARS)
+export const bodyExcerpt = (text: string): string => redactText(text).slice(0, EXCERPT_CHARS)
 
 /**
  * EN: `X-Retry-After` / `Retry-After` in seconds → ms, or null.

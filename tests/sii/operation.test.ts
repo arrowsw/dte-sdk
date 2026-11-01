@@ -1,6 +1,7 @@
 import { DteError } from '../../src/errors'
 import { createMemoryCapture } from '../../src/sii/capture'
 import {
+  bodyExcerpt,
   httpError,
   isSuccess,
   parseJson,
@@ -17,6 +18,30 @@ import { encodeUtf8 } from '../../src/sii/transport'
 import { encodeLatin1 } from '../../src/text/latin1'
 import { createFakeSii, type FakeRoute } from '../support/fake-sii'
 import { expectCode, testSii } from '../support/sii-client'
+
+describe('bodyExcerpt', () => {
+  test('keeps a short body and cuts a long one at 2 000 characters', () => {
+    expect(bodyExcerpt('<html/>')).toBe('<html/>')
+    expect(bodyExcerpt('x'.repeat(2500))).toBe('x'.repeat(2000))
+  })
+
+  test.each([
+    ['raw', '<r><TOKEN>SECRET123</TOKEN></r>', '<r><TOKEN>[redacted]</TOKEN></r>'],
+    ['prefixed', '<SII:TOKEN>SECRET123</SII:TOKEN>', '<SII:TOKEN>[redacted]</SII:TOKEN>'],
+    ['XML-escaped', '&lt;TOKEN&gt;SECRET123&lt;/TOKEN&gt;', '&lt;TOKEN&gt;[redacted]&lt;/TOKEN&gt;'],
+    ['a seed', '<SEMILLA>000000000078</SEMILLA>', '<SEMILLA>[redacted]</SEMILLA>'],
+    ['a cookie', 'TOKEN=SECRET123; Path=/', 'TOKEN=[redacted]; Path=/'],
+  ])('redacts a secret: %s', (_name, body, expected) => {
+    expect(bodyExcerpt(body)).toBe(expected)
+  })
+
+  test('redacts before cutting, so a secret across the cut cannot survive', () => {
+    const excerpt = bodyExcerpt(`${'x'.repeat(1990)}<TOKEN>SECRET123</TOKEN>`)
+    expect(excerpt).toHaveLength(2000)
+    expect(excerpt).not.toContain('SECRET123')
+    expect(excerpt.startsWith(`${'x'.repeat(1990)}<TOKEN>[`)).toBe(true)
+  })
+})
 
 describe('operation helpers', () => {
   test('retryAfterMs reads X-Retry-After or Retry-After in seconds', () => {

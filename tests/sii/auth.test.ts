@@ -489,6 +489,38 @@ describe('withToken', () => {
 describe('tokens never leak', () => {
   const tokens = [SOAP_TOKEN, REST_TOKEN]
 
+  test.each([
+    ['no ESTADO', '<SII:RESPUESTA><SII:RESP_BODY><TOKEN>SECRET123</TOKEN></SII:RESP_BODY></SII:RESPUESTA>', 200],
+    [
+      'a prefixed TOKEN',
+      '<SII:RESPUESTA><SII:RESP_HDR><ESTADO>00</ESTADO></SII:RESP_HDR><SII:TOKEN>SECRET123</SII:TOKEN></SII:RESPUESTA>',
+      200,
+    ],
+    ['an HTTP error status', '<TOKEN>SECRET123</TOKEN>', 500],
+  ])(
+    'a token-bearing reply with %s stays out of the error details',
+    async (_name, body, status) => {
+      const { sii } = testSii(
+        [
+          { url: REST_SEED, reply: { body: siiFixture('rest-seed-ok.xml'), encoding: 'utf8' } },
+          { url: REST_TOKEN_URL, reply: { status, body, encoding: 'utf8' } },
+        ],
+        { retry: false },
+      )
+      const error: DteError = await getToken(sii, 'rest').then(
+        () => {
+          throw new Error('expected a rejection')
+        },
+        (caught: DteError) => caught,
+      )
+      expect(error.code).toBe(status === 200 ? 'SII_RESPONSE_INVALID' : 'SII_HTTP_ERROR')
+      expect(JSON.stringify(error.details)).toContain('[redacted]')
+      expect(JSON.stringify(error.details)).not.toContain('SECRET123')
+      expect(error.message).not.toContain('SECRET123')
+    },
+    SLOW,
+  )
+
   test(
     'no token in any log line, error message, error detail or capture, on success or failure',
     async () => {
