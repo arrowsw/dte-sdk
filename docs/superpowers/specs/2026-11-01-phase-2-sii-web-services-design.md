@@ -223,7 +223,7 @@ Phase 1 files that change:
 |---|---|
 | `src/errors.ts` | new codes (section 3.8); `SAFE_DETAIL_KEYS` gains `status`, `httpStatus`, `attempts`, `channel`, `operation`, `code`, `trackId` |
 | `src/catalogs/upload-status.ts` | `DOCUMENT_STATUS` gains `FAN` (`cancelled`, "Folio anulado"); exports `isTokenErrorStatus` for `-3`/`-13` and the `001`/`002`/`003` token errors |
-| `src/catalogs/endpoints.ts` | `REST_ENDPOINTS` gains `documentStatus` (`…/recursos/v1/boleta.electronica/` prefix) and `statusCatalog` (`…/recursos/v1/globales/boleta.electronica.envio.estado`); `CLAIM_WS_ENDPOINTS` entries drop the `?wsdl` suffix (the call goes to the service URL; the WSDL URL stays as `CLAIM_WSDL_ENDPOINTS`) |
+| `src/catalogs/endpoints.ts` | `REST_ENDPOINTS` gains `documentStatus` (`…/recursos/v1/boleta.electronica/` prefix); `CLAIM_WS_ENDPOINTS` entries drop the `?wsdl` suffix (the call goes to the service URL; the WSDL URL stays as `CLAIM_WSDL_ENDPOINTS`) |
 | `src/signature/xmldsig.ts` | `buildSignedInfo` accepts `{ uri, enveloped }`; new `signRootElement` |
 | `src/index.ts` | re-exports section 3.13 |
 | `scripts/build.mjs` | `external: [...deps, 'node:*']` |
@@ -841,8 +841,9 @@ Where the built client refines this design. Sections 2 and 3 are otherwise accur
 - **Build.** esbuild keeps `import()` of `node:` modules in the CJS bundle too, instead of rewriting it as D12 expected.
 
 Not verified against the SII yet: the class and gloss of `RCO` (`rejected`, inferred from its neighbours; the OpenAPI
-document answered 503 on 2026-11-01), and `REST_ENDPOINTS.statusCatalog`, which answered HTTP 500 "no existe servicio"
-on both hosts that day and is not used by any operation. The live smoke has not been run yet.
+document answered 503 on 2026-11-01). The `statusCatalog` REST endpoint listed in an earlier draft answered HTTP 500
+"no existe servicio" on both hosts that day and no operation used it, so it was dropped. The live smoke has not been run
+yet (tracked in a GitHub issue).
 
 ---
 

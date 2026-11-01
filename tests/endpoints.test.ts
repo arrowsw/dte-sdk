@@ -31,8 +31,5 @@ describe('endpoints', () => {
   test('REST status endpoints are prefixes the client completes', () => {
     expect(REST_ENDPOINTS.certification.status).toBe('https://apicert.sii.cl/recursos/v1/boleta.electronica.envio/')
     expect(REST_ENDPOINTS.production.documentStatus).toBe('https://api.sii.cl/recursos/v1/boleta.electronica/')
-    expect(REST_ENDPOINTS.production.statusCatalog).toBe(
-      'https://api.sii.cl/recursos/v1/globales/boleta.electronica.envio.estado',
-    )
   })
 })

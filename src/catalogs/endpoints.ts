@@ -58,8 +58,6 @@ export type RestEndpoints = {
   readonly status: string
   /** EN: per-document status prefix; append `{rut}-{dv}-{type}-{folio}/estado`. ES: Prefijo de estado por documento; se completa con `{rut}-{dv}-{tipo}-{folio}/estado`. */
   readonly documentStatus: string
-  /** EN: catalog of envelope states (no token needed). ES: Catálogo de estados de envío (sin token). */
-  readonly statusCatalog: string
 }
 
 const restFor = (apiHost: string, uploadHost: string): RestEndpoints => ({
@@ -68,7 +66,6 @@ const restFor = (apiHost: string, uploadHost: string): RestEndpoints => ({
   upload: `https://${uploadHost}/recursos/v1/boleta.electronica.envio`,
   status: `https://${apiHost}/recursos/v1/boleta.electronica.envio/`,
   documentStatus: `https://${apiHost}/recursos/v1/boleta.electronica/`,
-  statusCatalog: `https://${apiHost}/recursos/v1/globales/boleta.electronica.envio.estado`,
 })
 
 /**

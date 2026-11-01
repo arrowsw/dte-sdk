@@ -47,12 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `FAN` document status, the `RCO` envelope status (rejected), REST per-document status
   endpoint, WSRECLAMO service URLs (`CLAIM_WS_ENDPOINTS`) and their WSDLs
   (`CLAIM_WSDL_ENDPOINTS`).
-- Helpers for custom adapters and tests: `buildMultipartBody` (with `generateBoundary`,
-  `multipartContentType`), `buildSoapEnvelope`/`parseSoapResponse` (with `SOAP_HEADERS`,
-  `stripNamespacePrefixes`), `parseReceptionResponse`, `signSeed`, `signRootElement`,
-  `redactExchange` (with `redactText`, `redactHeaders`), `withRetry` (with `mergeRetryPolicy`,
-  `retryDelayMs`), `decodeBody`/`encodeUtf8`, `tokenCacheKey`/`certificateFingerprint`,
-  `uploadRecordName`.
+- Helpers for custom adapters and tests: `buildMultipartBody`, `buildSoapEnvelope`/`parseSoapResponse`,
+  `signSeed`, `signRootElement`, `redactExchange` and `tokenCacheKey`.
 
 ### Removed
 

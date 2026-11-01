@@ -61,22 +61,14 @@ export {
   isTokenErrorStatus,
 } from './catalogs/upload-status'
 export type { UploadStatusClass, UploadChannel, DocumentStatusClass } from './catalogs/upload-status'
-export {
-  RECEPTION_STATUS,
-  classifyReceptionStatus,
-  receptionStatusMessage,
-  isRetryableReceptionStatus,
-  isSchemaRejection,
-} from './catalogs/reception-status'
+export { RECEPTION_STATUS, classifyReceptionStatus, receptionStatusMessage } from './catalogs/reception-status'
 export type { ReceptionStatusClass } from './catalogs/reception-status'
 export {
   CLAIM_ACTIONS,
-  isClaimAction,
   CLAIM_EVENT_CODES,
   CLAIM_RESPONSE_CODES,
   claimResponseMessage,
   TRANSFERABILITY_CODES,
-  transferabilityOf,
   transferabilityMessage,
 } from './catalogs/claim-codes'
 export type { ClaimAction, ClaimActionCode } from './catalogs/claim-codes'
@@ -195,15 +187,15 @@ export type { SignedEnvelope } from './envelope/sign'
 
 export { silentLogger } from './sii/logger'
 export type { Logger, LogFn, LogContext } from './sii/logger'
-export { certificateFingerprint, tokenCacheKey, createMemoryTokenCache } from './sii/token-cache'
+export { tokenCacheKey, createMemoryTokenCache } from './sii/token-cache'
 export type { TokenChannel, CachedToken, TokenCache } from './sii/token-cache'
-export { DEFAULT_RETRY_POLICY, mergeRetryPolicy, isRetryableError, retryDelayMs, withRetry } from './sii/retry'
+export { DEFAULT_RETRY_POLICY, isRetryableError } from './sii/retry'
 export type { RetryPolicy, RetryOptions } from './sii/retry'
-export { createFetchTransport, decodeBody, encodeUtf8 } from './sii/transport'
+export { createFetchTransport } from './sii/transport'
 export type { HttpMethod, HttpRequest, HttpResponse, HttpTransport, BodyEncoding, FetchLike } from './sii/transport'
 export { createNodeHttpsTransport } from './sii/node-transport'
 export type { NodeTlsOptions, NodeHttpsTransportOptions, TlsVersion } from './sii/node-transport'
-export { redactText, redactHeaders, redactExchange, createMemoryCapture } from './sii/capture'
+export { redactExchange, createMemoryCapture } from './sii/capture'
 export type {
   HttpExchange,
   HttpExchangeRequest,
@@ -211,20 +203,20 @@ export type {
   HttpExchangeError,
   HttpCapture,
 } from './sii/capture'
-export { uploadRecordName, createMemoryUploadArchive } from './sii/archive'
+export { createMemoryUploadArchive } from './sii/archive'
 export type { UploadKind, UploadRecord, UploadArchive } from './sii/archive'
 export { createDirectoryCapture } from './sii/node-capture'
 export type { DirectoryCaptureOptions } from './sii/node-capture'
 export { createDirectoryUploadArchive } from './sii/node-archive'
 export type { DirectoryUploadArchiveOptions } from './sii/node-archive'
-export { createSiiClient, DEFAULT_TIMEOUTS, DEFAULT_TOKEN_TTL_MS } from './sii/client'
+export { createSiiClient } from './sii/client'
 export type { SiiClient, SiiClientOptions, SiiTimeouts, SiiEndpoints, CallOverrides, SleepFn } from './sii/client'
-export { buildSoapEnvelope, parseSoapResponse, stripNamespacePrefixes, SOAP_HEADERS } from './sii/soap'
+export { buildSoapEnvelope, parseSoapResponse } from './sii/soap'
 export type { SoapParam, SoapEnvelopeInput, SoapFault, SoapResponse } from './sii/soap'
-export { generateBoundary, multipartContentType, buildMultipartBody } from './sii/multipart'
+export { buildMultipartBody } from './sii/multipart'
 export type { MultipartField, MultipartFile, MultipartBodyInput } from './sii/multipart'
 export { getSeed, signSeed, getToken, invalidateToken } from './sii/auth'
-export { uploadEnvelope, uploadBook, uploadFolioConsumption, parseReceptionResponse } from './sii/upload'
+export { uploadEnvelope, uploadBook, uploadFolioConsumption } from './sii/upload'
 export type {
   UploadReceipt,
   UploadableEnvelope,
