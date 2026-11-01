@@ -1,6 +1,8 @@
 import { loadCertificateFromPem } from '../../src/certificate/pem'
+import type { Environment } from '../../src/catalogs/codes'
 import { createSiiClient, type SiiClientOptions } from '../../src/sii/client'
 import type { Logger } from '../../src/sii/logger'
+import { tokenCacheKey, type CachedToken, type TokenCache } from '../../src/sii/token-cache'
 import { createFakeSii, type FakeRoute, type FakeSii } from './fake-sii'
 import { fixtureText, FIXED_NOW } from './fixtures'
 
@@ -73,6 +75,31 @@ export const testSii = (routes: FakeRoute[], options: Partial<SiiClientOptions> 
   })
   return { fake, clock, logger, sleeps, sii }
 }
+
+const HOUR = 60 * 60 * 1000
+
+/**
+ * A token cache that already holds a fresh SOAP token and a fresh REST token, so no seed/token handshake runs. A
+ * handshake signs a seed with a 2048-bit key in pure JavaScript (about 0.6 s); tests that are not about
+ * authentication start from this cache. A token the test makes the SII reject is deleted like any cached token, and
+ * the next call authenticates for real.
+ */
+export const seededTokenCache = (environment: Environment): TokenCache => {
+  const fresh = (token: string): CachedToken => ({ token, expiresAt: FIXED_NOW.getTime() + HOUR })
+  const entries = new Map<string, CachedToken>([
+    [tokenCacheKey(environment, 'soap', certificate), fresh(SOAP_TOKEN)],
+    [tokenCacheKey(environment, 'rest', certificate), fresh(REST_TOKEN)],
+  ])
+  return {
+    get: async (key) => entries.get(key) ?? null,
+    set: async (key, value) => void entries.set(key, value),
+    delete: async (key) => void entries.delete(key),
+  }
+}
+
+/** A `testSii` whose tokens are already cached, so the routes only need the operation's own URLs. */
+export const cachedSii = (routes: FakeRoute[], options: Partial<SiiClientOptions> = {}): TestSii =>
+  testSii(routes, { tokenCache: seededTokenCache(options.environment ?? 'certification'), ...options })
 
 export const expectCode = async (
   promise: Promise<unknown>,

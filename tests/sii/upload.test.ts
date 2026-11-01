@@ -1,18 +1,15 @@
-import type { Environment } from '../../src/catalogs/codes'
 import type { SignedEnvelope } from '../../src/envelope/sign'
 import { DteError } from '../../src/errors'
 import { createMemoryUploadArchive } from '../../src/sii/archive'
 import { createMemoryCapture } from '../../src/sii/capture'
-import type { SiiClientOptions } from '../../src/sii/client'
 import { isRetryableError } from '../../src/sii/retry'
-import { tokenCacheKey, type CachedToken, type TokenCache } from '../../src/sii/token-cache'
 import { parseReceptionResponse, uploadBook, uploadEnvelope, uploadFolioConsumption } from '../../src/sii/upload'
 import { decodeLatin1, encodeLatin1 } from '../../src/text/latin1'
 import type { FakeReply, FakeRoute, FakeSii } from '../support/fake-sii'
-import { FIXED_NOW, ISSUER_RUT } from '../support/fixtures'
+import { ISSUER_RUT } from '../support/fixtures'
 import {
   authRoutes,
-  certificate,
+  cachedSii,
   COMPANY_RUT,
   expectCode,
   REST_TOKEN,
@@ -24,7 +21,6 @@ import {
 // A token handshake signs a seed with a 2048-bit key in pure JavaScript (about 0.6 s). Tests that are not about the
 // handshake start with the tokens already cached; the ones that renew a token or authenticate get more than 5 s.
 const SLOW = 30000
-const HOUR = 60 * 60 * 1000
 const CGI = 'https://maullin.sii.cl/cgi_dte/UPL/DTEUpload'
 const REST_UPLOAD_CERT = 'https://pangal.sii.cl/recursos/v1/boleta.electronica.envio'
 const REST_UPLOAD_PROD = 'https://rahue.sii.cl/recursos/v1/boleta.electronica.envio'
@@ -47,22 +43,6 @@ const cgi = (reply: FakeRoute['reply']): FakeRoute[] => [{ url: CGI, reply }]
 const restRoutes = (url: string, reply: FakeRoute['reply']): FakeRoute[] => [{ url, reply }]
 const posts = (fake: FakeSii, url: string = CGI): number =>
   fake.requests.filter((request) => request.url === url).length
-
-const seededCache = (environment: Environment): TokenCache => {
-  const fresh = (token: string): CachedToken => ({ token, expiresAt: FIXED_NOW.getTime() + HOUR })
-  const entries = new Map<string, CachedToken>([
-    [tokenCacheKey(environment, 'soap', certificate), fresh(SOAP_TOKEN)],
-    [tokenCacheKey(environment, 'rest', certificate), fresh(REST_TOKEN)],
-  ])
-  return {
-    get: async (key) => entries.get(key) ?? null,
-    set: async (key, value) => void entries.set(key, value),
-    delete: async (key) => void entries.delete(key),
-  }
-}
-/** A client whose tokens are already cached, so no handshake runs and the routes only need the upload URL. */
-const cachedSii = (routes: FakeRoute[], options: Partial<SiiClientOptions> = {}) =>
-  testSii(routes, { tokenCache: seededCache(options.environment ?? 'certification'), ...options })
 
 const fakeSigned = (...counts: readonly number[]): SignedEnvelope =>
   ({
