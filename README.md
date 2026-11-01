@@ -8,8 +8,9 @@
 </div>
 
 `dte-sdk` builds, stamps and signs Chilean **DTE** (Documento Tributario
-Electrónico) the way the SII expects them, with a readable English API and
-bilingual (EN/ES) documentation on every field.
+Electrónico) the way the SII expects them, sends them through the SII web
+services and tracks them, with a readable English API and bilingual (EN/ES)
+documentation on every field.
 
 - 🧾 **Document types** 33, 34, 39, 41, 43, 46, 52, 56 and 61.
 - 🧮 **Totals done right** — per-line rounding, exempt and non-billable lines,
@@ -19,6 +20,9 @@ bilingual (EN/ES) documentation on every field.
 - ✉️ **Envelopes** — `EnvioDTE` and `EnvioBOLETA` with cover and signed `SetDTE`.
 - 🪪 **Certificates** — PKCS#12 (`.pfx`/`.p12`, legacy and modern) or PEM; the
   holder RUT is read from the certificate.
+- 📡 **SII web services** — seed/token, `DTEUpload` and the receipts REST API, envelope and
+  document status, polling, acceptance/claims; injectable transport, retries, HTTP capture
+  with redaction and an upload archive. TLS verification stays on.
 - 🧠 **Fully typed** — a domain model in English (`totalAmount`, `issuer.businessName`)
   that maps to the official SII tags (`MntTotal`, `RznSoc`) through a codec.
 - 🇨🇱 **Identity by [rut.ts](https://github.com/arrowsw/rut.ts)** — every RUT is
@@ -66,8 +70,10 @@ const envelope = signEnvelope(
   certificate,
 )
 
-encodeLatin1(envelope.xml) // ISO-8859-1 bytes, ready for the SII upload
+encodeLatin1(envelope.xml) // ISO-8859-1 bytes, as the SII receives them
 ```
+
+To send the envelope to the SII, see [SII web services](#sii-web-services).
 
 Receipts (boletas) need no receiver and take VAT-included prices:
 
@@ -95,6 +101,58 @@ verifyDocumentSignature(signed.xml) // { digestValid: true, signatureValid: true
 
 Every function that depends on "now" accepts `{ now: Date }`, so tests are deterministic.
 
+## SII web services
+
+```typescript
+import { createSiiClient, uploadEnvelope, waitForUploadStatus, registerClaim, claimResponseMessage } from 'dte-sdk'
+
+const sii = createSiiClient({ environment: 'certification', certificate, companyRut: '76543210-3' })
+
+const receipt = await uploadEnvelope(sii, { envelope }) // EnvioDTE → DTEUpload; EnvioBOLETA → REST in production
+const status = await waitForUploadStatus(sii, { trackId: receipt.trackId })
+status.status // 'accepted' | 'acceptedWithObjections' | 'rejected' | …
+status.message // Spanish gloss from the SII
+
+const claim = await registerClaim(sii, { issuerRut: '10000004-0', type: 33, folio: 1234, action: 'acceptContent' })
+if (!claim.ok) console.log(claimResponseMessage(claim.code)) // business answers are codes, not errors
+```
+
+Uploads send the XML as ISO-8859-1 bytes, so it must open with an XML declaration naming
+ISO-8859-1 (the phase 1 envelopes do); anything else is refused with
+`INVALID_OPTION { field: 'xml' }` before anything is sent, and whitespace before the declaration
+is dropped.
+
+The client is plain data: every operation is a free function that takes it first. Tokens are
+obtained and renewed for you (one cache per environment, channel and certificate). Also
+available: `getSeed`/`getToken`, `uploadBook`, `uploadFolioConsumption`, `queryUploadStatus`,
+`queryDocumentStatus`, `folioReceived`, `listClaimEvents`, `queryTransferable`,
+`queryReceptionDate`, `receiverStatus`.
+
+Options worth knowing:
+
+- `transport`: `fetch` by default; `createNodeHttpsTransport({ tls })` for a custom CA
+  (`tls.ca`, added to the public roots bundled with Node, not in place of them) or, only if
+  you must, `rejectUnauthorized: false` / `legacyRenegotiation: true`. TLS verification is on
+  by default and the SII hosts verify with the system trust store, so the defaults just work.
+- `retry`: 6 attempts with exponential backoff by default; `false` disables it. An upload
+  (`uploadEnvelope`, `uploadBook`, `uploadFolioConsumption`) and `registerClaim` change state at
+  the SII, so they are sent again only while no SII response has arrived (connection failure,
+  timeout before the response headers). Once the SII answered, whatever it said, and even if the
+  reply was cut off halfway, they are never re-sent, except once with a fresh token when the SII
+  refused the token. Queries are read-only and follow the full policy. `retry.retryOn` can only
+  narrow what is retried (`() => false` never re-sends), never widen it. Getting a token is one
+  retry loop around seed, signature and token, so every attempt signs a fresh seed.
+  `waitForUploadStatus` polls every `intervalMs` instead of following the retry policy, and its
+  `timeoutMs` is a budget: each poll and each sleep is cut to the time that remains.
+- `capture: createDirectoryCapture({ dir })` writes every HTTP exchange, redacted (tokens,
+  seeds, cookies, private keys), for SII support tickets. `archive:
+  createDirectoryUploadArchive({ dir })` keeps the exact bytes of every upload the SII answered,
+  with its TrackID and the SII's reply (tokens redacted). A duplicate answer is kept as
+  `<trackId>-<kind>-duplicate-<yyyymmddHHMMSS>` and never replaces the record of the original.
+- `logger`: silent by default; pass `console` or your own. Messages never carry tokens, RUTs
+  or XML.
+- Every call accepts `{ signal, timeoutMs, retry }` as a last argument.
+
 ## Errors
 
 ```typescript
@@ -109,11 +167,20 @@ try {
 
 Messages never include RUTs, names or item text; the offending value lives in `details`.
 
+The SII web services use the same `DteError` (`TRANSPORT_FAILED`, `TRANSPORT_TLS`, `REQUEST_TIMEOUT`,
+`SII_UPLOAD_REJECTED`, `SII_TOKEN_INVALID`, `WAIT_TIMEOUT`, …); `isRetryableError(err)` tells which ones are
+worth another try. Their messages carry only codes and numbers; a response excerpt (tokens and seeds
+redacted) lives in `details`, never in the message. Transport errors carry `details.operation` (and
+`timeoutMs` on `REQUEST_TIMEOUT`), `SII_HTTP_ERROR` carries `httpStatus`, `url` and `body`, and the
+`details.status` of `SII_UPLOAD_REJECTED` is the `DTEUpload` status as a number.
+
 ## Status codes
 
 `classifyUploadStatus('EPR')` → `'accepted'`, `classifyUploadStatus('RCT')` → `'rejected'`,
 `classifyUploadStatus('-11')` → `'queryError'` (retry). `classifyDocumentStatus('FAU')` → `'notReceived'`.
-Spanish glosses via `uploadStatusMessage` and `documentStatusMessage`.
+Spanish glosses via `uploadStatusMessage` and `documentStatusMessage`. The same pattern covers the
+`DTEUpload` reception statuses (`classifyReceptionStatus`, `receptionStatusMessage`) and the acceptance/claim
+registry (`claimResponseMessage`, `transferabilityMessage`, `CLAIM_ACTIONS`).
 
 ## Development
 
@@ -125,6 +192,7 @@ npm run build        # esbuild (ESM + CJS) + tsc declarations
 npm run lint         # ESLint flat config + Prettier
 npm run size         # bundle size guard (.size-limit.json)
 npm run scan         # no real RUTs, local paths or secrets in tracked files
+SII_LIVE=1 SII_CERT_PFX=… SII_CERT_PASSWORD=… npx jest tests/live   # opt-in smoke against maullin (needs a real certificate)
 ```
 
 Releases are tag-triggered and published from CI with npm provenance — see

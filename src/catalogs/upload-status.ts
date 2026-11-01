@@ -38,6 +38,7 @@ const UPLOAD_STATUS: Readonly<Record<string, StatusEntry>> = {
   VOF: { cls: 'rejected', message: 'Error interno del SII' },
   RCT: { cls: 'rejected', message: 'Rechazado por error en carátula' },
   RCH: { cls: 'rejected', message: 'Rechazado' },
+  RCO: { cls: 'rejected', message: 'Envío rechazado' },
   RSC: { cls: 'rejected', message: 'Rechazado por error en schema' },
   RLV: { cls: 'rejected', message: 'Rechazado, error en documento' },
   LNC: { cls: 'rejected', message: 'Tipo de envío de libro no corresponde' },
@@ -115,6 +116,7 @@ const DOCUMENT_STATUS: Readonly<Record<string, DocumentStatusEntry>> = {
   MMC: { cls: 'modified', message: 'Existe nota de crédito que modifica montos' },
   AND: { cls: 'cancelled', message: 'Existe nota de débito que anula el documento' },
   ANC: { cls: 'cancelled', message: 'Existe nota de crédito que anula el documento' },
+  FAN: { cls: 'cancelled', message: 'Folio anulado' },
 }
 
 /**
@@ -136,3 +138,12 @@ export const documentStatusMessage = (code: string): string => {
   if (entry) return entry.message
   return /^-\d+$/.test(code) ? QUERY_ERROR_MESSAGE : `Estado desconocido: ${code}`
 }
+
+// Statuses that mean the SII rejected the authentication token: `QueryEst*` -3/-13 and the 001/002/003 token errors.
+const TOKEN_ERROR_STATUS: ReadonlySet<string> = new Set(['-3', '-13', '001', '002', '003'])
+
+/**
+ * EN: True when a `QueryEstUp`/`QueryEstDte` status means the token was rejected (renew it and retry once).
+ * ES: True cuando un estado de `QueryEstUp`/`QueryEstDte` significa token rechazado (renovar y reintentar una vez).
+ */
+export const isTokenErrorStatus = (code: string): boolean => TOKEN_ERROR_STATUS.has(code)

@@ -25,17 +25,19 @@ export type XmlSignature = {
 }
 
 /**
- * EN: Builds `SignedInfo`. `expandTags` renders empty elements as `<X></X>` (the canonical form that is signed);
- * `includeXsi` adds `xmlns:xsi`, which the canonical form inherits from the root anyway.
- * ES: Arma `SignedInfo`. `expandTags` escribe los elementos vacíos como `<X></X>` (la forma canónica que se firma);
- * `includeXsi` agrega `xmlns:xsi`, que la forma canónica hereda del raíz de todos modos.
+ * EN: Builds `SignedInfo`. `referenceId` is the `ID` of the signed element, or `''` for a whole-document reference
+ * (`URI=""`). `expandTags` renders empty elements as `<X></X>` (the canonical form that is signed); `includeXsi`
+ * adds `xmlns:xsi`, which the canonical form inherits from the root anyway.
+ * ES: Arma `SignedInfo`. `referenceId` es el `ID` del elemento firmado, o `''` para referenciar el documento completo
+ * (`URI=""`). `expandTags` escribe los elementos vacíos como `<X></X>` (la forma canónica que se firma); `includeXsi`
+ * agrega `xmlns:xsi`, que la forma canónica hereda del raíz de todos modos.
  */
 export const buildSignedInfo = (
   referenceId: string,
   digestValue: string,
   options: { readonly expandTags?: boolean; readonly includeXsi?: boolean } = {},
 ): string => {
-  const uri = referenceId.startsWith('#') ? referenceId : `#${referenceId}`
+  const uri = referenceId === '' || referenceId.startsWith('#') ? referenceId : `#${referenceId}`
   const xsi = (options.includeXsi ?? true) ? ` xmlns:xsi="${XSI_NS}"` : ''
   const empty = (tag: string, algorithm: string): string =>
     options.expandTags ? `<${tag} Algorithm="${algorithm}"></${tag}>` : `<${tag} Algorithm="${algorithm}"/>`
@@ -110,6 +112,56 @@ export const signEnveloped = ({
   return {
     // A replacer function keeps `$`-patterns in the inserted content literal.
     xml: xml.replace(closing, () => `</${elementTag}>${signatureXml}</${rootTag}>`),
+    signature: { digestValue, signatureValue },
+  }
+}
+
+/**
+ * EN: Input of `signRootElement`.
+ * ES: Entrada de `signRootElement`.
+ */
+export type SignRootElementInput = {
+  /** EN: Unsigned XML whose root element is signed as a whole (`Reference URI=""`). ES: XML sin firma cuyo elemento raíz se firma completo (`Reference URI=""`). */
+  readonly xml: string
+  /** EN: Expected root tag (`getToken`). ES: Etiqueta raíz esperada (`getToken`). */
+  readonly rootTag: string
+  /** EN: Signing certificate. ES: Certificado firmante. */
+  readonly certificate: Pick<Certificate, 'privateKeyPem' | 'publicKey' | 'certificateBase64'>
+}
+
+/**
+ * EN: Signs the whole root element with an enveloped XMLDSig signature (`Reference URI=""`, enveloped-signature
+ * transform, C14N 1.0, RSA-SHA1) and inserts `Signature` right before the closing root tag. `SignedInfo` carries only
+ * the XMLDSig namespace, when signed and when stored, because the roots signed this way (`getToken`) declare no
+ * `xmlns:xsi`. This is the signature the SII token services verify.
+ * ES: Firma el elemento raíz completo con una firma XMLDSig envuelta (`Reference URI=""`, transformada
+ * enveloped-signature, C14N 1.0, RSA-SHA1) e inserta `Signature` justo antes del cierre del raíz. `SignedInfo` lleva
+ * solo el namespace XMLDSig, al firmar y al guardar, porque los raíces que se firman así (`getToken`) no declaran
+ * `xmlns:xsi`. Es la firma que verifican los servicios de token del SII.
+ * @throws {DteError} EN: `XML_PARSE_FAILED` when the root is not `rootTag` or has no closing tag. ES: `XML_PARSE_FAILED` si el raíz no es `rootTag` o no tiene etiqueta de cierre.
+ */
+export const signRootElement = ({
+  xml,
+  rootTag,
+  certificate,
+}: SignRootElementInput): { readonly xml: string; readonly signature: XmlSignature } => {
+  const root = parseXmlDom(xml).documentElement
+  if (root.tagName !== rootTag)
+    throw new DteError('XML_PARSE_FAILED', { field: rootTag, reason: `root is ${root.tagName}` })
+  const closing = `</${rootTag}>`
+  const at = xml.lastIndexOf(closing)
+  if (at === -1) throw new DteError('XML_PARSE_FAILED', { field: rootTag, reason: `expected ${closing}` })
+  const digestValue = sha1Base64(canonicalizeElement(root), 'utf8')
+  const signedInfoToSign = buildSignedInfo('', digestValue, { expandTags: true, includeXsi: false })
+  const signedInfoToStore = buildSignedInfo('', digestValue, { expandTags: false, includeXsi: false })
+  const signatureValue = rsaSha1SignBase64(certificate.privateKeyPem, signedInfoToSign, 'utf8')
+  const signatureXml = buildSignatureXml(signedInfoToStore, wrapBase64(signatureValue), {
+    modulus: wrapBase64(certificate.publicKey.modulus),
+    exponent: certificate.publicKey.exponent,
+    certificate: wrapBase64(certificate.certificateBase64),
+  })
+  return {
+    xml: `${xml.slice(0, at)}${signatureXml}${xml.slice(at)}`,
     signature: { digestValue, signatureValue },
   }
 }

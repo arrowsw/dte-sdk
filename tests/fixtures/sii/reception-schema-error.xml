@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<RECEPCIONDTE>
+<RUTSENDER>76543210-3</RUTSENDER>
+<RUTCOMPANY>10000004-0</RUTCOMPANY>
+<FILE>EnvioDTE.xml</FILE>
+<TIMESTAMP>2026-11-15 15:30:05</TIMESTAMP>
+<STATUS>7</STATUS>
+<DETAIL>
+<ERROR>SCH-00001: Error de Esquema</ERROR>
+<ERROR>cvc-complex-type.2.4.a: Invalid content was found starting with element 'Detalle'.</ERROR>
+</DETAIL>
+</RECEPCIONDTE>
