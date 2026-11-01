@@ -17,6 +17,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Certificates from PKCS#12 and PEM, CAF parsing and validity, Chile-local timestamps,
   text sanitization and ISO-8859-1 encoding, SII status code classification.
 - Dependencies: `node-forge`, `@xmldom/xmldom`, `fast-xml-parser`, `rut.ts`.
+- SII web services client: `createSiiClient` (plain data, no methods) and free functions
+  for seed/token on the DTEWS SOAP and receipts REST channels (`getSeed`, `getToken`),
+  uploads (`uploadEnvelope`, `uploadBook`, `uploadFolioConsumption`) with duplicate
+  recovery, status queries (`queryUploadStatus`, `waitForUploadStatus`,
+  `queryDocumentStatus`, `folioReceived`) and the acceptance/claim registry
+  (`registerClaim`, `listClaimEvents`, `queryTransferable`, `queryReceptionDate`,
+  `receiverStatus`). Uploads and `registerClaim` are never re-sent once the SII has
+  answered, except once with a fresh token when the SII refused the token.
+- Injectable HTTP transport (`createFetchTransport`, `createNodeHttpsTransport` with TLS
+  verification on by default), token cache, retry policy with backoff, HTTP capture with
+  redaction (`createMemoryCapture`, `createDirectoryCapture`) and upload archive
+  (`createMemoryUploadArchive`, `createDirectoryUploadArchive`). The Node adapters load
+  `node:` modules lazily, so importing the package evaluates no `node:` module.
+- Catalogs: `DTEUpload` reception statuses, claim actions/events/response codes,
+  `FAN` document status, REST per-document status endpoint, WSRECLAMO service URLs
+  (`CLAIM_WS_ENDPOINTS`) and their WSDLs (`CLAIM_WSDL_ENDPOINTS`).
+- Helpers for custom adapters and tests: `buildMultipartBody` (with `generateBoundary`,
+  `multipartContentType`), `buildSoapEnvelope`/`parseSoapResponse` (with `SOAP_HEADERS`,
+  `stripNamespacePrefixes`), `parseReceptionResponse`, `signSeed`, `signRootElement`,
+  `redactExchange` (with `redactText`, `redactHeaders`), `withRetry` (with `mergeRetryPolicy`,
+  `retryDelayMs`), `decodeBody`/`encodeUtf8`, `tokenCacheKey`/`certificateFingerprint`,
+  `uploadRecordName`.
 
 ### Removed
 

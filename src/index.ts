@@ -1,6 +1,8 @@
 /**
- * EN: dte-sdk public API. Everything is exported from this single entry.
- * ES: API pública de dte-sdk. Todo se exporta desde esta única entrada.
+ * EN: dte-sdk public API: documents, stamps, signatures and envelopes, plus the SII web services client (seed and
+ * token, uploads, status queries, acceptance and claims). Everything is exported from this single entry.
+ * ES: API pública de dte-sdk: documentos, timbres, firmas y sobres, más el cliente de los servicios web del SII
+ * (semilla y token, envíos, consultas de estado, aceptación y reclamos). Todo se exporta desde esta única entrada.
  */
 export { DteError, DTE_ERROR_CODES, isDteError } from './errors'
 export type { DteErrorCode, DteErrorDetails } from './errors'
@@ -59,6 +61,25 @@ export {
   isTokenErrorStatus,
 } from './catalogs/upload-status'
 export type { UploadStatusClass, UploadChannel, DocumentStatusClass } from './catalogs/upload-status'
+export {
+  RECEPTION_STATUS,
+  classifyReceptionStatus,
+  receptionStatusMessage,
+  isRetryableReceptionStatus,
+  isSchemaRejection,
+} from './catalogs/reception-status'
+export type { ReceptionStatusClass } from './catalogs/reception-status'
+export {
+  CLAIM_ACTIONS,
+  isClaimAction,
+  CLAIM_EVENT_CODES,
+  CLAIM_RESPONSE_CODES,
+  claimResponseMessage,
+  TRANSFERABILITY_CODES,
+  transferabilityOf,
+  transferabilityMessage,
+} from './catalogs/claim-codes'
+export type { ClaimAction, ClaimActionCode } from './catalogs/claim-codes'
 
 export { toSiiRut, isSiiRut, splitSiiRut } from './model/rut'
 export type { SiiRut } from './model/rut'
@@ -157,11 +178,82 @@ export { signWithCaf, verifyWithCaf } from './caf/sign'
 
 export { stampDocument, verifyTed, buildDdString, buildTedXml, tedText } from './ted/build'
 export type { Ted, StampedDocument, StampOptions } from './ted/build'
-export { buildSignedInfo, buildSignatureXml, signEnveloped, verifyEnveloped } from './signature/xmldsig'
-export type { XmlSignature, SignEnvelopedInput, SignatureVerification } from './signature/xmldsig'
+export {
+  buildSignedInfo,
+  buildSignatureXml,
+  signEnveloped,
+  signRootElement,
+  verifyEnveloped,
+} from './signature/xmldsig'
+export type { XmlSignature, SignEnvelopedInput, SignRootElementInput, SignatureVerification } from './signature/xmldsig'
 
 export { createEnvelope, generateSetId } from './envelope/create'
 export type { Envelope, EnvelopeKind, CreateEnvelopeInput } from './envelope/create'
 export { buildEnvelopeXml, envelopeRootName } from './envelope/build-xml'
 export { signEnvelope, verifyEnvelopeSignature } from './envelope/sign'
 export type { SignedEnvelope } from './envelope/sign'
+
+export { silentLogger } from './sii/logger'
+export type { Logger, LogFn, LogContext } from './sii/logger'
+export { certificateFingerprint, tokenCacheKey, createMemoryTokenCache } from './sii/token-cache'
+export type { TokenChannel, CachedToken, TokenCache } from './sii/token-cache'
+export { DEFAULT_RETRY_POLICY, mergeRetryPolicy, isRetryableError, retryDelayMs, withRetry } from './sii/retry'
+export type { RetryPolicy, RetryOptions } from './sii/retry'
+export { createFetchTransport, decodeBody, encodeUtf8 } from './sii/transport'
+export type { HttpMethod, HttpRequest, HttpResponse, HttpTransport, BodyEncoding, FetchLike } from './sii/transport'
+export { createNodeHttpsTransport } from './sii/node-transport'
+export type { NodeTlsOptions, NodeHttpsTransportOptions, TlsVersion } from './sii/node-transport'
+export { redactText, redactHeaders, redactExchange, createMemoryCapture } from './sii/capture'
+export type {
+  HttpExchange,
+  HttpExchangeRequest,
+  HttpExchangeResponse,
+  HttpExchangeError,
+  HttpCapture,
+} from './sii/capture'
+export { uploadRecordName, createMemoryUploadArchive } from './sii/archive'
+export type { UploadKind, UploadRecord, UploadArchive } from './sii/archive'
+export { createDirectoryCapture } from './sii/node-capture'
+export type { DirectoryCaptureOptions } from './sii/node-capture'
+export { createDirectoryUploadArchive } from './sii/node-archive'
+export type { DirectoryUploadArchiveOptions } from './sii/node-archive'
+export { createSiiClient, DEFAULT_TIMEOUTS, DEFAULT_TOKEN_TTL_MS } from './sii/client'
+export type { SiiClient, SiiClientOptions, SiiTimeouts, SiiEndpoints, CallOverrides, SleepFn } from './sii/client'
+export { buildSoapEnvelope, parseSoapResponse, stripNamespacePrefixes, SOAP_HEADERS } from './sii/soap'
+export type { SoapParam, SoapEnvelopeInput, SoapFault, SoapResponse } from './sii/soap'
+export { generateBoundary, multipartContentType, buildMultipartBody } from './sii/multipart'
+export type { MultipartField, MultipartFile, MultipartBodyInput } from './sii/multipart'
+export { getSeed, signSeed, getToken, invalidateToken } from './sii/auth'
+export { uploadEnvelope, uploadBook, uploadFolioConsumption, parseReceptionResponse } from './sii/upload'
+export type {
+  UploadReceipt,
+  UploadableEnvelope,
+  UploadEnvelopeInput,
+  UploadXmlInput,
+  ReceptionOutcome,
+} from './sii/upload'
+export { queryUploadStatus, waitForUploadStatus, queryDocumentStatus, folioReceived } from './sii/status'
+export type {
+  UploadStatus,
+  UploadStatusCounts,
+  UploadStatusDocument,
+  UploadStatusDocumentError,
+  QueryUploadStatusInput,
+  WaitForUploadStatusInput,
+  DocumentStatus,
+  QueryDocumentStatusInput,
+  FolioReceivedInput,
+} from './sii/status'
+export { registerClaim, listClaimEvents, queryTransferable, queryReceptionDate, receiverStatus } from './sii/claims'
+export type {
+  ClaimDocumentType,
+  ClaimDocumentInput,
+  RegisterClaimInput,
+  ClaimResult,
+  ClaimEvent,
+  ClaimEventsResult,
+  TransferabilityResult,
+  ReceptionDateResult,
+  ReceiverStatus,
+  ReceiverStatusResult,
+} from './sii/claims'
