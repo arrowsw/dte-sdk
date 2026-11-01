@@ -2,7 +2,7 @@
   "name": "dte-sdk",
   "version": "0.0.2",
   "type": "module",
-  "description": "TypeScript SDK for Chilean electronic tax documents (DTE): build, stamp (TED), sign and envelope DTEs for the SII.",
+  "description": "TypeScript SDK for Chilean electronic tax documents (DTE): build, stamp (TED), sign and envelope DTEs for the SII, and talk to the SII web services (upload, status, acceptance/claims).",
   "author": "arrowsw",
   "sideEffects": false,
   "main": "./dist/cjs/index.min.js",
@@ -33,6 +33,7 @@
     "build:types": "tsc --emitDeclarationOnly --outDir dist/esm && tsc --emitDeclarationOnly --outDir dist/cjs",
     "scan": "node scripts/scan-real-data.mjs",
     "fixtures": "node scripts/make-fixtures.mjs",
+    "fixtures:tls": "node scripts/make-tls-fixture.mjs",
     "test:differential": "RUN_DIFFERENTIAL=1 jest --config jest.config.cjs tests/differential.test.ts"
   },
   "license": "MIT",

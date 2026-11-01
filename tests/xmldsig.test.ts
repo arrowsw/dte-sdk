@@ -1,7 +1,8 @@
 import { loadCertificateFromPem } from '../src/certificate/pem'
 import { sha1Base64 } from '../src/crypto/digest'
+import { rsaSha1VerifyBase64 } from '../src/crypto/rsa'
 import { DteError } from '../src/errors'
-import { buildSignedInfo, signEnveloped, verifyEnveloped } from '../src/signature/xmldsig'
+import { buildSignedInfo, signEnveloped, signRootElement, verifyEnveloped } from '../src/signature/xmldsig'
 import { canonicalizeElement, findElement } from '../src/xml/c14n'
 import { parseXmlDom } from '../src/xml/parse'
 import { fixtureText, FIXED_NOW } from './support/fixtures'
@@ -166,5 +167,54 @@ describe('verifyEnveloped resists signature wrapping', () => {
     expect(() => verifyEnveloped(noSignedInfo, target)).toThrow(
       expect.objectContaining({ code: 'SIGNATURE_NOT_FOUND', details: { field: 'SignedInfo' } }),
     )
+  })
+})
+
+describe('buildSignedInfo with an empty reference', () => {
+  test('emits URI="" for whole-document signatures', () => {
+    expect(buildSignedInfo('', 'ZGlnZXN0', { includeXsi: false })).toContain('<Reference URI="">')
+    expect(buildSignedInfo('', 'ZGlnZXN0', { includeXsi: false })).not.toContain('xmlns:xsi')
+  })
+})
+
+describe('signRootElement', () => {
+  const body = '<getToken><item><Semilla>000000000078</Semilla></item></getToken>'
+  const seedXml = `<?xml version="1.0" encoding="UTF-8"?>\n${body}`
+
+  test('signs the canonical root and inserts the Signature before the closing tag', () => {
+    const { xml: signed, signature } = signRootElement({ xml: seedXml, rootTag: 'getToken', certificate })
+    expect(signature.digestValue).toBe(sha1Base64(body, 'utf8'))
+    expect(
+      signed.startsWith(
+        `<?xml version="1.0" encoding="UTF-8"?>\n<getToken><item><Semilla>000000000078</Semilla></item><Signature xmlns="${DSIG}"><SignedInfo xmlns="${DSIG}"><CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>`,
+      ),
+    ).toBe(true)
+    expect(signed.endsWith('</X509Certificate></X509Data></KeyInfo></Signature></getToken>')).toBe(true)
+    expect(signed).toContain(
+      '<Reference URI=""><Transforms><Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/></Transforms>',
+    )
+    expect(signed).not.toContain('xmlns:xsi')
+    const canonicalSignedInfo = buildSignedInfo('', signature.digestValue, { expandTags: true, includeXsi: false })
+    expect(rsaSha1VerifyBase64(certificate.publicKey, canonicalSignedInfo, 'utf8', signature.signatureValue)).toBe(true)
+  })
+
+  test('wraps SignatureValue, Modulus and X509Certificate at 64 columns', () => {
+    const { xml: signed } = signRootElement({ xml: seedXml, rootTag: 'getToken', certificate })
+    const modulus = /<Modulus>([\s\S]*?)<\/Modulus>/.exec(signed)![1]
+    for (const line of modulus.split('\n')) expect(line.length).toBeLessThanOrEqual(64)
+  })
+
+  test('rejects a different root or a self-closing root', () => {
+    const expectParseFailure = (xml: string) => {
+      try {
+        signRootElement({ xml, rootTag: 'getToken', certificate })
+        throw new Error('expected DteError')
+      } catch (err) {
+        expect(err).toBeInstanceOf(DteError)
+        expect((err as DteError).code).toBe('XML_PARSE_FAILED')
+      }
+    }
+    expectParseFailure('<other><getToken/></other>')
+    expectParseFailure('<getToken/>')
   })
 })

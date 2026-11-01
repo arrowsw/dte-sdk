@@ -1,0 +1,1 @@
+<?xml version="1.0" encoding="UTF-8"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><ns2:consultarFechaRecepcionSiiResponse xmlns:ns2="http://ws.registroreclamodte.diii.sdi.sii.cl"><ns2:return>15-11-2026 15:30:05</ns2:return></ns2:consultarFechaRecepcionSiiResponse></soapenv:Body></soapenv:Envelope>
