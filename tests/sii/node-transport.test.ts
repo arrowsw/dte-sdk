@@ -227,7 +227,9 @@ describe('createNodeHttpsTransport', () => {
     const cut = await detailsOf(transport(get('/cut')))
     expect(cut.code).toBe('TRANSPORT_FAILED')
     expect(cut.details).toMatchObject({ reason: 'ECONNRESET', responseStarted: true })
-    const stalled = await detailsOf(transport(get('/half', { timeoutMs: 50 })))
+    // `/half` answers its headers at once and then stalls, so the timeout must outlast a fresh TLS handshake
+    // (`keepAlive: false`) on a cold CI runner: 50 ms lost that race once on Node 20, 1 s leaves ample room.
+    const stalled = await detailsOf(transport(get('/half', { timeoutMs: 1000 })))
     expect(stalled.code).toBe('REQUEST_TIMEOUT')
     expect(stalled.details).toMatchObject({ responseStarted: true })
     const silent = await detailsOf(transport(get('/slow', { timeoutMs: 50 })))
