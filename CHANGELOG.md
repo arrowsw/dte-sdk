@@ -24,7 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `queryDocumentStatus`, `folioReceived`) and the acceptance/claim registry
   (`registerClaim`, `listClaimEvents`, `queryTransferable`, `queryReceptionDate`,
   `receiverStatus`). Uploads and `registerClaim` are never re-sent once the SII has
-  answered, except once with a fresh token when the SII refused the token.
+  answered, even if the reply was cut off halfway (transport errors then carry
+  `details.responseStarted: true`), except once with a fresh token when the SII refused
+  the token. `retry.retryOn` can narrow what is retried, never widen it. Getting a token is
+  one retry loop around seed, signature and token (a fresh seed per attempt), and
+  `waitForUploadStatus` polls inside a hard `timeoutMs` budget instead of applying the
+  retry policy to every poll.
 - Injectable HTTP transport (`createFetchTransport`, `createNodeHttpsTransport` with TLS
   verification on by default), token cache, retry policy with backoff, HTTP capture with
   redaction (`createMemoryCapture`, `createDirectoryCapture`) and upload archive

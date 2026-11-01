@@ -39,9 +39,13 @@ export type HttpResponse = {
 
 /**
  * EN: Transport port: `fetch` by default (`createFetchTransport`), Node `https` as an adapter
- * (`createNodeHttpsTransport`), or anything the consumer injects (tests use a route-based fake).
+ * (`createNodeHttpsTransport`), or anything the consumer injects (tests use a route-based fake). A failure that
+ * happens after the response headers arrived (while the body was being read) must carry `details.responseStarted:
+ * true`: the SII has answered, so an upload or a claim is not sent again.
  * ES: Puerto de transporte: `fetch` por defecto (`createFetchTransport`), `https` de Node como adaptador
- * (`createNodeHttpsTransport`), o lo que inyecte el consumidor (los tests usan un falso por rutas).
+ * (`createNodeHttpsTransport`), o lo que inyecte el consumidor (los tests usan un falso por rutas). Una falla que ocurre
+ * después de que llegaron las cabeceras de la respuesta (mientras se leía el cuerpo) debe traer `details.responseStarted:
+ * true`: el SII ya respondió, así que un envío o un reclamo no se vuelve a enviar.
  */
 export type HttpTransport = (request: HttpRequest) => Promise<HttpResponse>
 
@@ -111,14 +115,24 @@ const errorCode = (error: unknown): string | null => {
  * EN: Classifies a failure thrown by `fetch` or `node:https` into `REQUEST_TIMEOUT`, `REQUEST_ABORTED`,
  * `TRANSPORT_TLS` or `TRANSPORT_FAILED`; a `DteError` passes through. `details.reason` is the OS/OpenSSL code when
  * there is one, so the operator sees `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` instead of a generic failure.
+ * `responseStarted` says the failure came after the response headers arrived: the error then carries
+ * `details.responseStarted: true`, which is how the client knows the SII has answered, at least in part.
  * ES: Clasifica una falla lanzada por `fetch` o `node:https` en `REQUEST_TIMEOUT`, `REQUEST_ABORTED`, `TRANSPORT_TLS` o
  * `TRANSPORT_FAILED`; un `DteError` pasa tal cual. `details.reason` es el código del SO/OpenSSL cuando lo hay, así el
- * operador ve `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` en vez de una falla genérica.
+ * operador ve `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` en vez de una falla genérica. `responseStarted` indica que la falla
+ * llegó después de las cabeceras de la respuesta: el error trae entonces `details.responseStarted: true`, que es como el
+ * cliente sabe que el SII respondió, al menos en parte.
  */
-export const mapTransportError = (error: unknown, timedOut: boolean, aborted: boolean): DteError => {
+export const mapTransportError = (
+  error: unknown,
+  timedOut: boolean,
+  aborted: boolean,
+  responseStarted: boolean = false,
+): DteError => {
   if (isDteError(error)) return error
-  if (timedOut) return new DteError('REQUEST_TIMEOUT', { reason: errorMessage(error) })
-  if (aborted) return new DteError('REQUEST_ABORTED')
+  const started = responseStarted ? { responseStarted: true } : {}
+  if (timedOut) return new DteError('REQUEST_TIMEOUT', { reason: errorMessage(error), ...started })
+  if (aborted) return new DteError('REQUEST_ABORTED', started)
   const code = errorCode(error)
   const cause = (error as { cause?: unknown } | null)?.cause
   const text = `${errorMessage(error)} ${cause === undefined ? '' : errorMessage(cause)}`
@@ -126,7 +140,7 @@ export const mapTransportError = (error: unknown, timedOut: boolean, aborted: bo
   // whose name holds `ssl` or `tls` must stay a retryable network failure.
   const textDecides = code === null || code === 'EPROTO'
   const tls = (code !== null && TLS_CODE.test(code)) || (textDecides && /certificate|\btls\b|\bssl\b/i.test(text))
-  return new DteError(tls ? 'TRANSPORT_TLS' : 'TRANSPORT_FAILED', { reason: code ?? errorMessage(error) })
+  return new DteError(tls ? 'TRANSPORT_TLS' : 'TRANSPORT_FAILED', { reason: code ?? errorMessage(error), ...started })
 }
 
 /**
@@ -162,6 +176,9 @@ export const createFetchTransport =
     if (typeof fetchFn !== 'function')
       throw new DteError('TRANSPORT_UNAVAILABLE', { reason: 'globalThis.fetch is not defined' })
     const guard = createRequestSignal(request.timeoutMs, request.signal)
+    // Set once `fetch` resolves, i.e. once the SII has sent its status line and headers: a failure after that point
+    // happened while the body was being read.
+    const progress = { responseStarted: false }
     try {
       const response = await fetchFn(request.url, {
         method: request.method,
@@ -170,6 +187,7 @@ export const createFetchTransport =
         signal: guard.signal,
         redirect: 'manual',
       })
+      progress.responseStarted = true
       // `fetch` reports each `Set-Cookie` on its own, so repeated names are joined here, not overwritten.
       const joined = new Map<string, string>()
       response.headers.forEach((value, key) => {
@@ -183,7 +201,7 @@ export const createFetchTransport =
         body: new Uint8Array(await response.arrayBuffer()),
       }
     } catch (error) {
-      throw mapTransportError(error, guard.timedOut(), request.signal?.aborted ?? false)
+      throw mapTransportError(error, guard.timedOut(), request.signal?.aborted ?? false, progress.responseStarted)
     } finally {
       guard.cleanup()
     }

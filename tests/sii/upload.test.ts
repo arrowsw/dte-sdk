@@ -505,6 +505,21 @@ describe('an upload is retried only while no SII response has arrived', () => {
     expect(posts(perCall.fake)).toBe(1)
   })
 
+  test('a retryOn that refuses everything, on the client or on the call, means one POST', async () => {
+    const timeout = new DteError('REQUEST_TIMEOUT')
+    const policy = { retryOn: () => false }
+    const client = cachedSii(cgi(timeout), { retry: policy })
+    await expectCode(uploadEnvelope(client.sii, dte), 'REQUEST_TIMEOUT', { attempts: 1 })
+    const perCall = cachedSii(cgi(timeout))
+    await expectCode(uploadEnvelope(perCall.sii, dte, { retry: policy }), 'REQUEST_TIMEOUT', { attempts: 1 })
+    const book = cachedSii(cgi(timeout))
+    await expectCode(uploadBook(book.sii, { xml: '<LibroCompraVenta/>' }, { retry: policy }), 'REQUEST_TIMEOUT', {
+      attempts: 1,
+    })
+    expect([client, perCall, book].map((test) => posts(test.fake))).toEqual([1, 1, 1])
+    expect([client, perCall, book].map((test) => test.sleeps)).toEqual([[], [], []])
+  })
+
   test('the REST channel retries a connection failure too', async () => {
     const { sii, fake, sleeps } = cachedSii(
       restRoutes(REST_UPLOAD_PROD, [new DteError('TRANSPORT_FAILED', { reason: 'ECONNRESET' }), restOk]),

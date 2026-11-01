@@ -35,6 +35,40 @@ const requireTag = (xml: string, tag: string, operation: string): string => {
   return value
 }
 
+// One seed request, without retries: the caller owns the retry loop.
+const requestSeed = async (
+  sii: SiiClient,
+  channel: TokenChannel,
+  attempt: number,
+  overrides?: CallOverrides,
+): Promise<string> => {
+  const xml =
+    channel === 'soap'
+      ? await soapCall(sii, {
+          operation: 'getSeed',
+          url: sii.endpoints.soap.seed,
+          method: 'getSeed',
+          params: [],
+          attempt,
+          overrides,
+        })
+      : await restText(sii, {
+          operation: 'getSeed',
+          method: 'GET',
+          url: sii.endpoints.rest.seed,
+          headers: { Accept: 'application/xml' },
+          attempt,
+          overrides,
+        })
+  const { code } = readSiiResponse(xml, 'getSeed')
+  if (code !== '00') throw new DteError('SII_SEED_FAILED', { code, channel })
+  // A malformed seed is the SII's fault and retryable; let through, signSeed would blame the caller.
+  const seed = requireTag(xml, 'SEMILLA', 'getSeed')
+  if (!SEED_PATTERN.test(seed))
+    throw new DteError('SII_RESPONSE_INVALID', { operation: 'getSeed', body: bodyExcerpt(xml) })
+  return seed
+}
+
 /**
  * EN: Asks the SII for a seed on the given channel (SOAP `CrSeed` or REST `boleta.electronica.semilla`). The seed is a
  * 12-digit string valid for two minutes; it is never cached.
@@ -45,84 +79,66 @@ const requireTag = (xml: string, tag: string, operation: string): string => {
 export const getSeed = (sii: SiiClient, channel: TokenChannel, overrides?: CallOverrides): Promise<string> =>
   withRetry(
     retryFor(sii, overrides),
-    async (attempt) => {
-      const xml =
-        channel === 'soap'
-          ? await soapCall(sii, {
-              operation: 'getSeed',
-              url: sii.endpoints.soap.seed,
-              method: 'getSeed',
-              params: [],
-              attempt,
-              overrides,
-            })
-          : await restText(sii, {
-              operation: 'getSeed',
-              method: 'GET',
-              url: sii.endpoints.rest.seed,
-              headers: { Accept: 'application/xml' },
-              attempt,
-              overrides,
-            })
-      const { code } = readSiiResponse(xml, 'getSeed')
-      if (code !== '00') throw new DteError('SII_SEED_FAILED', { code, channel })
-      // A malformed seed is the SII's fault and retryable; let through, signSeed would blame the caller.
-      const seed = requireTag(xml, 'SEMILLA', 'getSeed')
-      if (!SEED_PATTERN.test(seed))
-        throw new DteError('SII_RESPONSE_INVALID', { operation: 'getSeed', body: bodyExcerpt(xml) })
-      return seed
-    },
+    (attempt) => requestSeed(sii, channel, attempt, overrides),
     retryOptions(sii, 'getSeed', overrides),
   )
 
-const requestToken = (
+// One token request for a signed seed, without retries: the caller owns the retry loop.
+const requestToken = async (
   sii: SiiClient,
   channel: TokenChannel,
   signedSeed: string,
+  attempt: number,
   overrides?: CallOverrides,
-): Promise<string> =>
-  withRetry(
-    retryFor(sii, overrides),
-    async (attempt) => {
-      const xml =
-        channel === 'soap'
-          ? await soapCall(sii, {
-              operation: 'getToken',
-              url: sii.endpoints.soap.token,
-              method: 'getToken',
-              params: [{ name: 'pszXml', value: signedSeed }],
-              attempt,
-              overrides,
-            })
-          : await restText(sii, {
-              operation: 'getToken',
-              method: 'POST',
-              url: sii.endpoints.rest.token,
-              headers: { 'Content-Type': 'application/xml', Accept: 'application/xml' },
-              body: encodeUtf8(signedSeed),
-              attempt,
-              overrides,
-            })
-      const { code } = readSiiResponse(xml, 'getToken')
-      if (code !== '00') throw new DteError('SII_TOKEN_FAILED', { code, channel })
-      return requireTag(xml, 'TOKEN', 'getToken')
-    },
-    retryOptions(sii, 'getToken', overrides),
-  )
+): Promise<string> => {
+  const xml =
+    channel === 'soap'
+      ? await soapCall(sii, {
+          operation: 'getToken',
+          url: sii.endpoints.soap.token,
+          method: 'getToken',
+          params: [{ name: 'pszXml', value: signedSeed }],
+          attempt,
+          overrides,
+        })
+      : await restText(sii, {
+          operation: 'getToken',
+          method: 'POST',
+          url: sii.endpoints.rest.token,
+          headers: { 'Content-Type': 'application/xml', Accept: 'application/xml' },
+          body: encodeUtf8(signedSeed),
+          attempt,
+          overrides,
+        })
+  const { code } = readSiiResponse(xml, 'getToken')
+  if (code !== '00') throw new DteError('SII_TOKEN_FAILED', { code, channel })
+  return requireTag(xml, 'TOKEN', 'getToken')
+}
 
 /**
  * EN: Returns a valid token for the channel: the cached one while it has not expired, otherwise seed → signed seed →
- * token, stored in the cache for `tokenTtlMs`. The DTEWS token and the REST token are different things.
+ * token, stored in the cache for `tokenTtlMs`. The DTEWS token and the REST token are different things. The whole
+ * handshake is one retry loop: a seed lives two minutes and is meant to be used at once, so every retry asks for a fresh
+ * seed instead of repeating the signed one, and the attempts are bounded by `maxAttempts` for seed and token together.
  * ES: Devuelve un token vigente para el canal: el de la caché mientras no venza, si no semilla → semilla firmada →
- * token, guardado en caché por `tokenTtlMs`. El token DTEWS y el token REST son cosas distintas.
+ * token, guardado en caché por `tokenTtlMs`. El token DTEWS y el token REST son cosas distintas. Todo el intercambio es
+ * un solo ciclo de reintentos: una semilla vive dos minutos y se usa de inmediato, así que cada reintento pide una
+ * semilla nueva en vez de repetir la firmada, y los intentos quedan acotados por `maxAttempts` para semilla y token
+ * juntos.
  * @throws {DteError} EN: the codes of `getSeed` plus `SII_TOKEN_FAILED { code }`. ES: los códigos de `getSeed` más `SII_TOKEN_FAILED { code }`.
  */
 export const getToken = async (sii: SiiClient, channel: TokenChannel, overrides?: CallOverrides): Promise<string> => {
   const key = tokenCacheKey(sii.environment, channel, sii.certificate)
   const cached = await sii.tokenCache.get(key)
   if (cached !== null && cached.expiresAt > sii.now().getTime()) return cached.token
-  const seed = await getSeed(sii, channel, overrides)
-  const token = await requestToken(sii, channel, signSeed(seed, sii.certificate), overrides)
+  const token = await withRetry(
+    retryFor(sii, overrides),
+    async (attempt) => {
+      const seed = await requestSeed(sii, channel, attempt, overrides)
+      return requestToken(sii, channel, signSeed(seed, sii.certificate), attempt, overrides)
+    },
+    retryOptions(sii, 'getToken', overrides),
+  )
   await sii.tokenCache.set(key, { token, expiresAt: sii.now().getTime() + sii.tokenTtlMs })
   sii.logger.info('sii token obtained', { channel })
   return token
@@ -137,11 +153,13 @@ export const invalidateToken = (sii: SiiClient, channel: TokenChannel): Promise<
 
 /**
  * EN: Runs `call(token)`; when it throws `SII_TOKEN_INVALID` (the SII rejected the token) the cached token is dropped,
- * a fresh one obtained and `call` run once more. A second rejection surfaces as `SII_TOKEN_INVALID` with
- * `attempts: 2`. Any other error passes through.
+ * a fresh one obtained and `call` run once more. A second rejection drops the fresh token from the cache too, so the
+ * next call authenticates again, and surfaces as `SII_TOKEN_INVALID` with `attempts: 2`. Any other error passes
+ * through.
  * ES: Ejecuta `call(token)`; si lanza `SII_TOKEN_INVALID` (el SII rechazó el token) se descarta el token en caché, se
- * obtiene uno nuevo y `call` se ejecuta una vez más. Un segundo rechazo sale como `SII_TOKEN_INVALID` con
- * `attempts: 2`. Cualquier otro error pasa tal cual.
+ * obtiene uno nuevo y `call` se ejecuta una vez más. Un segundo rechazo descarta también el token nuevo de la caché, así
+ * la próxima llamada vuelve a autenticarse, y sale como `SII_TOKEN_INVALID` con `attempts: 2`. Cualquier otro error pasa
+ * tal cual.
  */
 export const withToken = async <T>(
   sii: SiiClient,
@@ -160,8 +178,11 @@ export const withToken = async <T>(
     try {
       return await call(fresh)
     } catch (second) {
-      if (isDteError(second) && second.code === 'SII_TOKEN_INVALID')
+      if (isDteError(second) && second.code === 'SII_TOKEN_INVALID') {
+        // The SII refused the fresh token too: it must not stay in the cache for the next call to use.
+        await invalidateToken(sii, channel)
         throw new DteError('SII_TOKEN_INVALID', { ...second.details, channel, attempts: 2 })
+      }
       throw second
     }
   }

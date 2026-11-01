@@ -127,9 +127,12 @@ export const createNodeHttpsTransport = (
     const guard = createRequestSignal(request.timeoutMs, request.signal)
     const url = new URL(request.url)
     return new Promise<HttpResponse>((resolve, reject) => {
+      // Set when the response callback fires, i.e. once the SII has sent its status line and headers: a failure after
+      // that point happened while the body was being read.
+      const progress = { responseStarted: false }
       const fail = (error: unknown): void => {
         guard.cleanup()
-        reject(mapTransportError(error, guard.timedOut(), request.signal?.aborted ?? false))
+        reject(mapTransportError(error, guard.timedOut(), request.signal?.aborted ?? false, progress.responseStarted))
       }
       const req = https.request(
         {
@@ -142,6 +145,7 @@ export const createNodeHttpsTransport = (
           signal: guard.signal,
         },
         (res) => {
+          progress.responseStarted = true
           const chunks: Buffer[] = []
           res.on('data', (chunk: Buffer) => chunks.push(chunk))
           res.on('error', fail)

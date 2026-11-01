@@ -159,6 +159,29 @@ describe('withRetry', () => {
     expect(s.calls).toEqual([100])
   })
 
+  test('the call retryOn and the policy retryOn must both agree', async () => {
+    const s = sleeps()
+    const yes = () => true
+    const no = () => false
+    const timeout = new DteError('REQUEST_TIMEOUT')
+    // The policy refuses: a call that accepts cannot override it.
+    await expect(
+      withRetry({ ...fast, retryOn: no }, failing([timeout]), { sleep: s.sleep, retryOn: yes }),
+    ).rejects.toMatchObject({ details: { attempts: 1 } })
+    // The call refuses: a policy that accepts cannot override it.
+    await expect(
+      withRetry({ ...fast, retryOn: yes }, failing([timeout]), { sleep: s.sleep, retryOn: no }),
+    ).rejects.toMatchObject({ details: { attempts: 1 } })
+    // The policy has no retryOn of its own, so `isRetryableError` is the policy's rule, and a call cannot widen it.
+    await expect(
+      withRetry(fast, failing([new DteError('SII_TOKEN_INVALID')]), { sleep: s.sleep, retryOn: yes }),
+    ).rejects.toMatchObject({ code: 'SII_TOKEN_INVALID', details: { attempts: 1 } })
+    expect(s.calls).toEqual([])
+    // Both accept.
+    expect(await withRetry({ ...fast, retryOn: yes }, failing([timeout]), { sleep: s.sleep, retryOn: yes })).toBe('ok')
+    expect(s.calls).toEqual([100])
+  })
+
   test('jitter uses the injected random', async () => {
     const s = sleeps()
     const jittery = { ...fast, jitterRatio: 0.5 }

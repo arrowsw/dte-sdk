@@ -136,6 +136,18 @@ describe('mapTransportError', () => {
     if (reason !== undefined) expect(mapped.details.reason).toBe(reason)
   })
 
+  test.each([
+    [new Error('x'), true, false, 'REQUEST_TIMEOUT'],
+    [new Error('x'), false, true, 'REQUEST_ABORTED'],
+    [Object.assign(new Error('read'), { code: 'ECONNRESET' }), false, false, 'TRANSPORT_FAILED'],
+    [Object.assign(new Error('tls'), { code: 'CERT_HAS_EXPIRED' }), false, false, 'TRANSPORT_TLS'],
+  ])('responseStarted is carried into %p (timedOut=%s, aborted=%s) → %s', (error, timedOut, aborted, code) => {
+    const started = mapTransportError(error, timedOut, aborted, true)
+    expect(started.code).toBe(code)
+    expect(started.details.responseStarted).toBe(true)
+    expect(mapTransportError(error, timedOut, aborted).details).not.toHaveProperty('responseStarted')
+  })
+
   test('a DteError passes through untouched', () => {
     const original = new DteError('TRANSPORT_FAILED', { reason: 'kept' })
     expect(mapTransportError(original, true, true)).toBe(original)
@@ -245,6 +257,63 @@ describe('createFetchTransport', () => {
     const pending = createFetchTransport({ fetch: hang })(request({ signal: controller.signal }))
     controller.abort()
     await expectCode(pending, 'REQUEST_ABORTED')
+  })
+
+  describe('a failure after the response headers arrived', () => {
+    const readFailure =
+      (read: () => Promise<ArrayBuffer>): FetchLike =>
+      async () => ({
+        status: 200,
+        headers: new Headers(),
+        arrayBuffer: read,
+      })
+    const expectFailure = async (promise: Promise<unknown>): Promise<DteError> => {
+      const error = await promise.then(
+        () => null,
+        (caught: unknown) => caught,
+      )
+      expect(error).toBeInstanceOf(DteError)
+      return error as DteError
+    }
+
+    test('a body that fails to arrive is TRANSPORT_FAILED and says the response had started', async () => {
+      const reset = readFailure(() =>
+        Promise.reject(Object.assign(new TypeError('terminated'), { cause: { code: 'ECONNRESET' } })),
+      )
+      const error = await expectFailure(createFetchTransport({ fetch: reset })(request()))
+      expect(error.code).toBe('TRANSPORT_FAILED')
+      expect(error.details).toEqual({ reason: 'ECONNRESET', responseStarted: true })
+    })
+
+    test('a timeout while the body streams is REQUEST_TIMEOUT and says the response had started', async () => {
+      const stalled: FetchLike = async (_url, init) => ({
+        status: 200,
+        headers: new Headers(),
+        arrayBuffer: () =>
+          new Promise((_resolve, reject) => {
+            init.signal.addEventListener('abort', () =>
+              reject(Object.assign(new Error('aborted'), { name: 'AbortError' })),
+            )
+          }),
+      })
+      const error = await expectFailure(createFetchTransport({ fetch: stalled })(request({ timeoutMs: 10 })))
+      expect(error.code).toBe('REQUEST_TIMEOUT')
+      expect(error.details).toMatchObject({ responseStarted: true })
+    })
+
+    test('a failure before the headers carries no responseStarted', async () => {
+      const refused = failWith(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }))
+      const error = await expectFailure(createFetchTransport({ fetch: refused })(request()))
+      expect(error.code).toBe('TRANSPORT_FAILED')
+      expect(error.details).not.toHaveProperty('responseStarted')
+      const hang: FetchLike = (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => reject(new Error('aborted')))
+        })
+      const timeout = await expectFailure(createFetchTransport({ fetch: hang })(request({ timeoutMs: 10 })))
+      expect(timeout.code).toBe('REQUEST_TIMEOUT')
+      expect(timeout.details).not.toHaveProperty('responseStarted')
+    })
   })
 
   test('network and TLS failures are classified', async () => {

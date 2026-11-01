@@ -113,18 +113,22 @@ export const retryOptions = (sii: SiiClient, operation: string, overrides?: Call
 })
 
 /**
- * EN: True for the two errors that can only happen before the SII answered (`TRANSPORT_FAILED`, `REQUEST_TIMEOUT`).
- * An operation that changes state at the SII (an upload, a claim) is sent again only for these: once the SII answered,
- * whatever the HTTP status or the code, the request may already have taken effect, and a second copy is the duplicate
- * the client then has to recover from. Pass it as `retryOn`; a retry policy's own `retryOn` cannot widen it.
+ * EN: True for the two errors that can only happen before the SII answered (`TRANSPORT_FAILED`, `REQUEST_TIMEOUT`), and
+ * only when the transport did not get as far as the response headers: a failure with `details.responseStarted` happened
+ * while the reply was being read, so the SII had answered and the request may already have taken effect. An operation
+ * that changes state at the SII (an upload, a claim) is sent again only for these: once the SII answered, whatever the
+ * HTTP status or the code, and even if only part of the reply arrived, a second copy is the duplicate the client then
+ * has to recover from. Pass it as `retryOn`; a retry policy's own `retryOn` can narrow it but never widen it.
  * ES: True para los dos errores que solo pueden ocurrir antes de que el SII responda (`TRANSPORT_FAILED`,
- * `REQUEST_TIMEOUT`). Una operación que cambia estado en el SII (un envío, un reclamo) se vuelve a enviar solo por
- * estos: una vez que el SII respondió, cualquiera sea el estado HTTP o el código, la petición pudo haber surtido
- * efecto, y una segunda copia es el duplicado que el cliente luego tendría que recuperar. Se pasa como `retryOn`; el
- * `retryOn` de una política de reintentos no puede ampliarla.
+ * `REQUEST_TIMEOUT`), y solo cuando el transporte no llegó a las cabeceras de la respuesta: una falla con
+ * `details.responseStarted` ocurrió mientras se leía la respuesta, así que el SII había respondido y la petición pudo
+ * haber surtido efecto. Una operación que cambia estado en el SII (un envío, un reclamo) se vuelve a enviar solo por
+ * estos: una vez que el SII respondió, cualquiera sea el estado HTTP o el código, e incluso si solo llegó parte de la
+ * respuesta, una segunda copia es el duplicado que el cliente luego tendría que recuperar. Se pasa como `retryOn`; el
+ * `retryOn` de una política de reintentos puede restringirla pero nunca ampliarla.
  */
 export const isNoAnswer = (error: DteError): boolean =>
-  error.code === 'TRANSPORT_FAILED' || error.code === 'REQUEST_TIMEOUT'
+  (error.code === 'TRANSPORT_FAILED' || error.code === 'REQUEST_TIMEOUT') && error.details.responseStarted !== true
 
 /**
  * EN: Input of `soapCall`.

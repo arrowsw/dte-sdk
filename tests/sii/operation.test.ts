@@ -274,6 +274,14 @@ describe('isNoAnswer', () => {
     expect(isNoAnswer(new DteError(code))).toBe(true)
   })
 
+  test.each(['TRANSPORT_FAILED', 'REQUEST_TIMEOUT'] as const)(
+    '%s after the response headers arrived is an answer that was cut off',
+    (code) => {
+      expect(isNoAnswer(new DteError(code, { responseStarted: true }))).toBe(false)
+      expect(isNoAnswer(new DteError(code, { responseStarted: false }))).toBe(true)
+    },
+  )
+
   test.each([
     'SII_HTTP_ERROR',
     'SII_RESPONSE_INVALID',

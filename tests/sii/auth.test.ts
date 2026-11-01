@@ -6,6 +6,7 @@ import { buildSoapEnvelope } from '../../src/sii/soap'
 import { createMemoryTokenCache, tokenCacheKey, type CachedToken, type TokenCache } from '../../src/sii/token-cache'
 import { canonicalizeElement } from '../../src/xml/c14n'
 import { decodeXmlEntities, parseXmlDom } from '../../src/xml/parse'
+import type { FakeRoute } from '../support/fake-sii'
 import { fixtureText, ISSUER_RUT } from '../support/fixtures'
 import {
   authRoutes,
@@ -386,6 +387,99 @@ describe('getToken', () => {
     SLOW,
   )
 
+  describe('one retry loop around seed → sign → token', () => {
+    const resetByPeer = new DteError('TRANSPORT_FAILED', { reason: 'ECONNRESET' })
+    // A seed route that hands out a different seed every time, so a token request can be matched to its own seed.
+    const numberedSeeds: FakeRoute = {
+      url: SOAP_SEED,
+      reply: (() => {
+        const count = { n: 0 }
+        return () => {
+          count.n += 1
+          return { body: siiFixture('soap-seed-ok.xml').replace('000000000078', `00000000010${count.n}`) }
+        }
+      })(),
+    }
+    const semillaOf = (envelope: string): string => /Semilla&gt;(\d+)&lt;/.exec(envelope)![1]
+
+    test(
+      'a token endpoint that fails twice is asked again with a fresh signed seed every time',
+      async () => {
+        const { sii, fake, sleeps } = testSii([
+          numberedSeeds,
+          { url: SOAP_TOKEN_URL, reply: [resetByPeer, resetByPeer, { body: siiFixture('soap-token-ok.xml') }] },
+        ])
+        expect(await getToken(sii, 'soap')).toBe(SOAP_TOKEN)
+        expect(fake.requests.map((request) => request.url)).toEqual([
+          SOAP_SEED,
+          SOAP_TOKEN_URL,
+          SOAP_SEED,
+          SOAP_TOKEN_URL,
+          SOAP_SEED,
+          SOAP_TOKEN_URL,
+        ])
+        expect(fake.requests.filter((request) => request.url === SOAP_TOKEN_URL).map((r) => semillaOf(r.text))).toEqual(
+          ['000000000101', '000000000102', '000000000103'],
+        )
+        expect(sleeps).toEqual([2000, 3600])
+      },
+      SLOW,
+    )
+
+    test(
+      'the attempts are bounded by maxAttempts, not multiplied by the two steps',
+      async () => {
+        const { sii, fake, sleeps } = testSii([numberedSeeds, { url: SOAP_TOKEN_URL, reply: resetByPeer }])
+        await expectCode(getToken(sii, 'soap'), 'TRANSPORT_FAILED', { reason: 'ECONNRESET', attempts: 3 })
+        expect(fake.requests.filter((request) => request.url === SOAP_SEED)).toHaveLength(3)
+        expect(fake.requests.filter((request) => request.url === SOAP_TOKEN_URL)).toHaveLength(3)
+        expect(sleeps).toEqual([2000, 3600])
+      },
+      SLOW,
+    )
+
+    test(
+      'a failing seed and a failing token spend the same budget',
+      async () => {
+        const seed = { body: siiFixture('soap-seed-ok.xml') }
+        const { sii, fake } = testSii(
+          [
+            { url: SOAP_SEED, reply: [resetByPeer, seed, seed] },
+            { url: SOAP_TOKEN_URL, reply: [resetByPeer, { body: siiFixture('soap-token-ok.xml') }] },
+          ],
+          { retry: { maxAttempts: 3 } },
+        )
+        expect(await getToken(sii, 'soap')).toBe(SOAP_TOKEN)
+        expect(fake.requests.map((request) => request.url)).toEqual([
+          SOAP_SEED,
+          SOAP_SEED,
+          SOAP_TOKEN_URL,
+          SOAP_SEED,
+          SOAP_TOKEN_URL,
+        ])
+        const tight = testSii(
+          [
+            { url: SOAP_SEED, reply: [resetByPeer, { body: siiFixture('soap-seed-ok.xml') }] },
+            { url: SOAP_TOKEN_URL, reply: resetByPeer },
+          ],
+          { retry: { maxAttempts: 2 } },
+        )
+        await expectCode(getToken(tight.sii, 'soap'), 'TRANSPORT_FAILED', { attempts: 2 })
+        expect(tight.fake.requests.map((request) => request.url)).toEqual([SOAP_SEED, SOAP_SEED, SOAP_TOKEN_URL])
+      },
+      SLOW,
+    )
+
+    test('the public getSeed keeps its own retry', async () => {
+      const { sii, fake, sleeps } = testSii([
+        { url: SOAP_SEED, reply: [resetByPeer, { body: siiFixture('soap-seed-ok.xml') }] },
+      ])
+      expect(await getSeed(sii, 'soap')).toBe('000000000078')
+      expect(fake.requests).toHaveLength(2)
+      expect(sleeps).toEqual([2000])
+    })
+  })
+
   test('invalidateToken removes the cached entry', async () => {
     const { sii, fake } = testSii(authRoutes())
     await getToken(sii, 'soap')
@@ -451,6 +545,25 @@ describe('withToken', () => {
     expect(calls.n).toBe(2)
     expect(fake.requests).toHaveLength(4)
   })
+
+  test(
+    'after a second rejection the rejected token is gone from the cache, so the next call authenticates again',
+    async () => {
+      const { sii, fake } = testSii(authRoutes())
+      const key = tokenCacheKey('certification', 'soap', certificate)
+      await expectCode(
+        withToken(sii, 'soap', undefined, async () => Promise.reject(new DteError('SII_TOKEN_INVALID'))),
+        'SII_TOKEN_INVALID',
+        { attempts: 2 },
+      )
+      expect(await sii.tokenCache.get(key)).toBeNull()
+      expect(fake.requests).toHaveLength(4)
+      expect(await withToken(sii, 'soap', undefined, async (token) => token)).toBe(SOAP_TOKEN)
+      // The third call did not reuse the rejected token: it ran the handshake again.
+      expect(fake.requests.map((request) => request.url).slice(4)).toEqual([SOAP_SEED, SOAP_TOKEN_URL])
+    },
+    SLOW,
+  )
 
   test('the REST channel renews the same way and reports its own channel', async () => {
     const { sii, fake } = testSii(authRoutes())

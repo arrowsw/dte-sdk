@@ -458,17 +458,36 @@ describe('waitForUploadStatus', () => {
     expect(requestsTo(fake.requests, EST_UP)).toBe(3)
   })
 
-  test('query errors are retried inside each poll before they count as pending', async () => {
+  test('the poll interval replaces the retry policy: a failed poll is one request, then the wait sleeps', async () => {
     const { sleeps, options } = manualTime()
     const error = fx('soap-estup-error.xml')
     const { sii, fake } = cachedSii(route(EST_UP, [error, error, fx('soap-estup-epr.xml')]), {
       ...options,
-      retry: { maxAttempts: 2 },
+      retry: { maxAttempts: 6 },
     })
-    expect((await waitForUploadStatus(sii, { trackId: '9876543210' })).code).toBe('EPR')
-    // 2000 ms between the two attempts of the first poll, then the wait's own 5000 ms.
-    expect(sleeps).toEqual([2000, 5000])
+    expect((await waitForUploadStatus(sii, { trackId: '9876543210' }, { retry: { maxAttempts: 6 } })).code).toBe('EPR')
+    // No 2000 ms / 3600 ms backoff inside a poll: only the wait's own 5000 ms.
+    expect(sleeps).toEqual([5000, 5000])
     expect(requestsTo(fake.requests, EST_UP)).toBe(3)
+  })
+
+  test.each([
+    ['a transport failure', new DteError('TRANSPORT_FAILED', { reason: 'ECONNRESET' }), 'TRANSPORT_FAILED'],
+    ['a timeout', new DteError('REQUEST_TIMEOUT'), 'REQUEST_TIMEOUT'],
+    ['an HTTP 503', { status: 503, body: 'down' } as FakeReply, 'SII_HTTP_ERROR'],
+    ['an HTTP 429', { status: 429, body: 'slow down' } as FakeReply, 'SII_HTTP_ERROR'],
+    ['an unreadable page', { body: siiFixture('html-maintenance.html') } as FakeReply, 'SII_RESPONSE_INVALID'],
+  ])('%s counts as pending and the wait goes on', async (_label, failure, lastCode) => {
+    const { sleeps, options } = manualTime()
+    const down = cachedSii(route(EST_UP, [failure, fx('soap-estup-epr.xml')]), options)
+    expect((await waitForUploadStatus(down.sii, { trackId: '9876543210' })).code).toBe('EPR')
+    expect(sleeps).toEqual([5000])
+    const forever = cachedSii(route(EST_UP, failure), options)
+    await expectCode(
+      waitForUploadStatus(forever.sii, { trackId: '9876543210', intervalMs: 1000, timeoutMs: 2500 }),
+      'WAIT_TIMEOUT',
+      { trackId: '9876543210', attempts: 3, lastCode },
+    )
   })
 
   test.each([
@@ -499,7 +518,8 @@ describe('waitForUploadStatus', () => {
       'WAIT_TIMEOUT',
       { trackId: '9876543210', attempts: 3, lastCode: 'REC' },
     )
-    expect(sleeps).toEqual([1000, 1000])
+    // The last sleep is cut to the 500 ms that remain, so the wait ends at 2.5 s, not later.
+    expect(sleeps).toEqual([1000, 1000, 500])
   })
 
   test('when only query errors came back, the timeout is still WAIT_TIMEOUT and names the error code', async () => {
@@ -508,7 +528,7 @@ describe('waitForUploadStatus', () => {
     await expectCode(
       waitForUploadStatus(sii, { trackId: '9876543210', intervalMs: 1000, timeoutMs: 1000 }),
       'WAIT_TIMEOUT',
-      { trackId: '9876543210', attempts: 2, lastCode: '-1' },
+      { trackId: '9876543210', attempts: 1, lastCode: '-1' },
     )
   })
 
@@ -516,7 +536,7 @@ describe('waitForUploadStatus', () => {
     const { sleeps, options } = manualTime()
     const { sii } = cachedSii(route(EST_UP, fx('soap-estup-rec.xml')), options)
     await expectCode(waitForUploadStatus(sii, { trackId: '9876543210' }), 'WAIT_TIMEOUT', {
-      attempts: 121,
+      attempts: 120,
       lastCode: 'REC',
     })
     expect(sleeps).toHaveLength(120)
@@ -539,11 +559,127 @@ describe('waitForUploadStatus', () => {
     expect(requestsTo(fake.requests, EST_UP)).toBe(2)
   })
 
+  describe('the timeout is a budget no poll can overrun', () => {
+    // A query that costs `cost` ms of the fake clock but, like a real transport, never longer than its own timeout.
+    const spending = (clock: ReturnType<typeof testClock>, cost: number, reply: () => FakeReply | DteError) => {
+      const seen: { readonly timeoutMs: number; readonly remainingMs: number }[] = []
+      const deadline = { at: 0 }
+      const route: FakeRoute['reply'] = (request) => {
+        seen.push({ timeoutMs: request.timeoutMs, remainingMs: deadline.at - clock.now().getTime() })
+        clock.advance(Math.min(cost, request.timeoutMs))
+        return reply()
+      }
+      return { seen, route, startAt: (timeoutMs: number) => void (deadline.at = clock.now().getTime() + timeoutMs) }
+    }
+
+    test('timeoutMs 10 s with query errors ends at 10 s, one request per poll and no retry sleeps', async () => {
+      const { clock, sleeps, options } = manualTime()
+      const spent = spending(clock, 0, () => fx('soap-estup-error.xml') as FakeReply)
+      const { sii, fake } = cachedSii(route(EST_UP, spent.route), options)
+      const started = clock.now().getTime()
+      spent.startAt(10000)
+      await expectCode(
+        waitForUploadStatus(sii, { trackId: '9876543210', intervalMs: 4000, timeoutMs: 10000 }),
+        'WAIT_TIMEOUT',
+        { trackId: '9876543210', attempts: 3, lastCode: '-1' },
+      )
+      expect(clock.now().getTime() - started).toBe(10000)
+      expect(sleeps).toEqual([4000, 4000, 2000])
+      expect(requestsTo(fake.requests, EST_UP)).toBe(3)
+    })
+
+    test('a hanging query is cut at the time remaining, not at its normal timeout, and not retried', async () => {
+      const { clock, sleeps, options } = manualTime()
+      const spent = spending(clock, Number.POSITIVE_INFINITY, () => new DteError('REQUEST_TIMEOUT'))
+      const { sii, fake } = cachedSii(route(EST_UP, spent.route), options)
+      const started = clock.now().getTime()
+      spent.startAt(40000)
+      await expectCode(waitForUploadStatus(sii, { trackId: '9876543210', timeoutMs: 40000 }), 'WAIT_TIMEOUT', {
+        attempts: 2,
+        lastCode: 'REQUEST_TIMEOUT',
+      })
+      // 30 s (the normal SOAP timeout) while 40 s remain, then only the 5 s that remain after the 5 s sleep.
+      expect(spent.seen.map((request) => request.timeoutMs)).toEqual([30000, 5000])
+      expect(clock.now().getTime() - started).toBe(40000)
+      expect(sleeps).toEqual([5000])
+      expect(requestsTo(fake.requests, EST_UP)).toBe(2)
+    })
+
+    test('the timeout of a poll never exceeds the time remaining, and a per-call timeout is the normal one', async () => {
+      const { clock, options } = manualTime()
+      const spent = spending(clock, 3000, () => fx('soap-estup-rec.xml') as FakeReply)
+      const { sii } = cachedSii(route(EST_UP, spent.route), options)
+      const started = clock.now().getTime()
+      spent.startAt(20000)
+      await expectCode(
+        waitForUploadStatus(sii, { trackId: '9876543210', intervalMs: 1500, timeoutMs: 20000 }, { timeoutMs: 4000 }),
+        'WAIT_TIMEOUT',
+        { lastCode: 'REC' },
+      )
+      expect(spent.seen.length).toBeGreaterThan(3)
+      for (const request of spent.seen) {
+        expect(request.timeoutMs).toBeLessThanOrEqual(4000)
+        expect(request.timeoutMs).toBeLessThanOrEqual(request.remainingMs)
+      }
+      // The last poll got what was left, which was less than the normal 4 s.
+      expect(spent.seen[spent.seen.length - 1].timeoutMs).toBeLessThan(4000)
+      expect(clock.now().getTime() - started).toBe(20000)
+    })
+
+    test('the REST channel is bounded by its own, shorter, normal timeout', async () => {
+      const { clock, options } = manualTime()
+      const spent = spending(clock, 0, () => restBody('{"estado":"REC"}') as FakeReply)
+      const { sii } = cachedSii(route(REST_STATUS, spent.route), options)
+      spent.startAt(60000)
+      await expectCode(
+        waitForUploadStatus(sii, { trackId: '1234567890', channel: 'rest', timeoutMs: 60000 }),
+        'WAIT_TIMEOUT',
+        { lastCode: 'REC' },
+      )
+      // 15 s while that much remains (not the 30 s of SOAP), then whatever is left of the 60 s.
+      expect(spent.seen.map((request) => request.timeoutMs)).toEqual([
+        15000, 15000, 15000, 15000, 15000, 15000, 15000, 15000, 15000, 15000, 10000, 5000,
+      ])
+    })
+
+    test(
+      'a token the SII refuses is still renewed during a wait, inside the same budget',
+      async () => {
+        const { sleeps, options } = manualTime()
+        const rejected = fx('soap-estup-token-error.xml')
+        const { sii, fake } = cachedSii(
+          withAuth(EST_UP, [rejected, fx('soap-estup-rec.xml'), fx('soap-estup-epr.xml')]),
+          options,
+        )
+        expect((await waitForUploadStatus(sii, { trackId: '9876543210', timeoutMs: 10000 })).code).toBe('EPR')
+        expect(fake.requests.map((request) => request.url)).toEqual([
+          EST_UP,
+          'https://maullin.sii.cl/DTEWS/CrSeed.jws',
+          'https://maullin.sii.cl/DTEWS/GetTokenFromSeed.jws',
+          EST_UP,
+          EST_UP,
+        ])
+        expect(sleeps).toEqual([5000])
+        // The first poll renewed the token: all three of its requests are capped at the 10 s budget, the second at the 5 s left.
+        expect(fake.requests.map((request) => request.timeoutMs)).toEqual([10000, 10000, 10000, 10000, 5000])
+      },
+      SLOW,
+    )
+  })
+
   test('other errors end the wait at once', async () => {
     const { sleeps, options } = manualTime()
-    const http = cachedSii(route(EST_UP, { status: 500, body: 'x' }), { ...options, retry: false })
-    await expectCode(waitForUploadStatus(http.sii, { trackId: '9876543210' }), 'SII_HTTP_ERROR', { httpStatus: 500 })
-    const boom = cachedSii(route(EST_UP, new Error('boom')), { ...options, retry: false })
+    const http = cachedSii(route(EST_UP, { status: 400, body: 'x' }), options)
+    await expectCode(waitForUploadStatus(http.sii, { trackId: '9876543210' }), 'SII_HTTP_ERROR', { httpStatus: 400 })
+    const refused = cachedSii(route(EST_UP, new DteError('TRANSPORT_TLS', { reason: 'CERT_HAS_EXPIRED' })), options)
+    await expectCode(waitForUploadStatus(refused.sii, { trackId: '9876543210' }), 'TRANSPORT_TLS')
+    const claimed = cachedSii(route(EST_UP, fx('soap-estup-rec.xml')), options)
+    await expectCode(
+      waitForUploadStatus(claimed.sii, { trackId: '9876543210', channel: 'ftp' as unknown as 'soap' }),
+      'INVALID_OPTION',
+      { field: 'channel' },
+    )
+    const boom = cachedSii(route(EST_UP, new Error('boom')), options)
     await expect(waitForUploadStatus(boom.sii, { trackId: '9876543210' })).rejects.toThrow('boom')
     const trackId = cachedSii(route(EST_UP, fx('soap-estup-rec.xml')), options)
     await expectCode(waitForUploadStatus(trackId.sii, { trackId: '12/34' }), 'INVALID_OPTION', { field: 'trackId' })

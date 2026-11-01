@@ -24,6 +24,8 @@ export type RecordedRequest = {
   /** Lower-cased header names. */
   readonly headers: Readonly<Record<string, string>>
   readonly body: Uint8Array | null
+  /** The per-request timeout the client asked for, ms. */
+  readonly timeoutMs: number
   /** Body decoded as Latin-1 (lossless one char per byte). */
   readonly text: string
   /** Parsed multipart parts when the request is `multipart/form-data`, else `[]`. */
@@ -75,6 +77,7 @@ const record = (request: HttpRequest): RecordedRequest => {
     url: request.url,
     headers,
     body: request.body ?? null,
+    timeoutMs: request.timeoutMs,
     text,
     parts: contentType.startsWith('multipart/form-data') ? parseMultipart(text, contentType) : [],
   }

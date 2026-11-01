@@ -14,7 +14,7 @@ import { splitSiiRut, toSiiRut, type SiiRut } from '../model/rut'
 import { chileDate, toIsoDate } from '../time/chile'
 import { extractTagContent } from '../xml/parse'
 import { withToken } from './auth'
-import { resolveCompanyRut, retryFor, type CallOverrides, type SiiClient } from './client'
+import { resolveCompanyRut, retryFor, timeoutFor, type CallOverrides, type SiiClient } from './client'
 import {
   bodyExcerpt,
   httpError,
@@ -25,7 +25,7 @@ import {
   retryOptions,
   soapCall,
 } from './operation'
-import { withRetry } from './retry'
+import { isRetryableError, withRetry } from './retry'
 import type { TokenChannel } from './token-cache'
 
 /**
@@ -405,33 +405,44 @@ export const queryUploadStatus = async (
   )
 }
 
-// One poll: the status, or only the code of the query error that stood in for it.
+// One poll: the status, or only the code of the retryable failure that stood in for it.
 type Poll = { readonly status: UploadStatus | null; readonly code: string }
 
-const pollOnce = (sii: SiiClient, input: QueryUploadStatusInput, overrides?: CallOverrides): Promise<Poll> =>
+// A failure worth repeating (`isRetryableError`) is not the end of a wait: the next poll is the retry. The SII's own
+// query errors report their `-1` … `-14` code; any other one reports its error code. Everything else ends the wait.
+const pollOnce = (sii: SiiClient, input: QueryUploadStatusInput, overrides: CallOverrides): Promise<Poll> =>
   queryUploadStatus(sii, input, overrides).then(
     (status): Poll => ({ status, code: status.code }),
     (error: unknown): Poll => {
-      if (isDteError(error) && error.code === 'SII_QUERY_ERROR')
-        return { status: null, code: String(error.details.code) }
-      throw error
+      if (!isDteError(error) || !isRetryableError(error)) throw error
+      return { status: null, code: error.code === 'SII_QUERY_ERROR' ? String(error.details.code) : error.code }
     },
   )
 
 /**
- * EN: Polls `queryUploadStatus` every `intervalMs` until the status is no longer `pending`, up to `timeoutMs`. The
- * SII's own query errors (`-1` … `-14`, already retried by the retry policy) count as pending, so a flaky query
- * service does not end the wait; the wait ends with `WAIT_TIMEOUT { trackId, attempts, lastCode }` only when
- * `timeoutMs` elapses, whether the last answer was a pending status or a query error (`lastCode` tells which). Any
- * other error (HTTP error, invalid token, transport failure that outlived its retries) ends the wait at once. It uses
- * the client's `now` and `sleep`, and stops with `REQUEST_ABORTED` when the caller's `signal` fires.
- * ES: Sondea `queryUploadStatus` cada `intervalMs` hasta que el estado deje de ser `pending`, hasta `timeoutMs`. Los
- * errores de consulta del propio SII (`-1` … `-14`, ya reintentados por la política de reintentos) cuentan como
- * pendiente, así que un servicio de consulta inestable no termina la espera; la espera termina con `WAIT_TIMEOUT
- * { trackId, attempts, lastCode }` solo cuando se cumple `timeoutMs`, sea que la última respuesta fuera un estado
- * pendiente o un error de consulta (`lastCode` dice cuál). Cualquier otro error (error HTTP, token inválido, falla de
- * transporte que agotó sus reintentos) termina la espera de inmediato. Usa el `now` y el `sleep` del cliente, y se
- * detiene con `REQUEST_ABORTED` cuando se dispara el `signal` del llamador.
+ * EN: Polls `queryUploadStatus` every `intervalMs` until the status is no longer `pending`, up to `timeoutMs`. During a
+ * wait the polling interval replaces the retry policy: each poll is a single request (the client's and the call's
+ * `retry` are ignored), its timeout is the smaller of the normal timeout of the call and the time remaining, and the
+ * sleep between polls is the smaller of `intervalMs` and the time remaining, so the wait ends at `timeoutMs` and not
+ * after a retry policy has run its course on every poll (a poll that has to renew the token makes up to three requests,
+ * each with that timeout). An error that `isRetryableError` accepts (the SII's query errors `-1` … `-14`, transport
+ * failures and timeouts, HTTP 429/405/5xx, unreadable pages) counts as pending, so a flaky query service does not end
+ * the wait; any other error (invalid token, HTTP 4xx, a failed handshake) ends it at once. The wait ends with
+ * `WAIT_TIMEOUT { trackId, attempts, lastCode }` only when `timeoutMs` elapses; `lastCode` is the last status code or
+ * query-error code, or the error code of a retryable failure (`REQUEST_TIMEOUT`…), so it tells which. It uses the
+ * client's `now` and `sleep`, and stops with `REQUEST_ABORTED` when the caller's `signal` fires.
+ * ES: Sondea `queryUploadStatus` cada `intervalMs` hasta que el estado deje de ser `pending`, hasta `timeoutMs`.
+ * Durante la espera el intervalo de sondeo reemplaza a la política de reintentos: cada sondeo es una sola petición (el
+ * `retry` del cliente y el de la llamada se ignoran), su timeout es el menor entre el timeout normal de la llamada y el
+ * tiempo que queda, y la pausa entre sondeos es la menor entre `intervalMs` y el tiempo que queda, así que la espera
+ * termina en `timeoutMs` y no después de que la política de reintentos se agote en cada sondeo (un sondeo que debe
+ * renovar el token hace hasta tres peticiones, cada una con ese timeout). Un error que `isRetryableError` acepta (los
+ * errores de consulta del SII `-1` … `-14`, fallas de transporte y timeouts, HTTP 429/405/5xx, páginas ilegibles) cuenta
+ * como pendiente, así que un servicio de consulta inestable no termina la espera; cualquier otro error (token inválido,
+ * HTTP 4xx, un intercambio de token fallido) la termina de inmediato. La espera termina con `WAIT_TIMEOUT { trackId,
+ * attempts, lastCode }` solo cuando se cumple `timeoutMs`; `lastCode` es el último código de estado o de error de
+ * consulta, o el código de error de una falla reintentable (`REQUEST_TIMEOUT`…), así que dice cuál fue. Usa el `now` y
+ * el `sleep` del cliente, y se detiene con `REQUEST_ABORTED` cuando se dispara el `signal` del llamador.
  * @throws {DteError} EN: `WAIT_TIMEOUT { trackId, attempts, lastCode }`, `REQUEST_ABORTED`, `INVALID_OPTION { field: 'intervalMs' | 'timeoutMs' }` plus whatever `queryUploadStatus` throws. ES: `WAIT_TIMEOUT { trackId, attempts, lastCode }`, `REQUEST_ABORTED`, `INVALID_OPTION { field: 'intervalMs' | 'timeoutMs' }` más lo que lance `queryUploadStatus`.
  */
 export const waitForUploadStatus = async (
@@ -441,18 +452,25 @@ export const waitForUploadStatus = async (
 ): Promise<UploadStatus> => {
   const intervalMs = positiveOption(input.intervalMs, DEFAULT_INTERVAL_MS, 'intervalMs')
   const timeoutMs = positiveOption(input.timeoutMs, DEFAULT_WAIT_MS, 'timeoutMs')
+  // An unknown channel is reported by the first poll, which validates it; here it only picks the normal timeout.
+  const normalMs = timeoutFor(sii, input.channel === 'rest' ? 'rest' : 'soap', overrides)
   const deadline = sii.now().getTime() + timeoutMs
-  const poll = async (attempt: number): Promise<UploadStatus> => {
+  const poll = async (polled: number, lastCode: string): Promise<UploadStatus> => {
     // An injected `sleep` may ignore the signal, so it is checked here as well as handed to `sleep`.
     if (overrides?.signal?.aborted) throw new DteError('REQUEST_ABORTED', { operation: 'waitForUploadStatus' })
-    const outcome = await pollOnce(sii, input, overrides)
+    const remainingMs = deadline - sii.now().getTime()
+    if (remainingMs <= 0) throw new DteError('WAIT_TIMEOUT', { trackId: input.trackId, attempts: polled, lastCode })
+    const outcome = await pollOnce(sii, input, {
+      ...overrides,
+      retry: false,
+      timeoutMs: Math.min(normalMs, remainingMs),
+    })
     if (outcome.status !== null && outcome.status.status !== 'pending') return outcome.status
-    if (sii.now().getTime() + intervalMs > deadline)
-      throw new DteError('WAIT_TIMEOUT', { trackId: input.trackId, attempts: attempt, lastCode: outcome.code })
-    await sii.sleep(intervalMs, overrides?.signal)
-    return poll(attempt + 1)
+    const leftMs = deadline - sii.now().getTime()
+    if (leftMs > 0) await sii.sleep(Math.min(intervalMs, leftMs), overrides?.signal)
+    return poll(polled + 1, outcome.code)
   }
-  return poll(1)
+  return poll(0, '')
 }
 
 type DocumentQuery = {

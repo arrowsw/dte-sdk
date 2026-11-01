@@ -327,6 +327,17 @@ describe('retries', () => {
     expect(posts(perCall.fake)).toBe(1)
   })
 
+  test('a retryOn that refuses everything, on the client or on the call, means one POST', async () => {
+    const timeout = new DteError('REQUEST_TIMEOUT')
+    const policy = { retryOn: () => false }
+    const client = answering(timeout, { retry: policy })
+    await expectCode(registerClaim(client.sii, ACCEPT), 'REQUEST_TIMEOUT', { attempts: 1 })
+    const perCall = answering(timeout)
+    await expectCode(registerClaim(perCall.sii, ACCEPT, { retry: policy }), 'REQUEST_TIMEOUT', { attempts: 1 })
+    expect([client, perCall].map((test) => posts(test.fake))).toEqual([1, 1])
+    expect([client, perCall].map((test) => test.sleeps)).toEqual([[], []])
+  })
+
   test.each(unreadable)('a read-only operation retries after %s with the normal backoff', async (_label, reply) => {
     const { sii, fake, sleeps } = answering([reply, fx('claims-events.xml')])
     expect((await listClaimEvents(sii, doc)).code).toBe(15)

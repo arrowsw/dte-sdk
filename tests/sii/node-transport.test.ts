@@ -36,6 +36,10 @@ beforeAll(async () => {
       } else if (req.url === '/half') {
         res.writeHead(200)
         res.write('partial') // never ends
+      } else if (req.url === '/cut') {
+        // Headers and the start of the body, then the connection dies: the SII answered, but never finished.
+        res.writeHead(200, { 'Content-Length': '500' })
+        res.write('<RECEPCIONDTE>\n<STATUS>0', () => setTimeout(() => res.socket?.destroy(), 20))
       } else if (req.url !== '/slow') {
         res.writeHead(404)
         res.end()
@@ -150,6 +154,30 @@ describe('createNodeHttpsTransport', () => {
     const transport = createNodeHttpsTransport({ tls: { ca: cert } })
     await expectCode(transport(get('/slow', { timeoutMs: 50 })), 'REQUEST_TIMEOUT')
     await expectCode(transport(get('/half', { timeoutMs: 50 })), 'REQUEST_TIMEOUT')
+  })
+
+  test('a failure after the response headers arrived says so; one before them does not', async () => {
+    const transport = createNodeHttpsTransport({ tls: { ca: cert }, keepAlive: false })
+    const detailsOf = async (promise: Promise<unknown>): Promise<DteError> => {
+      const error = await promise.then(
+        () => null,
+        (caught: unknown) => caught,
+      )
+      expect(error).toBeInstanceOf(DteError)
+      return error as DteError
+    }
+    const cut = await detailsOf(transport(get('/cut')))
+    expect(cut.code).toBe('TRANSPORT_FAILED')
+    expect(cut.details).toMatchObject({ reason: 'ECONNRESET', responseStarted: true })
+    const stalled = await detailsOf(transport(get('/half', { timeoutMs: 50 })))
+    expect(stalled.code).toBe('REQUEST_TIMEOUT')
+    expect(stalled.details).toMatchObject({ responseStarted: true })
+    const silent = await detailsOf(transport(get('/slow', { timeoutMs: 50 })))
+    expect(silent.code).toBe('REQUEST_TIMEOUT')
+    expect(silent.details).not.toHaveProperty('responseStarted')
+    const refused = await detailsOf(createNodeHttpsTransport()(get('/latin1')))
+    expect(refused.code).toBe('TRANSPORT_TLS')
+    expect(refused.details).not.toHaveProperty('responseStarted')
   })
 
   test('caller abort', async () => {

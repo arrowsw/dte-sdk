@@ -132,8 +132,13 @@ Options worth knowing:
 - `retry`: 6 attempts with exponential backoff by default; `false` disables it. An upload
   (`uploadEnvelope`, `uploadBook`, `uploadFolioConsumption`) and `registerClaim` change state at
   the SII, so they are sent again only while no SII response has arrived (connection failure,
-  timeout). Once the SII answered, whatever it said, they are never re-sent, except once with a
-  fresh token when the SII refused the token. Queries are read-only and follow the full policy.
+  timeout before the response headers). Once the SII answered, whatever it said, and even if the
+  reply was cut off halfway, they are never re-sent, except once with a fresh token when the SII
+  refused the token. Queries are read-only and follow the full policy. `retry.retryOn` can only
+  narrow what is retried (`() => false` never re-sends), never widen it. Getting a token is one
+  retry loop around seed, signature and token, so every attempt signs a fresh seed.
+  `waitForUploadStatus` polls every `intervalMs` instead of following the retry policy, and its
+  `timeoutMs` is a budget: each poll and each sleep is cut to the time that remains.
 - `capture: createDirectoryCapture({ dir })` writes every HTTP exchange, redacted (tokens,
   seeds, cookies, private keys), for SII support tickets. `archive:
   createDirectoryUploadArchive({ dir })` keeps the exact bytes of every upload the SII answered,

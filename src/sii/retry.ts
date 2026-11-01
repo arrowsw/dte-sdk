@@ -15,7 +15,14 @@ export type RetryPolicy = {
   readonly backoffMultiplier: number
   /** EN: Jitter as a fraction of the delay (0.2 → ±20 %). ES: Jitter como fracción de la espera (0,2 → ±20 %). */
   readonly jitterRatio: number
-  /** EN: Which errors to retry; defaults to `isRetryableError`. ES: Qué errores reintentar; por defecto `isRetryableError`. */
+  /**
+   * EN: Which errors to retry; defaults to `isRetryableError`. An operation that changes state at the SII (an upload, a
+   * claim) applies its own, narrower rule as well and retries only when both agree, so this can narrow what is
+   * retried (`() => false` never re-sends) but never widen it.
+   * ES: Qué errores reintentar; por defecto `isRetryableError`. Una operación que cambia estado en el SII (un envío, un
+   * reclamo) aplica además su propia regla, más estricta, y reintenta solo cuando ambas coinciden: esto puede restringir
+   * lo que se reintenta (`() => false` nunca reenvía) pero nunca ampliarlo.
+   */
   readonly retryOn?: (error: DteError) => boolean
 }
 
@@ -81,9 +88,11 @@ export const retryDelayMs = (policy: RetryPolicy, attempt: number, random: () =>
 
 /**
  * EN: Runtime hooks of `withRetry`: the injectable `sleep`, the caller's `signal`, the jitter `random`, a per-call
- * `retryOn` and an `onRetry` observer.
+ * `retryOn` and an `onRetry` observer. The per-call `retryOn` does not replace the policy's: an error is retried only
+ * when both it and the policy's `retryOn` (`isRetryableError` by default) accept it.
  * ES: Ganchos de `withRetry`: el `sleep` inyectable, el `signal` del llamador, el `random` del jitter, un `retryOn` por
- * llamada y un observador `onRetry`.
+ * llamada y un observador `onRetry`. El `retryOn` por llamada no reemplaza al de la política: un error se reintenta solo
+ * cuando tanto este como el `retryOn` de la política (`isRetryableError` por defecto) lo aceptan.
  */
 export type RetryOptions = {
   readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>
@@ -99,27 +108,34 @@ const withAttempts = (error: DteError, attempts: number): DteError =>
 const retryAfterOf = (error: DteError): number | null =>
   typeof error.details.retryAfterMs === 'number' ? error.details.retryAfterMs : null
 
+// Both rules must agree: the policy's `retryOn` cannot widen a call's rule (an upload's `isNoAnswer`), and a call's rule
+// cannot override a caller's `retryOn: () => false` on the policy.
+const canRetry = (policy: RetryPolicy, options: RetryOptions, error: DteError): boolean =>
+  (policy.retryOn ?? isRetryableError)(error) && (options.retryOn?.(error) ?? true)
+
 /**
- * EN: Runs `run(attempt)` until it succeeds, a non-retryable error, `maxAttempts` or the signal. The thrown
- * `DteError` carries `details.attempts`; `details.retryAfterMs` on an error (SII `X-Retry-After`) overrides the
- * computed delay, still capped at `maxDelayMs`. Non-`DteError` values are rethrown untouched.
- * ES: Ejecuta `run(attempt)` hasta que tenga éxito, un error no reintentable, `maxAttempts` o el signal. El `DteError`
- * lanzado trae `details.attempts`; `details.retryAfterMs` en un error (`X-Retry-After` del SII) reemplaza la espera
- * calculada, siempre con tope `maxDelayMs`. Los valores que no son `DteError` se relanzan tal cual.
+ * EN: Runs `run(attempt)` until it succeeds, a non-retryable error, `maxAttempts` or the signal. An error is
+ * retryable when the policy's `retryOn` (`isRetryableError` by default) and the call's `options.retryOn`, if any, both
+ * accept it. The thrown `DteError` carries `details.attempts`; `details.retryAfterMs` on an error (SII
+ * `X-Retry-After`) overrides the computed delay, still capped at `maxDelayMs`. Non-`DteError` values are rethrown
+ * untouched.
+ * ES: Ejecuta `run(attempt)` hasta que tenga éxito, un error no reintentable, `maxAttempts` o el signal. Un error es
+ * reintentable cuando el `retryOn` de la política (`isRetryableError` por defecto) y el `options.retryOn` de la
+ * llamada, si lo hay, lo aceptan ambos. El `DteError` lanzado trae `details.attempts`; `details.retryAfterMs` en un
+ * error (`X-Retry-After` del SII) reemplaza la espera calculada, siempre con tope `maxDelayMs`. Los valores que no son
+ * `DteError` se relanzan tal cual.
  */
 export const withRetry = async <T>(
   policy: RetryPolicy | false,
   run: (attempt: number) => Promise<T>,
   options: RetryOptions,
 ): Promise<T> => {
-  const shouldRetry: (error: DteError) => boolean =
-    options.retryOn ?? (policy === false ? isRetryableError : (policy.retryOn ?? isRetryableError))
   const attempt = async (n: number): Promise<T> => {
     try {
       return await run(n)
     } catch (error) {
       if (!isDteError(error)) throw error
-      if (policy === false || n >= policy.maxAttempts || !shouldRetry(error)) throw withAttempts(error, n)
+      if (policy === false || n >= policy.maxAttempts || !canRetry(policy, options, error)) throw withAttempts(error, n)
       const delayMs = Math.min(policy.maxDelayMs, retryAfterOf(error) ?? retryDelayMs(policy, n, options.random))
       options.onRetry?.(error, n, delayMs)
       await options.sleep(delayMs, options.signal)
