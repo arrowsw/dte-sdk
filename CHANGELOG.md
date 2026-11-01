@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Core issuance: `createDocument`, `stampDocument` (TED), `signDocument` (enveloped XMLDSig),
+  `issueDocument`, `createEnvelope`/`signEnvelope` (`EnvioDTE`, `EnvioBOLETA`), verification
+  helpers (`verifyTed`, `verifyDocumentSignature`, `verifyEnvelopeSignature`).
+- Domain model in English with bilingual (EN/ES) JSDoc, SII-shaped types and the
+  `toSiiDocument`/`fromSiiDocument` codec.
+- Certificates from PKCS#12 and PEM, CAF parsing and validity, Chile-local timestamps,
+  text sanitization and ISO-8859-1 encoding, SII status code classification.
+- Dependencies: `node-forge`, `@xmldom/xmldom`, `fast-xml-parser`, `rut.ts`.
+
+### Removed
+
+- The placeholder `hello()` export.
+
 ## [0.0.2] - 2026-10-26
 
 ### Changed

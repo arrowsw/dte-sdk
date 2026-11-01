@@ -3,7 +3,8 @@
     "target": "ES2020",
     "module": "esnext",
     "lib": [
-      "ES2020"
+      "ES2020",
+      "DOM"
     ],
     "declaration": true,
     "sourceMap": true,
@@ -17,9 +18,15 @@
     "moduleResolution": "node",
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "types": [
+      "node",
+      "jest"
+    ]
   },
-  "include": ["src"],
+  "include": [
+    "src"
+  ],
   "exclude": [
     "dist",
     "node_modules"
