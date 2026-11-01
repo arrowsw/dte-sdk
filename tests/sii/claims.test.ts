@@ -52,7 +52,7 @@ describe('wire format', () => {
     expect(request.method).toBe('POST')
     expect(request.url).toBe(CLAIMS)
     expect(request.headers['content-type']).toBe('text/xml; charset=utf-8')
-    expect(request.headers.soapaction).toBe('')
+    expect(request.headers.soapaction).toBe('""')
     expect(request.headers.cookie).toBe(`TOKEN=${SOAP_TOKEN}`)
     expect(request.text).toBe(
       '<?xml version="1.0" encoding="UTF-8"?>' +
@@ -244,6 +244,25 @@ describe('faults, HTTP errors and unreadable replies', () => {
     expect((error as DteError).message).not.toContain('TOKEN')
   })
 
+  test('a token inside the fault text is redacted in details.reason', async () => {
+    const leaky = (text: string): FakeReply =>
+      utf8(
+        `<e:Envelope xmlns:e="x"><e:Body><e:Fault><faultcode>e:Server</faultcode><faultstring>${text}</faultstring></e:Fault></e:Body></e:Envelope>`,
+        500,
+      )
+    for (const [text, expected] of [
+      ['TOKEN invalido: TOKEN=SECRET123', 'TOKEN invalido: TOKEN=[redacted]'],
+      ['&lt;TOKEN&gt;SECRET123&lt;/TOKEN&gt;', '<TOKEN>[redacted]</TOKEN>'],
+    ] as const) {
+      const { sii } = answering(leaky(text), { retry: false })
+      const error: unknown = await registerClaim(sii, ACCEPT).catch((caught: unknown) => caught)
+      expect(error).toBeInstanceOf(DteError)
+      expect((error as DteError).details.reason).toBe(expected)
+      expect(JSON.stringify((error as DteError).details)).not.toContain('SECRET123')
+      expect((error as DteError).message).not.toContain('SECRET123')
+    }
+  })
+
   test('the Fault is read on a read-only operation too, and never retried', async () => {
     const { sii, fake, sleeps } = answering(fault, { retry: { maxAttempts: 6 } })
     await expectCode(listClaimEvents(sii, doc), 'SII_SOAP_FAULT', {
@@ -265,6 +284,7 @@ describe('faults, HTTP errors and unreadable replies', () => {
     await expectCode(listClaimEvents(sii, doc), 'SII_HTTP_ERROR', {
       httpStatus: 500,
       operation: 'listClaimEvents',
+      url: CLAIMS,
       channel: 'soap',
       body: 'Internal Server Error',
     })
@@ -479,6 +499,28 @@ describe('queryReceptionDate', () => {
       ),
     )
     expect(await queryReceptionDate(sii, doc)).toEqual({ receivedAt: null, raw })
+  })
+
+  test.each(['<ns2:return/>', '<ns2:return />', '<ns2:return xsi:nil="true"/>'])(
+    'a self-closing %s is an empty answer: receivedAt null and an empty raw string',
+    async (element) => {
+      const { sii } = answering(
+        utf8(
+          `<?xml version="1.0" encoding="UTF-8"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><ns2:consultarFechaRecepcionSiiResponse xmlns:ns2="${NAMESPACE}">${element}</ns2:consultarFechaRecepcionSiiResponse></soapenv:Body></soapenv:Envelope>`,
+        ),
+      )
+      expect(await queryReceptionDate(sii, doc)).toEqual({ receivedAt: null, raw: '' })
+    },
+  )
+
+  test('a self-closing return is still invalid where a result code is required', async () => {
+    const { sii } = answering(
+      utf8(
+        `<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Body><ns2:r xmlns:ns2="${NAMESPACE}"><ns2:return/></ns2:r></soapenv:Body></soapenv:Envelope>`,
+      ),
+      { retry: false },
+    )
+    await expectCode(listClaimEvents(sii, doc), 'SII_RESPONSE_INVALID', { operation: 'listClaimEvents' })
   })
 })
 

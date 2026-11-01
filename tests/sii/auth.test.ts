@@ -136,7 +136,7 @@ describe('getSeed', () => {
     expect(fake.requests[0].method).toBe('POST')
     expect(fake.requests[0].url).toBe(SOAP_SEED)
     expect(fake.requests[0].headers['content-type']).toBe('text/xml; charset=utf-8')
-    expect(fake.requests[0].headers.soapaction).toBe('')
+    expect(fake.requests[0].headers.soapaction).toBe('""')
     expect(fake.requests[0].text).toBe(buildSoapEnvelope({ method: 'getSeed' }))
   })
 
@@ -583,7 +583,7 @@ describe('withToken', () => {
 
   test('other errors pass through untouched, with or without a renewal in between', async () => {
     const { sii, fake } = testSii(authRoutes())
-    const boom = new DteError('SII_UPLOAD_REJECTED', { status: '3' })
+    const boom = new DteError('SII_UPLOAD_REJECTED', { status: 3 })
     await expect(withToken(sii, 'soap', undefined, async () => Promise.reject(boom))).rejects.toBe(boom)
     expect(fake.requests).toHaveLength(2)
     const calls = { n: 0 }

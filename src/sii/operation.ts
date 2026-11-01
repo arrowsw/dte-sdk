@@ -38,13 +38,22 @@ export const retryAfterMs = (headers: Readonly<Record<string, string>>): number 
 export const isSuccess = (status: number): boolean => status >= 200 && status < 300
 
 /**
- * EN: `SII_HTTP_ERROR` for a non-2xx response; carries the status, an excerpt of the body and the SII retry hint.
- * ES: `SII_HTTP_ERROR` para una respuesta no 2xx; trae el estado, un extracto del cuerpo y la sugerencia de reintento del SII.
+ * EN: `SII_HTTP_ERROR` for a non-2xx response; carries the status, the URL that was called, an excerpt of the body and
+ * the SII retry hint. The URL is never part of the message (a status URL holds a RUT).
+ * ES: `SII_HTTP_ERROR` para una respuesta no 2xx; trae el estado, la URL llamada, un extracto del cuerpo y la sugerencia
+ * de reintento del SII. La URL nunca es parte del mensaje (la URL de estado lleva un RUT).
  */
-export const httpError = (response: HttpResponse, text: string, operation: string, channel: TokenChannel): DteError =>
+export const httpError = (
+  response: HttpResponse,
+  text: string,
+  operation: string,
+  channel: TokenChannel,
+  url: string,
+): DteError =>
   new DteError('SII_HTTP_ERROR', {
     httpStatus: response.status,
     operation,
+    url,
     channel,
     body: bodyExcerpt(text),
     retryAfterMs: retryAfterMs(response.headers),
@@ -168,12 +177,12 @@ export const soapCall = async (sii: SiiClient, input: SoapCallInput): Promise<st
     requestEncoding: 'utf8',
   })
   const text = decodeBody(response.body, 'latin1')
-  if (!isSuccess(response.status)) throw httpError(response, text, input.operation, 'soap')
+  if (!isSuccess(response.status)) throw httpError(response, text, input.operation, 'soap', input.url)
   const parsed = parseSoapResponse(text)
   if (parsed.fault !== null)
     throw new DteError('SII_SOAP_FAULT', {
       code: parsed.fault.code,
-      reason: parsed.fault.reason,
+      reason: redactText(parsed.fault.reason),
       operation: input.operation,
     })
   if (parsed.returnValue === null)
@@ -235,7 +244,7 @@ export const restCall = async (
  */
 export const restText = async (sii: SiiClient, input: RestCallInput): Promise<string> => {
   const { response, text } = await restCall(sii, input)
-  if (!isSuccess(response.status)) throw httpError(response, text, input.operation, 'rest')
+  if (!isSuccess(response.status)) throw httpError(response, text, input.operation, 'rest', input.url)
   return text
 }
 

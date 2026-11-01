@@ -72,7 +72,7 @@ export const isRetryableError = (error: unknown): boolean => {
   if (!isDteError(error)) return false
   if (RETRYABLE_CODES.has(error.code)) return true
   if (error.code === 'SII_HTTP_ERROR') return isRetryableHttpStatus(Number(error.details.httpStatus))
-  if (error.code === 'SII_UPLOAD_REJECTED') return error.details.status === '9'
+  if (error.code === 'SII_UPLOAD_REJECTED') return error.details.status === 9
   return false
 }
 

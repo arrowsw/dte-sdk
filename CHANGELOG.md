@@ -29,15 +29,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the token. `retry.retryOn` can narrow what is retried, never widen it. Getting a token is
   one retry loop around seed, signature and token (a fresh seed per attempt), and
   `waitForUploadStatus` polls inside a hard `timeoutMs` budget instead of applying the
-  retry policy to every poll.
+  retry policy to every poll. Uploaded XML must open with an XML declaration naming
+  ISO-8859-1 (the bytes sent are ISO-8859-1), else `INVALID_OPTION { field: 'xml' }`
+  before anything is sent; whitespace before the declaration is dropped. Errors follow the
+  spec: transport failures carry `details.operation` (and `timeoutMs` on `REQUEST_TIMEOUT`),
+  `SII_HTTP_ERROR` carries `details.url` (never in the message) and
+  `SII_UPLOAD_REJECTED.details.status` is a number.
 - Injectable HTTP transport (`createFetchTransport`, `createNodeHttpsTransport` with TLS
-  verification on by default), token cache, retry policy with backoff, HTTP capture with
+  verification on by default; `tls.ca` adds to Node's bundled roots instead of replacing
+  them), token cache, retry policy with backoff, HTTP capture with
   redaction (`createMemoryCapture`, `createDirectoryCapture`) and upload archive
-  (`createMemoryUploadArchive`, `createDirectoryUploadArchive`). The Node adapters load
+  (`createMemoryUploadArchive`, `createDirectoryUploadArchive`; a duplicate answer is kept
+  as `<trackId>-<kind>-duplicate-<timestamp>` and archived replies and SOAP fault reasons have
+  tokens redacted). SOAP calls send `SOAPAction: ""`. The Node adapters load
   `node:` modules lazily, so importing the package evaluates no `node:` module.
 - Catalogs: `DTEUpload` reception statuses, claim actions/events/response codes,
-  `FAN` document status, REST per-document status endpoint, WSRECLAMO service URLs
-  (`CLAIM_WS_ENDPOINTS`) and their WSDLs (`CLAIM_WSDL_ENDPOINTS`).
+  `FAN` document status, the `RCO` envelope status (rejected), REST per-document status
+  endpoint, WSRECLAMO service URLs (`CLAIM_WS_ENDPOINTS`) and their WSDLs
+  (`CLAIM_WSDL_ENDPOINTS`).
 - Helpers for custom adapters and tests: `buildMultipartBody` (with `generateBoundary`,
   `multipartContentType`), `buildSoapEnvelope`/`parseSoapResponse` (with `SOAP_HEADERS`,
   `stripNamespacePrefixes`), `parseReceptionResponse`, `signSeed`, `signRootElement`,

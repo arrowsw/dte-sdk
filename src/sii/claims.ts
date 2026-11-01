@@ -3,6 +3,7 @@ import { DteError } from '../errors'
 import { splitSiiRut, toSiiRut, type SiiRut } from '../model/rut'
 import { decodeXmlEntities, extractTagContent } from '../xml/parse'
 import { withToken } from './auth'
+import { redactText } from './capture'
 import { retryFor, timeoutFor, type CallOverrides, type SiiClient } from './client'
 import { bodyExcerpt, httpError, isNoAnswer, isSuccess, retryOptions, siiTimestampToIso } from './operation'
 import { withRetry } from './retry'
@@ -174,11 +175,11 @@ const attemptClaim = async <T>(
   if (parsed.fault !== null)
     throw new DteError('SII_SOAP_FAULT', {
       code: parsed.fault.code,
-      reason: parsed.fault.reason,
+      reason: redactText(parsed.fault.reason),
       operation,
       httpStatus: response.status,
     })
-  if (!isSuccess(response.status)) throw httpError(response, text, operation, 'soap')
+  if (!isSuccess(response.status)) throw httpError(response, text, operation, 'soap', sii.endpoints.claims)
   if (parsed.returnXml === null) throw new DteError('SII_RESPONSE_INVALID', { operation, body: bodyExcerpt(text) })
   return call.read(parsed.returnXml, operation)
 }

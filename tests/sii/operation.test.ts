@@ -63,16 +63,21 @@ describe('operation helpers', () => {
       'x'.repeat(3000),
       'uploadEnvelope',
       'rest',
+      'https://pangal.sii.cl/recursos/v1/boleta.electronica.envio/10000004-0-1234567',
     )
     expect(error.code).toBe('SII_HTTP_ERROR')
     expect(error.details).toEqual({
       httpStatus: 405,
       operation: 'uploadEnvelope',
+      url: 'https://pangal.sii.cl/recursos/v1/boleta.electronica.envio/10000004-0-1234567',
       channel: 'rest',
       body: 'x'.repeat(2000),
       retryAfterMs: 3000,
     })
     expect(error.message).not.toContain('xxx')
+    // The URL of a status query holds the company RUT: it is context for the caller, never part of the message.
+    expect(error.message).not.toContain('10000004')
+    expect(error.message).not.toContain('sii.cl')
   })
 
   test('readSiiResponse reads ESTADO and GLOSA or fails as invalid', () => {
@@ -140,7 +145,7 @@ describe('soapCall', () => {
     expect(await soapCall(sii, input)).toBe('Acción &lt; señal')
     expect(fake.requests[0].method).toBe('POST')
     expect(fake.requests[0].headers['content-type']).toBe('text/xml; charset=utf-8')
-    expect(fake.requests[0].headers.soapaction).toBe('')
+    expect(fake.requests[0].headers.soapaction).toBe('""')
     // `ñ` is the two bytes C3 B1 on the wire (UTF-8), not the single byte F1 the replies use.
     expect(Array.from(fake.requests[0].body!)).toEqual(Array.from(encodeUtf8(buildSoapEnvelope(input))))
     expect(Array.from(fake.requests[0].body!)).toContain(0xc3)
@@ -168,10 +173,35 @@ describe('soapCall', () => {
     await expectCode(soapCall(sii, input), 'SII_HTTP_ERROR', {
       httpStatus: 503,
       operation: 'probe',
+      url: SOAP_URL,
       channel: 'soap',
       body: 'á'.repeat(2000),
       retryAfterMs: 4000,
     })
+  })
+
+  test('a token inside the fault text is redacted in details.reason and absent from the message', async () => {
+    const faultReply = (text: string): string =>
+      `<e:Envelope xmlns:e="x"><e:Body><e:Fault><faultcode>e:Server</faultcode><faultstring>${text}</faultstring></e:Fault></e:Body></e:Envelope>`
+    const cases = [
+      ['sesion TOKEN=SECRET123 vencida', 'sesion TOKEN=[redacted] vencida'],
+      [
+        'mal &lt;TOKEN&gt;SECRET123&lt;/TOKEN&gt; &lt;SEMILLA&gt;0078&lt;/SEMILLA&gt;',
+        'mal <TOKEN>[redacted]</TOKEN> <SEMILLA>[redacted]</SEMILLA>',
+      ],
+    ] as const
+    for (const [text, expected] of cases) {
+      const { sii } = probe([{ url: SOAP_URL, reply: { body: faultReply(text) } }])
+      const error = await soapCall(sii, input).then(
+        () => null,
+        (caught: unknown) => caught as DteError,
+      )
+      expect(error).toBeInstanceOf(DteError)
+      expect(error?.code).toBe('SII_SOAP_FAULT')
+      expect(error?.details).toMatchObject({ code: 'e:Server', operation: 'probe', reason: expected })
+      expect(JSON.stringify(error?.details)).not.toMatch(/SECRET123|0078/)
+      expect(error?.message).not.toContain('SECRET123')
+    }
   })
 
   test('a Fault is SII_SOAP_FAULT and a reply without a return element is SII_RESPONSE_INVALID', async () => {
@@ -247,6 +277,7 @@ describe('restCall and restText', () => {
     await expectCode(restText(bad.sii, input), 'SII_HTTP_ERROR', {
       httpStatus: 401,
       operation: 'probe',
+      url: REST_URL,
       channel: 'rest',
       body: 'sin token',
       retryAfterMs: null,

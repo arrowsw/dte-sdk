@@ -16,7 +16,7 @@ export type TlsVersion = 'TLSv1.2' | 'TLSv1.3'
  * hosts del SII verifican con el almacén del sistema y negocian TLS 1.2/1.3 sin ayuda, medido el 2026-11-01).
  */
 export type NodeTlsOptions = {
-  /** EN: Extra trusted CA certificates (PEM): the right fix for a container without a CA bundle or a corporate proxy. ES: CA adicionales de confianza (PEM): la solución correcta para un contenedor sin CAs o un proxy corporativo. */
+  /** EN: Extra trusted CA certificates (PEM), added to the public roots bundled with Node, never in their place: the right fix for a corporate proxy or a private CA. ES: CA adicionales de confianza (PEM), que se suman a las raíces públicas incluidas en Node y nunca las reemplazan: la solución correcta para un proxy corporativo o una CA privada. */
   readonly ca?: string | readonly string[]
   /** EN: Verify the server certificate (default true). ES: Verificar el certificado del servidor (por defecto true). */
   readonly rejectUnauthorized?: boolean
@@ -53,21 +53,27 @@ export type SslConstants = {
 export type NodeModules = {
   readonly https: typeof import('node:https')
   readonly constants: SslConstants
+  /** EN: The bundled public roots (`tls.rootCertificates`), PEM. ES: Las raíces públicas incluidas en Node (`tls.rootCertificates`), PEM. */
+  readonly rootCertificates: readonly string[]
 }
 
 /**
  * EN: `https.Agent` options derived from the adapter options (pure; tests assert the flags here because a legacy
- * server cannot be emulated).
+ * server cannot be emulated). Node's `ca` option replaces its trusted roots, so `tls.ca` is sent as the bundled
+ * `rootCertificates` followed by the extra CAs; without `tls.ca` no `ca` is sent and Node keeps its default trust.
  * ES: Opciones del `https.Agent` derivadas de las del adaptador (pura; los tests verifican los flags aquí porque un
- * servidor legacy no se puede emular).
+ * servidor legacy no se puede emular). La opción `ca` de Node reemplaza sus raíces de confianza, así que `tls.ca` se
+ * envía como las `rootCertificates` incluidas en Node seguidas de las CA adicionales; sin `tls.ca` no se envía `ca` y
+ * Node conserva su confianza por defecto.
  */
 export const agentOptions = (
   options: NodeHttpsTransportOptions,
   constants: SslConstants,
+  rootCertificates: readonly string[],
 ): {
   readonly keepAlive: boolean
   readonly rejectUnauthorized: boolean
-  readonly ca?: string | string[]
+  readonly ca?: string[]
   readonly minVersion?: TlsVersion
   readonly maxVersion?: TlsVersion
   readonly secureOptions?: number
@@ -78,7 +84,7 @@ export const agentOptions = (
   return {
     keepAlive: options.keepAlive ?? true,
     rejectUnauthorized: tls.rejectUnauthorized ?? true,
-    ...(tls.ca === undefined ? {} : { ca: typeof tls.ca === 'string' ? tls.ca : [...tls.ca] }),
+    ...(tls.ca === undefined ? {} : { ca: [...rootCertificates, ...(typeof tls.ca === 'string' ? [tls.ca] : tls.ca)] }),
     ...(tls.minVersion === undefined ? {} : { minVersion: tls.minVersion }),
     ...(tls.maxVersion === undefined ? {} : { maxVersion: tls.maxVersion }),
     ...(tls.legacyRenegotiation
@@ -91,8 +97,8 @@ export const agentOptions = (
 }
 
 const loadNodeModules = async (): Promise<NodeModules> => {
-  const [https, crypto] = await Promise.all([import('node:https'), import('node:crypto')])
-  return { https, constants: crypto.constants }
+  const [https, crypto, tls] = await Promise.all([import('node:https'), import('node:crypto'), import('node:tls')])
+  return { https, constants: crypto.constants, rootCertificates: tls.rootCertificates }
 }
 
 // Node delivers a repeated `Set-Cookie` as an array and never leaves a value undefined; spec 3.3 wants repeated
@@ -107,9 +113,13 @@ const flattenHeaders = (headers: Readonly<Record<string, string | string[] | und
 
 /**
  * EN: Transport over `node:https`, loaded on first use (never at import). Verifies the server certificate by
- * default; see `NodeTlsOptions` for the opt-in knobs. `loadModules` exists for tests only.
+ * default; see `NodeTlsOptions` for the opt-in knobs. `loadModules` exists for tests only. A request that cannot be
+ * built (a URL that does not parse, a header Node refuses) is `TRANSPORT_FAILED`, like any other failure before the
+ * exchange, and leaves no timer behind.
  * ES: Transporte sobre `node:https`, cargado en el primer uso (nunca al importar). Verifica el certificado del
- * servidor por defecto; ver `NodeTlsOptions` para los ajustes opt-in. `loadModules` existe solo para tests.
+ * servidor por defecto; ver `NodeTlsOptions` para los ajustes opt-in. `loadModules` existe solo para tests. Una
+ * petición que no se puede armar (una URL que no se interpreta, una cabecera que Node rechaza) es `TRANSPORT_FAILED`,
+ * como cualquier otra falla previa al intercambio, y no deja ningún timer pendiente.
  * @throws {DteError} EN: `TRANSPORT_UNAVAILABLE` when `node:https` cannot be loaded, then the codes of `mapTransportError`. ES: `TRANSPORT_UNAVAILABLE` si `node:https` no se puede cargar, luego los códigos de `mapTransportError`.
  */
 export const createNodeHttpsTransport = (
@@ -120,12 +130,14 @@ export const createNodeHttpsTransport = (
     const modules = await loadModules().catch((error: unknown) => {
       throw new DteError('TRANSPORT_UNAVAILABLE', { reason: errorMessage(error) })
     })
-    return { https: modules.https, agent: new modules.https.Agent(agentOptions(options, modules.constants)) }
+    return {
+      https: modules.https,
+      agent: new modules.https.Agent(agentOptions(options, modules.constants, modules.rootCertificates)),
+    }
   })
   return async (request) => {
     const { https, agent } = await ready()
     const guard = createRequestSignal(request.timeoutMs, request.signal)
-    const url = new URL(request.url)
     return new Promise<HttpResponse>((resolve, reject) => {
       // Set when the response callback fires, i.e. once the SII has sent its status line and headers: a failure after
       // that point happened while the body was being read.
@@ -134,34 +146,41 @@ export const createNodeHttpsTransport = (
         guard.cleanup()
         reject(mapTransportError(error, guard.timedOut(), request.signal?.aborted ?? false, progress.responseStarted))
       }
-      const req = https.request(
-        {
-          hostname: url.hostname,
-          port: url.port === '' ? 443 : Number(url.port),
-          path: `${url.pathname}${url.search}`,
-          method: request.method,
-          headers: request.headers,
-          agent,
-          signal: guard.signal,
-        },
-        (res) => {
-          progress.responseStarted = true
-          const chunks: Buffer[] = []
-          res.on('data', (chunk: Buffer) => chunks.push(chunk))
-          res.on('error', fail)
-          res.on('end', () => {
-            guard.cleanup()
-            resolve({
-              status: Number(res.statusCode),
-              headers: flattenHeaders(res.headers),
-              body: new Uint8Array(Buffer.concat(chunks)),
+      // A URL that does not parse or a header Node refuses (a newline in a value) throws before any socket exists: the
+      // guard's timer has to go with it, or it would keep the process alive for the whole timeout.
+      try {
+        const url = new URL(request.url)
+        const req = https.request(
+          {
+            hostname: url.hostname,
+            port: url.port === '' ? 443 : Number(url.port),
+            path: `${url.pathname}${url.search}`,
+            method: request.method,
+            headers: request.headers,
+            agent,
+            signal: guard.signal,
+          },
+          (res) => {
+            progress.responseStarted = true
+            const chunks: Buffer[] = []
+            res.on('data', (chunk: Buffer) => chunks.push(chunk))
+            res.on('error', fail)
+            res.on('end', () => {
+              guard.cleanup()
+              resolve({
+                status: Number(res.statusCode),
+                headers: flattenHeaders(res.headers),
+                body: new Uint8Array(Buffer.concat(chunks)),
+              })
             })
-          })
-        },
-      )
-      req.on('error', fail)
-      if (request.body !== undefined) req.write(request.body)
-      req.end()
+          },
+        )
+        req.on('error', fail)
+        if (request.body !== undefined) req.write(request.body)
+        req.end()
+      } catch (error) {
+        fail(error)
+      }
     })
   }
 }

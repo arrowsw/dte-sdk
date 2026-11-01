@@ -26,6 +26,7 @@ describe('upload status (QueryEstUp / REST)', () => {
     ['VOF', 'rejected'],
     ['RCT', 'rejected'],
     ['RCH', 'rejected'],
+    ['RCO', 'rejected'],
     ['RSC', 'rejected'],
     ['RLV', 'rejected'],
     ['LNC', 'rejected'],
@@ -43,11 +44,13 @@ describe('upload status (QueryEstUp / REST)', () => {
     expect(classifyUploadStatus('RLV', 'soap')).toBe('rejected')
     expect(classifyUploadStatus('EPR', 'rest')).toBe('accepted')
     expect(classifyUploadStatus('RCH', 'rest')).toBe('rejected')
+    expect(classifyUploadStatus('RCO', 'rest')).toBe('rejected')
   })
 
   test('messages are Spanish glosses', () => {
     expect(uploadStatusMessage('EPR')).toBe('Envío procesado')
     expect(uploadStatusMessage('RCT')).toBe('Rechazado por error en carátula')
+    expect(uploadStatusMessage('RCO')).toBe('Envío rechazado')
     expect(uploadStatusMessage('-11')).toBe('Error de consulta del SII, reintentar más tarde')
     expect(uploadStatusMessage('ZZZ')).toBe('Estado desconocido: ZZZ')
   })

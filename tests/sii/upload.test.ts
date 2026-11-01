@@ -1,12 +1,16 @@
+import { readdir, readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { SignedEnvelope } from '../../src/envelope/sign'
 import { DteError } from '../../src/errors'
 import { createMemoryUploadArchive } from '../../src/sii/archive'
 import { createMemoryCapture } from '../../src/sii/capture'
+import { createDirectoryUploadArchive } from '../../src/sii/node-archive'
 import { isRetryableError } from '../../src/sii/retry'
 import { parseReceptionResponse, uploadBook, uploadEnvelope, uploadFolioConsumption } from '../../src/sii/upload'
 import { decodeLatin1, encodeLatin1 } from '../../src/text/latin1'
 import type { FakeReply, FakeRoute, FakeSii } from '../support/fake-sii'
 import { ISSUER_RUT } from '../support/fixtures'
+import { createTempDirs } from '../support/temp-dir'
 import {
   authRoutes,
   cachedSii,
@@ -21,12 +25,16 @@ import {
 // A token handshake signs a seed with a 2048-bit key in pure JavaScript (about 0.6 s). Tests that are not about the
 // handshake start with the tokens already cached; the ones that renew a token or authenticate get more than 5 s.
 const SLOW = 30000
+const temp = createTempDirs()
+afterAll(temp.cleanup)
 const CGI = 'https://maullin.sii.cl/cgi_dte/UPL/DTEUpload'
 const REST_UPLOAD_CERT = 'https://pangal.sii.cl/recursos/v1/boleta.electronica.envio'
 const REST_UPLOAD_PROD = 'https://rahue.sii.cl/recursos/v1/boleta.electronica.envio'
 const dteXml = '<?xml version="1.0" encoding="ISO-8859-1"?>\n<EnvioDTE><SetDTE ID="SetDoc">Ñandú</SetDTE></EnvioDTE>'
 const receiptXml =
   '<?xml version="1.0" encoding="ISO-8859-1"?>\n<EnvioBOLETA><SetDTE ID="SetDoc">Café</SetDTE></EnvioBOLETA>'
+const libroXml = '<?xml version="1.0" encoding="ISO-8859-1"?>\n<LibroCompraVenta/>'
+const consumoXml = '<?xml version="1.0" encoding="ISO-8859-1"?>\n<ConsumoFolios/>'
 const dte = { envelope: { kind: 'dte', xml: dteXml } } as const
 const receipt = { envelope: { kind: 'receipt', xml: receiptXml } } as const
 
@@ -122,18 +130,18 @@ describe('uploadEnvelope through DTEUpload', () => {
     SLOW,
   )
 
-  test('adds the ISO-8859-1 prolog when the XML has none and keeps an existing one', async () => {
+  test('sends an existing ISO-8859-1 declaration as it is', async () => {
     const { sii, fake } = cachedSii(cgi(reception('reception-ok.xml')))
-    await uploadEnvelope(sii, { envelope: { kind: 'dte', xml: '<EnvioDTE/>' } })
-    expect(fake.requests[0].parts[4].value).toBe('<?xml version="1.0" encoding="ISO-8859-1"?>\n<EnvioDTE/>')
     await uploadEnvelope(sii, dte)
-    expect(fake.requests[1].parts[4].value).toBe(dteXml)
+    expect(fake.requests[0].parts[4].value).toBe(dteXml)
   })
 
   test('a character outside ISO-8859-1 is refused before anything is sent', async () => {
     const { sii, fake } = cachedSii(cgi(reception('reception-ok.xml')))
     await expectCode(
-      uploadEnvelope(sii, { envelope: { kind: 'dte', xml: '<EnvioDTE>€</EnvioDTE>' } }),
+      uploadEnvelope(sii, {
+        envelope: { kind: 'dte', xml: '<?xml version="1.0" encoding="ISO-8859-1"?>\n<EnvioDTE>€</EnvioDTE>' },
+      }),
       'ENCODING_UNSUPPORTED_CHAR',
     )
     expect(fake.requests).toHaveLength(0)
@@ -156,7 +164,7 @@ describe('uploadEnvelope through DTEUpload', () => {
       const memory = createMemoryUploadArchive()
       const { sii, fake, sleeps } = cachedSii(cgi(withStatus(status)), { archive: memory.archive })
       await expectCode(uploadEnvelope(sii, dte), 'SII_UPLOAD_REJECTED', {
-        status,
+        status: Number(status),
         fileName: 'EnvioDTE.xml',
         operation: 'uploadEnvelope',
         attempts: 1,
@@ -175,12 +183,12 @@ describe('uploadEnvelope through DTEUpload', () => {
 
   test('STATUS 0 without a TrackID, and STATUS 7 with schema or charset errors, are rejections', async () => {
     const missing = cachedSii(cgi(receptionWith('reception-ok.xml', '<TRACKID>9876543210</TRACKID>', '')))
-    await expectCode(uploadEnvelope(missing.sii, dte), 'SII_UPLOAD_REJECTED', { status: '0' })
+    await expectCode(uploadEnvelope(missing.sii, dte), 'SII_UPLOAD_REJECTED', { status: 0 })
     const empty = cachedSii(cgi(receptionWith('reception-ok.xml', '9876543210', '')))
-    await expectCode(uploadEnvelope(empty.sii, dte), 'SII_UPLOAD_REJECTED', { status: '0' })
+    await expectCode(uploadEnvelope(empty.sii, dte), 'SII_UPLOAD_REJECTED', { status: 0 })
     const schema = cachedSii(cgi(reception('reception-schema-error.xml')))
     await expectCode(uploadEnvelope(schema.sii, dte), 'SII_UPLOAD_REJECTED', {
-      status: '7',
+      status: 7,
       errors: [
         'SCH-00001: Error de Esquema',
         "cvc-complex-type.2.4.a: Invalid content was found starting with element 'Detalle'.",
@@ -189,21 +197,21 @@ describe('uploadEnvelope through DTEUpload', () => {
     const charset = cachedSii(
       cgi(receptionWith('reception-schema-error.xml', 'SCH-00001: Error de Esquema', 'CHR-00001: Error de Charset')),
     )
-    await expectCode(uploadEnvelope(charset.sii, dte), 'SII_UPLOAD_REJECTED', { status: '7' })
+    await expectCode(uploadEnvelope(charset.sii, dte), 'SII_UPLOAD_REJECTED', { status: 7 })
     expect([missing, empty, schema, charset].map((test) => posts(test.fake))).toEqual([1, 1, 1, 1])
   })
 
   test('a STATUS 7 whose errors are schema errors stays a rejection even when a TRACKID is present', async () => {
     const withTrack = receptionWith('reception-schema-error.xml', '<DETAIL>', '<TRACKID>9876543210</TRACKID>\n<DETAIL>')
     const { sii } = cachedSii(cgi(withTrack))
-    await expectCode(uploadEnvelope(sii, dte), 'SII_UPLOAD_REJECTED', { status: '7' })
+    await expectCode(uploadEnvelope(sii, dte), 'SII_UPLOAD_REJECTED', { status: 7 })
   })
 
   test('a STATUS 7 without errors and without a TrackID is a rejection', async () => {
     const bare = receptionWith('reception-duplicate-7.xml', '<TRACKID>9876543210</TRACKID>', '')
     const { sii } = cachedSii(cgi(bare))
     await expectCode(uploadEnvelope(sii, dte), 'SII_UPLOAD_REJECTED', {
-      status: '7',
+      status: 7,
       errors: ['Archivo ya fue enviado anteriormente'],
     })
   })
@@ -228,7 +236,7 @@ describe('uploadEnvelope through DTEUpload', () => {
     expect(await uploadEnvelope(ninetyNine.sii, dte)).toMatchObject({ trackId: '9876543210', duplicate: true })
     expect(memory.records()[0]).toMatchObject({ trackId: '9876543210', duplicate: true, response: { code: '99' } })
     const noTrack = cachedSii(cgi(receptionWith('reception-duplicate-99.xml', ' con Trackid 9876543210', '')))
-    await expectCode(uploadEnvelope(noTrack.sii, dte), 'SII_UPLOAD_REJECTED', { status: '99' })
+    await expectCode(uploadEnvelope(noTrack.sii, dte), 'SII_UPLOAD_REJECTED', { status: 99 })
     expect([seven, ninetyNine, noTrack].map((test) => posts(test.fake))).toEqual([1, 1, 1])
   })
 
@@ -261,6 +269,87 @@ describe('uploadEnvelope through DTEUpload', () => {
   test('falls back to the client clock when TIMESTAMP is missing', async () => {
     const { sii } = cachedSii(cgi(receptionWith('reception-ok.xml', '<TIMESTAMP>2026-11-15 15:30:05</TIMESTAMP>', '')))
     expect((await uploadEnvelope(sii, dte)).receivedAt).toBe('2026-11-15T15:30:00')
+  })
+})
+
+describe('the declared encoding is the encoding sent', () => {
+  type EntryPoint = (sii: ReturnType<typeof cachedSii>['sii'], xml: string) => Promise<unknown>
+  const entryPoints: readonly (readonly [string, EntryPoint])[] = [
+    ['uploadEnvelope (dte)', (sii, xml) => uploadEnvelope(sii, { envelope: { kind: 'dte', xml } })],
+    ['uploadEnvelope (receipt)', (sii, xml) => uploadEnvelope(sii, { envelope: { kind: 'receipt', xml } })],
+    ['uploadBook', (sii, xml) => uploadBook(sii, { xml })],
+    ['uploadFolioConsumption', (sii, xml) => uploadFolioConsumption(sii, { xml })],
+  ]
+  const body = '<Libro>Peñalolén</Libro>'
+
+  test.each(entryPoints)(
+    '%s refuses anything that is not declared as ISO-8859-1, before sending',
+    async (_name, call) => {
+      const refused = [
+        body,
+        `<?xml version="1.0"?>${body}`,
+        `<?xml version="1.0" encoding="UTF-8"?>${body}`,
+        `<?xml version='1.0' encoding='utf-8'?>${body}`,
+        `<?xml version="1.0" encoding="ISO-8859-15"?>${body}`,
+        `<?xml version="1.0" encoding="latin1"?>${body}`,
+        `<!-- note --><?xml version="1.0" encoding="ISO-8859-1"?>${body}`,
+        `<?xml version="1.0" standalone="yes"?><X encoding="ISO-8859-1"/>`,
+        '',
+      ]
+      for (const xml of refused) {
+        const { sii, fake } = cachedSii(cgi(reception('reception-ok.xml')))
+        const error: unknown = await call(sii, xml).catch((caught: unknown) => caught)
+        expect(error).toBeInstanceOf(DteError)
+        expect(error).toMatchObject({ code: 'INVALID_OPTION', details: { field: 'xml' } })
+        expect((error as DteError).message).not.toContain('Peñalolén')
+        expect(fake.requests).toHaveLength(0)
+      }
+    },
+  )
+
+  test.each(entryPoints)('%s accepts the declaration in any case and with either quote style', async (_name, call) => {
+    const accepted = [
+      `<?xml version="1.0" encoding="ISO-8859-1"?>${body}`,
+      `<?xml version="1.0" encoding="iso-8859-1"?>${body}`,
+      `<?xml version='1.0' encoding='Iso-8859-1'?>\n${body}`,
+      `<?xml version="1.0"  encoding = "ISO-8859-1" standalone="no" ?>${body}`,
+    ]
+    for (const xml of accepted) {
+      const { sii, fake } = cachedSii(cgi(reception('reception-ok.xml')))
+      await call(sii, xml)
+      expect(fake.requests).toHaveLength(1)
+      const bytes = fake.requests[0].body!
+      expect(Array.from(bytes)).toContain(0xf1) // ñ is the single byte F1 the declaration promises
+      expect(Array.from(bytes)).not.toContain(0xc3)
+    }
+  })
+
+  test.each(entryPoints)(
+    '%s drops whitespace before the declaration, which would be a fatal XML error',
+    async (_name, call) => {
+      const xml = `<?xml version="1.0" encoding="ISO-8859-1"?>${body}`
+      const { sii, fake } = cachedSii(cgi(reception('reception-ok.xml')))
+      await call(sii, `\n \t\r\n${xml}`)
+      expect(fake.requests[0].parts[4].value).toBe(xml)
+      expect(fake.requests[0].parts[4].value.startsWith('<?xml')).toBe(true)
+    },
+  )
+
+  test('the archive holds the trimmed bytes that were sent', async () => {
+    const memory = createMemoryUploadArchive()
+    const { sii } = cachedSii(cgi(reception('reception-ok.xml')), { archive: memory.archive })
+    await uploadBook(sii, { xml: `  \n<?xml version="1.0" encoding="ISO-8859-1"?>${body}` })
+    expect(decodeLatin1(memory.records()[0].xml)).toBe(`<?xml version="1.0" encoding="ISO-8859-1"?>${body}`)
+  })
+
+  test('the REST channel refuses it too, and the check comes before any token is requested', async () => {
+    const { sii, fake } = testSii(authRoutes('production'), { environment: 'production' })
+    await expectCode(
+      uploadEnvelope(sii, { envelope: { kind: 'receipt', xml: `<?xml version="1.0" encoding="UTF-8"?>${body}` } }),
+      'INVALID_OPTION',
+      { field: 'xml' },
+    )
+    expect(fake.requests).toHaveLength(0)
   })
 })
 
@@ -357,7 +446,7 @@ describe('the TrackID becomes a file name, so it is digits only', () => {
 
 describe('an upload is never re-sent once the SII answered', () => {
   const cgiAnswers: [string, FakeReply, string, Record<string, unknown>][] = [
-    ['HTTP 500', { status: 500, body: 'error' }, 'SII_HTTP_ERROR', { httpStatus: 500 }],
+    ['HTTP 500', { status: 500, body: 'error' }, 'SII_HTTP_ERROR', { httpStatus: 500, url: CGI }],
     ['HTTP 503', { status: 503, body: 'down' }, 'SII_HTTP_ERROR', { httpStatus: 503 }],
     [
       'HTTP 429',
@@ -368,14 +457,14 @@ describe('an upload is never re-sent once the SII answered', () => {
     ['HTTP 401', { status: 401, body: 'no token' }, 'SII_HTTP_ERROR', { httpStatus: 401 }],
     ['an HTML maintenance page', { body: siiFixture('html-maintenance.html') }, 'SII_RESPONSE_INVALID', {}],
     ['a truncated RECEPCIONDTE', { body: '<RECEPCIONDTE>\n<STATUS>0' }, 'SII_RESPONSE_INVALID', {}],
-    ['STATUS 9 (system blocked)', withStatus('9'), 'SII_UPLOAD_REJECTED', { status: '9' }],
-    ['STATUS 1', withStatus('1'), 'SII_UPLOAD_REJECTED', { status: '1' }],
-    ['STATUS 7 with schema errors', reception('reception-schema-error.xml'), 'SII_UPLOAD_REJECTED', { status: '7' }],
+    ['STATUS 9 (system blocked)', withStatus('9'), 'SII_UPLOAD_REJECTED', { status: 9 }],
+    ['STATUS 1', withStatus('1'), 'SII_UPLOAD_REJECTED', { status: 1 }],
+    ['STATUS 7 with schema errors', reception('reception-schema-error.xml'), 'SII_UPLOAD_REJECTED', { status: 7 }],
     [
       'STATUS 99 without a TrackID',
       receptionWith('reception-duplicate-99.xml', ' con Trackid 9876543210', ''),
       'SII_UPLOAD_REJECTED',
-      { status: '99' },
+      { status: 99 },
     ],
   ]
 
@@ -394,7 +483,7 @@ describe('an upload is never re-sent once the SII answered', () => {
   )
 
   const restAnswers: [string, FakeReply, string, Record<string, unknown>][] = [
-    ['HTTP 500', { status: 500, body: 'error' }, 'SII_HTTP_ERROR', { httpStatus: 500 }],
+    ['HTTP 500', { status: 500, body: 'error' }, 'SII_HTTP_ERROR', { httpStatus: 500, url: REST_UPLOAD_PROD }],
     ['HTTP 503', { status: 503, body: 'down' }, 'SII_HTTP_ERROR', { httpStatus: 503 }],
     [
       'HTTP 405 with X-Retry-After',
@@ -430,16 +519,16 @@ describe('an upload is never re-sent once the SII answered', () => {
     await expectCode(uploadEnvelope(client.sii, dte), 'SII_HTTP_ERROR', { attempts: 1 })
     const perCall = cachedSii(cgi(withStatus('9')))
     await expectCode(uploadEnvelope(perCall.sii, dte, { retry: policy }), 'SII_UPLOAD_REJECTED', {
-      status: '9',
+      status: 9,
       attempts: 1,
     })
     const batch = cachedSii(cgi(withStatus('9')))
-    await expectCode(uploadBook(batch.sii, { xml: '<LibroCompraVenta/>' }, { retry: policy }), 'SII_UPLOAD_REJECTED', {
+    await expectCode(uploadBook(batch.sii, { xml: libroXml }, { retry: policy }), 'SII_UPLOAD_REJECTED', {
       attempts: 1,
     })
     const consumption = cachedSii(cgi({ status: 500, body: 'error' }))
     await expectCode(
-      uploadFolioConsumption(consumption.sii, { xml: '<ConsumoFolios/>' }, { retry: policy }),
+      uploadFolioConsumption(consumption.sii, { xml: consumoXml }, { retry: policy }),
       'SII_HTTP_ERROR',
       { attempts: 1 },
     )
@@ -513,7 +602,7 @@ describe('an upload is retried only while no SII response has arrived', () => {
     const perCall = cachedSii(cgi(timeout))
     await expectCode(uploadEnvelope(perCall.sii, dte, { retry: policy }), 'REQUEST_TIMEOUT', { attempts: 1 })
     const book = cachedSii(cgi(timeout))
-    await expectCode(uploadBook(book.sii, { xml: '<LibroCompraVenta/>' }, { retry: policy }), 'REQUEST_TIMEOUT', {
+    await expectCode(uploadBook(book.sii, { xml: libroXml }, { retry: policy }), 'REQUEST_TIMEOUT', {
       attempts: 1,
     })
     expect([client, perCall, book].map((test) => posts(test.fake))).toEqual([1, 1, 1])
@@ -587,7 +676,7 @@ describe('token renewal is the one case that re-sends after an answer', () => {
     async () => {
       const refused = reception('reception-not-authenticated.xml')
       const blocked = cachedSii([...authRoutes(), ...cgi([refused, withStatus('9'), reception('reception-ok.xml')])])
-      await expectCode(uploadEnvelope(blocked.sii, dte), 'SII_UPLOAD_REJECTED', { status: '9' })
+      await expectCode(uploadEnvelope(blocked.sii, dte), 'SII_UPLOAD_REJECTED', { status: 9 })
       expect(posts(blocked.fake)).toBe(2)
       const down = cachedSii([
         ...authRoutes(),
@@ -666,6 +755,43 @@ describe('the archive port', () => {
     ])
   })
 
+  test('a duplicate answer is archived next to the original upload, which keeps its own sentAt and code', async () => {
+    const dir = await temp.make('dte-sdk-upload-archive-')
+    const { sii, clock } = cachedSii(cgi([reception('reception-ok.xml'), reception('reception-duplicate-99.xml')]), {
+      archive: createDirectoryUploadArchive({ dir }),
+    })
+    const first = await uploadEnvelope(sii, dte)
+    clock.advance(30 * 60 * 1000) // inside the cached token's hour
+    const again = await uploadEnvelope(sii, dte)
+    expect([first.duplicate, again.duplicate, again.trackId]).toEqual([false, true, first.trackId])
+    const folder = join(dir, 'certification', '2026-11')
+    expect((await readdir(folder)).sort()).toEqual([
+      '9876543210-dte-duplicate-20261115190000.json',
+      '9876543210-dte-duplicate-20261115190000.xml',
+      '9876543210-dte.json',
+      '9876543210-dte.xml',
+    ])
+    const original = JSON.parse(await readFile(join(folder, '9876543210-dte.json'), 'utf8'))
+    expect(original).toMatchObject({ duplicate: false, sentAt: '2026-11-15T18:30:00.000Z', response: { code: '0' } })
+    const duplicate = JSON.parse(await readFile(join(folder, '9876543210-dte-duplicate-20261115190000.json'), 'utf8'))
+    expect(duplicate).toMatchObject({ duplicate: true, sentAt: '2026-11-15T19:00:00.000Z', response: { code: '99' } })
+  })
+
+  test('redacts a token that came back in the reply, in the archive only: the receipt keeps the reply as it is', async () => {
+    const memory = createMemoryUploadArchive()
+    const leaky = receptionWith('reception-ok.xml', '</RECEPCIONDTE>', '<TOKEN>SECRETREPLY</TOKEN></RECEPCIONDTE>')
+    const rejected = { status: 500, body: 'Error de sesion TOKEN=SECRETREPLY2' }
+    const { sii } = cachedSii(cgi([leaky, rejected]), { archive: memory.archive })
+    const receipt = await uploadEnvelope(sii, dte)
+    await expectCode(uploadEnvelope(sii, dte), 'SII_HTTP_ERROR', { httpStatus: 500 })
+    const [accepted, failed] = memory.records()
+    expect(accepted.response.raw).toContain('<TOKEN>[redacted]</TOKEN>')
+    expect(accepted.response.raw).not.toContain('SECRETREPLY')
+    expect(accepted.response.raw).toContain('<TRACKID>9876543210</TRACKID>')
+    expect(failed.response.raw).toBe('Error de sesion TOKEN=[redacted]')
+    expect(receipt.raw).toContain('<TOKEN>SECRETREPLY</TOKEN>')
+  })
+
   test.each([
     ['rejects', async (): Promise<void> => Promise.reject(new Error('disk full'))],
     [
@@ -690,7 +816,7 @@ describe('the archive port', () => {
         throw new Error('disk full')
       },
     })
-    await expectCode(uploadEnvelope(sii, dte), 'SII_UPLOAD_REJECTED', { status: '1' })
+    await expectCode(uploadEnvelope(sii, dte), 'SII_UPLOAD_REJECTED', { status: 1 })
     expect(logger.lines.filter(([level]) => level === 'warn')).toHaveLength(1)
   })
 
@@ -851,11 +977,11 @@ describe('uploadBook / uploadFolioConsumption', () => {
   test('use DTEUpload with their file names and operation names', async () => {
     const memory = createMemoryUploadArchive()
     const { sii, fake } = cachedSii(cgi(reception('reception-ok.xml')), { archive: memory.archive })
-    expect(await uploadBook(sii, { xml: '<LibroCompraVenta/>' })).toMatchObject({
+    expect(await uploadBook(sii, { xml: libroXml })).toMatchObject({
       kind: 'book',
       fileName: 'LibroCV.xml',
     })
-    expect(await uploadFolioConsumption(sii, { xml: '<ConsumoFolios/>', companyRut: '12345678-5' })).toMatchObject({
+    expect(await uploadFolioConsumption(sii, { xml: consumoXml, companyRut: '12345678-5' })).toMatchObject({
       kind: 'folioConsumption',
       fileName: 'ConsumoFolios.xml',
     })
@@ -867,13 +993,13 @@ describe('uploadBook / uploadFolioConsumption', () => {
 
   test('their rejections name their own operation', async () => {
     const book = cachedSii(cgi(withStatus('6')))
-    await expectCode(uploadBook(book.sii, { xml: '<LibroCompraVenta/>' }), 'SII_UPLOAD_REJECTED', {
+    await expectCode(uploadBook(book.sii, { xml: libroXml }), 'SII_UPLOAD_REJECTED', {
       operation: 'uploadBook',
       fileName: 'LibroCV.xml',
     })
     const consumption = cachedSii(cgi(withStatus('6')))
     await expectCode(
-      uploadFolioConsumption(consumption.sii, { xml: '<ConsumoFolios/>', senderRut: '10000004-0' }),
+      uploadFolioConsumption(consumption.sii, { xml: consumoXml, senderRut: '10000004-0' }),
       'SII_UPLOAD_REJECTED',
       { operation: 'uploadFolioConsumption', fileName: 'ConsumoFolios.xml' },
     )

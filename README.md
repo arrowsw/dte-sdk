@@ -117,6 +117,11 @@ const claim = await registerClaim(sii, { issuerRut: '10000004-0', type: 33, foli
 if (!claim.ok) console.log(claimResponseMessage(claim.code)) // business answers are codes, not errors
 ```
 
+Uploads send the XML as ISO-8859-1 bytes, so it must open with an XML declaration naming
+ISO-8859-1 (the phase 1 envelopes do); anything else is refused with
+`INVALID_OPTION { field: 'xml' }` before anything is sent, and whitespace before the declaration
+is dropped.
+
 The client is plain data: every operation is a free function that takes it first. Tokens are
 obtained and renewed for you (one cache per environment, channel and certificate). Also
 available: `getSeed`/`getToken`, `uploadBook`, `uploadFolioConsumption`, `queryUploadStatus`,
@@ -126,9 +131,9 @@ available: `getSeed`/`getToken`, `uploadBook`, `uploadFolioConsumption`, `queryU
 Options worth knowing:
 
 - `transport`: `fetch` by default; `createNodeHttpsTransport({ tls })` for a custom CA
-  (`tls.ca`) or, only if you must, `rejectUnauthorized: false` / `legacyRenegotiation: true`.
-  TLS verification is on by default and the SII hosts verify with the system trust store, so
-  the defaults just work.
+  (`tls.ca`, added to the public roots bundled with Node, not in place of them) or, only if
+  you must, `rejectUnauthorized: false` / `legacyRenegotiation: true`. TLS verification is on
+  by default and the SII hosts verify with the system trust store, so the defaults just work.
 - `retry`: 6 attempts with exponential backoff by default; `false` disables it. An upload
   (`uploadEnvelope`, `uploadBook`, `uploadFolioConsumption`) and `registerClaim` change state at
   the SII, so they are sent again only while no SII response has arrived (connection failure,
@@ -142,7 +147,8 @@ Options worth knowing:
 - `capture: createDirectoryCapture({ dir })` writes every HTTP exchange, redacted (tokens,
   seeds, cookies, private keys), for SII support tickets. `archive:
   createDirectoryUploadArchive({ dir })` keeps the exact bytes of every upload the SII answered,
-  with its TrackID.
+  with its TrackID and the SII's reply (tokens redacted). A duplicate answer is kept as
+  `<trackId>-<kind>-duplicate-<yyyymmddHHMMSS>` and never replaces the record of the original.
 - `logger`: silent by default; pass `console` or your own. Messages never carry tokens, RUTs
   or XML.
 - Every call accepts `{ signal, timeoutMs, retry }` as a last argument.
@@ -164,7 +170,9 @@ Messages never include RUTs, names or item text; the offending value lives in `d
 The SII web services use the same `DteError` (`TRANSPORT_FAILED`, `TRANSPORT_TLS`, `REQUEST_TIMEOUT`,
 `SII_UPLOAD_REJECTED`, `SII_TOKEN_INVALID`, `WAIT_TIMEOUT`, …); `isRetryableError(err)` tells which ones are
 worth another try. Their messages carry only codes and numbers; a response excerpt (tokens and seeds
-redacted) lives in `details`, never in the message.
+redacted) lives in `details`, never in the message. Transport errors carry `details.operation` (and
+`timeoutMs` on `REQUEST_TIMEOUT`), `SII_HTTP_ERROR` carries `httpStatus`, `url` and `body`, and the
+`details.status` of `SII_UPLOAD_REJECTED` is the `DTEUpload` status as a number.
 
 ## Status codes
 

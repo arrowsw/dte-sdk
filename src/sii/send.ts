@@ -1,4 +1,4 @@
-import { errorMessage } from '../errors'
+import { DteError, errorMessage, isDteError } from '../errors'
 import { exchangeError, redactExchange, redactText, type HttpExchange } from './capture'
 import type { SiiClient } from './client'
 import type { TokenChannel } from './token-cache'
@@ -51,6 +51,18 @@ const withContentLength = (
     ? headers
     : { ...headers, 'Content-Length': String(body.length) }
 
+// A transport failure reaches the caller with the context the error table promises: the operation that was running
+// and, for a timeout, the timeout that elapsed. What the transport already set stays. The URL is left out on purpose: it
+// can hold a RUT. A value that is not a `DteError` (a custom transport) goes through untouched.
+const withContext = (error: unknown, input: SendInput): unknown =>
+  isDteError(error)
+    ? new DteError(error.code, {
+        operation: input.operation,
+        ...(error.code === 'REQUEST_TIMEOUT' ? { timeoutMs: input.timeoutMs } : {}),
+        ...error.details,
+      })
+    : error
+
 const toExchange = (
   input: SendInput,
   request: HttpRequest,
@@ -86,11 +98,13 @@ const toExchange = (
 /**
  * EN: Performs one HTTP exchange through the client's transport: adds `Content-Length` to bodies, times the call,
  * hands the redacted exchange to the `capture` port (a failing capture is logged, never thrown), logs a `debug` line
- * and returns the response or rethrows the transport error. Retries and token renewal live above this function.
+ * and returns the response or rethrows the transport error with the operation (and, for `REQUEST_TIMEOUT`, `timeoutMs`)
+ * added to its details. Retries and token renewal live above this function.
  * ES: Realiza un intercambio HTTP por el transporte del cliente: agrega `Content-Length` a los cuerpos, cronometra la
  * llamada, entrega el intercambio tachado al puerto `capture` (una captura que falla se registra, nunca se lanza),
- * escribe una línea `debug` y devuelve la respuesta o relanza el error de transporte. Los reintentos y la renovación
- * de token viven por encima de esta función.
+ * escribe una línea `debug` y devuelve la respuesta o relanza el error de transporte con la operación (y, en
+ * `REQUEST_TIMEOUT`, `timeoutMs`) agregadas a sus detalles. Los reintentos y la renovación de token viven por encima
+ * de esta función.
  */
 export const send = async (sii: SiiClient, input: SendInput): Promise<HttpResponse> => {
   const request: HttpRequest = {
@@ -123,7 +137,7 @@ export const send = async (sii: SiiClient, input: SendInput): Promise<HttpRespon
       durationMs,
       error: { ...failure, reason: redactText(failure.reason) },
     })
-    throw outcome.error
+    throw withContext(outcome.error, input)
   }
   sii.logger.debug('sii http', {
     operation: input.operation,

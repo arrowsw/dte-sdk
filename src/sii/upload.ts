@@ -9,6 +9,7 @@ import { chileTimestamp } from '../time/chile'
 import { decodeXmlEntities, extractTagContent } from '../xml/parse'
 import type { UploadKind } from './archive'
 import { withToken } from './auth'
+import { redactText } from './capture'
 import { resolveCompanyRut, resolveSenderRut, retryFor, timeoutFor, type CallOverrides, type SiiClient } from './client'
 import { buildMultipartBody, generateBoundary, multipartContentType, type MultipartField } from './multipart'
 import { bodyExcerpt, httpError, isNoAnswer, isSuccess, parseJson, retryOptions, siiTimestampToIso } from './operation'
@@ -34,13 +35,15 @@ export type UploadReceipt = {
   readonly fileName: string
   /** EN: true when the SII reported the file as already uploaded and returned the original TrackID. ES: true si el SII lo reportó como duplicado y devolvió el TrackID original. */
   readonly duplicate: boolean
-  /** EN: Raw SII response. ES: Respuesta cruda del SII. */
+  /** EN: Raw SII response, as received (the archive port gets a redacted copy). ES: Respuesta cruda del SII, tal como llegó (el puerto de archivo recibe una copia con los secretos tachados). */
   readonly raw: string
 }
 
 /**
- * EN: A signed envelope from phase 1, or just its kind and XML (for XML produced elsewhere).
- * ES: Un sobre firmado de la fase 1, o solo su tipo y XML (para XML generado en otra parte).
+ * EN: A signed envelope from phase 1, or just its kind and XML (for XML produced elsewhere, which must open with an XML
+ * declaration naming ISO-8859-1, as the phase 1 envelopes do).
+ * ES: Un sobre firmado de la fase 1, o solo su tipo y XML (para XML generado en otra parte, que debe abrir con una
+ * declaración XML que nombre ISO-8859-1, como los sobres de la fase 1).
  */
 export type UploadableEnvelope = SignedEnvelope | { readonly kind: EnvelopeKind; readonly xml: string }
 
@@ -64,7 +67,7 @@ export type UploadEnvelopeInput = {
  * ES: Entrada de `uploadBook` y `uploadFolioConsumption`: el XML firmado.
  */
 export type UploadXmlInput = {
-  /** EN: The signed XML document. ES: `LibroCompraVenta` / `LibroGuia` / `ConsumoFolios` — El documento XML firmado. */
+  /** EN: The signed XML document; it must open with an XML declaration naming ISO-8859-1 (leading whitespace is dropped). ES: `LibroCompraVenta` / `LibroGuia` / `ConsumoFolios` — El documento XML firmado; debe abrir con una declaración XML que nombre ISO-8859-1 (se descarta el espacio inicial). */
   readonly xml: string
   /** EN: Company RUT; defaults to the client's. ES: `rutCompany` — RUT de la empresa; por defecto el del cliente. */
   readonly companyRut?: string
@@ -169,6 +172,7 @@ type UploadJob = {
   readonly companyRut: SiiRut
   readonly senderRut: SiiRut
   readonly channel: TokenChannel
+  readonly url: string
 }
 
 const FILE_NAMES: Readonly<Record<UploadKind, string>> = {
@@ -179,9 +183,16 @@ const FILE_NAMES: Readonly<Record<UploadKind, string>> = {
 }
 const MAX_REST_RECEIPTS = 500
 
-// Phase 1 envelopes carry the prolog; XML produced elsewhere may not, and the SII expects it.
-const ensureProlog = (xml: string): string =>
-  xml.trimStart().startsWith('<?xml') ? xml : `<?xml version="1.0" encoding="ISO-8859-1"?>\n${xml}`
+// The file bytes are ISO-8859-1, so the XML has to say so: with another encoding, or none (XML then defaults to UTF-8),
+// the SII would read a different text than the one that was signed. The declaration is also what the SII's parser
+// reads first, so it must be the first thing in the file; whitespace before it is a fatal XML error.
+const LATIN1_DECLARATION = /^<\?xml\s[^?]*?\sencoding\s*=\s*(?:"iso-8859-1"|'iso-8859-1')[^?]*\?>/i
+
+const latin1Xml = (xml: string): string => {
+  const trimmed = xml.trimStart()
+  if (!LATIN1_DECLARATION.test(trimmed)) throw new DteError('INVALID_OPTION', { field: 'xml' })
+  return trimmed
+}
 
 const buildJob = (
   sii: SiiClient,
@@ -194,11 +205,12 @@ const buildJob = (
   kind,
   operation,
   fileName: FILE_NAMES[kind],
-  // The prolog declares ISO-8859-1, so the file bytes are Latin-1 on both channels.
-  bytes: encodeLatin1(ensureProlog(xml)),
+  // The declaration names ISO-8859-1, so the file bytes are Latin-1 on both channels.
+  bytes: encodeLatin1(latin1Xml(xml)),
   companyRut: resolveCompanyRut(sii, ruts.companyRut),
   senderRut: resolveSenderRut(sii, ruts.senderRut),
   channel,
+  url: channel === 'rest' ? sii.endpoints.rest.upload : sii.endpoints.soap.upload,
 })
 
 const rutFields = (senderRut: SiiRut, companyRut: SiiRut): readonly MultipartField[] => {
@@ -243,7 +255,7 @@ const refuse = (failure: unknown, code = ''): Verdict => ({ ok: false, code, fai
 // Throws for an answer that cannot be read (HTTP error status, body that is not what the channel returns); returns
 // a verdict for one that can.
 const readCgiAnswer = (job: UploadJob, response: HttpResponse, text: string): Verdict => {
-  if (!isSuccess(response.status)) throw httpError(response, text, job.operation, 'soap')
+  if (!isSuccess(response.status)) throw httpError(response, text, job.operation, 'soap', job.url)
   const reception = parseReceptionResponse(text, job.operation)
   // Only `received` and `duplicate` carry a TrackID; the other two are the SII refusing the token or the file.
   if (reception.trackId === null)
@@ -251,7 +263,7 @@ const readCgiAnswer = (job: UploadJob, response: HttpResponse, text: string): Ve
       reception.outcome === 'notAuthenticated'
         ? new DteError('SII_TOKEN_INVALID', { operation: job.operation, channel: 'soap', status: reception.status })
         : new DteError('SII_UPLOAD_REJECTED', {
-            status: reception.status,
+            status: Number(reception.status),
             errors: reception.errors,
             fileName: job.fileName,
             operation: job.operation,
@@ -276,7 +288,7 @@ const restTrackId = (value: unknown): string | null => {
 const readRestAnswer = (job: UploadJob, response: HttpResponse, text: string): Verdict => {
   if (response.status === 401)
     return refuse(new DteError('SII_TOKEN_INVALID', { operation: job.operation, channel: 'rest', httpStatus: 401 }))
-  if (!isSuccess(response.status)) throw httpError(response, text, job.operation, 'rest')
+  if (!isSuccess(response.status)) throw httpError(response, text, job.operation, 'rest', job.url)
   const json = parseJson(text, job.operation)
   const trackId = restTrackId(json.trackid)
   if (trackId === null) throw invalidResponse(job.operation, text)
@@ -318,7 +330,7 @@ const archiveUpload = async (
       fileName: job.fileName,
       sentAt: answer.sentAt.toISOString(),
       xml: job.bytes,
-      response: { httpStatus: answer.response.status, code: verdict.code, raw: answer.raw },
+      response: { httpStatus: answer.response.status, code: verdict.code, raw: redactText(answer.raw) },
     })
   } catch (error) {
     sii.logger.warn('upload archive failed', { operation: job.operation, reason: errorMessage(error) })
@@ -341,7 +353,7 @@ const attemptUpload = async (
     operation: job.operation,
     channel: job.channel,
     method: 'POST',
-    url: rest ? sii.endpoints.rest.upload : sii.endpoints.soap.upload,
+    url: job.url,
     headers: {
       'User-Agent': UPLOAD_USER_AGENT,
       Cookie: `TOKEN=${token}`,
@@ -388,13 +400,18 @@ const performUpload = (sii: SiiClient, job: UploadJob, overrides?: CallOverrides
  * receipts REST API in production or `DTEUpload` in certification (`channel` overrides). Duplicate uploads are
  * recognised and return the original TrackID with `duplicate: true`. The upload is retried only while no SII response
  * has arrived; once the SII answered (any HTTP status, any `STATUS`) it is never sent again, except once with a fresh
- * token when the SII refused the token. Every answer is handed to the archive port.
+ * token when the SII refused the token. Every answer is handed to the archive port. The XML is sent as ISO-8859-1
+ * bytes, so it must open with an XML declaration naming ISO-8859-1 (any case, either quote style) and whitespace
+ * before it is dropped; anything else is refused before anything is sent.
  * ES: Sube un sobre firmado: `EnvioDTE` por `DTEUpload` (multipart ISO-8859-1), `EnvioBOLETA` por la API REST de
  * boletas en producción o `DTEUpload` en certificación (`channel` lo fuerza). Los envíos duplicados se reconocen y
  * devuelven el TrackID original con `duplicate: true`. El envío se reintenta solo mientras no haya llegado respuesta
  * del SII; una vez que el SII respondió (cualquier estado HTTP, cualquier `STATUS`) no se vuelve a enviar, salvo una
- * vez con un token nuevo cuando el SII rechazó el token. Toda respuesta se entrega al puerto de archivo.
- * @throws {DteError} EN: `SII_UPLOAD_REJECTED { status, errors }`, `SII_TOKEN_INVALID`, `SII_HTTP_ERROR`, `SII_RESPONSE_INVALID`, `INVALID_OPTION { field: 'channel' }`, `MISSING_FIELD`, `INVALID_RUT`, `ENCODING_UNSUPPORTED_CHAR`, transport codes. ES: los mismos códigos.
+ * vez con un token nuevo cuando el SII rechazó el token. Toda respuesta se entrega al puerto de archivo. El XML se
+ * envía como bytes ISO-8859-1, así que debe abrir con una declaración XML que nombre ISO-8859-1 (en cualquier caja y con
+ * cualquier tipo de comillas); el espacio antes de ella se descarta y cualquier otra cosa se rechaza antes de enviar
+ * nada.
+ * @throws {DteError} EN: `SII_UPLOAD_REJECTED { status (a number), errors }`, `SII_TOKEN_INVALID`, `SII_HTTP_ERROR`, `SII_RESPONSE_INVALID`, `INVALID_OPTION { field: 'channel' | 'xml' }`, `MISSING_FIELD`, `INVALID_RUT`, `ENCODING_UNSUPPORTED_CHAR`, transport codes. ES: los mismos códigos.
  */
 export const uploadEnvelope = async (
   sii: SiiClient,
@@ -415,8 +432,10 @@ export const uploadEnvelope = async (
 }
 
 /**
- * EN: Uploads a signed book (`LibroCompraVenta`, `LibroGuia`) through `DTEUpload` as `LibroCV.xml`.
- * ES: Sube un libro firmado (`LibroCompraVenta`, `LibroGuia`) por `DTEUpload` como `LibroCV.xml`.
+ * EN: Uploads a signed book (`LibroCompraVenta`, `LibroGuia`) through `DTEUpload` as `LibroCV.xml`; the XML must
+ * declare ISO-8859-1, as for `uploadEnvelope` (`INVALID_OPTION { field: 'xml' }` otherwise).
+ * ES: Sube un libro firmado (`LibroCompraVenta`, `LibroGuia`) por `DTEUpload` como `LibroCV.xml`; el XML debe declarar
+ * ISO-8859-1, igual que en `uploadEnvelope` (si no, `INVALID_OPTION { field: 'xml' }`).
  */
 export const uploadBook = async (
   sii: SiiClient,
@@ -426,8 +445,10 @@ export const uploadBook = async (
   performUpload(sii, buildJob(sii, 'book', 'uploadBook', input.xml, input, 'soap'), overrides)
 
 /**
- * EN: Uploads a signed folio consumption report (RCOF, `ConsumoFolios`) through `DTEUpload` as `ConsumoFolios.xml`.
- * ES: Sube un Reporte de Consumo de Folios firmado (`ConsumoFolios`) por `DTEUpload` como `ConsumoFolios.xml`.
+ * EN: Uploads a signed folio consumption report (RCOF, `ConsumoFolios`) through `DTEUpload` as `ConsumoFolios.xml`; the
+ * XML must declare ISO-8859-1, as for `uploadEnvelope` (`INVALID_OPTION { field: 'xml' }` otherwise).
+ * ES: Sube un Reporte de Consumo de Folios firmado (`ConsumoFolios`) por `DTEUpload` como `ConsumoFolios.xml`; el XML
+ * debe declarar ISO-8859-1, igual que en `uploadEnvelope` (si no, `INVALID_OPTION { field: 'xml' }`).
  */
 export const uploadFolioConsumption = async (
   sii: SiiClient,

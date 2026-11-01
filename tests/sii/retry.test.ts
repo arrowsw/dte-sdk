@@ -42,8 +42,11 @@ describe('isRetryableError', () => {
     [new DteError('SII_HTTP_ERROR', { httpStatus: 429 }), true],
     [new DteError('SII_HTTP_ERROR', { httpStatus: 405 }), true],
     [new DteError('SII_HTTP_ERROR', { httpStatus: 400 }), false],
-    [new DteError('SII_UPLOAD_REJECTED', { status: '9' }), true],
-    [new DteError('SII_UPLOAD_REJECTED', { status: '7' }), false],
+    [new DteError('SII_UPLOAD_REJECTED', { status: 9 }), true],
+    [new DteError('SII_UPLOAD_REJECTED', { status: 7 }), false],
+    [new DteError('SII_UPLOAD_REJECTED', { status: 'TOO_MANY' }), false],
+    // The status is a number, as the upload reports it: a string is not the "system blocked" answer.
+    [new DteError('SII_UPLOAD_REJECTED', { status: '9' }), false],
     [new DteError('SII_TOKEN_INVALID'), false],
     [new DteError('REQUEST_ABORTED'), false],
     [new Error('plain'), false],

@@ -341,7 +341,7 @@ const restJson = async (
     overrides,
   })
   if (response.status === 401) throw new DteError('SII_TOKEN_INVALID', { operation, channel: 'rest', httpStatus: 401 })
-  if (!isSuccess(response.status)) throw httpError(response, text, operation, 'rest')
+  if (!isSuccess(response.status)) throw httpError(response, text, operation, 'rest', url)
   return { json: parseJson(text, operation), text }
 }
 

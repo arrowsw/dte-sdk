@@ -30,7 +30,7 @@ export type UploadRecord = {
   readonly sentAt: string
   /** EN: The exact bytes sent. ES: Los bytes exactos enviados. */
   readonly xml: Uint8Array
-  /** EN: HTTP status, SII code and raw body of the answer. ES: Estado HTTP, código del SII y cuerpo crudo de la respuesta. */
+  /** EN: HTTP status, SII code and body of the answer, with tokens and seeds redacted (`redactText`). ES: Estado HTTP, código del SII y cuerpo de la respuesta, con tokens y semillas tachados (`redactText`). */
   readonly response: { readonly httpStatus: number; readonly code: string; readonly raw: string }
 }
 
@@ -41,13 +41,18 @@ export type UploadRecord = {
 export type UploadArchive = (record: UploadRecord) => Promise<void>
 
 /**
- * EN: File-friendly name of a record: `<trackId>-<kind>`, or `rejected-<yyyymmddHHMMSS>-<kind>` without a TrackID.
- * ES: Nombre apto para archivo: `<trackId>-<kind>`, o `rejected-<aaaammddHHMMSS>-<kind>` sin TrackID.
+ * EN: File-friendly name of a record: `<trackId>-<kind>`, `<trackId>-<kind>-duplicate-<yyyymmddHHMMSS>` for a duplicate
+ * answer (it names the TrackID of the original upload and must not replace that upload's record), or
+ * `rejected-<yyyymmddHHMMSS>-<kind>` without a TrackID. The timestamp is the UTC send instant.
+ * ES: Nombre apto para archivo: `<trackId>-<kind>`, `<trackId>-<kind>-duplicate-<aaaammddHHMMSS>` para una respuesta de
+ * duplicado (nombra el TrackID del envío original y no debe reemplazar el registro de ese envío), o
+ * `rejected-<aaaammddHHMMSS>-<kind>` sin TrackID. La marca de tiempo es el instante de envío en UTC.
  */
-export const uploadRecordName = (record: Pick<UploadRecord, 'trackId' | 'kind' | 'sentAt'>): string =>
-  record.trackId === null
-    ? `rejected-${record.sentAt.replace(/\D/g, '').slice(0, 14)}-${record.kind}`
-    : `${record.trackId}-${record.kind}`
+export const uploadRecordName = (record: Pick<UploadRecord, 'trackId' | 'kind' | 'sentAt' | 'duplicate'>): string => {
+  const stamp = record.sentAt.replace(/\D/g, '').slice(0, 14)
+  if (record.trackId === null) return `rejected-${stamp}-${record.kind}`
+  return record.duplicate ? `${record.trackId}-${record.kind}-duplicate-${stamp}` : `${record.trackId}-${record.kind}`
+}
 
 /**
  * EN: In-memory archive: `records()` returns a copy of everything archived so far.

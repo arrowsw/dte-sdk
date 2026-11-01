@@ -223,6 +223,7 @@ describe('queryUploadStatus (SOAP)', () => {
     const html = cachedSii(route(EST_UP, { status: 503, body: 'down' }))
     await expectCode(queryUploadStatus(html.sii, { trackId: '9876543210' }), 'SII_HTTP_ERROR', {
       httpStatus: 503,
+      url: EST_UP,
       attempts: 3,
     })
     expect(html.sleeps).toEqual([2000, 3600])
@@ -345,8 +346,14 @@ describe('queryUploadStatus (REST)', () => {
     const broken = cachedSii(route(REST_STATUS, { status: 500, body: 'x' }))
     await expectCode(queryUploadStatus(broken.sii, { trackId: '1234567890', channel: 'rest' }), 'SII_HTTP_ERROR', {
       httpStatus: 500,
+      url: REST_STATUS,
       attempts: 3,
     })
+    const rejected = await queryUploadStatus(broken.sii, { trackId: '1234567890', channel: 'rest' }).catch(
+      (caught: unknown) => caught as DteError,
+    )
+    // The status URL holds the company RUT: details only, never the message.
+    expect((rejected as DteError).message).not.toContain('10000004')
     const missing = cachedSii(route(REST_STATUS, { status: 404, body: 'x' }))
     await expectCode(queryUploadStatus(missing.sii, { trackId: '1234567890', channel: 'rest' }), 'SII_HTTP_ERROR', {
       httpStatus: 404,
@@ -494,6 +501,7 @@ describe('waitForUploadStatus', () => {
     ['EPR', 'accepted'],
     ['RPR', 'acceptedWithObjections'],
     ['RCH', 'rejected'],
+    ['RCO', 'rejected'],
     ['XYZ', 'unknown'],
   ])('%s ends the wait as %s', async (estado, expected) => {
     const { options } = manualTime()

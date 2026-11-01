@@ -42,6 +42,31 @@ describe('createDirectoryUploadArchive', () => {
     expect(metadata.response.code).toBe('0')
   })
 
+  test('a duplicate answer is kept next to the original record instead of replacing it', async () => {
+    const dir = await temp.make('dte-sdk-archive-')
+    const archive = createDirectoryUploadArchive({ dir })
+    const original = { ...sampleRecord, response: { ...sampleRecord.response, code: '0' } }
+    const again = {
+      ...sampleRecord,
+      duplicate: true,
+      sentAt: '2026-11-16T09:15:30.000Z',
+      response: { httpStatus: 200, code: '99', raw: '<RECEPCIONDTE><STATUS>99</STATUS></RECEPCIONDTE>' },
+    }
+    await archive(original)
+    await archive(again)
+    const folder = join(dir, 'certification', '2026-11')
+    expect((await readdir(folder)).sort()).toEqual([
+      '1234567-dte-duplicate-20261116091530.json',
+      '1234567-dte-duplicate-20261116091530.xml',
+      '1234567-dte.json',
+      '1234567-dte.xml',
+    ])
+    const first = JSON.parse(await readFile(join(folder, '1234567-dte.json'), 'utf8'))
+    expect(first).toMatchObject({ duplicate: false, sentAt: '2026-11-15T18:30:00.000Z', response: { code: '0' } })
+    const second = JSON.parse(await readFile(join(folder, '1234567-dte-duplicate-20261116091530.json'), 'utf8'))
+    expect(second).toMatchObject({ duplicate: true, sentAt: '2026-11-16T09:15:30.000Z', response: { code: '99' } })
+  })
+
   test('the .json holds every field of the record except xml', async () => {
     const dir = await temp.make('dte-sdk-archive-')
     await createDirectoryUploadArchive({ dir })(sampleRecord)

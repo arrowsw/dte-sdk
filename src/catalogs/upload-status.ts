@@ -38,6 +38,7 @@ const UPLOAD_STATUS: Readonly<Record<string, StatusEntry>> = {
   VOF: { cls: 'rejected', message: 'Error interno del SII' },
   RCT: { cls: 'rejected', message: 'Rechazado por error en carátula' },
   RCH: { cls: 'rejected', message: 'Rechazado' },
+  RCO: { cls: 'rejected', message: 'Envío rechazado' },
   RSC: { cls: 'rejected', message: 'Rechazado por error en schema' },
   RLV: { cls: 'rejected', message: 'Rechazado, error en documento' },
   LNC: { cls: 'rejected', message: 'Tipo de envío de libro no corresponde' },

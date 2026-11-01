@@ -1,18 +1,24 @@
 import { EventEmitter } from 'node:events'
-import { createServer, type Server } from 'node:https'
+import https, { createServer, type Server } from 'node:https'
 import type { AddressInfo } from 'node:net'
+import { rootCertificates } from 'node:tls'
 import { DteError } from '../../src/errors'
 import { agentOptions, createNodeHttpsTransport, type NodeModules } from '../../src/sii/node-transport'
+import { SOAP_HEADERS } from '../../src/sii/soap'
 import { decodeBody, type HttpRequest } from '../../src/sii/transport'
 import { encodeLatin1 } from '../../src/text/latin1'
 import { fixtureText } from '../support/fixtures'
 
 const cert = fixtureText('tls-localhost.pem')
 const key = fixtureText('tls-localhost.key.pem')
+// A certificate that has nothing to do with the test server: the "unrelated extra CA" of the tests below.
+const unrelatedCa = fixtureText('cert.pem')
+const roots = ['ROOT-1', 'ROOT-2']
 const constants = { SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION: 0x40000, SSL_OP_LEGACY_SERVER_CONNECT: 0x4 }
 const loadReal = async (): Promise<NodeModules> => ({
   https: await import('node:https'),
   constants: (await import('node:crypto')).constants,
+  rootCertificates: (await import('node:tls')).rootCertificates,
 })
 
 const state: { server: Server | null; base: string } = { server: null, base: '' }
@@ -30,6 +36,7 @@ beforeAll(async () => {
         res.writeHead(201, {
           'X-Method': req.method ?? '',
           'X-Cookie': req.headers.cookie ?? '',
+          'X-Soap-Action': req.headers.soapaction ?? 'none',
           'Set-Cookie': ['a=1', 'b=2'],
         })
         res.end(body)
@@ -76,7 +83,20 @@ const expectCode = async (promise: Promise<unknown>, code: string, reason?: stri
 
 describe('agentOptions', () => {
   test('verifies by default and negotiates the protocol freely', () => {
-    expect(agentOptions({}, constants)).toEqual({ keepAlive: true, rejectUnauthorized: true })
+    expect(agentOptions({}, constants, roots)).toEqual({ keepAlive: true, rejectUnauthorized: true })
+  })
+
+  test('tls.ca adds to the bundled public roots instead of replacing them', () => {
+    expect(agentOptions({ tls: { ca: 'EXTRA' } }, constants, roots).ca).toEqual(['ROOT-1', 'ROOT-2', 'EXTRA'])
+    expect(agentOptions({ tls: { ca: ['EXTRA-1', 'EXTRA-2'] } }, constants, roots).ca).toEqual([
+      'ROOT-1',
+      'ROOT-2',
+      'EXTRA-1',
+      'EXTRA-2',
+    ])
+    expect(agentOptions({ tls: { ca: [] } }, constants, roots).ca).toEqual(roots)
+    // Without tls.ca there is nothing to add: Node keeps its own default trust (bundled roots and NODE_EXTRA_CA_CERTS).
+    expect(agentOptions({ tls: {} }, constants, roots)).not.toHaveProperty('ca')
   })
 
   test('every knob is opt-in', () => {
@@ -94,18 +114,18 @@ describe('agentOptions', () => {
           },
         },
         constants,
+        roots,
       ),
     ).toEqual({
       keepAlive: false,
       rejectUnauthorized: false,
-      ca: ['CA1', 'CA2'],
+      ca: ['ROOT-1', 'ROOT-2', 'CA1', 'CA2'],
       minVersion: 'TLSv1.2',
       maxVersion: 'TLSv1.2',
       secureOptions: 0x40004,
       key: 'KEY',
       cert: 'CHAIN',
     })
-    expect(agentOptions({ tls: { ca: 'ONE' } }, constants).ca).toBe('ONE')
   })
 })
 
@@ -130,9 +150,47 @@ describe('createNodeHttpsTransport', () => {
     expect(decodeBody(response.body, 'latin1')).toBe('á')
   })
 
+  test('an extra CA does not displace the public roots: a server they vouch for stays trusted', async () => {
+    // The loopback server stands in for a publicly trusted host: its certificate is one of the "bundled roots" here.
+    const withRoot = async (): Promise<NodeModules> => ({ ...(await loadReal()), rootCertificates: [cert] })
+    const withExtra = createNodeHttpsTransport({ tls: { ca: unrelatedCa }, keepAlive: false }, withRoot)
+    expect((await withExtra(get('/echo'))).status).toBe(201)
+    const twoExtras = createNodeHttpsTransport({ tls: { ca: [unrelatedCa, unrelatedCa] }, keepAlive: false }, withRoot)
+    expect((await twoExtras(get('/echo'))).status).toBe(201)
+    // Without that root the same extra CA cannot vouch for the server, so it is the root that made the call succeed.
+    const withoutRoot = async (): Promise<NodeModules> => ({ ...(await loadReal()), rootCertificates: [] })
+    await expectCode(
+      createNodeHttpsTransport({ tls: { ca: unrelatedCa }, keepAlive: false }, withoutRoot)(get('/echo')),
+      'TRANSPORT_TLS',
+      'DEPTH_ZERO_SELF_SIGNED_CERT',
+    )
+  })
+
+  test('the extra CA itself is trusted next to the real bundled roots, which the default loader supplies', async () => {
+    const spy = jest.spyOn(https, 'Agent')
+    const created: unknown[] = []
+    try {
+      const response = await createNodeHttpsTransport({ tls: { ca: cert }, keepAlive: false })(get('/echo'))
+      expect(response.status).toBe(201)
+      created.push(...spy.mock.calls.map(([options]) => options))
+    } finally {
+      spy.mockRestore()
+    }
+    expect(rootCertificates.length).toBeGreaterThan(50)
+    expect(created).toHaveLength(1)
+    expect((created[0] as { readonly ca: readonly string[] }).ca).toEqual([...rootCertificates, cert])
+  })
+
   test('rejectUnauthorized: false also connects (opt-in escape hatch)', async () => {
     const response = await createNodeHttpsTransport({ tls: { rejectUnauthorized: false } })(get('/echo'))
     expect(response.status).toBe(201)
+  })
+
+  test('SOAPAction goes on the wire as two quote characters', async () => {
+    const response = await createNodeHttpsTransport({ tls: { ca: cert }, keepAlive: false })(
+      get('/echo', { method: 'POST', headers: { ...SOAP_HEADERS, 'Content-Length': '0' } }),
+    )
+    expect(response.headers['x-soap-action']).toBe('""')
   })
 
   test('forwards headers, joins repeated response headers and echoes the body', async () => {
@@ -180,6 +238,45 @@ describe('createNodeHttpsTransport', () => {
     expect(refused.details).not.toHaveProperty('responseStarted')
   })
 
+  describe('a request that cannot even be built', () => {
+    afterEach(() => {
+      jest.useRealTimers()
+    })
+
+    test.each([
+      ['a URL that does not parse', { url: 'not a url' }, undefined],
+      ['an illegal character in a header value', { headers: { Cookie: 'TOKEN=secret-a\nb' } }, 'secret-a'],
+      ['an illegal header name', { headers: { 'Bad Name': 'x' } }, undefined],
+    ] as const)('%s is TRANSPORT_FAILED with a reason, and no timer outlives it', async (_label, overrides, secret) => {
+      const transport = createNodeHttpsTransport({ tls: { ca: cert }, keepAlive: false })
+      await transport(get('/echo')) // loads node:https with the real timers, so the next call starts from nothing
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] })
+      const error = await transport(get('/echo', { ...overrides, timeoutMs: 60000 })).then(
+        () => null,
+        (caught: unknown) => caught,
+      )
+      expect(error).toBeInstanceOf(DteError)
+      expect((error as DteError).code).toBe('TRANSPORT_FAILED')
+      expect((error as DteError).details.reason).toEqual(expect.any(String))
+      expect((error as DteError).details.reason).not.toBe('')
+      if (secret !== undefined) expect(JSON.stringify(error)).not.toContain(secret)
+      expect(jest.getTimerCount()).toBe(0)
+    })
+
+    test('a caller who already aborted gets REQUEST_ABORTED, not a TypeError', async () => {
+      const controller = new AbortController()
+      controller.abort()
+      const transport = createNodeHttpsTransport({ tls: { ca: cert } })
+      await expectCode(transport(get('/echo', { url: 'not a url', signal: controller.signal })), 'REQUEST_ABORTED')
+    })
+
+    test('the next request on the same transport still works', async () => {
+      const transport = createNodeHttpsTransport({ tls: { ca: cert }, keepAlive: false })
+      await expectCode(transport(get('/echo', { url: 'not a url' })), 'TRANSPORT_FAILED')
+      expect((await transport(get('/echo'))).status).toBe(201)
+    })
+  })
+
   test('caller abort', async () => {
     const controller = new AbortController()
     const pending = createNodeHttpsTransport({ tls: { ca: cert } })(get('/slow', { signal: controller.signal }))
@@ -213,7 +310,10 @@ describe('createNodeHttpsTransport', () => {
         return req
       },
     }
-    const stub = createNodeHttpsTransport({}, async () => ({ https: fakeHttps, constants }) as unknown as NodeModules)
+    const stub = createNodeHttpsTransport(
+      {},
+      async () => ({ https: fakeHttps, constants, rootCertificates: roots }) as unknown as NodeModules,
+    )
     await expectCode(
       stub({
         method: 'POST',

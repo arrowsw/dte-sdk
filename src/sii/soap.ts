@@ -25,12 +25,14 @@ export type SoapEnvelopeInput = {
 }
 
 /**
- * EN: Headers of every SOAP 1.1 call to the SII.
- * ES: Cabeceras de toda llamada SOAP 1.1 al SII.
+ * EN: Headers of every SOAP 1.1 call to the SII. SOAP 1.1 writes an empty `soapAction` as `SOAPAction: ""`, two literal
+ * quote characters, which is what the value holds.
+ * ES: Cabeceras de toda llamada SOAP 1.1 al SII. SOAP 1.1 escribe un `soapAction` vacío como `SOAPAction: ""`, dos
+ * comillas literales, que es lo que contiene el valor.
  */
 export const SOAP_HEADERS: Readonly<Record<string, string>> = {
   'Content-Type': 'text/xml; charset=utf-8',
-  SOAPAction: '',
+  SOAPAction: '""',
 }
 
 /**
@@ -85,9 +87,11 @@ export type SoapFault = {
 
 /**
  * EN: What a SOAP reply carried: a fault, the unescaped XML inside `<…Return>` (DTEWS) or the inner XML of
- * `<return>` (WSRECLAMO), prefixes stripped. Nulls when absent.
+ * `<return>` (WSRECLAMO), prefixes stripped. Nulls when absent; a self-closing element (`<return/>`) is present and
+ * empty, so its value is an empty string.
  * ES: Lo que trajo una respuesta SOAP: un fault, el XML des-escapado dentro de `<…Return>` (DTEWS) o el XML interior
- * de `<return>` (WSRECLAMO), sin prefijos. Null cuando no está.
+ * de `<return>` (WSRECLAMO), sin prefijos. Null cuando no está; un elemento autocerrado (`<return/>`) está presente y
+ * vacío, así que su valor es un string vacío.
  */
 export type SoapResponse = {
   readonly fault: SoapFault | null
@@ -95,8 +99,10 @@ export type SoapResponse = {
   readonly returnXml: string | null
 }
 
-const RETURN_VALUE = /<([\w.-]+Return)\b[^>]*>([\s\S]*?)<\/\1>/
-const RETURN_XML = /<return\b[^>]*>([\s\S]*?)<\/return>/
+// A self-closing element (`<return/>`, `<xReturn xsi:nil="true"/>`) is the first alternative and leaves its capture
+// group undefined; the parser reads it as an empty string.
+const RETURN_VALUE = /<([\w.-]+Return)\b(?:[^>]*?\/>|[^>]*>([\s\S]*?)<\/\1>)/
+const RETURN_XML = /<return\b(?:[^>]*?\/>|[^>]*>([\s\S]*?)<\/return>)/
 
 /**
  * EN: Parses a SOAP reply without a full XML parse: the SII answers are flat and sometimes carry stray entities.
@@ -112,7 +118,7 @@ export const parseSoapResponse = (xml: string): SoapResponse => {
   const inner = RETURN_XML.exec(plain)
   return {
     fault,
-    returnValue: value === null ? null : decodeEntities(value[2]),
-    returnXml: inner === null ? null : inner[1],
+    returnValue: value === null ? null : decodeEntities(value[2] ?? ''),
+    returnXml: inner === null ? null : (inner[1] ?? ''),
   }
 }

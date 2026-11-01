@@ -172,6 +172,69 @@ describe('send', () => {
     ])
   })
 
+  describe('the context a transport failure carries (spec table 3.8)', () => {
+    const input = {
+      operation: 'uploadEnvelope',
+      channel: 'soap' as const,
+      method: 'POST' as const,
+      url: 'https://api.test/x?rut=10000004-0',
+      headers: {},
+      timeoutMs: 4321,
+      attempt: 1,
+    }
+    const failWith = async (error: Error): Promise<unknown> => {
+      const fake = createFakeSii([{ url: 'https://api.test/x*', reply: error }])
+      const sii = createSiiClient({ environment: 'production', certificate, transport: fake.transport })
+      return send(sii, input).then(
+        () => null,
+        (caught: unknown) => caught,
+      )
+    }
+
+    test.each([
+      ['TRANSPORT_FAILED', { reason: 'ECONNRESET' }, { reason: 'ECONNRESET', operation: 'uploadEnvelope' }],
+      [
+        'TRANSPORT_FAILED',
+        { reason: 'ECONNRESET', responseStarted: true },
+        { reason: 'ECONNRESET', responseStarted: true, operation: 'uploadEnvelope' },
+      ],
+      ['TRANSPORT_TLS', { reason: 'CERT_HAS_EXPIRED' }, { reason: 'CERT_HAS_EXPIRED', operation: 'uploadEnvelope' }],
+      ['REQUEST_ABORTED', {}, { operation: 'uploadEnvelope' }],
+      [
+        'REQUEST_TIMEOUT',
+        { reason: 'This operation was aborted' },
+        { reason: 'This operation was aborted', operation: 'uploadEnvelope', timeoutMs: 4321 },
+      ],
+      [
+        'REQUEST_TIMEOUT',
+        { responseStarted: true },
+        { responseStarted: true, operation: 'uploadEnvelope', timeoutMs: 4321 },
+      ],
+    ] as const)(
+      '%s keeps its details and gains the operation (and the timeout, for a timeout)',
+      async (code, details, expected) => {
+        const error = await failWith(new DteError(code, details))
+        expect(error).toBeInstanceOf(DteError)
+        expect((error as DteError).code).toBe(code)
+        expect((error as DteError).details).toEqual(expected)
+        expect((error as DteError).message).toContain('operation=uploadEnvelope')
+        // The URL of the call can hold a RUT: it is not part of the error at all.
+        expect(JSON.stringify(error)).not.toContain('10000004')
+        expect((error as DteError).message).not.toContain('4321')
+      },
+    )
+
+    test('a detail the transport already set is not overwritten', async () => {
+      const error = await failWith(new DteError('REQUEST_TIMEOUT', { operation: 'custom', timeoutMs: 7 }))
+      expect((error as DteError).details).toEqual({ operation: 'custom', timeoutMs: 7 })
+    })
+
+    test('a value that is not a DteError (a custom transport) is rethrown as it is', async () => {
+      const boom = new TypeError('boom')
+      expect(await failWith(boom)).toBe(boom)
+    })
+  })
+
   test('a token inside a transport failure reaches neither the capture nor the log', async () => {
     const fake = createFakeSii([
       { url: 'https://api.test/x', reply: new DteError('TRANSPORT_FAILED', { reason: 'reset after TOKEN=abc123' }) },

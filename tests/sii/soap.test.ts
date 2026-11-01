@@ -58,7 +58,9 @@ describe('buildSoapEnvelope', () => {
   })
 
   test('headers', () => {
-    expect(SOAP_HEADERS).toEqual({ 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: '' })
+    // The header value is two literal quote characters, as the WSDL's empty soapAction goes on the wire.
+    expect(SOAP_HEADERS).toEqual({ 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: '""' })
+    expect(SOAP_HEADERS.SOAPAction).toHaveLength(2)
   })
 })
 
@@ -113,6 +115,29 @@ describe('parseSoapResponse', () => {
         '<s:Body><ns1:getEstUpReturn xsi:type="xsd:string">&lt;a&gt;1&lt;/a&gt;</ns1:getEstUpReturn></s:Body>',
       ).returnValue,
     ).toBe('<a>1</a>')
+  })
+
+  test.each([
+    ['<return/>', 'returnXml'],
+    ['<ns2:return/>', 'returnXml'],
+    ['<return xsi:nil="true"/>', 'returnXml'],
+    ['<return a="x/" />', 'returnXml'],
+    ['<getSeedReturn/>', 'returnValue'],
+    ['<ns1:getEstUpReturn xsi:type="xsd:string"/>', 'returnValue'],
+  ] as const)('a self-closing %s is an empty %s, not a missing one', (element, field) => {
+    const parsed = parseSoapResponse(
+      `<s:Envelope><s:Body><ns1:opResponse>${element}</ns1:opResponse></s:Body></s:Envelope>`,
+    )
+    expect(parsed[field]).toBe('')
+    expect(parsed.fault).toBeNull()
+  })
+
+  test('a self-closing element does not swallow the content of the one after it', () => {
+    const parsed = parseSoapResponse('<s:Body><a:xReturn/><a:yReturn>&lt;A/&gt;</a:yReturn></s:Body>')
+    expect(parsed.returnValue).toBe('')
+    expect(parseSoapResponse('<s:Body><x:return/><x:return>b</x:return></s:Body>').returnXml).toBe('')
+    expect(parseSoapResponse('<s:Body><x:return>a/</x:return></s:Body>').returnXml).toBe('a/')
+    expect(parseSoapResponse('<s:Body><x:return a="1/">b</x:return></s:Body>').returnXml).toBe('b')
   })
 
   test('decodes entities in a single pass: an escaped ampersand never starts a second entity', () => {

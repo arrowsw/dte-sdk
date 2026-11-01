@@ -13,7 +13,7 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 const request = (overrides: Partial<HttpRequest> = {}): HttpRequest => ({
   method: 'POST',
   url: 'https://maullin.sii.cl/DTEWS/CrSeed.jws',
-  headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: '' },
+  headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: '""' },
   body: encodeUtf8('<x/>'),
   timeoutMs: 1000,
   ...overrides,
@@ -174,7 +174,7 @@ describe('createFetchTransport', () => {
       {
         url: 'https://maullin.sii.cl/DTEWS/CrSeed.jws',
         method: 'POST',
-        headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: '' },
+        headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: '""' },
         body: Array.from(encodeUtf8('<x/>')),
         redirect: 'manual',
         hasSignal: true,
