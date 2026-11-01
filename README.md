@@ -179,6 +179,7 @@ npm run build        # esbuild (ESM + CJS) + tsc declarations
 npm run lint         # ESLint flat config + Prettier
 npm run size         # bundle size guard (.size-limit.json)
 npm run scan         # no real RUTs, local paths or secrets in tracked files
+SII_LIVE=1 SII_CERT_PFX=… SII_CERT_PASSWORD=… npx jest tests/live   # opt-in smoke against maullin (needs a real certificate)
 ```
 
 Releases are tag-triggered and published from CI with npm provenance — see
