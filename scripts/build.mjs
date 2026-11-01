@@ -4,7 +4,9 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { build } from 'esbuild'
 
-const EXTERNAL = ['node-forge', '@xmldom/xmldom', 'fast-xml-parser', 'rut.ts']
+// `node:*` stays external: the Node adapters import `node:https` and `node:fs/promises` lazily, inside the
+// function that needs them, so the neutral bundle never evaluates them and Deno/Bun/browsers still load it.
+const EXTERNAL = ['node-forge', '@xmldom/xmldom', 'fast-xml-parser', 'rut.ts', 'node:*']
 
 const TARGETS = [
   { format: 'esm', outfile: 'dist/esm/index.min.js' },
