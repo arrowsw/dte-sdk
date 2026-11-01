@@ -27,6 +27,31 @@ describe('DteError', () => {
     expect(new DteError(code).message.length).toBeGreaterThan(5)
   })
 
+  test('phase 2 codes exist with generic messages', () => {
+    expect(new DteError('TRANSPORT_FAILED').message).toBe('HTTP request failed before a response arrived')
+    expect(new DteError('TRANSPORT_TLS').message).toBe('TLS handshake or certificate verification failed')
+    expect(new DteError('SII_UPLOAD_REJECTED').message).toBe('SII rejected the upload')
+    expect(new DteError('WAIT_TIMEOUT').message).toBe('Timed out waiting for the SII status')
+  })
+
+  test('phase 2 safe keys appear in the message; url and body never do', () => {
+    const err = new DteError('SII_HTTP_ERROR', {
+      httpStatus: 503,
+      operation: 'getSeed',
+      attempts: 3,
+      channel: 'soap',
+      url: 'https://maullin.sii.cl/DTEWS/CrSeed.jws?rut=SECRET',
+      body: '<html>SECRET</html>',
+    })
+    expect(err.message).toBe(
+      'SII answered with an HTTP error status (httpStatus=503, attempts=3, channel=soap, operation=getSeed)',
+    )
+    expect(err.message).not.toContain('SECRET')
+    expect(new DteError('SII_UPLOAD_REJECTED', { status: '7', trackId: '123', code: 'SCH-00001' }).message).toBe(
+      'SII rejected the upload (status=7, code=SCH-00001, trackId=123)',
+    )
+  })
+
   test('isDteError narrows', () => {
     expect(isDteError(new DteError('CAF_EXPIRED'))).toBe(true)
     expect(isDteError(new Error('x'))).toBe(false)

@@ -23,6 +23,21 @@ export const DTE_ERROR_CODES = {
   ENCODING_UNSUPPORTED_CHAR: 'ENCODING_UNSUPPORTED_CHAR',
   ENVELOPE_EMPTY: 'ENVELOPE_EMPTY',
   ENVELOPE_KIND_MISMATCH: 'ENVELOPE_KIND_MISMATCH',
+  INVALID_OPTION: 'INVALID_OPTION',
+  TRANSPORT_UNAVAILABLE: 'TRANSPORT_UNAVAILABLE',
+  TRANSPORT_FAILED: 'TRANSPORT_FAILED',
+  TRANSPORT_TLS: 'TRANSPORT_TLS',
+  REQUEST_TIMEOUT: 'REQUEST_TIMEOUT',
+  REQUEST_ABORTED: 'REQUEST_ABORTED',
+  SII_HTTP_ERROR: 'SII_HTTP_ERROR',
+  SII_RESPONSE_INVALID: 'SII_RESPONSE_INVALID',
+  SII_SOAP_FAULT: 'SII_SOAP_FAULT',
+  SII_SEED_FAILED: 'SII_SEED_FAILED',
+  SII_TOKEN_FAILED: 'SII_TOKEN_FAILED',
+  SII_TOKEN_INVALID: 'SII_TOKEN_INVALID',
+  SII_UPLOAD_REJECTED: 'SII_UPLOAD_REJECTED',
+  SII_QUERY_ERROR: 'SII_QUERY_ERROR',
+  WAIT_TIMEOUT: 'WAIT_TIMEOUT',
 } as const
 
 /**
@@ -58,10 +73,42 @@ const MESSAGES: Readonly<Record<DteErrorCode, string>> = {
   ENCODING_UNSUPPORTED_CHAR: 'Text contains a character outside ISO-8859-1',
   ENVELOPE_EMPTY: 'Envelope has no documents',
   ENVELOPE_KIND_MISMATCH: 'Document type does not belong in this envelope kind',
+  INVALID_OPTION: 'Option value is not valid',
+  TRANSPORT_UNAVAILABLE: 'No HTTP transport is available in this runtime',
+  TRANSPORT_FAILED: 'HTTP request failed before a response arrived',
+  TRANSPORT_TLS: 'TLS handshake or certificate verification failed',
+  REQUEST_TIMEOUT: 'Request timed out',
+  REQUEST_ABORTED: 'Request was aborted by the caller',
+  SII_HTTP_ERROR: 'SII answered with an HTTP error status',
+  SII_RESPONSE_INVALID: 'SII response could not be interpreted',
+  SII_SOAP_FAULT: 'SII answered with a SOAP fault',
+  SII_SEED_FAILED: 'SII refused to issue a seed',
+  SII_TOKEN_FAILED: 'SII refused to issue a token',
+  SII_TOKEN_INVALID: 'SII rejected the authentication token',
+  SII_UPLOAD_REJECTED: 'SII rejected the upload',
+  SII_QUERY_ERROR: 'SII status query failed',
+  WAIT_TIMEOUT: 'Timed out waiting for the SII status',
 }
 
-// Only these detail keys are safe to show: field names and numbers, never user text.
-const SAFE_DETAIL_KEYS = ['field', 'maxLength', 'length', 'type', 'folio', 'from', 'to', 'kind', 'index'] as const
+// Only these detail keys are safe to show: field names, codes and numbers, never user text, URLs or bodies.
+const SAFE_DETAIL_KEYS = [
+  'field',
+  'maxLength',
+  'length',
+  'type',
+  'folio',
+  'from',
+  'to',
+  'kind',
+  'index',
+  'status',
+  'httpStatus',
+  'code',
+  'attempts',
+  'channel',
+  'operation',
+  'trackId',
+] as const
 
 const formatMessage = (code: DteErrorCode, details: DteErrorDetails): string => {
   const shown = SAFE_DETAIL_KEYS.filter((key) => details[key] !== undefined).map(
