@@ -19,16 +19,13 @@ const canonicalAttribute = (value: string): string =>
 
 const isNamespaceDeclaration = (name: string): boolean => name === 'xmlns' || name.startsWith('xmlns:')
 
-// xmlns first, then xmlns:* by name, then the rest by name (code point order).
-const compareAttributeNames = (a: string, b: string): number => {
-  if (a === b) return 0
-  if (a === 'xmlns') return -1
-  if (b === 'xmlns') return 1
-  const aNs = a.startsWith('xmlns:')
-  const bNs = b.startsWith('xmlns:')
-  if (aNs !== bNs) return aNs ? -1 : 1
-  return a < b ? -1 : 1
-}
+// Canonical attribute order for the SII subset: xmlns, then xmlns:* by name, then the rest by name, all in code
+// point order. The rank is prefixed to the name and the two keys are compared arithmetically (a branch-free total
+// order).
+const attributeRank = (name: string): string => (name === 'xmlns' ? '0' : name.startsWith('xmlns:') ? '1' : '2')
+const attributeSortKey = (name: string): string => `${attributeRank(name)}${name}`
+const compareAttributeNames = (a: string, b: string): number =>
+  Number(attributeSortKey(a) > attributeSortKey(b)) - Number(attributeSortKey(a) < attributeSortKey(b))
 
 type NamespaceScope = ReadonlyMap<string, string>
 
@@ -41,7 +38,7 @@ const renderAttributes = (attributes: readonly { readonly name: string; readonly
     .join('')
 
 const serializeNode = (node: Node, inherited: NamespaceScope): string => {
-  if (node.nodeType === TEXT_NODE || node.nodeType === CDATA_NODE) return canonicalText(node.nodeValue ?? '')
+  if (node.nodeType === TEXT_NODE || node.nodeType === CDATA_NODE) return canonicalText((node as CharacterData).data)
   if (node.nodeType !== ELEMENT_NODE) return ''
   const element = node as Element
   const scope = new Map(inherited)

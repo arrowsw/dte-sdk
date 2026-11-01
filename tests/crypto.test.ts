@@ -36,6 +36,7 @@ describe('rsa', () => {
     expect(rsaSha1VerifyBase64(parts, '<DD>n</DD>', 'latin1', signature)).toBe(false)
     expect(rsaSha1VerifyBase64(parts, '<DD>ñ</DD>', 'utf8', signature)).toBe(false)
     expect(rsaSha1VerifyBase64(parts, '<DD>ñ</DD>', 'latin1', 'AAAA')).toBe(false)
+    expect(rsaSha1SignBase64(keyPem, 'abc')).toBe(rsaSha1SignBase64(keyPem, 'abc', 'utf8'))
   })
 
   test('public key parts from the certificate match the private key', () => {
@@ -78,7 +79,11 @@ describe('x509', () => {
     return { id: '2.5.29.17', name: 'subjectAltName', critical: false, value: generalNames }
   }
 
-  const buildCert = (subject: forge.pki.CertificateField[], sanRut?: string): forge.pki.Certificate => {
+  const buildCert = (
+    subject: forge.pki.CertificateField[],
+    sanRut?: string,
+    extraExtensions: readonly object[] = [],
+  ): forge.pki.Certificate => {
     const keys = forge.pki.rsa.generateKeyPair({ bits: 1024, e: 0x10001 })
     const cert = forge.pki.createCertificate()
     cert.publicKey = keys.publicKey
@@ -87,11 +92,11 @@ describe('x509', () => {
     cert.validity.notAfter = new Date('2027-01-01T00:00:00Z')
     cert.setSubject(subject)
     cert.setIssuer(subject)
-    cert.setExtensions(
-      sanRut
-        ? [{ name: 'basicConstraints', cA: false }, sanExtension(sanRut)]
-        : [{ name: 'basicConstraints', cA: false }],
-    )
+    cert.setExtensions([
+      { name: 'basicConstraints', cA: false },
+      ...(sanRut ? [sanExtension(sanRut)] : []),
+      ...extraExtensions,
+    ])
     cert.sign(keys.privateKey, forge.md.sha256.create())
     // Round-trip through DER so extensions are parsed the way a real PFX certificate is.
     return forge.pki.certificateFromAsn1(
@@ -140,6 +145,37 @@ describe('x509', () => {
         ]),
       ),
     ).toBe('12345678-5')
+  })
+
+  test('subject attributes without a known name are skipped; a certificate may have no CN', () => {
+    const cert = buildCert([
+      { shortName: 'O', value: 'Org' },
+      { type: '1.2.3.4', value: 'opaque' },
+    ])
+    const parsed = parseCertificatePem(forge.pki.certificateToPem(cert))
+    expect(parsed.subject).toEqual({ O: 'Org' })
+    expect(parsed.commonName).toBeNull()
+    expect(parsed.rut).toBeNull()
+  })
+
+  test('SAN entries that are not a valid RUT otherName are skipped', () => {
+    const { asn1 } = forge
+    const otherName = (oid: string, inner: forge.asn1.Asn1) =>
+      asn1.create(asn1.Class.CONTEXT_SPECIFIC, 0, true, [
+        asn1.create(asn1.Class.UNIVERSAL, asn1.Type.OID, false, asn1.oidToDer(oid).getBytes()),
+        asn1.create(asn1.Class.CONTEXT_SPECIFIC, 0, true, [inner]),
+      ])
+    const utf8 = (text: string) => asn1.create(asn1.Class.UNIVERSAL, asn1.Type.UTF8, false, text)
+    const names = asn1.create(asn1.Class.UNIVERSAL, asn1.Type.SEQUENCE, true, [
+      asn1.create(asn1.Class.CONTEXT_SPECIFIC, 2, false, 'www.ejemplo.cl'),
+      otherName('1.2.3.4', utf8('12345678-5')),
+      otherName(RUT_OID, asn1.create(asn1.Class.UNIVERSAL, asn1.Type.SEQUENCE, true, [])),
+      otherName(RUT_OID, utf8('not a rut')),
+    ])
+    const cert = buildCert([{ type: '2.5.4.5', value: '7654321-6' }], undefined, [
+      { id: '2.5.29.17', name: 'subjectAltName', critical: false, value: names },
+    ])
+    expect(rutFromCertificate(cert)).toBe('7654321-6')
   })
 
   test('parseCertificatePem rejects garbage', () => {

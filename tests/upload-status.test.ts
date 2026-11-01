@@ -81,5 +81,6 @@ describe('document status (QueryEstDte)', () => {
     expect(documentStatusMessage('DOK')).toBe('Documento recibido por el SII, datos coinciden')
     expect(documentStatusMessage('FAU')).toBe('DTE no recibido por el SII')
     expect(documentStatusMessage('XYZ')).toBe('Estado desconocido: XYZ')
+    expect(documentStatusMessage('-7')).toBe('Error de consulta del SII, reintentar más tarde')
   })
 })

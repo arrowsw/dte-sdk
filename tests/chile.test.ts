@@ -28,6 +28,7 @@ describe('Chile time', () => {
       minute: '30',
       second: '05',
     })
+    expect(Object.keys(chileDateTimeParts())).toEqual(['year', 'month', 'day', 'hour', 'minute', 'second'])
     expect(chileDate()).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     expect(chileTimestamp()).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/)
   })
@@ -51,6 +52,10 @@ describe('toIsoDate', () => {
       expect((err as DteError).code).toBe('INVALID_DATE')
       expect((err as DteError).details).toEqual({ field: 'resolutionDate' })
     }
+  })
+
+  test('a missing value is an invalid date, not a crash', () => {
+    expect(() => toIsoDate(undefined as unknown as string)).toThrow(DteError)
   })
 
   test('isIsoDate', () => {

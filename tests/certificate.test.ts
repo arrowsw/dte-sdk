@@ -40,6 +40,35 @@ describe('loadCertificateFromPkcs12', () => {
     expectCode(() => loadCertificateFromPkcs12(new Uint8Array([1, 2, 3]), 'x'), 'CERT_INVALID')
   })
 
+  const fixtureKey = () => forge.pki.privateKeyFromPem(fixtureText('cert.key.pem'))
+  const fixtureCert = () => forge.pki.certificateFromPem(fixtureText('cert.pem'))
+  const derBytes = (asn1: forge.asn1.Asn1) => new Uint8Array(Buffer.from(forge.asn1.toDer(asn1).getBytes(), 'binary'))
+
+  test('plain (unencrypted) key bag without MAC, as `openssl pkcs12 -keypbe NONE -nomac` produces', () => {
+    const pfx = forge.pkcs12.toPkcs12Asn1(fixtureKey(), [fixtureCert()], null, { useMac: false })
+    expect(loadCertificateFromPkcs12(derBytes(pfx), 'ignored', { now: FIXED_NOW }).rut).toBe('76543210-3')
+  })
+
+  test('a file without a private key or without certificates is invalid', () => {
+    const noKey = forge.pkcs12.toPkcs12Asn1(null, [fixtureCert()], 'pw', { algorithm: '3des' })
+    expectCode(() => loadCertificateFromPkcs12(derBytes(noKey), 'pw', { now: FIXED_NOW }), 'CERT_INVALID')
+    const noCert = forge.pkcs12.toPkcs12Asn1(fixtureKey(), null as unknown as forge.pki.Certificate[], 'pw', {
+      algorithm: '3des',
+    })
+    expectCode(() => loadCertificateFromPkcs12(derBytes(noCert), 'pw', { now: FIXED_NOW }), 'CERT_INVALID')
+  })
+
+  test('a key that matches none of the certificates is rejected as a mismatch', () => {
+    const other = forge.pki.rsa.generateKeyPair({ bits: 1024, e: 0x10001 }).privateKey
+    const pfx = forge.pkcs12.toPkcs12Asn1(other, [fixtureCert()], 'pw', { algorithm: '3des' })
+    expectCode(() => loadCertificateFromPkcs12(derBytes(pfx), 'pw', { now: FIXED_NOW }), 'CERT_INVALID')
+  })
+
+  test('valid DER that is not a PKCS#12 is invalid, not a wrong password', () => {
+    const der = derBytes(forge.pki.certificateToAsn1(fixtureCert()))
+    expectCode(() => loadCertificateFromPkcs12(der, 'pw', { now: FIXED_NOW }), 'CERT_INVALID')
+  })
+
   test('expired certificate is rejected unless allowExpired', () => {
     expectCode(
       () => loadCertificateFromPkcs12(fixtureBytes('cert-expired.pfx'), FIXTURE_PASSWORD, { now: FIXED_NOW }),
@@ -101,6 +130,7 @@ describe('loadCertificateFromPem', () => {
     const cert = loadCertificateFromPem({ privateKeyPem, certificatePem }, { now: FIXED_NOW })
     expect(cert.rut).toBe('76543210-3')
     expect(cert.chainPem).toBe(certificatePem)
+    expect(loadCertificateFromPem({ privateKeyPem, certificatePem }).rut).toBe('76543210-3')
     expect(
       loadCertificateFromPem({ privateKeyPem, certificatePem, chainPem: 'CHAIN' }, { now: FIXED_NOW }).chainPem,
     ).toBe('CHAIN')

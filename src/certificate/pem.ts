@@ -1,6 +1,6 @@
 import { rsaPublicKeyParts } from '../crypto/rsa'
 import { parseCertificatePem } from '../crypto/x509'
-import { DteError } from '../errors'
+import { DteError, errorMessage } from '../errors'
 import { isCertificateExpired, type Certificate, type LoadCertificateOptions } from './certificate'
 
 /**
@@ -32,9 +32,7 @@ export const loadCertificateFromPem = (
     try {
       return rsaPublicKeyParts(input.privateKeyPem)
     } catch (error) {
-      throw new DteError('CERT_INVALID', {
-        reason: `private key: ${error instanceof Error ? error.message : String(error)}`,
-      })
+      throw new DteError('CERT_INVALID', { reason: `private key: ${errorMessage(error)}` })
     }
   })()
   if (keyParts.modulus !== parsed.publicKey.modulus)

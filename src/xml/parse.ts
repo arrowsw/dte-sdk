@@ -48,10 +48,9 @@ const failDom = (message: string): never => {
   throw new DteError('XML_PARSE_FAILED', { reason: message })
 }
 
-const domParser = new DOMParser({
-  locator: {},
-  errorHandler: { warning: () => undefined, error: failDom, fatalError: failDom },
-})
+// `assertWellFormed` runs first, so xmldom only ever sees well-formed input; what it can still object to (an
+// undefined entity, say) it reports as an error, never as a warning.
+const domParser = new DOMParser({ locator: {}, errorHandler: { error: failDom, fatalError: failDom } })
 
 /**
  * EN: Parses XML into a DOM (needed by canonicalization and signature verification).

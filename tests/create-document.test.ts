@@ -162,6 +162,34 @@ describe('createDocument', () => {
     expect(doc.header.totals).toEqual({ netAmount: 1000, vatRate: 19, vatAmount: 190, totalAmount: 1190 })
   })
 
+  test('invoices need a receiver commune; items take surcharges; references may name a RUT; transport may omit the driver', () => {
+    expectError(
+      () =>
+        createDocument({
+          type: 33,
+          folio: 1,
+          issuer,
+          items,
+          receiver: { rut: RECEIVER_RUT, businessName: 'Cliente', businessActivity: 'Comercio', address: 'Calle 456' },
+        }),
+      'MISSING_FIELD',
+      { field: 'receiver.commune' },
+    )
+    const doc = createDocument({
+      type: 33,
+      folio: 2,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver,
+      items: [{ name: 'Con recargo', quantity: 1, unitPrice: 1000, surchargePercent: 10 }],
+      references: [{ documentType: 33, folio: 5, date: '2026-11-01', otherRut: '12.345.678-5' }],
+      transport: { licensePlate: 'ABCD12' },
+    })
+    expect(doc.items[0]).toMatchObject({ surchargePercent: 10, surchargeAmount: 100, amount: 1100 })
+    expect(doc.references[0]).toMatchObject({ otherRut: '12345678-5' })
+    expect(doc.header.transport).toEqual({ licensePlate: 'ABCD12' })
+  })
+
   test('settlement invoice (43) requires settledDocumentType per line and keeps commissions', () => {
     const doc = createDocument({
       type: 43,

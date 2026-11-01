@@ -112,6 +112,14 @@ describe('calculateTotals', () => {
     expect(totals).toEqual({ netAmount: 1000, exemptAmount: 600, vatRate: 19, vatAmount: 190, totalAmount: 1790 })
   })
 
+  test('global adjustments on the non-billable base stay out of the total', () => {
+    const totals = calculateTotals([line(1000), line(300, 2)], {
+      type: 33,
+      globalAdjustments: [{ lineNumber: 1, kind: 'discount', valueType: 'percent', value: 50, exemptIndicator: 2 }],
+    })
+    expect(totals).toEqual({ netAmount: 1000, vatRate: 19, vatAmount: 190, nonBillableAmount: 150, totalAmount: 1190 })
+  })
+
   test('no amounts at all (transfer without values)', () => {
     expect(calculateTotals([line(0)], { type: 52 })).toEqual({ vatRate: 19, totalAmount: 0 })
     expect(calculateTotals([], { type: 39 })).toEqual({ totalAmount: 0 })

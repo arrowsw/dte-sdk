@@ -71,6 +71,7 @@ describe('parseXml', () => {
       expect((err as DteError).code).toBe('XML_PARSE_FAILED')
     }
     expect(() => parseXmlDom('<a><b></a>')).toThrow(DteError)
+    expect(() => parseXmlDom('<a>&foo;</a>')).toThrow(expect.objectContaining({ code: 'XML_PARSE_FAILED' }))
   })
 
   test('parseXmlDom returns a DOM with attributes in source order', () => {

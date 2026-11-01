@@ -324,9 +324,77 @@ describe('fromSiiDocument', () => {
         items: [{ name: 'F', unitPrice: 100, settledDocumentType: '39' }],
         commissions: [{ kind: 'otherCharge', description: 'Flete', netValue: 10 }],
       }),
+      createDocument({
+        type: 33,
+        folio: 6,
+        issueDate: '2026-11-15',
+        issuer,
+        receiver,
+        items: [
+          { name: 'G', quantity: 3, unitPrice: 100, surchargePercent: 5, codes: [{ type: 'INT1', value: 'SKU-1' }] },
+          { name: 'H', unitPrice: 50, exemptIndicator: 2 },
+        ],
+        references: [{ documentType: 52, folio: 9, date: '2026-11-10', otherRut: RECEIVER_RUT, reason: 'Guía' }],
+        globalAdjustments: [
+          { kind: 'discount', valueType: 'percent', value: 5, description: 'Pronto pago' },
+          { kind: 'surcharge', valueType: 'amount', value: 7, exemptIndicator: 2 },
+        ],
+        subtotals: [{ number: 1, description: 'Sub', totalAmount: 315, lines: [1] }],
+        options: {
+          payments: [{ date: '2026-12-01', amount: 100, note: 'Cuota 1' }],
+          billingPeriod: { from: '2026-11-01', to: '2026-11-30' },
+        },
+      }),
+      createDocument({
+        type: 52,
+        folio: 7,
+        issueDate: '2026-11-15',
+        issuer,
+        receiver,
+        items: [{ name: 'I', quantity: 1, unitPrice: 10 }],
+        options: { transferType: 1 },
+        transport: { licensePlate: 'YY5678', carrierRut: RECEIVER_RUT, destinationCity: 'Santiago' },
+      }),
+      createDocument({
+        type: 46,
+        folio: 8,
+        issueDate: '2026-11-15',
+        issuer,
+        receiver,
+        items: [{ name: 'J', unitPrice: 1000 }],
+      }),
+      createDocument({
+        type: 43,
+        folio: 9,
+        issueDate: '2026-11-15',
+        issuer,
+        receiver,
+        items: [{ name: 'K', unitPrice: 10000, settledDocumentType: '33' }],
+        commissions: [{ kind: 'commission', description: 'Comisión', rate: 10, netValue: 1000, vatValue: 190 }],
+        totals: {
+          netAmount: 10000,
+          vatRate: 19,
+          vatAmount: 1900,
+          commissions: { netValue: 1000, vatValue: 190 },
+          totalAmount: 10710,
+        },
+      }),
     ]
     for (const doc of inputs) {
       expect(fromSiiDocument(toSiiDocument(doc))).toEqual(doc)
     }
+  })
+
+  test('an Emisor without business name or activity maps to empty strings', () => {
+    const doc = fromSiiDocument({
+      Encabezado: {
+        IdDoc: { TipoDTE: 33, Folio: 1, FchEmis: '2026-11-15' },
+        Emisor: { RUTEmisor: ISSUER_RUT, DirOrigen: 'Av. 1', CmnaOrigen: 'Santiago' },
+        Receptor: { RUTRecep: RECEIVER_RUT, RznSocRecep: 'Cliente' },
+        Totales: { MntTotal: 0 },
+      },
+      Detalle: [{ NroLinDet: 1, NmbItem: 'x', MontoItem: 0 }],
+    })
+    expect(doc.header.issuer).toMatchObject({ businessName: '', businessActivity: '' })
   })
 })

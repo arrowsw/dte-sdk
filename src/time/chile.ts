@@ -32,7 +32,11 @@ export type ChileDateTimeParts = {
  */
 export const chileDateTimeParts = (now: Date = new Date()): ChileDateTimeParts => {
   const parts = FORMATTER.formatToParts(now)
-  const get = (type: Intl.DateTimeFormatPartTypes): string => parts.find((part) => part.type === type)?.value ?? ''
+  const get = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts
+      .filter((part) => part.type === type)
+      .map((part) => part.value)
+      .join('')
   return {
     year: get('year'),
     month: get('month'),

@@ -61,6 +61,20 @@ describe('parseCaf', () => {
   test('missing FA yields null authorization date', () => {
     expect(parseCaf(caf33.replace(/<FA>[^<]*<\/FA>/, '')).authorizationDate).toBeNull()
   })
+
+  test('rejects a bad range, a missing public key and a <CAF> block that cannot be located', () => {
+    expectCode(() => parseCaf(withFields(caf33, 33, 0, 100, '2026-10-31')), 'CAF_INVALID')
+    expectCode(() => parseCaf(withFields(caf33, 33, 10, 5, '2026-10-31')), 'CAF_INVALID')
+    expectCode(() => parseCaf(caf33.replace(/<M>[^<]*<\/M>/, '')), 'CAF_INVALID')
+    expectCode(() => parseCaf(caf33.replace('</CAF>', '</CAF >')), 'CAF_INVALID')
+  })
+
+  test('issuer RUT is mandatory; issuer name and SII signature default to empty', () => {
+    expectCode(() => parseCaf(caf33.replace(/<RE>[^<]*<\/RE>/, '')), 'INVALID_RUT')
+    const bare = parseCaf(caf33.replace(/<RS>[^<]*<\/RS>/, '').replace(/<FRMA[^>]*>[^<]*<\/FRMA>/, ''))
+    expect(bare.issuerName).toBe('')
+    expect(bare.siiSignature).toBe('')
+  })
 })
 
 describe('validity', () => {

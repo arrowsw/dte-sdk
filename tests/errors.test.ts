@@ -1,4 +1,4 @@
-import { DteError, DTE_ERROR_CODES, isDteError } from '../src/errors'
+import { DteError, DTE_ERROR_CODES, errorMessage, isDteError } from '../src/errors'
 
 describe('DteError', () => {
   test('carries a stable code, generic message and details', () => {
@@ -31,5 +31,13 @@ describe('DteError', () => {
     expect(isDteError(new DteError('CAF_EXPIRED'))).toBe(true)
     expect(isDteError(new Error('x'))).toBe(false)
     expect(isDteError(null)).toBe(false)
+  })
+})
+
+describe('errorMessage', () => {
+  test('takes the message of an Error and the string form of anything else', () => {
+    expect(errorMessage(new Error('boom'))).toBe('boom')
+    expect(errorMessage('plain')).toBe('plain')
+    expect(errorMessage(42)).toBe('42')
   })
 })

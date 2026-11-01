@@ -1,5 +1,5 @@
 import forge from 'node-forge'
-import { DteError } from '../errors'
+import { DteError, errorMessage } from '../errors'
 import { decodeLatin1 } from '../text/latin1'
 import type { Certificate, LoadCertificateOptions } from './certificate'
 import { loadCertificateFromPem } from './pem'
@@ -7,40 +7,33 @@ import { loadCertificateFromPem } from './pem'
 type ForgeCertificate = forge.pki.Certificate
 type ForgeRsaPrivateKey = forge.pki.rsa.PrivateKey
 
+// With a `bagType` filter forge always answers with an array under that key, empty when the file has none.
 const bagsOf = (pfx: forge.pkcs12.Pkcs12Pfx, bagType: string): readonly forge.pkcs12.Bag[] =>
-  pfx.getBags({ bagType })[bagType] ?? []
-
-const describe = (error: unknown): string => (error instanceof Error ? error.message : String(error))
+  pfx.getBags({ bagType })[bagType] as readonly forge.pkcs12.Bag[]
 
 const decode = (bytes: Uint8Array, password: string): forge.pkcs12.Pkcs12Pfx => {
   const asn1 = (() => {
     try {
       return forge.asn1.fromDer(decodeLatin1(bytes))
     } catch (error) {
-      throw new DteError('CERT_INVALID', { reason: `not DER: ${describe(error)}` })
+      throw new DteError('CERT_INVALID', { reason: `not DER: ${errorMessage(error)}` })
     }
   })()
   try {
     return forge.pkcs12.pkcs12FromAsn1(asn1, password)
   } catch (error) {
-    const reason = describe(error)
+    const reason = errorMessage(error)
     if (/password|MAC could not be verified/i.test(reason)) throw new DteError('CERT_PASSWORD_WRONG')
     throw new DteError('CERT_INVALID', { reason })
   }
 }
 
-// The leaf is the certificate whose public key is the private key's; failing that, the first non-CA one.
-const findLeaf = (certificates: readonly ForgeCertificate[], privateKey: ForgeRsaPrivateKey): ForgeCertificate => {
-  const byKey = certificates.find(
+// The leaf is the certificate whose public key is the private key's. When none matches, the first one goes to
+// `loadCertificateFromPem`, which rejects the key/certificate mismatch.
+const findLeaf = (certificates: readonly ForgeCertificate[], privateKey: ForgeRsaPrivateKey): ForgeCertificate =>
+  certificates.find(
     (certificate) => (certificate.publicKey as forge.pki.rsa.PublicKey).n.compareTo(privateKey.n) === 0,
-  )
-  if (byKey) return byKey
-  const nonCa = certificates.find((certificate) => {
-    const basic = certificate.getExtension('basicConstraints') as { cA?: boolean } | null
-    return basic === null || basic.cA !== true
-  })
-  return nonCa ?? certificates[0]
-}
+  ) ?? certificates[0]
 
 // Leaf → issuer → issuer's issuer…; anything unlinked goes last. The SII TLS endpoints need the intermediates.
 const orderChain = (leaf: ForgeCertificate, certificates: readonly ForgeCertificate[]): readonly ForgeCertificate[] => {
@@ -70,8 +63,8 @@ export const loadCertificateFromPkcs12 = (
   options: LoadCertificateOptions = {},
 ): Certificate => {
   const pfx = decode(bytes, password)
-  const privateKey = (bagsOf(pfx, forge.pki.oids.pkcs8ShroudedKeyBag)[0] ?? bagsOf(pfx, forge.pki.oids.keyBag)[0])
-    ?.key as ForgeRsaPrivateKey | undefined
+  const keyBags = [...bagsOf(pfx, forge.pki.oids.pkcs8ShroudedKeyBag), ...bagsOf(pfx, forge.pki.oids.keyBag)]
+  const privateKey = keyBags[0]?.key as ForgeRsaPrivateKey | undefined
   const certificates = bagsOf(pfx, forge.pki.oids.certBag)
     .map((bag) => bag.cert)
     .filter((certificate): certificate is ForgeCertificate => certificate !== undefined && certificate !== null)

@@ -1,6 +1,6 @@
 import forge from 'node-forge'
 import { format } from 'rut.ts'
-import { DteError } from '../errors'
+import { DteError, errorMessage } from '../errors'
 import type { SiiRut } from '../model/rut'
 import type { RsaPublicKeyParts } from './rsa'
 
@@ -39,9 +39,10 @@ const asSiiRut = (candidate: string | undefined): SiiRut | null => {
  */
 export const subjectFields = (certificate: forge.pki.Certificate): Readonly<Record<string, string>> =>
   Object.fromEntries(
-    certificate.subject.attributes
-      .filter((attribute) => attribute.shortName !== undefined || attribute.name !== undefined)
-      .map((attribute) => [attribute.shortName ?? attribute.name ?? '', String(attribute.value ?? '')]),
+    certificate.subject.attributes.flatMap((attribute) => {
+      const key = attribute.shortName ?? attribute.name
+      return key === undefined ? [] : [[key, String(attribute.value)] as const]
+    }),
   )
 
 // The RUT lives in SubjectAltName as otherName OID 1.3.6.1.4.1.8321.1 (Chilean e-signature law), the one source
@@ -101,7 +102,7 @@ export const parseCertificatePem = (certificatePem: string): ParsedCertificate =
     try {
       return forge.pki.certificateFromPem(certificatePem)
     } catch (error) {
-      throw new DteError('CERT_INVALID', { reason: error instanceof Error ? error.message : String(error) })
+      throw new DteError('CERT_INVALID', { reason: errorMessage(error) })
     }
   })()
   const subject = subjectFields(certificate)

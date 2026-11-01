@@ -40,6 +40,11 @@ describe('foldToAscii (TED only)', () => {
     expect(foldToAscii(input)).toBe(expected)
   })
 
+  test('null and undefined fold to empty', () => {
+    expect(foldToAscii(null)).toBe('')
+    expect(foldToAscii(undefined)).toBe('')
+  })
+
   test('output is printable ASCII only', () => {
     expect(foldToAscii('áéíóú ñ Ñ ¿? ¡! € ©')).toMatch(/^[\x20-\x7E]*$/)
   })

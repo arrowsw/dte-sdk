@@ -97,3 +97,11 @@ export class DteError extends Error {
  * @returns EN: true when `value` is a `DteError`. ES: true cuando `value` es un `DteError`.
  */
 export const isDteError = (value: unknown): value is DteError => value instanceof DteError
+
+/**
+ * EN: Message of an unknown thrown value: `Error.message`, or its string form for anything else. Fills
+ * `DteError.details.reason` when wrapping errors from the underlying libraries.
+ * ES: Mensaje de un valor lanzado desconocido: `Error.message`, o su forma de string para cualquier otra cosa. Llena
+ * `DteError.details.reason` al envolver errores de las bibliotecas subyacentes.
+ */
+export const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error))
