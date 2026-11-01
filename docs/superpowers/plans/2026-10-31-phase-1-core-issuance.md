@@ -5908,7 +5908,10 @@ import { fixtureText, FIXED_NOW } from './support/fixtures'
 const NS = 'http://www.sii.cl/SiiDte'
 const XSI = 'http://www.w3.org/2001/XMLSchema-instance'
 const DSIG = 'http://www.w3.org/2000/09/xmldsig#'
-const certificate = loadCertificateFromPem({ privateKeyPem: fixtureText('cert.key.pem'), certificatePem: fixtureText('cert.pem') }, { now: FIXED_NOW })
+const certificate = loadCertificateFromPem(
+  { privateKeyPem: fixtureText('cert.key.pem'), certificatePem: fixtureText('cert.pem') },
+  { now: FIXED_NOW },
+)
 const xml = `<DTE xmlns="${NS}" xmlns:xsi="${XSI}" version="1.0"><Documento ID="DTE_T33F1"><A>it&apos;s "1"</A>\n<B/></Documento></DTE>`
 
 describe('buildSignedInfo', () => {
@@ -5925,7 +5928,13 @@ describe('buildSignedInfo', () => {
 
 describe('signEnveloped', () => {
   test('inserts a valid Signature after the signed element', () => {
-    const { xml: signed, signature } = signEnveloped({ xml, elementTag: 'Documento', rootTag: 'DTE', certificate, includeXsiInStoredSignedInfo: false })
+    const { xml: signed, signature } = signEnveloped({
+      xml,
+      elementTag: 'Documento',
+      rootTag: 'DTE',
+      certificate,
+      includeXsiInStoredSignedInfo: false,
+    })
     expect(signed.startsWith(xml.replace('</Documento></DTE>', '</Documento>'))).toBe(true)
     expect(signed.endsWith('</Signature></DTE>')).toBe(true)
     expect(signed).toContain(`<Signature xmlns="${DSIG}"><SignedInfo xmlns="${DSIG}"><CanonicalizationMethod`)
@@ -5936,9 +5945,16 @@ describe('signEnveloped', () => {
     expect(signatureValue.split('\n').every((line) => line.length <= 64 && line.length > 0)).toBe(true)
     expect(signatureValue.replace(/\n/g, '')).toBe(signature.signatureValue)
     expect(/<Modulus>([^<]+)<\/Modulus>/.exec(signed)?.[1].split('\n')[0].length).toBe(64)
-    expect(/<X509Certificate>([^<]+)<\/X509Certificate>/.exec(signed)?.[1].replace(/\n/g, '')).toBe(certificate.certificateBase64)
+    expect(/<X509Certificate>([^<]+)<\/X509Certificate>/.exec(signed)?.[1].replace(/\n/g, '')).toBe(
+      certificate.certificateBase64,
+    )
     expect(signed).toContain(`<Exponent>${certificate.publicKey.exponent}</Exponent>`)
-    expect(verifyEnveloped(signed, { elementTag: 'Documento', rootTag: 'DTE' })).toEqual({ referenceId: 'DTE_T33F1', digestValid: true, signatureValid: true, valid: true })
+    expect(verifyEnveloped(signed, { elementTag: 'Documento', rootTag: 'DTE' })).toEqual({
+      referenceId: 'DTE_T33F1',
+      digestValid: true,
+      signatureValid: true,
+      valid: true,
+    })
   })
 
   test('stored SignedInfo with xmlns:xsi verifies too (envelopes and books)', () => {
@@ -5949,7 +5965,9 @@ describe('signEnveloped', () => {
   })
 
   test('is deterministic', () => {
-    expect(signEnveloped({ xml, elementTag: 'Documento', rootTag: 'DTE', certificate }).xml).toBe(signEnveloped({ xml, elementTag: 'Documento', rootTag: 'DTE', certificate }).xml)
+    expect(signEnveloped({ xml, elementTag: 'Documento', rootTag: 'DTE', certificate }).xml).toBe(
+      signEnveloped({ xml, elementTag: 'Documento', rootTag: 'DTE', certificate }).xml,
+    )
   })
 
   test('tampering is detected', () => {
@@ -5965,9 +5983,74 @@ describe('signEnveloped', () => {
 
   test('errors: no Signature, no ID, closing tags not adjacent, wrong root', () => {
     expect(() => verifyEnveloped(xml, { elementTag: 'Documento', rootTag: 'DTE' })).toThrow(DteError)
-    expect(() => signEnveloped({ xml: xml.replace(' ID="DTE_T33F1"', ''), elementTag: 'Documento', rootTag: 'DTE', certificate })).toThrow(DteError)
-    expect(() => signEnveloped({ xml: xml.replace('</Documento></DTE>', '</Documento>\n</DTE>'), elementTag: 'Documento', rootTag: 'DTE', certificate })).toThrow(DteError)
-    expect(() => verifyEnveloped(signEnveloped({ xml, elementTag: 'Documento', rootTag: 'DTE', certificate }).xml, { elementTag: 'Documento', rootTag: 'EnvioDTE' })).toThrow(DteError)
+    expect(() =>
+      signEnveloped({ xml: xml.replace(' ID="DTE_T33F1"', ''), elementTag: 'Documento', rootTag: 'DTE', certificate }),
+    ).toThrow(DteError)
+    expect(() =>
+      signEnveloped({
+        xml: xml.replace('</Documento></DTE>', '</Documento>\n</DTE>'),
+        elementTag: 'Documento',
+        rootTag: 'DTE',
+        certificate,
+      }),
+    ).toThrow(DteError)
+    expect(() =>
+      verifyEnveloped(signEnveloped({ xml, elementTag: 'Documento', rootTag: 'DTE', certificate }).xml, {
+        elementTag: 'Documento',
+        rootTag: 'EnvioDTE',
+      }),
+    ).toThrow(DteError)
+  })
+})
+
+describe('verifyEnveloped resists signature wrapping', () => {
+  const target = { elementTag: 'Documento', rootTag: 'DTE' }
+  const { xml: signed } = signEnveloped({ xml, elementTag: 'Documento', rootTag: 'DTE', certificate })
+  const original = /<Documento ID="DTE_T33F1">[\s\S]*?<\/Documento>/.exec(signed)?.[0] ?? ''
+  const forged = '<Documento ID="DTE_T33F2"><A>forged</A>\n<B/></Documento>'
+
+  test('the signed element moved into a wrapper while a forged one sits under the root', () => {
+    const wrapped = signed.replace(original, `<Wrapper>${original}</Wrapper>${forged}`)
+    expect(verifyEnveloped(wrapped, target)).toEqual({
+      referenceId: 'DTE_T33F1',
+      digestValid: false,
+      signatureValid: true,
+      valid: false,
+    })
+  })
+
+  test('a second element with the same ID makes the reference ambiguous', () => {
+    const duplicated = signed.replace(original, `${original}${forged.replace('DTE_T33F2', 'DTE_T33F1')}`)
+    const result = verifyEnveloped(duplicated, target)
+    expect(result.digestValid).toBe(false)
+    expect(result.signatureValid).toBe(true)
+    expect(result.valid).toBe(false)
+  })
+
+  test('the referenced element must carry the expected tag', () => {
+    const result = verifyEnveloped(signed, { elementTag: 'Liquidacion', rootTag: 'DTE' })
+    expect(result.referenceId).toBe('DTE_T33F1')
+    expect(result.digestValid).toBe(false)
+    expect(result.valid).toBe(false)
+  })
+
+  test('a Reference without URI or pointing nowhere never verifies', () => {
+    const noUri = verifyEnveloped(signed.replace(' URI="#DTE_T33F1"', ''), target)
+    expect(noUri.referenceId).toBeNull()
+    expect(noUri.digestValid).toBe(false)
+    const dangling = verifyEnveloped(signed.replace('URI="#DTE_T33F1"', 'URI="#NOPE"'), target)
+    expect(dangling.referenceId).toBe('NOPE')
+    expect(dangling.digestValid).toBe(false)
+    const empty = verifyEnveloped(signed.replace('URI="#DTE_T33F1"', 'URI="#"'), target)
+    expect(empty.referenceId).toBe('')
+    expect(empty.digestValid).toBe(false)
+  })
+
+  test('a Signature without SignedInfo is reported as not found', () => {
+    const noSignedInfo = signed.replace(/<SignedInfo[\s\S]*?<\/SignedInfo>/, '')
+    expect(() => verifyEnveloped(noSignedInfo, target)).toThrow(
+      expect.objectContaining({ code: 'SIGNATURE_NOT_FOUND', details: { field: 'SignedInfo' } }),
+    )
   })
 })
 ```
@@ -6014,7 +6097,11 @@ export type XmlSignature = {
  * ES: Arma `SignedInfo`. `expandTags` escribe los elementos vacíos como `<X></X>` (la forma canónica que se firma);
  * `includeXsi` agrega `xmlns:xsi`, que la forma canónica hereda del raíz de todos modos.
  */
-export const buildSignedInfo = (referenceId: string, digestValue: string, options: { readonly expandTags?: boolean; readonly includeXsi?: boolean } = {}): string => {
+export const buildSignedInfo = (
+  referenceId: string,
+  digestValue: string,
+  options: { readonly expandTags?: boolean; readonly includeXsi?: boolean } = {},
+): string => {
   const uri = referenceId.startsWith('#') ? referenceId : `#${referenceId}`
   const xsi = (options.includeXsi ?? true) ? ` xmlns:xsi="${XSI_NS}"` : ''
   const empty = (tag: string, algorithm: string): string =>
@@ -6032,7 +6119,11 @@ export const buildSignedInfo = (referenceId: string, digestValue: string, option
  * EN: Builds the `Signature` element from a stored `SignedInfo`, the wrapped signature and the key material.
  * ES: Arma el elemento `Signature` a partir del `SignedInfo` guardado, la firma recortada y el material de clave.
  */
-export const buildSignatureXml = (signedInfo: string, signatureValue: string, keyInfo: { readonly modulus: string; readonly exponent: string; readonly certificate: string }): string =>
+export const buildSignatureXml = (
+  signedInfo: string,
+  signatureValue: string,
+  keyInfo: { readonly modulus: string; readonly exponent: string; readonly certificate: string },
+): string =>
   `<Signature xmlns="${XMLDSIG_NS}">${signedInfo}<SignatureValue>${signatureValue}</SignatureValue><KeyInfo><KeyValue><RSAKeyValue><Modulus>${keyInfo.modulus}</Modulus><Exponent>${keyInfo.exponent}</Exponent></RSAKeyValue></KeyValue><X509Data><X509Certificate>${keyInfo.certificate}</X509Certificate></X509Data></KeyInfo></Signature>`
 
 /**
@@ -6059,7 +6150,13 @@ export type SignEnvelopedInput = {
  * insertada justo antes de `</rootTag>`.
  * @throws {DteError} EN: `XML_PARSE_FAILED` when the element, its `ID` or the adjacent closing tags are missing. ES: `XML_PARSE_FAILED` si faltan el elemento, su `ID` o los cierres adyacentes.
  */
-export const signEnveloped = ({ xml, elementTag, rootTag, certificate, includeXsiInStoredSignedInfo = true }: SignEnvelopedInput): { readonly xml: string; readonly signature: XmlSignature } => {
+export const signEnveloped = ({
+  xml,
+  elementTag,
+  rootTag,
+  certificate,
+  includeXsiInStoredSignedInfo = true,
+}: SignEnvelopedInput): { readonly xml: string; readonly signature: XmlSignature } => {
   const element = findElement(parseXmlDom(xml), elementTag)
   const id = element.getAttribute('ID')
   if (!id) throw new DteError('XML_PARSE_FAILED', { field: elementTag, reason: 'missing ID attribute' })
@@ -6067,24 +6164,33 @@ export const signEnveloped = ({ xml, elementTag, rootTag, certificate, includeXs
   if (!xml.includes(closing)) throw new DteError('XML_PARSE_FAILED', { field: rootTag, reason: `expected ${closing}` })
   const digestValue = sha1Base64(canonicalizeElement(element), 'utf8')
   const signedInfoToSign = buildSignedInfo(id, digestValue, { expandTags: true, includeXsi: true })
-  const signedInfoToStore = buildSignedInfo(id, digestValue, { expandTags: false, includeXsi: includeXsiInStoredSignedInfo })
+  const signedInfoToStore = buildSignedInfo(id, digestValue, {
+    expandTags: false,
+    includeXsi: includeXsiInStoredSignedInfo,
+  })
   const signatureValue = rsaSha1SignBase64(certificate.privateKeyPem, signedInfoToSign, 'utf8')
   const signatureXml = buildSignatureXml(signedInfoToStore, wrapBase64(signatureValue), {
     modulus: wrapBase64(certificate.publicKey.modulus),
     exponent: certificate.publicKey.exponent,
     certificate: wrapBase64(certificate.certificateBase64),
   })
-  return { xml: xml.replace(closing, `</${elementTag}>${signatureXml}</${rootTag}>`), signature: { digestValue, signatureValue } }
+  return {
+    xml: xml.replace(closing, `</${elementTag}>${signatureXml}</${rootTag}>`),
+    signature: { digestValue, signatureValue },
+  }
 }
 
 /**
- * EN: Outcome of verifying an enveloped signature.
- * ES: Resultado de verificar una firma envuelta.
+ * EN: Outcome of verifying an enveloped signature. `valid` proves that the referenced element and `SignedInfo` are
+ * intact with respect to the certificate embedded in `KeyInfo`; whether that certificate belongs to the expected
+ * signer is a separate check.
+ * ES: Resultado de verificar una firma envuelta. `valid` prueba que el elemento referenciado y `SignedInfo` están
+ * íntegros respecto del certificado embebido en `KeyInfo`; que ese certificado sea del firmante esperado es otro chequeo.
  */
 export type SignatureVerification = {
-  /** EN: `Reference/@URI` without `#`. ES: `Reference/@URI` sin `#`. */
+  /** EN: `Reference/@URI` without `#`, or null when the signature carries no reference. ES: `Reference/@URI` sin `#`, o null si la firma no trae referencia. */
   readonly referenceId: string | null
-  /** EN: The signed element still hashes to `DigestValue`. ES: El elemento firmado sigue produciendo el `DigestValue`. */
+  /** EN: The referenced element is unique, sits next to `Signature` under the root, has the expected tag and still hashes to `DigestValue`. ES: El elemento referenciado es único, está junto a `Signature` bajo el raíz, tiene la etiqueta esperada y sigue produciendo el `DigestValue`. */
   readonly digestValid: boolean
   /** EN: `SignatureValue` verifies with the embedded certificate. ES: `SignatureValue` verifica con el certificado embebido. */
   readonly signatureValid: boolean
@@ -6095,29 +6201,60 @@ export type SignatureVerification = {
 const elementChildren = (parent: Element): readonly Element[] =>
   Array.from(parent.childNodes).filter((node): node is Element => node.nodeType === 1)
 
+const firstChildElement = (parent: Element, tag: string): Element | undefined =>
+  elementChildren(parent).find((child) => child.tagName === tag)
+
+const descendantsAndSelf = (element: Element): readonly Element[] => [
+  element,
+  ...elementChildren(element).flatMap(descendantsAndSelf),
+]
+
 const textOf = (parent: Element, tag: string): string | null => parent.getElementsByTagName(tag)[0]?.textContent ?? null
 
 /**
- * EN: Verifies the enveloped signature that is a direct child of `rootTag`: recomputes the digest of `elementTag` and
- * checks `SignatureValue` with the `X509Certificate` carried in `KeyInfo`.
- * ES: Verifica la firma envuelta que es hija directa de `rootTag`: recalcula el digest de `elementTag` y comprueba
- * `SignatureValue` con el `X509Certificate` que viene en `KeyInfo`.
- * @throws {DteError} EN: `XML_PARSE_FAILED`, `SIGNATURE_NOT_FOUND`. ES: `XML_PARSE_FAILED`, `SIGNATURE_NOT_FOUND`.
+ * EN: Locates the element a `Reference` points to, resisting signature wrapping: the `ID` must be unique in the whole
+ * document and the element must be a direct child of the root (a sibling of `Signature`) with tag `elementTag`.
+ * ES: Ubica el elemento al que apunta una `Reference`, resistiendo el *signature wrapping*: el `ID` debe ser único en
+ * todo el documento y el elemento debe ser hijo directo del raíz (hermano de `Signature`) con etiqueta `elementTag`.
  */
-export const verifyEnveloped = (xml: string, target: { readonly elementTag: string; readonly rootTag: string }): SignatureVerification => {
+const referencedElement = (root: Element, referenceId: string | null, elementTag: string): Element | null => {
+  if (referenceId === null || referenceId === '') return null
+  const matches = descendantsAndSelf(root).filter((element) => element.getAttribute('ID') === referenceId)
+  const element = matches.length === 1 ? matches[0] : undefined
+  if (element === undefined || element.parentNode !== root || element.tagName !== elementTag) return null
+  return element
+}
+
+/**
+ * EN: Verifies the enveloped signature that is a direct child of `rootTag`: locates the signed element by the `ID`
+ * named in `Reference/@URI` (see `referencedElement`), recomputes its digest and checks `SignatureValue` with the
+ * `X509Certificate` carried in `KeyInfo`. A reference that is missing, ambiguous, misplaced or not an `elementTag`
+ * yields `digestValid: false` instead of throwing, so wrapped or duplicated elements never verify.
+ * ES: Verifica la firma envuelta que es hija directa de `rootTag`: ubica el elemento firmado por el `ID` que nombra
+ * `Reference/@URI` (ver `referencedElement`), recalcula su digest y comprueba `SignatureValue` con el
+ * `X509Certificate` que viene en `KeyInfo`. Una referencia ausente, ambigua, mal ubicada o que no es un `elementTag`
+ * da `digestValid: false` en vez de lanzar, así que un elemento envuelto o duplicado nunca verifica.
+ * @throws {DteError} EN: `XML_PARSE_FAILED` (malformed XML or wrong root), `SIGNATURE_NOT_FOUND` (no `Signature` under the root or no `SignedInfo` in it). ES: `XML_PARSE_FAILED` (XML malformado o raíz incorrecta), `SIGNATURE_NOT_FOUND` (sin `Signature` bajo el raíz o sin `SignedInfo` dentro).
+ */
+export const verifyEnveloped = (
+  xml: string,
+  target: { readonly elementTag: string; readonly rootTag: string },
+): SignatureVerification => {
   const dom = parseXmlDom(xml)
   const root = dom.documentElement
-  if (root.tagName !== target.rootTag) throw new DteError('XML_PARSE_FAILED', { field: target.rootTag, reason: `root is ${root.tagName}` })
-  const signature = elementChildren(root).find((child) => child.tagName === 'Signature')
+  if (root.tagName !== target.rootTag)
+    throw new DteError('XML_PARSE_FAILED', { field: target.rootTag, reason: `root is ${root.tagName}` })
+  const signature = firstChildElement(root, 'Signature')
   if (signature === undefined) throw new DteError('SIGNATURE_NOT_FOUND', { field: target.rootTag })
-  const signedInfo = signature.getElementsByTagName('SignedInfo')[0]
+  const signedInfo = firstChildElement(signature, 'SignedInfo')
   if (signedInfo === undefined) throw new DteError('SIGNATURE_NOT_FOUND', { field: 'SignedInfo' })
   const storedDigest = (textOf(signedInfo, 'DigestValue') ?? '').replace(/\s+/g, '')
   const signatureValue = (textOf(signature, 'SignatureValue') ?? '').replace(/\s+/g, '')
   const certificateBase64 = (textOf(signature, 'X509Certificate') ?? '').replace(/\s+/g, '')
-  const referenceUri = signedInfo.getElementsByTagName('Reference')[0]?.getAttribute('URI') ?? null
-  const element = findElement(dom, target.elementTag)
-  const digestValid = sha1Base64(canonicalizeElement(element), 'utf8') === storedDigest
+  const referenceUri = firstChildElement(signedInfo, 'Reference')?.getAttribute('URI')
+  const referenceId = referenceUri ? referenceUri.replace(/^#/, '') : null
+  const element = referencedElement(root, referenceId, target.elementTag)
+  const digestValid = element !== null && sha1Base64(canonicalizeElement(element), 'utf8') === storedDigest
   const certificatePem = `-----BEGIN CERTIFICATE-----\n${wrapBase64(certificateBase64)}\n-----END CERTIFICATE-----\n`
   const publicKey = (() => {
     try {
@@ -6126,8 +6263,9 @@ export const verifyEnveloped = (xml: string, target: { readonly elementTag: stri
       return null
     }
   })()
-  const signatureValid = publicKey !== null && rsaSha1VerifyBase64(publicKey, canonicalizeElement(signedInfo), 'utf8', signatureValue)
-  return { referenceId: referenceUri === null ? null : referenceUri.replace(/^#/, ''), digestValid, signatureValid, valid: digestValid && signatureValid }
+  const signatureValid =
+    publicKey !== null && rsaSha1VerifyBase64(publicKey, canonicalizeElement(signedInfo), 'utf8', signatureValue)
+  return { referenceId, digestValid, signatureValid, valid: digestValid && signatureValid }
 }
 ```
 
