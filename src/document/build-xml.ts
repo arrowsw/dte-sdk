@@ -49,6 +49,8 @@ export const buildDocumentXml = (doc: Document, options: BuildDocumentXmlOptions
       [documentElementName(doc.header.type)]: element,
     },
   })
-  const withTed = options.ted === undefined ? xml : xml.replace(`<TED>${TED_PLACEHOLDER}</TED>`, options.ted.xml)
+  // Replacer functions keep `$&`, `$1`… in the inserted content literal (an item name may contain them).
+  const { ted } = options
+  const withTed = ted === undefined ? xml : xml.replace(`<TED>${TED_PLACEHOLDER}</TED>`, () => ted.xml)
   return withTed.replace(LINE_BREAK_AFTER, '</$1>\n<')
 }

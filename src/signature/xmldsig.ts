@@ -108,7 +108,8 @@ export const signEnveloped = ({
     certificate: wrapBase64(certificate.certificateBase64),
   })
   return {
-    xml: xml.replace(closing, `</${elementTag}>${signatureXml}</${rootTag}>`),
+    // A replacer function keeps `$`-patterns in the inserted content literal.
+    xml: xml.replace(closing, () => `</${elementTag}>${signatureXml}</${rootTag}>`),
     signature: { digestValue, signatureValue },
   }
 }

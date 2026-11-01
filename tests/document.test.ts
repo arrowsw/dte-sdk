@@ -123,6 +123,19 @@ describe('signDocument / issueDocument', () => {
     expect(verifyDocumentSignature(defaultClock.xml).valid).toBe(true)
   })
 
+  test('an item name with $-patterns survives the TED insertion untouched', () => {
+    const signed = issueDocument({
+      document: { ...invoiceInput, items: [{ name: 'Precio $1 $& $$', unitPrice: 1000 }] },
+      caf: caf33,
+      certificate,
+      now: FIXED_NOW,
+    })
+    expect(signed.xml).toContain('<IT1>Precio $1 $&amp; $$</IT1>')
+    expect(signed.xml).not.toContain('__DTE_SDK_TED__')
+    expect(verifyTed(signed.ted.xml, caf33)).toBe(true)
+    expect(verifyDocumentSignature(signed.xml).valid).toBe(true)
+  })
+
   test('issueDocument accepts raw input or a created document and is deterministic', () => {
     const fromInput = issueDocument({ document: invoiceInput, caf: caf33, certificate, now: FIXED_NOW })
     const fromDocument = issueDocument({
