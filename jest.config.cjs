@@ -12,7 +12,7 @@ module.exports = {
   testEnvironment: 'node',
   // `.claude/worktrees/` holds full local checkouts made by Claude Code. Keep
   // their copies of the tests and package.json out of discovery and the module map.
-  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/.claude/'],
+  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/.claude/', '<rootDir>/tests/support/'],
   modulePathIgnorePatterns: ['<rootDir>/.claude/'],
   // Coverage is measured against source, never the built `dist/*.min.js` that
   // the smoke test imports.
