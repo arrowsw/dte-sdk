@@ -41,13 +41,22 @@ export type {
   PaymentTerms,
   ExemptIndicator,
 } from './catalogs/codes'
-export { SII_HOSTS, SOAP_ENDPOINTS, REST_ENDPOINTS, CLAIM_WS_ENDPOINTS, UPLOAD_USER_AGENT } from './catalogs/endpoints'
+export {
+  SII_HOSTS,
+  SOAP_ENDPOINTS,
+  REST_ENDPOINTS,
+  CLAIM_WS_ENDPOINTS,
+  CLAIM_WSDL_ENDPOINTS,
+  UPLOAD_USER_AGENT,
+} from './catalogs/endpoints'
+export type { SoapEndpoints, RestEndpoints } from './catalogs/endpoints'
 export {
   classifyUploadStatus,
   uploadStatusMessage,
   isRetryableStatus,
   classifyDocumentStatus,
   documentStatusMessage,
+  isTokenErrorStatus,
 } from './catalogs/upload-status'
 export type { UploadStatusClass, UploadChannel, DocumentStatusClass } from './catalogs/upload-status'
 

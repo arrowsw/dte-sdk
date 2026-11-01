@@ -9,7 +9,11 @@ export const SII_HOSTS: Readonly<Record<Environment, string>> = {
   production: 'palena.sii.cl',
 }
 
-type SoapEndpoints = {
+/**
+ * EN: SOAP / CGI endpoints of one environment.
+ * ES: Endpoints SOAP / CGI de un ambiente.
+ */
+export type SoapEndpoints = {
   /** EN: `CrSeed.jws`, seed for the SOAP token. ES: Semilla del token SOAP. */
   readonly seed: string
   /** EN: `GetTokenFromSeed.jws`. ES: Token a partir de la semilla firmada. */
@@ -39,43 +43,59 @@ export const SOAP_ENDPOINTS: Readonly<Record<Environment, SoapEndpoints>> = {
   production: soapFor(SII_HOSTS.production),
 }
 
-type RestEndpoints = {
+/**
+ * EN: REST endpoints of the receipts API for one environment.
+ * ES: Endpoints REST de la API de boletas de un ambiente.
+ */
+export type RestEndpoints = {
   /** EN: GET seed for the receipts REST API. ES: Semilla de la API REST de boletas. */
   readonly seed: string
   /** EN: POST signed seed → token. ES: Token REST a partir de la semilla firmada. */
   readonly token: string
   /** EN: multipart upload of `EnvioBOLETA`. ES: Envío REST de boletas. */
   readonly upload: string
-  /** EN: status prefix; append `{rut}-{dv}-{trackId}`. ES: Prefijo de estado; se completa con `{rut}-{dv}-{trackId}`. */
+  /** EN: envelope status prefix; append `{rut}-{dv}-{trackId}`. ES: Prefijo de estado del envío; se completa con `{rut}-{dv}-{trackId}`. */
   readonly status: string
+  /** EN: per-document status prefix; append `{rut}-{dv}-{type}-{folio}/estado`. ES: Prefijo de estado por documento; se completa con `{rut}-{dv}-{tipo}-{folio}/estado`. */
+  readonly documentStatus: string
+  /** EN: catalog of envelope states (no token needed). ES: Catálogo de estados de envío (sin token). */
+  readonly statusCatalog: string
 }
+
+const restFor = (apiHost: string, uploadHost: string): RestEndpoints => ({
+  seed: `https://${apiHost}/recursos/v1/boleta.electronica.semilla`,
+  token: `https://${apiHost}/recursos/v1/boleta.electronica.token`,
+  upload: `https://${uploadHost}/recursos/v1/boleta.electronica.envio`,
+  status: `https://${apiHost}/recursos/v1/boleta.electronica.envio/`,
+  documentStatus: `https://${apiHost}/recursos/v1/boleta.electronica/`,
+  statusCatalog: `https://${apiHost}/recursos/v1/globales/boleta.electronica.envio.estado`,
+})
 
 /**
  * EN: REST endpoints of the receipts API per environment.
  * ES: Endpoints REST de boletas por ambiente (apicert/pangal en certificación, api/rahue en producción).
  */
 export const REST_ENDPOINTS: Readonly<Record<Environment, RestEndpoints>> = {
-  certification: {
-    seed: 'https://apicert.sii.cl/recursos/v1/boleta.electronica.semilla',
-    token: 'https://apicert.sii.cl/recursos/v1/boleta.electronica.token',
-    upload: 'https://pangal.sii.cl/recursos/v1/boleta.electronica.envio',
-    status: 'https://apicert.sii.cl/recursos/v1/boleta.electronica.envio/',
-  },
-  production: {
-    seed: 'https://api.sii.cl/recursos/v1/boleta.electronica.semilla',
-    token: 'https://api.sii.cl/recursos/v1/boleta.electronica.token',
-    upload: 'https://rahue.sii.cl/recursos/v1/boleta.electronica.envio',
-    status: 'https://api.sii.cl/recursos/v1/boleta.electronica.envio/',
-  },
+  certification: restFor('apicert.sii.cl', 'pangal.sii.cl'),
+  production: restFor('api.sii.cl', 'rahue.sii.cl'),
 }
 
 /**
- * EN: WSDL of the acceptance/claim registry web service (WSRECLAMO v1.2).
- * ES: WSDL del web service de Registro de Aceptación/Reclamo (WSRECLAMO v1.2).
+ * EN: Service URLs of the acceptance/claim registry web service (WSRECLAMO v1.2); SOAP calls are POSTed here.
+ * ES: URLs del servicio de Registro de Aceptación/Reclamo (WSRECLAMO v1.2); las llamadas SOAP se envían por POST aquí.
  */
 export const CLAIM_WS_ENDPOINTS: Readonly<Record<Environment, string>> = {
-  certification: 'https://ws2.sii.cl/WSREGISTRORECLAMODTECERT/registroreclamodteservice?wsdl',
-  production: 'https://ws1.sii.cl/WSREGISTRORECLAMODTE/registroreclamodteservice?wsdl',
+  certification: 'https://ws2.sii.cl/WSREGISTRORECLAMODTECERT/registroreclamodteservice',
+  production: 'https://ws1.sii.cl/WSREGISTRORECLAMODTE/registroreclamodteservice',
+}
+
+/**
+ * EN: WSDL of the acceptance/claim registry web service.
+ * ES: WSDL del web service de Registro de Aceptación/Reclamo.
+ */
+export const CLAIM_WSDL_ENDPOINTS: Readonly<Record<Environment, string>> = {
+  certification: `${CLAIM_WS_ENDPOINTS.certification}?wsdl`,
+  production: `${CLAIM_WS_ENDPOINTS.production}?wsdl`,
 }
 
 /**

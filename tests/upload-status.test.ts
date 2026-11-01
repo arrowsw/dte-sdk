@@ -4,6 +4,7 @@ import {
   classifyDocumentStatus,
   documentStatusMessage,
   isRetryableStatus,
+  isTokenErrorStatus,
 } from '../src/catalogs/upload-status'
 
 describe('upload status (QueryEstUp / REST)', () => {
@@ -70,6 +71,7 @@ describe('document status (QueryEstDte)', () => {
     ['MMC', 'modified'],
     ['MMD', 'modified'],
     ['ANC', 'cancelled'],
+    ['FAN', 'cancelled'],
     ['AND', 'cancelled'],
     ['-5', 'queryError'],
     ['XYZ', 'unknown'],
@@ -82,5 +84,19 @@ describe('document status (QueryEstDte)', () => {
     expect(documentStatusMessage('FAU')).toBe('DTE no recibido por el SII')
     expect(documentStatusMessage('XYZ')).toBe('Estado desconocido: XYZ')
     expect(documentStatusMessage('-7')).toBe('Error de consulta del SII, reintentar más tarde')
+  })
+})
+
+describe('token error statuses', () => {
+  test.each(['-3', '-13', '001', '002', '003'])('%s means the token was rejected', (code) => {
+    expect(isTokenErrorStatus(code)).toBe(true)
+  })
+
+  test.each(['EPR', '-1', '-14', '0', 'FAN'])('%s is not a token error', (code) => {
+    expect(isTokenErrorStatus(code)).toBe(false)
+  })
+
+  test('FAN has a gloss', () => {
+    expect(documentStatusMessage('FAN')).toBe('Folio anulado')
   })
 })

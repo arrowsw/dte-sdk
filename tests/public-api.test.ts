@@ -6,6 +6,7 @@ import * as sdk from '../src'
  */
 const RUNTIME_EXPORTS = [
   'CERTIFICATION_KEY_ID',
+  'CLAIM_WSDL_ENDPOINTS',
   'CLAIM_WS_ENDPOINTS',
   'DISPATCH_TYPES',
   'DOCUMENT_TYPES',
@@ -75,6 +76,7 @@ const RUNTIME_EXPORTS = [
   'isReceipt',
   'isRetryableStatus',
   'isSiiRut',
+  'isTokenErrorStatus',
   'isTransferable',
   'issueDocument',
   'loadCertificateFromPem',
