@@ -1,0 +1,7 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`buildDocumentXml unsigned invoice: root, order and line breaks between sections 1`] = `
+"<DTE xmlns="http://www.sii.cl/SiiDte" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="1.0"><Documento ID="DTE_T33F7"><Encabezado><IdDoc><TipoDTE>33</TipoDTE><Folio>7</Folio><FchEmis>2026-11-15</FchEmis></IdDoc><Emisor><RUTEmisor>76543210-3</RUTEmisor><RznSoc>Empresa Ejemplo SpA</RznSoc><GiroEmis>Software</GiroEmis><Acteco>620200</Acteco><DirOrigen>Av. Ejemplo 123</DirOrigen><CmnaOrigen>Santiago</CmnaOrigen><CiudadOrigen>Santiago</CiudadOrigen></Emisor><Receptor><RUTRecep>12345678-5</RUTRecep><RznSocRecep>Cliente SA</RznSocRecep><GiroRecep>Comercio</GiroRecep><DirRecep>Calle 456</DirRecep><CmnaRecep>Providencia</CmnaRecep></Receptor><Totales><MntNeto>145000</MntNeto><TasaIVA>19</TasaIVA><IVA>27550</IVA><MntTotal>172550</MntTotal></Totales></Encabezado>
+<Detalle><NroLinDet>1</NroLinDet><NmbItem>Licencia</NmbItem><QtyItem>1</QtyItem><PrcItem>100000</PrcItem><MontoItem>100000</MontoItem></Detalle>
+<Detalle><NroLinDet>2</NroLinDet><NmbItem>Soporte</NmbItem><QtyItem>3</QtyItem><PrcItem>15000</PrcItem><MontoItem>45000</MontoItem></Detalle></Documento></DTE>"
+`;
