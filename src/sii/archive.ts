@@ -1,0 +1,67 @@
+import type { Environment } from '../catalogs/codes'
+import type { SiiRut } from '../model/rut'
+import type { TokenChannel } from './token-cache'
+
+/**
+ * EN: What was uploaded: `EnvioDTE`, `EnvioBOLETA`, a book (IECV / guides) or the folio consumption report (RCOF).
+ * ES: Qué se subió: `EnvioDTE` (`dte`), `EnvioBOLETA` (`receipt`), un libro (`book`) o el Reporte de Consumo de Folios (`folioConsumption`).
+ */
+export type UploadKind = 'dte' | 'receipt' | 'book' | 'folioConsumption'
+
+/**
+ * EN: One upload that got an SII answer, as handed to the `archive` port.
+ * ES: Un envío que obtuvo respuesta del SII, tal como se entrega al puerto `archive`.
+ */
+export type UploadRecord = {
+  readonly environment: Environment
+  readonly kind: UploadKind
+  readonly channel: TokenChannel
+  /** EN: TrackID, or null when the SII rejected the upload. ES: `TRACKID`, o null si el SII rechazó el envío. */
+  readonly trackId: string | null
+  /** EN: The SII reported the file as already uploaded. ES: El SII reportó el archivo como ya enviado. */
+  readonly duplicate: boolean
+  /** EN: Company RUT. ES: `rutCompany` — RUT de la empresa. */
+  readonly companyRut: SiiRut
+  /** EN: Sender RUT. ES: `rutSender` — RUT de quien envía. */
+  readonly senderRut: SiiRut
+  /** EN: Multipart file name. ES: Nombre del archivo en el multipart. */
+  readonly fileName: string
+  /** EN: ISO 8601 UTC instant of the send. ES: Instante del envío, ISO 8601 UTC. */
+  readonly sentAt: string
+  /** EN: The exact bytes sent. ES: Los bytes exactos enviados. */
+  readonly xml: Uint8Array
+  /** EN: HTTP status, SII code and raw body of the answer. ES: Estado HTTP, código del SII y cuerpo crudo de la respuesta. */
+  readonly response: { readonly httpStatus: number; readonly code: string; readonly raw: string }
+}
+
+/**
+ * EN: Archive port.
+ * ES: Puerto de archivo de envíos.
+ */
+export type UploadArchive = (record: UploadRecord) => Promise<void>
+
+/**
+ * EN: File-friendly name of a record: `<trackId>-<kind>`, or `rejected-<yyyymmddHHMMSS>-<kind>` without a TrackID.
+ * ES: Nombre apto para archivo: `<trackId>-<kind>`, o `rejected-<aaaammddHHMMSS>-<kind>` sin TrackID.
+ */
+export const uploadRecordName = (record: Pick<UploadRecord, 'trackId' | 'kind' | 'sentAt'>): string =>
+  record.trackId === null
+    ? `rejected-${record.sentAt.replace(/\D/g, '').slice(0, 14)}-${record.kind}`
+    : `${record.trackId}-${record.kind}`
+
+/**
+ * EN: In-memory archive: `records()` returns a copy of everything archived so far.
+ * ES: Archivo en memoria: `records()` devuelve una copia de lo archivado hasta ahora.
+ */
+export const createMemoryUploadArchive = (): {
+  readonly archive: UploadArchive
+  readonly records: () => readonly UploadRecord[]
+} => {
+  const list: UploadRecord[] = []
+  return {
+    archive: async (record) => {
+      list.push(record)
+    },
+    records: () => [...list],
+  }
+}
