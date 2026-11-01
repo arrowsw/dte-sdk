@@ -39,16 +39,16 @@ Node ≥ 20, ESM and CommonJS.
 import { readFileSync } from 'node:fs'
 import { loadCertificateFromPkcs12, parseCaf, issueDocument, createEnvelope, signEnvelope, encodeLatin1 } from 'dte-sdk'
 
-const certificate = loadCertificateFromPkcs12(readFileSync('empresa.pfx'), process.env.PFX_PASSWORD!)
+const certificate = loadCertificateFromPkcs12(readFileSync('firma.pfx'), process.env.PFX_PASSWORD!)
 const caf = parseCaf(readFileSync('caf-33.xml', 'utf8'))
 
 const invoice = issueDocument({
   document: {
     type: 33,
     folio: 1,
-    issuer: { rut: '76543210-3', businessName: 'Empresa Ejemplo SpA', businessActivity: 'Software', address: 'Av. Ejemplo 123', commune: 'Santiago', activityCode: 620200 },
-    receiver: { rut: '12345678-5', businessName: 'Cliente SA', businessActivity: 'Comercio', address: 'Calle 456', commune: 'Providencia' },
-    items: [{ name: 'Licencia anual', quantity: 1, unitPrice: 100000 }],
+    issuer: { rut: '76543210-3', businessName: 'Comercial Andina SpA', businessActivity: 'Software', address: 'Av. Los Aromos 1540', commune: 'Santiago', activityCode: 620200 },
+    receiver: { rut: '12345678-5', businessName: 'Comercializadora Rapel Ltda', businessActivity: 'Comercio', address: 'Pasaje Los Olmos 88', commune: 'Providencia' },
+    items: [{ name: 'Plan anual', quantity: 1, unitPrice: 100000 }],
   },
   caf,
   certificate,

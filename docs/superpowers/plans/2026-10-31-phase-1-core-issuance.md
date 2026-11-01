@@ -218,7 +218,7 @@ import forge from 'node-forge'
 
 const OUT = 'tests/fixtures'
 const ISSUER_RUT = '76543210-3'
-const ISSUER_NAME = 'EMPRESA EJEMPLO SPA'
+const ISSUER_NAME = 'COMERCIAL ANDINA SPA'
 const PASSWORD = 'secret'
 const RUT_OID = '1.3.6.1.4.1.8321.1'
 
@@ -248,11 +248,11 @@ const makeCertificate = ({ notBefore, notAfter }) => {
   cert.validity.notBefore = notBefore
   cert.validity.notAfter = notAfter
   const attrs = [
-    { name: 'commonName', value: 'JUAN PEREZ PRUEBA' },
+    { name: 'commonName', value: 'CAROLINA VALDES ROJAS' },
     { name: 'countryName', value: 'CL' },
     { name: 'organizationName', value: ISSUER_NAME },
-    { shortName: 'OU', value: 'Terminos de uso en www.ejemplo.cl/tu' },
-    { name: 'emailAddress', value: 'juan@ejemplo.cl' },
+    { shortName: 'OU', value: 'Terminos de uso en www.andina.test/tu' },
+    { name: 'emailAddress', value: 'carolina@andina.test' },
     { type: '2.5.4.5', value: ISSUER_RUT },
   ]
   cert.setSubject(attrs)
@@ -260,14 +260,14 @@ const makeCertificate = ({ notBefore, notAfter }) => {
   cert.setExtensions([
     { name: 'basicConstraints', cA: false },
     { name: 'keyUsage', digitalSignature: true, nonRepudiation: true, keyEncipherment: true },
-    subjectAltName(ISSUER_RUT, 'juan@ejemplo.cl'),
+    subjectAltName(ISSUER_RUT, 'carolina@andina.test'),
   ])
   cert.sign(keys.privateKey, forge.md.sha256.create())
   return { keys, cert }
 }
 
 const pkcs12 = (keys, cert, algorithm) => {
-  const asn1 = forge.pkcs12.toPkcs12Asn1(keys.privateKey, [cert], PASSWORD, { algorithm, friendlyName: 'ejemplo' })
+  const asn1 = forge.pkcs12.toPkcs12Asn1(keys.privateKey, [cert], PASSWORD, { algorithm, friendlyName: 'andina' })
   return Buffer.from(forge.asn1.toDer(asn1).getBytes(), 'binary')
 }
 
@@ -1511,7 +1511,7 @@ import { DteError } from '../src/errors'
 
 describe('sanitizeText', () => {
   test.each([
-    ["CAPACITACION USO PLC'S CNC", 'CAPACITACION USO PLCS CNC'],
+    ["MANTENCION DE UPS'S 10KVA", 'MANTENCION DE UPSS 10KVA'],
     ['Cable de 3" marca X', 'Cable de 3 marca X'],
     ['acento ´ y grave `', 'acento  y grave'],
     ['guion — largo – corto', 'guion - largo - corto'],
@@ -1537,7 +1537,7 @@ describe('sanitizeText', () => {
 
 describe('foldToAscii (TED only)', () => {
   test.each([
-    ['Cajón AFECTO', 'Cajon AFECTO'],
+    ['Jamón SERRANO', 'Jamon SERRANO'],
     ['Pañuelo', 'Panuelo'],
     ['CIGUEÑALES', 'CIGUENALES'],
     ['Straße', 'Strasse'],
@@ -3070,11 +3070,11 @@ import { DteError } from '../src/errors'
 import type { DocumentInput } from '../src/model/document'
 import { FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from './support/fixtures'
 
-const issuer = { rut: ISSUER_RUT, businessName: 'Empresa Ejemplo SpA', businessActivity: 'Desarrollo de software', address: 'Av. Ejemplo 123', commune: 'Santiago', activityCode: 620200 }
-const receiver = { rut: RECEIVER_RUT, businessName: "Cliente 'Ejemplo' SA", businessActivity: 'Comercio', address: 'Calle 456', commune: 'Providencia' }
+const issuer = { rut: ISSUER_RUT, businessName: 'Comercial Andina SpA', businessActivity: 'Servicios informáticos', address: 'Av. Los Aromos 1540', commune: 'Santiago', activityCode: 620200 }
+const receiver = { rut: RECEIVER_RUT, businessName: "Comercializadora 'Rapel' Ltda", businessActivity: 'Comercio', address: 'Pasaje Los Olmos 88', commune: 'Providencia' }
 const items = [
-  { name: 'Licencia anual', quantity: 1, unitPrice: 100000 },
-  { name: 'Soporte técnico', quantity: 3, unitPrice: 15000 },
+  { name: 'Plan anual', quantity: 1, unitPrice: 100000 },
+  { name: 'Horas de consultoría', quantity: 3, unitPrice: 15000 },
 ]
 
 const expectError = (fn: () => unknown, code: string, details?: Record<string, unknown>) => {
@@ -3096,11 +3096,11 @@ describe('createDocument', () => {
     expect(doc.header.folio).toBe(7)
     expect(doc.header.issueDate).toBe('2026-11-15')
     expect(doc.header.issuer).toEqual({ ...issuer, city: 'Santiago' })
-    expect(doc.header.receiver.businessName).toBe('Cliente Ejemplo SA')
+    expect(doc.header.receiver.businessName).toBe('Comercializadora Rapel Ltda')
     expect(doc.header.options).toEqual({})
     expect(doc.items).toEqual([
-      { lineNumber: 1, name: 'Licencia anual', quantity: 1, unitPrice: 100000, amount: 100000 },
-      { lineNumber: 2, name: 'Soporte técnico', quantity: 3, unitPrice: 15000, amount: 45000 },
+      { lineNumber: 1, name: 'Plan anual', quantity: 1, unitPrice: 100000, amount: 100000 },
+      { lineNumber: 2, name: 'Horas de consultoría', quantity: 3, unitPrice: 15000, amount: 45000 },
     ])
     expect(doc.header.totals).toEqual({ netAmount: 145000, vatRate: 19, vatAmount: 27550, totalAmount: 172550 })
     expect(doc.references).toEqual([])
@@ -3527,8 +3527,8 @@ import { toSiiDocument, fromSiiDocument } from '../src/model/codec'
 import { createDocument } from '../src/document/create'
 import { ISSUER_RUT, RECEIVER_RUT } from './support/fixtures'
 
-const issuer = { rut: ISSUER_RUT, businessName: 'Empresa Ejemplo SpA', businessActivity: 'Software', address: 'Av. Ejemplo 123', commune: 'Santiago', activityCode: 620200, phone: '+56 9 1111 1111', email: 'ventas@ejemplo.cl' }
-const receiver = { rut: RECEIVER_RUT, businessName: 'Cliente SA', businessActivity: 'Comercio', address: 'Calle 456', commune: 'Providencia', email: 'pagos@cliente.cl' }
+const issuer = { rut: ISSUER_RUT, businessName: 'Comercial Andina SpA', businessActivity: 'Software', address: 'Av. Los Aromos 1540', commune: 'Santiago', activityCode: 620200, phone: '+56 9 1111 1111', email: 'ventas@andina.test' }
+const receiver = { rut: RECEIVER_RUT, businessName: 'Comercializadora Rapel Ltda', businessActivity: 'Comercio', address: 'Pasaje Los Olmos 88', commune: 'Providencia', email: 'pagos@rapel.test' }
 
 describe('toSiiDocument', () => {
   test('invoice: official tags in schema order', () => {
@@ -3539,7 +3539,7 @@ describe('toSiiDocument', () => {
       issuer,
       receiver,
       items: [{ name: 'Servicio', quantity: 2, unitPrice: 1000, description: 'Detalle' }, { name: 'Exento', unitPrice: 500, exempt: true }],
-      references: [{ documentType: 801, folio: 'OC-77', date: '2026-11-01', reason: 'Orden de compra' }],
+      references: [{ documentType: 801, folio: 'OC-77', date: '2026-11-01', reason: 'Nota de pedido' }],
       globalAdjustments: [{ kind: 'discount', valueType: 'percent', value: 10, description: 'Desc.' }],
       options: { paymentTerms: 2, dueDate: '2026-12-15' },
     })
@@ -3550,17 +3550,17 @@ describe('toSiiDocument', () => {
     expect(Object.keys(sii.Encabezado.IdDoc)).toEqual(['TipoDTE', 'Folio', 'FchEmis', 'FmaPago', 'FchVenc'])
     expect(sii.Encabezado.Emisor).toEqual({
       RUTEmisor: ISSUER_RUT,
-      RznSoc: 'Empresa Ejemplo SpA',
+      RznSoc: 'Comercial Andina SpA',
       GiroEmis: 'Software',
       Telefono: '+56 9 1111 1111',
-      CorreoEmisor: 'ventas@ejemplo.cl',
+      CorreoEmisor: 'ventas@andina.test',
       Acteco: 620200,
-      DirOrigen: 'Av. Ejemplo 123',
+      DirOrigen: 'Av. Los Aromos 1540',
       CmnaOrigen: 'Santiago',
       CiudadOrigen: 'Santiago',
     })
     expect(Object.keys(sii.Encabezado.Emisor)).toEqual(['RUTEmisor', 'RznSoc', 'GiroEmis', 'Telefono', 'CorreoEmisor', 'Acteco', 'DirOrigen', 'CmnaOrigen', 'CiudadOrigen'])
-    expect(sii.Encabezado.Receptor).toEqual({ RUTRecep: RECEIVER_RUT, RznSocRecep: 'Cliente SA', GiroRecep: 'Comercio', CorreoRecep: 'pagos@cliente.cl', DirRecep: 'Calle 456', CmnaRecep: 'Providencia' })
+    expect(sii.Encabezado.Receptor).toEqual({ RUTRecep: RECEIVER_RUT, RznSocRecep: 'Comercializadora Rapel Ltda', GiroRecep: 'Comercio', CorreoRecep: 'pagos@rapel.test', DirRecep: 'Pasaje Los Olmos 88', CmnaRecep: 'Providencia' })
     expect(Object.keys(sii.Encabezado.Totales)).toEqual(['MntNeto', 'MntExe', 'TasaIVA', 'IVA', 'MntTotal'])
     expect(sii.Encabezado.Totales).toEqual({ MntNeto: 1800, MntExe: 500, TasaIVA: 19, IVA: 342, MntTotal: 2642 })
     expect(sii.Detalle).toEqual([
@@ -3568,7 +3568,7 @@ describe('toSiiDocument', () => {
       { NroLinDet: 2, IndExe: 1, NmbItem: 'Exento', PrcItem: 500, MontoItem: 500 },
     ])
     expect(sii.DscRcgGlobal).toEqual([{ NroLinDR: 1, TpoMov: 'D', GlosaDR: 'Desc.', TpoValor: '%', ValorDR: 10 }])
-    expect(sii.Referencia).toEqual([{ NroLinRef: 1, TpoDocRef: 801, FolioRef: 'OC-77', FchRef: '2026-11-01', RazonRef: 'Orden de compra' }])
+    expect(sii.Referencia).toEqual([{ NroLinRef: 1, TpoDocRef: 801, FolioRef: 'OC-77', FchRef: '2026-11-01', RazonRef: 'Nota de pedido' }])
   })
 
   test('receipt: boleta tags for the issuer, minimal receiver, no TasaIVA', () => {
@@ -3577,10 +3577,10 @@ describe('toSiiDocument', () => {
     expect(sii.Encabezado.IdDoc).toEqual({ TipoDTE: 39, Folio: 5, FchEmis: '2026-11-15', IndServicio: 3 })
     expect(sii.Encabezado.Emisor).toEqual({
       RUTEmisor: ISSUER_RUT,
-      RznSocEmisor: 'Empresa Ejemplo SpA',
+      RznSocEmisor: 'Comercial Andina SpA',
       GiroEmisor: 'Software',
       CdgSIISucur: 12,
-      DirOrigen: 'Av. Ejemplo 123',
+      DirOrigen: 'Av. Los Aromos 1540',
       CmnaOrigen: 'Santiago',
       CiudadOrigen: 'Santiago',
     })
@@ -4169,13 +4169,13 @@ describe('buildXml', () => {
         Documento: {
           '@_ID': 'DTE_T33F1',
           Encabezado: { IdDoc: { TipoDTE: 33, Folio: 1 } },
-          Detalle: [{ NroLinDet: 1, NmbItem: "PLC'S & <X>" }, { NroLinDet: 2, NmbItem: 'B' }],
+          Detalle: [{ NroLinDet: 1, NmbItem: "UPS'S & <X>" }, { NroLinDet: 2, NmbItem: 'B' }],
           TED: '__TED__',
         },
       },
     })
     expect(xml).toBe(
-      '<DTE xmlns="http://www.sii.cl/SiiDte" version="1.0"><Documento ID="DTE_T33F1"><Encabezado><IdDoc><TipoDTE>33</TipoDTE><Folio>1</Folio></IdDoc></Encabezado><Detalle><NroLinDet>1</NroLinDet><NmbItem>PLC&apos;S &amp; &lt;X&gt;</NmbItem></Detalle><Detalle><NroLinDet>2</NroLinDet><NmbItem>B</NmbItem></Detalle><TED>__TED__</TED></Documento></DTE>',
+      '<DTE xmlns="http://www.sii.cl/SiiDte" version="1.0"><Documento ID="DTE_T33F1"><Encabezado><IdDoc><TipoDTE>33</TipoDTE><Folio>1</Folio></IdDoc></Encabezado><Detalle><NroLinDet>1</NroLinDet><NmbItem>UPS&apos;S &amp; &lt;X&gt;</NmbItem></Detalle><Detalle><NroLinDet>2</NroLinDet><NmbItem>B</NmbItem></Detalle><TED>__TED__</TED></Documento></DTE>',
     )
   })
 })
@@ -4437,9 +4437,9 @@ describe('canonicalizeElement', () => {
   })
 
   test("apostrophe and double quote stay literal in text; & < > and CR are escaped", () => {
-    const xml = `<DTE xmlns="${NS}" xmlns:xsi="${XSI}"><Documento ID="X"><NmbItem>CAPACITACION USO PLC&apos;s CNC</NmbItem><Nota>Cable de 3&quot; a &amp; b &lt; c &gt; d&#xD;</Nota></Documento></DTE>`
+    const xml = `<DTE xmlns="${NS}" xmlns:xsi="${XSI}"><Documento ID="X"><NmbItem>MANTENCION DE UPS&apos;s 10KVA</NmbItem><Nota>Cable de 3&quot; a &amp; b &lt; c &gt; d&#xD;</Nota></Documento></DTE>`
     const out = c14n(xml, 'Documento')
-    expect(out).toContain("PLC's CNC")
+    expect(out).toContain("UPS's 10KVA")
     expect(out).toContain('Cable de 3" a &amp; b &lt; c &gt; d&#xD;')
     expect(out).not.toContain('&apos;')
     expect(out).not.toContain('&quot;')
@@ -4660,8 +4660,8 @@ describe('x509', () => {
   test('parses the fixture certificate', () => {
     const cert = parseCertificatePem(certPem)
     expect(cert.rut).toBe('76543210-3')
-    expect(cert.commonName).toBe('JUAN PEREZ PRUEBA')
-    expect(cert.subject.O).toBe('EMPRESA EJEMPLO SPA')
+    expect(cert.commonName).toBe('CAROLINA VALDES ROJAS')
+    expect(cert.subject.O).toBe('COMERCIAL ANDINA SPA')
     expect(cert.subject.serialNumber).toBe('76543210-3')
     expect(cert.notBefore.toISOString()).toBe('2026-01-01T00:00:00.000Z')
     expect(cert.notAfter.toISOString()).toBe('2046-01-01T00:00:00.000Z')
@@ -4989,8 +4989,8 @@ describe('loadCertificateFromPkcs12', () => {
   test.each(['cert.pfx', 'cert-aes.pfx'])('%s: legacy and modern PKCS#12 both load', (file) => {
     const cert = loadCertificateFromPkcs12(fixtureBytes(file), FIXTURE_PASSWORD, { now: FIXED_NOW })
     expect(cert.rut).toBe('76543210-3')
-    expect(cert.commonName).toBe('JUAN PEREZ PRUEBA')
-    expect(cert.subject.O).toBe('EMPRESA EJEMPLO SPA')
+    expect(cert.commonName).toBe('CAROLINA VALDES ROJAS')
+    expect(cert.subject.O).toBe('COMERCIAL ANDINA SPA')
     expect(cert.notAfter.toISOString()).toBe('2046-01-01T00:00:00.000Z')
     expect(cert.privateKeyPem).toMatch(/^-----BEGIN RSA PRIVATE KEY-----/)
     expect(cert.certificatePem).toMatch(/^-----BEGIN CERTIFICATE-----/)
@@ -5339,7 +5339,7 @@ describe('parseCaf', () => {
   test('reads the authorization data and keeps the exact <CAF> block', () => {
     const caf = parseCaf(caf33)
     expect(caf.issuerRut).toBe('76543210-3')
-    expect(caf.issuerName).toBe('EMPRESA EJEMPLO SPA')
+    expect(caf.issuerName).toBe('COMERCIAL ANDINA SPA')
     expect(caf.documentType).toBe(33)
     expect(caf.range).toEqual({ from: 1, to: 100 })
     expect(caf.authorizationDate).toBe('2026-10-31')
@@ -5655,8 +5655,8 @@ import { buildDdString, buildTedXml, stampDocument, verifyTed, tedText } from '.
 import { fixtureText, FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from './support/fixtures'
 
 const caf = parseCaf(fixtureText('caf-33.xml'))
-const issuer = { rut: ISSUER_RUT, businessName: 'Empresa Ejemplo SpA', businessActivity: 'Software', address: 'Av. Ejemplo 123', commune: 'Santiago' }
-const receiver = { rut: RECEIVER_RUT, businessName: 'Cliente Ñandú & Cía', businessActivity: 'Comercio', address: 'Calle 456', commune: 'Providencia' }
+const issuer = { rut: ISSUER_RUT, businessName: 'Comercial Andina SpA', businessActivity: 'Software', address: 'Av. Los Aromos 1540', commune: 'Santiago' }
+const receiver = { rut: RECEIVER_RUT, businessName: 'Cliente Ñandú & Cía', businessActivity: 'Comercio', address: 'Pasaje Los Olmos 88', commune: 'Providencia' }
 const invoice = (folio = 7) => createDocument({ type: 33, folio, issueDate: '2026-11-15', issuer, receiver, items: [{ name: 'Cajón de peras', quantity: 2, unitPrice: 1000 }] })
 
 const expectCode = (fn: () => unknown, code: string) => {
@@ -6311,8 +6311,8 @@ const XSI = 'http://www.w3.org/2001/XMLSchema-instance'
 const caf33 = parseCaf(fixtureText('caf-33.xml'))
 const caf39 = parseCaf(fixtureText('caf-39.xml'))
 const certificate = loadCertificateFromPem({ privateKeyPem: fixtureText('cert.key.pem'), certificatePem: fixtureText('cert.pem') }, { now: FIXED_NOW })
-const issuer = { rut: ISSUER_RUT, businessName: 'Empresa Ejemplo SpA', businessActivity: 'Software', address: 'Av. Ejemplo 123', commune: 'Santiago', activityCode: 620200 }
-const receiver = { rut: RECEIVER_RUT, businessName: 'Cliente SA', businessActivity: 'Comercio', address: 'Calle 456', commune: 'Providencia' }
+const issuer = { rut: ISSUER_RUT, businessName: 'Comercial Andina SpA', businessActivity: 'Software', address: 'Av. Los Aromos 1540', commune: 'Santiago', activityCode: 620200 }
+const receiver = { rut: RECEIVER_RUT, businessName: 'Comercializadora Rapel Ltda', businessActivity: 'Comercio', address: 'Pasaje Los Olmos 88', commune: 'Providencia' }
 const invoiceInput = { type: 33 as const, folio: 7, issueDate: '2026-11-15', issuer, receiver, items: [{ name: 'Licencia', quantity: 1, unitPrice: 100000 }, { name: 'Soporte', quantity: 3, unitPrice: 15000 }] }
 
 describe('buildDocumentXml', () => {
@@ -6580,8 +6580,8 @@ import { fixtureText, FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from './support/fixt
 const caf33 = parseCaf(fixtureText('caf-33.xml'))
 const caf39 = parseCaf(fixtureText('caf-39.xml'))
 const certificate = loadCertificateFromPem({ privateKeyPem: fixtureText('cert.key.pem'), certificatePem: fixtureText('cert.pem') }, { now: FIXED_NOW })
-const issuer = { rut: ISSUER_RUT, businessName: 'Empresa Ejemplo SpA', businessActivity: 'Software', address: 'Av. Ejemplo 123', commune: 'Ñuñoa' }
-const receiver = { rut: RECEIVER_RUT, businessName: 'Cliente SA', businessActivity: 'Comercio', address: 'Calle 456', commune: 'Providencia' }
+const issuer = { rut: ISSUER_RUT, businessName: 'Comercial Andina SpA', businessActivity: 'Software', address: 'Av. Los Aromos 1540', commune: 'Ñuñoa' }
+const receiver = { rut: RECEIVER_RUT, businessName: 'Comercializadora Rapel Ltda', businessActivity: 'Comercio', address: 'Pasaje Los Olmos 88', commune: 'Providencia' }
 const cafFor = (type: number) => parseCaf(fixtureText('caf-33.xml').replace(/<TD>33<\/TD>/, `<TD>${type}</TD>`))
 const issue = (type: 33 | 56 | 61 | 52, folio: number) =>
   issueDocument({ document: { type, folio, issueDate: '2026-11-15', issuer, receiver, items: [{ name: 'Ítem', unitPrice: 1000 }], references: type === 33 || type === 52 ? [] : [{ documentType: 33, folio: 1, date: '2026-11-01', code: 1, reason: 'Anula' }] }, caf: type === 33 ? caf33 : cafFor(type), certificate, now: FIXED_NOW })
@@ -6994,7 +6994,7 @@ guarded('dist smoke (dual ESM + CJS package)', () => {
       document: {
         type: 33,
         folio: 1,
-        issuer: { rut: '76543210-3', businessName: 'Empresa Ejemplo SpA', businessActivity: 'Software', address: 'Av. 1', commune: 'Santiago' },
+        issuer: { rut: '76543210-3', businessName: 'Comercial Andina SpA', businessActivity: 'Software', address: 'Av. 1', commune: 'Santiago' },
         receiver: { rut: '12345678-5', businessName: 'Cliente', businessActivity: 'Comercio', address: 'Calle 2', commune: 'Providencia' },
         items: [{ name: 'Servicio', unitPrice: 1000 }],
       },
@@ -7202,16 +7202,16 @@ Node ≥ 20, ESM and CommonJS.
 import { readFileSync } from 'node:fs'
 import { loadCertificateFromPkcs12, parseCaf, issueDocument, createEnvelope, signEnvelope, encodeLatin1 } from 'dte-sdk'
 
-const certificate = loadCertificateFromPkcs12(readFileSync('empresa.pfx'), process.env.PFX_PASSWORD!)
+const certificate = loadCertificateFromPkcs12(readFileSync('firma.pfx'), process.env.PFX_PASSWORD!)
 const caf = parseCaf(readFileSync('caf-33.xml', 'utf8'))
 
 const invoice = issueDocument({
   document: {
     type: 33,
     folio: 1,
-    issuer: { rut: '76543210-3', businessName: 'Empresa Ejemplo SpA', businessActivity: 'Software', address: 'Av. Ejemplo 123', commune: 'Santiago', activityCode: 620200 },
-    receiver: { rut: '12345678-5', businessName: 'Cliente SA', businessActivity: 'Comercio', address: 'Calle 456', commune: 'Providencia' },
-    items: [{ name: 'Licencia anual', quantity: 1, unitPrice: 100000 }],
+    issuer: { rut: '76543210-3', businessName: 'Comercial Andina SpA', businessActivity: 'Software', address: 'Av. Los Aromos 1540', commune: 'Santiago', activityCode: 620200 },
+    receiver: { rut: '12345678-5', businessName: 'Comercializadora Rapel Ltda', businessActivity: 'Comercio', address: 'Pasaje Los Olmos 88', commune: 'Providencia' },
+    items: [{ name: 'Plan anual', quantity: 1, unitPrice: 100000 }],
   },
   caf,
   certificate,
@@ -7442,8 +7442,8 @@ describe('text invariants', () => {
 describe('codec round-trip', () => {
   const name = fc.stringMatching(/^[A-Za-z0-9 ]{1,40}$/).map((s) => s.trim()).filter((s) => s.length > 0)
   const item = fc.record({ name, quantity: fc.integer({ min: 1, max: 100 }), unitPrice: fc.integer({ min: 1, max: 1_000_000 }), exempt: fc.boolean() })
-  const issuer = { rut: ISSUER_RUT, businessName: 'Empresa Ejemplo SpA', businessActivity: 'Software', address: 'Av. Ejemplo 123', commune: 'Santiago' }
-  const receiver = { rut: RECEIVER_RUT, businessName: 'Cliente SA', businessActivity: 'Comercio', address: 'Calle 456', commune: 'Providencia' }
+  const issuer = { rut: ISSUER_RUT, businessName: 'Comercial Andina SpA', businessActivity: 'Software', address: 'Av. Los Aromos 1540', commune: 'Santiago' }
+  const receiver = { rut: RECEIVER_RUT, businessName: 'Comercializadora Rapel Ltda', businessActivity: 'Comercio', address: 'Pasaje Los Olmos 88', commune: 'Providencia' }
 
   test('fromSiiDocument(toSiiDocument(doc)) equals doc', () => {
     fc.assert(
@@ -7491,8 +7491,8 @@ import { fixtureText, FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from './support/fixt
 const harness = process.env.DTE_REFERENCE_HARNESS
 const guarded = process.env.RUN_DIFFERENTIAL === '1' && harness ? describe : describe.skip
 
-const issuer = { rut: ISSUER_RUT, businessName: 'Empresa Ejemplo SpA', businessActivity: 'Desarrollo de software', address: 'Av. Ejemplo 123', commune: 'Santiago', activityCode: 620200 }
-const receiver = { rut: RECEIVER_RUT, businessName: 'Cliente Ñandú SA', businessActivity: 'Comercio', address: 'Calle 456', commune: 'Providencia' }
+const issuer = { rut: ISSUER_RUT, businessName: 'Comercial Andina SpA', businessActivity: 'Servicios informáticos', address: 'Av. Los Aromos 1540', commune: 'Santiago', activityCode: 620200 }
+const receiver = { rut: RECEIVER_RUT, businessName: 'Cliente Ñandú SA', businessActivity: 'Comercio', address: 'Pasaje Los Olmos 88', commune: 'Providencia' }
 const stampedAt = chileTimestamp(FIXED_NOW)
 
 const cases: readonly { name: string; kind: 'dte' | 'receipt'; caf: string; input: DocumentInput }[] = [
@@ -7500,7 +7500,7 @@ const cases: readonly { name: string; kind: 'dte' | 'receipt'; caf: string; inpu
     name: 'invoice 33 with exempt line and reference',
     kind: 'dte',
     caf: 'caf-33.xml',
-    input: { type: 33, folio: 7, issueDate: '2026-11-15', issuer, receiver, items: [{ name: 'Licencia anual', quantity: 2, unitPrice: 1000 }, { name: 'Exento', unitPrice: 500, exempt: true }], references: [{ documentType: 801, folio: 'OC-77', date: '2026-11-01', reason: 'Orden de compra' }] },
+    input: { type: 33, folio: 7, issueDate: '2026-11-15', issuer, receiver, items: [{ name: 'Plan anual', quantity: 2, unitPrice: 1000 }, { name: 'Exento', unitPrice: 500, exempt: true }], references: [{ documentType: 801, folio: 'OC-77', date: '2026-11-01', reason: 'Nota de pedido' }] },
   },
   {
     name: 'invoice 33 with VAT-included prices',

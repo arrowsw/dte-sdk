@@ -27,7 +27,7 @@ describe('buildXml', () => {
           '@_ID': 'DTE_T33F1',
           Encabezado: { IdDoc: { TipoDTE: 33, Folio: 1 } },
           Detalle: [
-            { NroLinDet: 1, NmbItem: "PLC'S & <X>" },
+            { NroLinDet: 1, NmbItem: "UPS'S & <X>" },
             { NroLinDet: 2, NmbItem: 'B' },
           ],
           TED: '__TED__',
@@ -35,7 +35,7 @@ describe('buildXml', () => {
       },
     })
     expect(xml).toBe(
-      '<DTE xmlns="http://www.sii.cl/SiiDte" version="1.0"><Documento ID="DTE_T33F1"><Encabezado><IdDoc><TipoDTE>33</TipoDTE><Folio>1</Folio></IdDoc></Encabezado><Detalle><NroLinDet>1</NroLinDet><NmbItem>PLC&apos;S &amp; &lt;X&gt;</NmbItem></Detalle><Detalle><NroLinDet>2</NroLinDet><NmbItem>B</NmbItem></Detalle><TED>__TED__</TED></Documento></DTE>',
+      '<DTE xmlns="http://www.sii.cl/SiiDte" version="1.0"><Documento ID="DTE_T33F1"><Encabezado><IdDoc><TipoDTE>33</TipoDTE><Folio>1</Folio></IdDoc></Encabezado><Detalle><NroLinDet>1</NroLinDet><NmbItem>UPS&apos;S &amp; &lt;X&gt;</NmbItem></Detalle><Detalle><NroLinDet>2</NroLinDet><NmbItem>B</NmbItem></Detalle><TED>__TED__</TED></Documento></DTE>',
     )
   })
 })

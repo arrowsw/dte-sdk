@@ -81,7 +81,7 @@ guarded('dist smoke (dual ESM + CJS package)', () => {
         folio: 1,
         issuer: {
           rut: '76543210-3',
-          businessName: 'Empresa Ejemplo SpA',
+          businessName: 'Comercial Andina SpA',
           businessActivity: 'Software',
           address: 'Av. 1',
           commune: 'Santiago',

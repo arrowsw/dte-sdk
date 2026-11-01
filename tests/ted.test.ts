@@ -7,16 +7,16 @@ import { fixtureText, FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from './support/fixt
 const caf = parseCaf(fixtureText('caf-33.xml'))
 const issuer = {
   rut: ISSUER_RUT,
-  businessName: 'Empresa Ejemplo SpA',
+  businessName: 'Comercial Andina SpA',
   businessActivity: 'Software',
-  address: 'Av. Ejemplo 123',
+  address: 'Av. Los Aromos 1540',
   commune: 'Santiago',
 }
 const receiver = {
   rut: RECEIVER_RUT,
   businessName: 'Cliente Ñandú & Cía',
   businessActivity: 'Comercio',
-  address: 'Calle 456',
+  address: 'Pasaje Los Olmos 88',
   commune: 'Providencia',
 }
 const invoice = (folio = 7) =>

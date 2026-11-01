@@ -5,22 +5,22 @@ import { FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from './support/fixtures'
 
 const issuer = {
   rut: ISSUER_RUT,
-  businessName: 'Empresa Ejemplo SpA',
-  businessActivity: 'Desarrollo de software',
-  address: 'Av. Ejemplo 123',
+  businessName: 'Comercial Andina SpA',
+  businessActivity: 'Servicios informáticos',
+  address: 'Av. Los Aromos 1540',
   commune: 'Santiago',
   activityCode: 620200,
 }
 const receiver = {
   rut: RECEIVER_RUT,
-  businessName: "Cliente 'Ejemplo' SA",
+  businessName: "Comercializadora 'Rapel' Ltda",
   businessActivity: 'Comercio',
-  address: 'Calle 456',
+  address: 'Pasaje Los Olmos 88',
   commune: 'Providencia',
 }
 const items = [
-  { name: 'Licencia anual', quantity: 1, unitPrice: 100000 },
-  { name: 'Soporte técnico', quantity: 3, unitPrice: 15000 },
+  { name: 'Plan anual', quantity: 1, unitPrice: 100000 },
+  { name: 'Horas de consultoría', quantity: 3, unitPrice: 15000 },
 ]
 
 const expectError = (fn: () => unknown, code: string, details?: Record<string, unknown>) => {
@@ -42,11 +42,11 @@ describe('createDocument', () => {
     expect(doc.header.folio).toBe(7)
     expect(doc.header.issueDate).toBe('2026-11-15')
     expect(doc.header.issuer).toEqual({ ...issuer, city: 'Santiago' })
-    expect(doc.header.receiver.businessName).toBe('Cliente Ejemplo SA')
+    expect(doc.header.receiver.businessName).toBe('Comercializadora Rapel Ltda')
     expect(doc.header.options).toEqual({})
     expect(doc.items).toEqual([
-      { lineNumber: 1, name: 'Licencia anual', quantity: 1, unitPrice: 100000, amount: 100000 },
-      { lineNumber: 2, name: 'Soporte técnico', quantity: 3, unitPrice: 15000, amount: 45000 },
+      { lineNumber: 1, name: 'Plan anual', quantity: 1, unitPrice: 100000, amount: 100000 },
+      { lineNumber: 2, name: 'Horas de consultoría', quantity: 3, unitPrice: 15000, amount: 45000 },
     ])
     expect(doc.header.totals).toEqual({ netAmount: 145000, vatRate: 19, vatAmount: 27550, totalAmount: 172550 })
     expect(doc.references).toEqual([])
@@ -170,7 +170,12 @@ describe('createDocument', () => {
           folio: 1,
           issuer,
           items,
-          receiver: { rut: RECEIVER_RUT, businessName: 'Cliente', businessActivity: 'Comercio', address: 'Calle 456' },
+          receiver: {
+            rut: RECEIVER_RUT,
+            businessName: 'Cliente',
+            businessActivity: 'Comercio',
+            address: 'Pasaje Los Olmos 88',
+          },
         }),
       'MISSING_FIELD',
       { field: 'receiver.commune' },

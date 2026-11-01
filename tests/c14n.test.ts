@@ -15,9 +15,9 @@ describe('canonicalizeElement', () => {
   })
 
   test('apostrophe and double quote stay literal in text; & < > and CR are escaped', () => {
-    const xml = `<DTE xmlns="${NS}" xmlns:xsi="${XSI}"><Documento ID="X"><NmbItem>CAPACITACION USO PLC&apos;s CNC</NmbItem><Nota>Cable de 3&quot; a &amp; b &lt; c &gt; d&#xD;</Nota></Documento></DTE>`
+    const xml = `<DTE xmlns="${NS}" xmlns:xsi="${XSI}"><Documento ID="X"><NmbItem>MANTENCION DE UPS&apos;s 10KVA</NmbItem><Nota>Cable de 3&quot; a &amp; b &lt; c &gt; d&#xD;</Nota></Documento></DTE>`
     const out = c14n(xml, 'Documento')
-    expect(out).toContain("PLC's CNC")
+    expect(out).toContain("UPS's 10KVA")
     expect(out).toContain('Cable de 3" a &amp; b &lt; c &gt; d&#xD;')
     expect(out).not.toContain('&apos;')
     expect(out).not.toContain('&quot;')

@@ -52,8 +52,8 @@ describe('x509', () => {
   test('parses the fixture certificate', () => {
     const cert = parseCertificatePem(certPem)
     expect(cert.rut).toBe('76543210-3')
-    expect(cert.commonName).toBe('JUAN PEREZ PRUEBA')
-    expect(cert.subject.O).toBe('EMPRESA EJEMPLO SPA')
+    expect(cert.commonName).toBe('CAROLINA VALDES ROJAS')
+    expect(cert.subject.O).toBe('COMERCIAL ANDINA SPA')
     expect(cert.subject.serialNumber).toBe('76543210-3')
     expect(cert.notBefore.toISOString()).toBe('2026-01-01T00:00:00.000Z')
     expect(cert.notAfter.toISOString()).toBe('2046-01-01T00:00:00.000Z')
@@ -167,7 +167,7 @@ describe('x509', () => {
       ])
     const utf8 = (text: string) => asn1.create(asn1.Class.UNIVERSAL, asn1.Type.UTF8, false, text)
     const names = asn1.create(asn1.Class.UNIVERSAL, asn1.Type.SEQUENCE, true, [
-      asn1.create(asn1.Class.CONTEXT_SPECIFIC, 2, false, 'www.ejemplo.cl'),
+      asn1.create(asn1.Class.CONTEXT_SPECIFIC, 2, false, 'www.andina.test'),
       otherName('1.2.3.4', utf8('12345678-5')),
       otherName(RUT_OID, asn1.create(asn1.Class.UNIVERSAL, asn1.Type.SEQUENCE, true, [])),
       otherName(RUT_OID, utf8('not a rut')),

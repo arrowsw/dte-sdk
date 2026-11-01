@@ -4,21 +4,21 @@ import { ISSUER_RUT, RECEIVER_RUT } from './support/fixtures'
 
 const issuer = {
   rut: ISSUER_RUT,
-  businessName: 'Empresa Ejemplo SpA',
+  businessName: 'Comercial Andina SpA',
   businessActivity: 'Software',
-  address: 'Av. Ejemplo 123',
+  address: 'Av. Los Aromos 1540',
   commune: 'Santiago',
   activityCode: 620200,
   phone: '+56 9 1111 1111',
-  email: 'ventas@ejemplo.cl',
+  email: 'ventas@andina.test',
 }
 const receiver = {
   rut: RECEIVER_RUT,
-  businessName: 'Cliente SA',
+  businessName: 'Comercializadora Rapel Ltda',
   businessActivity: 'Comercio',
-  address: 'Calle 456',
+  address: 'Pasaje Los Olmos 88',
   commune: 'Providencia',
-  email: 'pagos@cliente.cl',
+  email: 'pagos@rapel.test',
 }
 
 describe('toSiiDocument', () => {
@@ -33,7 +33,7 @@ describe('toSiiDocument', () => {
         { name: 'Servicio', quantity: 2, unitPrice: 1000, description: 'Detalle' },
         { name: 'Exento', unitPrice: 500, exempt: true },
       ],
-      references: [{ documentType: 801, folio: 'OC-77', date: '2026-11-01', reason: 'Orden de compra' }],
+      references: [{ documentType: 801, folio: 'OC-77', date: '2026-11-01', reason: 'Nota de pedido' }],
       globalAdjustments: [{ kind: 'discount', valueType: 'percent', value: 10, description: 'Desc.' }],
       options: { paymentTerms: 2, dueDate: '2026-12-15' },
     })
@@ -50,12 +50,12 @@ describe('toSiiDocument', () => {
     expect(Object.keys(sii.Encabezado.IdDoc)).toEqual(['TipoDTE', 'Folio', 'FchEmis', 'FmaPago', 'FchVenc'])
     expect(sii.Encabezado.Emisor).toEqual({
       RUTEmisor: ISSUER_RUT,
-      RznSoc: 'Empresa Ejemplo SpA',
+      RznSoc: 'Comercial Andina SpA',
       GiroEmis: 'Software',
       Telefono: '+56 9 1111 1111',
-      CorreoEmisor: 'ventas@ejemplo.cl',
+      CorreoEmisor: 'ventas@andina.test',
       Acteco: 620200,
-      DirOrigen: 'Av. Ejemplo 123',
+      DirOrigen: 'Av. Los Aromos 1540',
       CmnaOrigen: 'Santiago',
       CiudadOrigen: 'Santiago',
     })
@@ -72,10 +72,10 @@ describe('toSiiDocument', () => {
     ])
     expect(sii.Encabezado.Receptor).toEqual({
       RUTRecep: RECEIVER_RUT,
-      RznSocRecep: 'Cliente SA',
+      RznSocRecep: 'Comercializadora Rapel Ltda',
       GiroRecep: 'Comercio',
-      CorreoRecep: 'pagos@cliente.cl',
-      DirRecep: 'Calle 456',
+      CorreoRecep: 'pagos@rapel.test',
+      DirRecep: 'Pasaje Los Olmos 88',
       CmnaRecep: 'Providencia',
     })
     expect(Object.keys(sii.Encabezado.Totales)).toEqual(['MntNeto', 'MntExe', 'TasaIVA', 'IVA', 'MntTotal'])
@@ -86,7 +86,7 @@ describe('toSiiDocument', () => {
     ])
     expect(sii.DscRcgGlobal).toEqual([{ NroLinDR: 1, TpoMov: 'D', GlosaDR: 'Desc.', TpoValor: '%', ValorDR: 10 }])
     expect(sii.Referencia).toEqual([
-      { NroLinRef: 1, TpoDocRef: 801, FolioRef: 'OC-77', FchRef: '2026-11-01', RazonRef: 'Orden de compra' },
+      { NroLinRef: 1, TpoDocRef: 801, FolioRef: 'OC-77', FchRef: '2026-11-01', RazonRef: 'Nota de pedido' },
     ])
   })
 
@@ -103,10 +103,10 @@ describe('toSiiDocument', () => {
     expect(sii.Encabezado.IdDoc).toEqual({ TipoDTE: 39, Folio: 5, FchEmis: '2026-11-15', IndServicio: 3 })
     expect(sii.Encabezado.Emisor).toEqual({
       RUTEmisor: ISSUER_RUT,
-      RznSocEmisor: 'Empresa Ejemplo SpA',
+      RznSocEmisor: 'Comercial Andina SpA',
       GiroEmisor: 'Software',
       CdgSIISucur: 12,
-      DirOrigen: 'Av. Ejemplo 123',
+      DirOrigen: 'Av. Los Aromos 1540',
       CmnaOrigen: 'Santiago',
       CiudadOrigen: 'Santiago',
     })
@@ -266,9 +266,9 @@ describe('fromSiiDocument', () => {
   // EnvioBOLETA_v11.xsd has no Acteco/Telefono/CorreoEmisor, so a receipt cannot carry them back.
   const receiptIssuer = {
     rut: ISSUER_RUT,
-    businessName: 'Empresa Ejemplo SpA',
+    businessName: 'Comercial Andina SpA',
     businessActivity: 'Software',
-    address: 'Av. Ejemplo 123',
+    address: 'Av. Los Aromos 1540',
     commune: 'Santiago',
   }
 

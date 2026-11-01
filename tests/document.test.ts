@@ -18,17 +18,17 @@ const certificate = loadCertificateFromPem(
 )
 const issuer = {
   rut: ISSUER_RUT,
-  businessName: 'Empresa Ejemplo SpA',
+  businessName: 'Comercial Andina SpA',
   businessActivity: 'Software',
-  address: 'Av. Ejemplo 123',
+  address: 'Av. Los Aromos 1540',
   commune: 'Santiago',
   activityCode: 620200,
 }
 const receiver = {
   rut: RECEIVER_RUT,
-  businessName: 'Cliente SA',
+  businessName: 'Comercializadora Rapel Ltda',
   businessActivity: 'Comercio',
-  address: 'Calle 456',
+  address: 'Pasaje Los Olmos 88',
   commune: 'Providencia',
 }
 const invoiceInput = {

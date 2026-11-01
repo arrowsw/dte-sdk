@@ -19,9 +19,9 @@ const guarded = process.env.RUN_DIFFERENTIAL === '1' && harness ? describe : des
 
 const issuer = {
   rut: ISSUER_RUT,
-  businessName: 'Empresa Ejemplo SpA',
-  businessActivity: 'Desarrollo de software',
-  address: 'Av. Ejemplo 123',
+  businessName: 'Comercial Andina SpA',
+  businessActivity: 'Servicios informáticos',
+  address: 'Av. Los Aromos 1540',
   commune: 'Santiago',
   activityCode: 620200,
 }
@@ -29,7 +29,7 @@ const receiver = {
   rut: RECEIVER_RUT,
   businessName: 'Cliente Ñandú SA',
   businessActivity: 'Comercio',
-  address: 'Calle 456',
+  address: 'Pasaje Los Olmos 88',
   commune: 'Providencia',
 }
 const stampedAt = chileTimestamp(FIXED_NOW)
@@ -46,10 +46,10 @@ const cases: readonly { name: string; kind: 'dte' | 'receipt'; caf: string; inpu
       issuer,
       receiver,
       items: [
-        { name: 'Licencia anual', quantity: 2, unitPrice: 1000 },
+        { name: 'Plan anual', quantity: 2, unitPrice: 1000 },
         { name: 'Exento', unitPrice: 500, exempt: true },
       ],
-      references: [{ documentType: 801, folio: 'OC-77', date: '2026-11-01', reason: 'Orden de compra' }],
+      references: [{ documentType: 801, folio: 'OC-77', date: '2026-11-01', reason: 'Nota de pedido' }],
     },
   },
   {

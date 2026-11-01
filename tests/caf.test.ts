@@ -25,7 +25,7 @@ describe('parseCaf', () => {
   test('reads the authorization data and keeps the exact <CAF> block', () => {
     const caf = parseCaf(caf33)
     expect(caf.issuerRut).toBe('76543210-3')
-    expect(caf.issuerName).toBe('EMPRESA EJEMPLO SPA')
+    expect(caf.issuerName).toBe('COMERCIAL ANDINA SPA')
     expect(caf.documentType).toBe(33)
     expect(caf.range).toEqual({ from: 1, to: 100 })
     expect(caf.authorizationDate).toBe('2026-10-31')

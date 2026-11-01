@@ -3,7 +3,7 @@ import { DteError } from '../src/errors'
 
 describe('sanitizeText', () => {
   test.each([
-    ["CAPACITACION USO PLC'S CNC", 'CAPACITACION USO PLCS CNC'],
+    ["MANTENCION DE UPS'S 10KVA", 'MANTENCION DE UPSS 10KVA'],
     ['Cable de 3" marca X', 'Cable de 3 marca X'],
     ['acento ´ y grave `', 'acento  y grave'],
     ['guion — largo – corto', 'guion - largo - corto'],
@@ -29,7 +29,7 @@ describe('sanitizeText', () => {
 
 describe('foldToAscii (TED only)', () => {
   test.each([
-    ['Cajón AFECTO', 'Cajon AFECTO'],
+    ['Jamón SERRANO', 'Jamon SERRANO'],
     ['Pañuelo', 'Panuelo'],
     ['CIGUEÑALES', 'CIGUENALES'],
     ['Straße', 'Strasse'],

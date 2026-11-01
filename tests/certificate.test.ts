@@ -19,8 +19,8 @@ describe('loadCertificateFromPkcs12', () => {
   test.each(['cert.pfx', 'cert-aes.pfx'])('%s: legacy and modern PKCS#12 both load', (file) => {
     const cert = loadCertificateFromPkcs12(fixtureBytes(file), FIXTURE_PASSWORD, { now: FIXED_NOW })
     expect(cert.rut).toBe('76543210-3')
-    expect(cert.commonName).toBe('JUAN PEREZ PRUEBA')
-    expect(cert.subject.O).toBe('EMPRESA EJEMPLO SPA')
+    expect(cert.commonName).toBe('CAROLINA VALDES ROJAS')
+    expect(cert.subject.O).toBe('COMERCIAL ANDINA SPA')
     expect(cert.notAfter.toISOString()).toBe('2046-01-01T00:00:00.000Z')
     expect(cert.privateKeyPem).toMatch(/^-----BEGIN RSA PRIVATE KEY-----/)
     expect(cert.certificatePem).toMatch(/^-----BEGIN CERTIFICATE-----/)
