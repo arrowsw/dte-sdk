@@ -1,37 +1,37 @@
-# Fase 1 — Core de emisión: plan de implementación
+# Phase 1 — Core issuance: implementation plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Núcleo de emisión de dte-sdk, funcional y en inglés: crear, timbrar (TED) y firmar (XMLDSig) un DTE de cualquier tipo soportado, y armar y firmar sobres `EnvioDTE`/`EnvioBOLETA`, con modelo de dominio en inglés y JSDoc bilingüe `EN:`/`ES:`.
+**Goal:** The issuance core of dte-sdk, functional and in English: create, stamp (TED) and sign (XMLDSig) a DTE of any supported type, and build and sign `EnvioDTE`/`EnvioBOLETA` envelopes, with an English domain model and bilingual `EN:`/`ES:` JSDoc.
 
-**Architecture:** Datos inmutables + funciones puras (sin clases salvo `DteError`). Dos modelos: dominio en inglés (`Document`, `Totals`…) y SII-shaped con etiquetas oficiales (`SiiDocumento`, `MntTotal`…) unidos por un codec; el XML siempre se serializa desde la capa SII-shaped en el orden del XSD. Una sola entrada `dte-sdk` (todo desde la raíz). Criptografía y XML con `node-forge`, `@xmldom/xmldom` y `fast-xml-parser`; RUT exclusivamente con `rut.ts`.
+**Architecture:** Immutable data + pure functions (no classes except `DteError`). Two models: an English domain (`Document`, `Totals`…) and an SII-shaped one with the official tags (`SiiDocumento`, `MntTotal`…) joined by a codec; XML is always serialized from the SII-shaped layer in XSD order. A single `dte-sdk` entry (everything from the root). Cryptography and XML with `node-forge`, `@xmldom/xmldom` and `fast-xml-parser`; RUT exclusively with `rut.ts`.
 
-**Tech Stack:** TypeScript 5.9 (strict), Node ≥ 20, Jest 30 + ts-jest, expect-type, fast-check, ESLint 9 + Prettier, esbuild (bundle ESM+CJS minificado), size-limit, node-forge 1.4.2, @xmldom/xmldom 0.8.15, fast-xml-parser 5.11.2, rut.ts 5.0.0.
+**Tech Stack:** TypeScript 5.9 (strict), Node ≥ 20, Jest 30 + ts-jest, expect-type, fast-check, ESLint 9 + Prettier, esbuild (minified ESM+CJS bundle), size-limit, node-forge 1.4.2, @xmldom/xmldom 0.8.15, fast-xml-parser 5.11.2, rut.ts 5.0.0.
 
-**Spec:** `docs/superpowers/specs/2026-10-31-dte-sdk-architecture-and-phase-1-design.md` (secciones 4 y 5 son el contrato: estructura, API y glosario).
+**Spec:** `docs/superpowers/specs/2026-10-31-dte-sdk-architecture-and-phase-1-design.md` (sections 4 and 5 are the contract: layout, API and glossary).
 
 ---
 
-## Convenciones que aplican a TODAS las tareas
+## Conventions that apply to EVERY task
 
-1. **JSDoc bilingüe obligatorio** en cada símbolo exportado y cada campo de tipo:
+1. **Bilingual JSDoc is mandatory** on every exported symbol and every type field:
    ```ts
    /**
     * EN: What it is or does.
-    * ES: `EtiquetaSII` — Qué es o qué hace.
+    * ES: `SiiTag` — Qué es o qué hace.
     */
    ```
-   En `@param`/`@returns`/`@throws`: `EN: … ES: …` en la misma línea.
-2. **Sin clases** (solo `DteError`). Sin `let` mutable fuera de bucles locales. Tipos `readonly`.
-3. **Sin PII en mensajes de error**: nunca interpolar RUT, nombres ni textos de ítems en `message`; van en `details`.
-4. **Estilo Prettier del repo**: comillas simples, sin punto y coma, ancho 120, comas finales.
-5. **Tests**: un archivo por módulo en `tests/`, `describe`/`test.each` como rut.ts. Cobertura 100 % (`jest.config.cjs` ya lo exige). Si una rama defensiva es inalcanzable, elimínala; no bajes el umbral.
-6. **Commits** en la rama `feat/core-issuance`, mensaje convencional en inglés, terminados en la línea `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`. Nada de datos reales (RUT, certificados, rutas locales): `npm run scan` lo verifica.
-7. Los comandos se corren desde la raíz del repo.
-8. **Fixtures**: `tests/fixtures/` (certificado autofirmado sintético, CAF sintéticos). Se generan con `node scripts/make-fixtures.mjs` **una sola vez** y se versionan; regenerarlos cambia llaves y obliga a regenerar los snapshots.
-9. **Nada público nombra a la implementación de referencia**: ni código, ni comentarios, ni tests, ni commits. Descríbase el comportamiento del SII directamente.
+   In `@param`/`@returns`/`@throws`: `EN: … ES: …` on the same line.
+2. **No classes** (only `DteError`). No mutable `let` outside local loops. `readonly` types.
+3. **No PII in error messages**: never interpolate RUTs, names or item text into `message`; they go in `details`.
+4. **Repository Prettier style**: single quotes, no semicolons, width 120, trailing commas.
+5. **Tests**: one file per module in `tests/`, `describe`/`test.each` as in rut.ts. 100 % coverage (`jest.config.cjs` already enforces it). If a defensive branch is unreachable, remove it; do not lower the threshold.
+6. **Commits** on the `feat/core-issuance` branch, conventional message in English, ending with the line `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`. No real data (RUTs, certificates, local paths): `npm run scan` checks it.
+7. Commands run from the repository root.
+8. **Fixtures**: `tests/fixtures/` (synthetic self-signed certificate, synthetic CAF files). They are generated with `node scripts/make-fixtures.mjs` **once** and committed; regenerating them changes the keys and forces the snapshots to be regenerated.
+9. **Nothing public names any third-party reference implementation**: not code, comments, tests or commits. Describe the SII behaviour directly.
 
-## Mapa de archivos
+## File map
 
 ```
 scripts/
@@ -88,21 +88,21 @@ tests/
 
 ---
 
-### Task 0: Scaffolding (rama, dependencias, build con esbuild, fixtures, scan)
+### Task 0: Scaffolding (branch, dependencies, esbuild build, fixtures, scan)
 
 **Files:**
 - Modify: `package.json`, `.size-limit.json`, `jest.config.cjs`, `tsconfig.json`, `.gitignore`, `.github/workflows/ci.yml`, `src/index.ts`
 - Create: `scripts/build.mjs`, `scripts/make-fixtures.mjs`, `scripts/scan-real-data.mjs`, `tests/support/fixtures.ts`, `tests/fixtures/README.md`
 - Delete: `scripts/postbuild.mjs`, `tests/hello.test.ts`
 
-- [ ] **Step 1: Crear la rama y limpiar `dist/`**
+- [ ] **Step 1: Create the branch and clean `dist/`**
 
 ```bash
 git checkout -b feat/core-issuance
 rm -rf dist coverage
 ```
 
-- [ ] **Step 2: Instalar dependencias (exactas; `.npmrc` ya tiene `save-exact`)**
+- [ ] **Step 2: Install dependencies (exact; `.npmrc` already has `save-exact`)**
 
 ```bash
 npm install node-forge@1.4.2 @xmldom/xmldom@0.8.15 fast-xml-parser@5.11.2 rut.ts@5.0.0
@@ -110,11 +110,11 @@ npm install --save-dev @types/node-forge@1.3.14 @types/node@26.6.6 esbuild@0.28.
 npm uninstall terser
 ```
 
-Expected: `package.json` con `dependencies` (4) y `devDependencies` sin `terser`.
+Expected: `package.json` with `dependencies` (4) and `devDependencies` without `terser`.
 
-- [ ] **Step 3: Reemplazar el build por esbuild**
+- [ ] **Step 3: Replace the build with esbuild**
 
-Crear `scripts/build.mjs`:
+Create `scripts/build.mjs`:
 
 ```js
 // Build: one bundle per module format, minified, with a source map that points at the
@@ -151,13 +151,13 @@ await mkdir('dist/cjs', { recursive: true })
 await writeFile('dist/cjs/package.json', '{"type":"commonjs"}\n')
 ```
 
-Borrar `scripts/postbuild.mjs`:
+Delete `scripts/postbuild.mjs`:
 
 ```bash
 git rm scripts/postbuild.mjs
 ```
 
-En `package.json`, reemplazar los scripts `build`, `build:esm`, `build:cjs` por:
+In `package.json`, replace the `build`, `build:esm` and `build:cjs` scripts with:
 
 ```json
 "build": "node scripts/build.mjs && npm run build:types",
@@ -167,31 +167,31 @@ En `package.json`, reemplazar los scripts `build`, `build:esm`, `build:cjs` por:
 "test:differential": "RUN_DIFFERENTIAL=1 jest --config jest.config.cjs tests/differential.test.ts",
 ```
 
-y en `prepublishOnly` agregar el scan: `"prepublishOnly": "npm run scan && npm run test && npm run prettier && npm run lint"`.
-Cambiar `description` a `"TypeScript SDK for Chilean electronic tax documents (DTE): build, stamp (TED), sign and envelope DTEs for the SII."`.
+and add the scan to `prepublishOnly`: `"prepublishOnly": "npm run scan && npm run test && npm run prettier && npm run lint"`.
+Change `description` to `"TypeScript SDK for Chilean electronic tax documents (DTE): build, stamp (TED), sign and envelope DTEs for the SII."`.
 
-En `tsconfig.json` agregar dentro de `compilerOptions`: `"types": ["node"]` (los tests usan `node:fs`).
+In `tsconfig.json` add inside `compilerOptions`: `"types": ["node"]` (the tests use `node:fs`).
 
-En `.size-limit.json` poner `"limit": "60 kB"` en las dos entradas (se ajusta en la Task 23 al valor medido + 10 %).
+In `.size-limit.json` set `"limit": "60 kB"` on both entries (Task 23 adjusts it to the measured value + 10 %).
 
-En `jest.config.cjs` cambiar `testPathIgnorePatterns` por:
+In `jest.config.cjs` replace `testPathIgnorePatterns` with:
 
 ```js
 testPathIgnorePatterns: ['/node_modules/', '<rootDir>/.claude/', '<rootDir>/tests/support/'],
 ```
 
-En `.gitignore` agregar una línea `local/` (harness diferencial y referencia, nunca versionados).
+In `.gitignore` add a `local/` line (differential harness and reference material, never committed).
 
-En `.github/workflows/ci.yml`:
-- renombrar el paso `Build (tsc ESM + CJS + terser)` a `Build (esbuild ESM + CJS + tsc types)`;
-- en el job `lint`, agregar después del paso ESLint:
+In `.github/workflows/ci.yml`:
+- rename the step `Build (tsc ESM + CJS + terser)` to `Build (esbuild ESM + CJS + tsc types)`;
+- in the `lint` job, add after the ESLint step:
   ```yaml
       - name: Real-data scan (no real RUTs, local paths or secrets)
         run: npm run scan
   ```
-- en los smokes de Deno y Bun reemplazar `m.hello() !== 'dte-sdk is coming'` por `typeof m.createDocument !== 'function'` (ambos).
+- in the Deno and Bun smokes replace `m.hello() !== 'dte-sdk is coming'` with `typeof m.createDocument !== 'function'` (both).
 
-- [ ] **Step 4: Dejar `src/index.ts` vacío y borrar el test del placeholder**
+- [ ] **Step 4: Leave `src/index.ts` empty and delete the placeholder test**
 
 `src/index.ts`:
 
@@ -204,9 +204,9 @@ export {}
 git rm tests/hello.test.ts
 ```
 
-- [ ] **Step 5: Script de fixtures**
+- [ ] **Step 5: Fixture script**
 
-Crear `scripts/make-fixtures.mjs`:
+Create `scripts/make-fixtures.mjs`:
 
 ```js
 // Generates the synthetic test fixtures under tests/fixtures. Run ONCE and commit the
@@ -315,7 +315,7 @@ await writeFile(`${OUT}/caf-33-old.xml`, makeCaf({ type: 33, from: 101, to: 200,
 console.log(`fixtures written to ${OUT}`)
 ```
 
-Crear `tests/fixtures/README.md`:
+Create `tests/fixtures/README.md`:
 
 ```md
 # Test fixtures
@@ -337,7 +337,7 @@ private keys were generated locally and the PFX password is `secret`.
 Regenerating changes every key, so `tests/golden/` must be regenerated in the same commit.
 ```
 
-Crear `tests/support/fixtures.ts`:
+Create `tests/support/fixtures.ts`:
 
 ```ts
 import { readFileSync } from 'node:fs'
@@ -356,14 +356,14 @@ export const ISSUER_RUT = '76543210-3'
 export const RECEIVER_RUT = '12345678-5'
 ```
 
-- [ ] **Step 6: Generar y versionar las fixtures**
+- [ ] **Step 6: Generate and commit the fixtures**
 
 Run: `npm run fixtures && ls -la tests/fixtures`
-Expected: 8 archivos más el README; `cert.pfx` ≈ 2.7 kB.
+Expected: 8 files plus the README; `cert.pfx` ≈ 2.7 kB.
 
-- [ ] **Step 7: Script de escaneo de datos reales**
+- [ ] **Step 7: Real-data scan script**
 
-Crear `scripts/scan-real-data.mjs`:
+Create `scripts/scan-real-data.mjs`:
 
 ```js
 // Fails when a tracked file in the published/scanned areas contains a RUT outside the
@@ -426,10 +426,10 @@ console.log(`Real-data scan ok (${tracked.length} files)`)
 Run: `npm run scan`
 Expected: `Real-data scan ok (N files)`.
 
-- [ ] **Step 8: Verificar que todo sigue verde y commitear**
+- [ ] **Step 8: Check everything is still green and commit**
 
 Run: `npm test && npm run lint && npm run build && npm run size`
-Expected: Jest "No tests found" sale con código 1 — por eso en este paso usa `npx jest --passWithNoTests`; build genera `dist/esm/index.min.js` y `dist/cjs/index.min.js`; size-limit pasa.
+Expected: Jest "No tests found" exits with code 1 — so use `npx jest --passWithNoTests` in this step; the build produces `dist/esm/index.min.js` and `dist/cjs/index.min.js`; size-limit passes.
 
 ```bash
 git add -A
@@ -440,13 +440,13 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 1: Errores tipados (`src/errors.ts`)
+### Task 1: Typed errors (`src/errors.ts`)
 
 **Files:**
 - Create: `src/errors.ts`
 - Test: `tests/errors.test.ts`
 
-- [ ] **Step 1: Test que falla**
+- [ ] **Step 1: Failing test**
 
 `tests/errors.test.ts`:
 
@@ -486,12 +486,12 @@ describe('DteError', () => {
 })
 ```
 
-- [ ] **Step 2: Correr y ver que falla**
+- [ ] **Step 2: Run it and watch it fail**
 
 Run: `npx jest tests/errors.test.ts`
 Expected: FAIL, `Cannot find module '../src/errors'`.
 
-- [ ] **Step 3: Implementación**
+- [ ] **Step 3: Implementation**
 
 `src/errors.ts`:
 
@@ -595,10 +595,10 @@ export class DteError extends Error {
 export const isDteError = (value: unknown): value is DteError => value instanceof DteError
 ```
 
-- [ ] **Step 4: Correr y ver que pasa**
+- [ ] **Step 4: Run it and watch it pass**
 
 Run: `npx jest tests/errors.test.ts`
-Expected: PASS (5 tests + los `test.each`).
+Expected: PASS (5 tests + the `test.each` cases).
 
 - [ ] **Step 5: Commit**
 
@@ -611,13 +611,13 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 2: Catálogo de tipos de documento (`src/catalogs/document-types.ts`)
+### Task 2: Document type catalog (`src/catalogs/document-types.ts`)
 
 **Files:**
 - Create: `src/catalogs/document-types.ts`
 - Test: `tests/document-types.test.ts`
 
-- [ ] **Step 1: Test que falla**
+- [ ] **Step 1: Failing test**
 
 `tests/document-types.test.ts`:
 
@@ -681,12 +681,12 @@ describe('document types', () => {
 })
 ```
 
-- [ ] **Step 2: Correr y ver que falla**
+- [ ] **Step 2: Run it and watch it fail**
 
 Run: `npx jest tests/document-types.test.ts`
-Expected: FAIL, módulo no encontrado.
+Expected: FAIL, module not found.
 
-- [ ] **Step 3: Implementación**
+- [ ] **Step 3: Implementation**
 
 `src/catalogs/document-types.ts`:
 
@@ -792,7 +792,7 @@ export const isTransferable = (type: DocumentType): boolean => TRANSFERABLE_TYPE
 export const documentTypeName = (type: DocumentType, variant: keyof NameVariants = 'long'): string => NAMES[type][variant]
 ```
 
-- [ ] **Step 4: Correr y ver que pasa**
+- [ ] **Step 4: Run it and watch it pass**
 
 Run: `npx jest tests/document-types.test.ts`
 Expected: PASS.
@@ -808,13 +808,13 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 3: Catálogos de códigos y endpoints (`src/catalogs/codes.ts`, `src/catalogs/endpoints.ts`)
+### Task 3: Code and endpoint catalogs (`src/catalogs/codes.ts`, `src/catalogs/endpoints.ts`)
 
 **Files:**
 - Create: `src/catalogs/codes.ts`, `src/catalogs/endpoints.ts`
 - Test: `tests/codes.test.ts`, `tests/endpoints.test.ts`
 
-- [ ] **Step 1: Tests que fallan**
+- [ ] **Step 1: Failing tests**
 
 `tests/codes.test.ts`:
 
@@ -887,12 +887,12 @@ describe('endpoints', () => {
 })
 ```
 
-- [ ] **Step 2: Correr y ver que fallan**
+- [ ] **Step 2: Run them and watch them fail**
 
 Run: `npx jest tests/codes.test.ts tests/endpoints.test.ts`
-Expected: FAIL, módulos no encontrados.
+Expected: FAIL, modules not found.
 
-- [ ] **Step 3: Implementación**
+- [ ] **Step 3: Implementation**
 
 `src/catalogs/codes.ts`:
 
@@ -1084,7 +1084,7 @@ export const CLAIM_WS_ENDPOINTS: Readonly<Record<Environment, string>> = {
 export const UPLOAD_USER_AGENT = 'Mozilla/4.0 ( compatible; PROG 1.0; Windows NT)'
 ```
 
-- [ ] **Step 4: Correr y ver que pasan**
+- [ ] **Step 4: Run them and watch them pass**
 
 Run: `npx jest tests/codes.test.ts tests/endpoints.test.ts`
 Expected: PASS.
@@ -1100,13 +1100,13 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 4: Clasificación de estados del SII (`src/catalogs/upload-status.ts`)
+### Task 4: SII status classification (`src/catalogs/upload-status.ts`)
 
 **Files:**
 - Create: `src/catalogs/upload-status.ts`
 - Test: `tests/upload-status.test.ts`
 
-- [ ] **Step 1: Test que falla**
+- [ ] **Step 1: Failing test**
 
 `tests/upload-status.test.ts`:
 
@@ -1198,12 +1198,12 @@ describe('document status (QueryEstDte)', () => {
 })
 ```
 
-- [ ] **Step 2: Correr y ver que falla**
+- [ ] **Step 2: Run it and watch it fail**
 
 Run: `npx jest tests/upload-status.test.ts`
-Expected: FAIL, módulo no encontrado.
+Expected: FAIL, module not found.
 
-- [ ] **Step 3: Implementación**
+- [ ] **Step 3: Implementation**
 
 `src/catalogs/upload-status.ts`:
 
@@ -1342,7 +1342,7 @@ export const documentStatusMessage = (code: string): string => {
 }
 ```
 
-- [ ] **Step 4: Correr y ver que pasa**
+- [ ] **Step 4: Run it and watch it pass**
 
 Run: `npx jest tests/upload-status.test.ts`
 Expected: PASS.
@@ -1358,15 +1358,15 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 5: Adaptador de RUT sobre rut.ts (`src/model/rut.ts`)
+### Task 5: RUT adapter over rut.ts (`src/model/rut.ts`)
 
 **Files:**
 - Create: `src/model/rut.ts`
 - Test: `tests/rut.test.ts`
 
-Regla: **ninguna lógica de RUT propia**; todo pasa por `rut.ts`.
+Rule: **no RUT logic of our own**; everything goes through `rut.ts`.
 
-- [ ] **Step 1: Test que falla**
+- [ ] **Step 1: Failing test**
 
 `tests/rut.test.ts`:
 
@@ -1420,12 +1420,12 @@ describe('splitSiiRut', () => {
 })
 ```
 
-- [ ] **Step 2: Correr y ver que falla**
+- [ ] **Step 2: Run it and watch it fail**
 
 Run: `npx jest tests/rut.test.ts`
-Expected: FAIL, módulo no encontrado.
+Expected: FAIL, module not found.
 
-- [ ] **Step 3: Implementación**
+- [ ] **Step 3: Implementation**
 
 `src/model/rut.ts`:
 
@@ -1479,7 +1479,7 @@ export const splitSiiRut = (rut: SiiRut): { readonly body: string; readonly veri
 }
 ```
 
-- [ ] **Step 4: Correr y ver que pasa**
+- [ ] **Step 4: Run it and watch it pass**
 
 Run: `npx jest tests/rut.test.ts`
 Expected: PASS.
@@ -1495,13 +1495,13 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 6: Sanitización de texto y codificación Latin-1 (`src/text/sanitize.ts`, `src/text/latin1.ts`)
+### Task 6: Text sanitization and Latin-1 encoding (`src/text/sanitize.ts`, `src/text/latin1.ts`)
 
 **Files:**
 - Create: `src/text/sanitize.ts`, `src/text/latin1.ts`
 - Test: `tests/sanitize.test.ts`, `tests/latin1.test.ts`
 
-- [ ] **Step 1: Tests que fallan**
+- [ ] **Step 1: Failing tests**
 
 `tests/sanitize.test.ts`:
 
@@ -1618,12 +1618,12 @@ describe('latin1', () => {
 })
 ```
 
-- [ ] **Step 2: Correr y ver que fallan**
+- [ ] **Step 2: Run them and watch them fail**
 
 Run: `npx jest tests/sanitize.test.ts tests/latin1.test.ts`
-Expected: FAIL, módulos no encontrados.
+Expected: FAIL, modules not found.
 
-- [ ] **Step 3: Implementación**
+- [ ] **Step 3: Implementation**
 
 `src/text/sanitize.ts`:
 
@@ -1750,7 +1750,7 @@ export const decodeLatin1 = (bytes: Uint8Array): string => {
 }
 ```
 
-- [ ] **Step 4: Correr y ver que pasan**
+- [ ] **Step 4: Run them and watch them pass**
 
 Run: `npx jest tests/sanitize.test.ts tests/latin1.test.ts`
 Expected: PASS.
@@ -1766,13 +1766,13 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 7: Fechas en hora de Chile (`src/time/chile.ts`)
+### Task 7: Dates in Chile time (`src/time/chile.ts`)
 
 **Files:**
 - Create: `src/time/chile.ts`
 - Test: `tests/chile.test.ts`
 
-- [ ] **Step 1: Test que falla**
+- [ ] **Step 1: Failing test**
 
 `tests/chile.test.ts`:
 
@@ -1841,12 +1841,12 @@ describe('toIsoDate', () => {
 })
 ```
 
-- [ ] **Step 2: Correr y ver que falla**
+- [ ] **Step 2: Run it and watch it fail**
 
 Run: `npx jest tests/chile.test.ts`
-Expected: FAIL, módulo no encontrado.
+Expected: FAIL, module not found.
 
-- [ ] **Step 3: Implementación**
+- [ ] **Step 3: Implementation**
 
 `src/time/chile.ts`:
 
@@ -1937,7 +1937,7 @@ export const toIsoDate = (value: string, field = 'date'): string => {
 }
 ```
 
-- [ ] **Step 4: Correr y ver que pasa**
+- [ ] **Step 4: Run it and watch it pass**
 
 Run: `npx jest tests/chile.test.ts`
 Expected: PASS.
@@ -1953,15 +1953,15 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 8: Tipos del modelo de dominio y del modelo SII (`src/model/document.ts`, `src/model/sii.ts`, `src/model/cover.ts`)
+### Task 8: Domain model and SII model types (`src/model/document.ts`, `src/model/sii.ts`, `src/model/cover.ts`)
 
 **Files:**
 - Create: `src/model/document.ts`, `src/model/sii.ts`, `src/model/cover.ts`
-- Test: `tests/model-types.test.ts` (nivel de tipos con `expect-type`)
+- Test: `tests/model-types.test.ts` (type level, with `expect-type`)
 
-Estos archivos son solo tipos: el test se verifica al compilar. Cada campo lleva JSDoc `EN:`/`ES:` con la etiqueta SII; el glosario de la spec (sección 5) es la fuente.
+These files are types only: the test is checked at compile time. Every field carries `EN:`/`ES:` JSDoc with the SII tag; the spec glossary (section 5) is the source.
 
-- [ ] **Step 1: Test que falla**
+- [ ] **Step 1: Failing test**
 
 `tests/model-types.test.ts`:
 
@@ -1994,12 +1994,12 @@ test('model types compile', () => {
 })
 ```
 
-- [ ] **Step 2: Correr y ver que falla**
+- [ ] **Step 2: Run it and watch it fail**
 
 Run: `npx jest tests/model-types.test.ts`
-Expected: FAIL (ts-jest: módulos no encontrados).
+Expected: FAIL (ts-jest: modules not found).
 
-- [ ] **Step 3: Implementación**
+- [ ] **Step 3: Implementation**
 
 `src/model/document.ts`:
 
@@ -2520,7 +2520,7 @@ export type DocumentInput = {
 }
 ```
 
-`src/model/sii.ts` (etiquetas oficiales, mismo orden que el XSD):
+`src/model/sii.ts` (official tags, same order as the XSD):
 
 ```ts
 /**
@@ -2785,10 +2785,10 @@ export type EnvelopeCover = {
 }
 ```
 
-- [ ] **Step 4: Correr y ver que pasa**
+- [ ] **Step 4: Run it and watch it pass**
 
 Run: `npx jest tests/model-types.test.ts && npx tsc --noEmit`
-Expected: PASS y `tsc` sin errores.
+Expected: PASS and `tsc` without errors.
 
 - [ ] **Step 5: Commit**
 
@@ -2801,24 +2801,24 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 9: Cálculo de montos y totales (`src/totals/calculate.ts`)
+### Task 9: Line amounts and totals (`src/totals/calculate.ts`)
 
 **Files:**
 - Create: `src/totals/calculate.ts`
 - Test: `tests/calculate.test.ts`
 
-Reglas:
-- Monto de línea: `round(qty × price)`, descuento `round(base × pct/100)`, recargo igual.
-- Línea con `exemptIndicator` 1 → exento; con 2…6 → no facturable (`MontoNF`, fuera de `MntTotal`); sin indicador → afecta.
-- Tipos 34/41: todo exento (lo decide `createDocument` al poner `exemptIndicator: 1`).
-- Ajustes globales: `%` sobre la base afecta (o exenta/no facturable según `IndExeDR`), `$` directo. Descuento resta, recargo suma.
-- `pricesIncludeVat`: afecto es bruto → `neto = round(bruto / 1.19)`, `IVA = bruto − neto`, `MntTotal = bruto + exento`.
-- Normal: `IVA = round(neto × 19/100)`, `MntTotal = neto + IVA + exento`.
-- Retención (46): `ImptoReten [{15, 19, IVA}]` y `MntTotal = neto + exento`.
-- Boletas: sin `TasaIVA`. `MntNeto`/`IVA`/`TasaIVA` solo si neto > 0; `MntExe` solo si exento > 0.
-- Sin montos: `{ TasaIVA (si no es boleta), MntTotal: 0 }` (guía de traslado sin valores).
+Rules:
+- Line amount: `round(qty × price)`, discount `round(base × pct/100)`, surcharge likewise.
+- A line with `exemptIndicator` 1 → exempt; with 2…6 → non-billable (`MontoNF`, outside `MntTotal`); without indicator → VAT-affected.
+- Types 34/41: everything exempt (`createDocument` decides it by setting `exemptIndicator: 1`).
+- Global adjustments: `%` over the affected base (or the exempt/non-billable one according to `IndExeDR`), `$` directly. A discount subtracts, a surcharge adds.
+- `pricesIncludeVat`: the affected amount is gross → `net = round(gross / 1.19)`, `VAT = gross − net`, `MntTotal = gross + exempt`.
+- Otherwise: `VAT = round(net × 19/100)`, `MntTotal = net + VAT + exempt`.
+- Withholding (46): `ImptoReten [{15, 19, VAT}]` and `MntTotal = net + exempt`.
+- Receipts: no `TasaIVA`. `MntNeto`/`IVA`/`TasaIVA` only when net > 0; `MntExe` only when exempt > 0.
+- No amounts: `{ TasaIVA (unless a receipt), MntTotal: 0 }` (a transfer guide without values).
 
-- [ ] **Step 1: Test que falla**
+- [ ] **Step 1: Failing test**
 
 `tests/calculate.test.ts`:
 
@@ -2912,12 +2912,12 @@ describe('calculateTotals', () => {
 })
 ```
 
-- [ ] **Step 2: Correr y ver que falla**
+- [ ] **Step 2: Run it and watch it fail**
 
 Run: `npx jest tests/calculate.test.ts`
-Expected: FAIL, módulo no encontrado.
+Expected: FAIL, module not found.
 
-- [ ] **Step 3: Implementación**
+- [ ] **Step 3: Implementation**
 
 `src/totals/calculate.ts`:
 
@@ -3038,7 +3038,7 @@ export const calculateTotals = (items: readonly Pick<LineItem, 'amount' | 'exemp
 }
 ```
 
-- [ ] **Step 4: Correr y ver que pasa**
+- [ ] **Step 4: Run it and watch it pass**
 
 Run: `npx jest tests/calculate.test.ts`
 Expected: PASS.
@@ -3060,7 +3060,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Create: `src/document/create.ts`
 - Test: `tests/create-document.test.ts`
 
-- [ ] **Step 1: Test que falla**
+- [ ] **Step 1: Failing test**
 
 `tests/create-document.test.ts`:
 
@@ -3216,12 +3216,12 @@ describe('createDocument', () => {
 })
 ```
 
-- [ ] **Step 2: Correr y ver que falla**
+- [ ] **Step 2: Run it and watch it fail**
 
 Run: `npx jest tests/create-document.test.ts`
-Expected: FAIL, módulo no encontrado.
+Expected: FAIL, module not found.
 
-- [ ] **Step 3: Implementación**
+- [ ] **Step 3: Implementation**
 
 `src/document/create.ts`:
 
@@ -3494,7 +3494,7 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
 }
 ```
 
-- [ ] **Step 4: Correr y ver que pasa**
+- [ ] **Step 4: Run it and watch it pass**
 
 Run: `npx jest tests/create-document.test.ts`
 Expected: PASS.
@@ -3510,15 +3510,15 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 11: Codec dominio ↔ SII (`src/model/codec.ts`)
+### Task 11: Domain ↔ SII codec (`src/model/codec.ts`)
 
 **Files:**
 - Create: `src/model/codec.ts`
 - Test: `tests/codec.test.ts`
 
-Orden de claves = orden del XSD (`DTE_v10.xsd` / `EnvioBOLETA_v11.xsd`). Es lo único que garantiza que el XML salga en el orden que el schema exige, porque `fast-xml-parser` serializa en el orden de inserción.
+Key order = XSD order (`DTE_v10.xsd` / `EnvioBOLETA_v11.xsd`). It is the only thing that guarantees the XML comes out in the order the schema demands, because `fast-xml-parser` serializes in insertion order.
 
-- [ ] **Step 1: Test que falla**
+- [ ] **Step 1: Failing test**
 
 `tests/codec.test.ts`:
 
@@ -3670,12 +3670,12 @@ describe('fromSiiDocument', () => {
 })
 ```
 
-- [ ] **Step 2: Correr y ver que falla**
+- [ ] **Step 2: Run it and watch it fail**
 
 Run: `npx jest tests/codec.test.ts`
-Expected: FAIL, módulo no encontrado.
+Expected: FAIL, module not found.
 
-- [ ] **Step 3: Implementación**
+- [ ] **Step 3: Implementation**
 
 `src/model/codec.ts`:
 
@@ -4119,10 +4119,10 @@ export const fromSiiDocument = (sii: SiiDocumento): Document => {
 }
 ```
 
-- [ ] **Step 4: Correr y ver que pasa**
+- [ ] **Step 4: Run it and watch it pass**
 
 Run: `npx jest tests/codec.test.ts`
-Expected: PASS. Si el round-trip difiere en `city` (el emisor normalizado siempre trae `city`), es correcto: `createDocument` lo rellena y el codec lo conserva.
+Expected: PASS. If the round trip differs in `city` (the normalized issuer always carries `city`), that is correct: `createDocument` fills it in and the codec keeps it.
 
 - [ ] **Step 5: Commit**
 
@@ -4135,14 +4135,14 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 12: Utilidades XML (`src/xml/escape.ts`, `src/xml/build.ts`, `src/xml/parse.ts`, `src/xml/format.ts`)
+### Task 12: XML utilities (`src/xml/escape.ts`, `src/xml/build.ts`, `src/xml/parse.ts`, `src/xml/format.ts`)
 
 **Files:**
 - Create: `src/xml/escape.ts`, `src/xml/build.ts`, `src/xml/parse.ts`, `src/xml/format.ts`
-- Modify: `tsconfig.json` (`"lib": ["ES2020", "DOM"]`, porque los tipos de `@xmldom/xmldom` 0.8 usan `Document`/`Element` del lib DOM)
+- Modify: `tsconfig.json` (`"lib": ["ES2020", "DOM"]`, because the `@xmldom/xmldom` 0.8 types use `Document`/`Element` from the DOM lib)
 - Test: `tests/xml.test.ts`
 
-- [ ] **Step 1: Test que falla**
+- [ ] **Step 1: Failing test**
 
 `tests/xml.test.ts`:
 
@@ -4239,14 +4239,14 @@ describe('format', () => {
 })
 ```
 
-- [ ] **Step 2: Correr y ver que falla**
+- [ ] **Step 2: Run it and watch it fail**
 
 Run: `npx jest tests/xml.test.ts`
-Expected: FAIL, módulos no encontrados.
+Expected: FAIL, modules not found.
 
-- [ ] **Step 3: Implementación**
+- [ ] **Step 3: Implementation**
 
-En `tsconfig.json`, cambiar `"lib": ["ES2020"]` por `"lib": ["ES2020", "DOM"]`.
+In `tsconfig.json`, change `"lib": ["ES2020"]` to `"lib": ["ES2020", "DOM"]`.
 
 `src/xml/escape.ts`:
 
@@ -4391,7 +4391,7 @@ export const formatBase64Columns = (xml: string): string =>
   )
 ```
 
-- [ ] **Step 4: Correr y ver que pasa**
+- [ ] **Step 4: Run it and watch it pass**
 
 Run: `npx jest tests/xml.test.ts`
 Expected: PASS.
@@ -4407,15 +4407,15 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 13: Canonicalización C14N del subconjunto SII (`src/xml/c14n.ts`)
+### Task 13: C14N canonicalization of the SII subset (`src/xml/c14n.ts`)
 
 **Files:**
 - Create: `src/xml/c14n.ts`
 - Test: `tests/c14n.test.ts`
 
-Reglas de Canonical XML 1.0 que importan aquí: el elemento apex declara **todos** los namespaces en alcance (los hereda de sus ancestros); los hijos omiten un `xmlns` igual al heredado; atributos ordenados (`xmlns` primero, luego `xmlns:*`, luego el resto); en texto se escapan solo `& < >` y `\r` (**nunca** `'` ni `"`: escaparlos cambia el digest y el SII rechaza el sobre completo con `RFR`); los elementos vacíos salen como `<X></X>`; los comentarios se omiten; los saltos de línea entre elementos se conservan como texto.
+Canonical XML 1.0 rules that matter here: the apex element declares **every** namespace in scope (inherited from its ancestors); children omit an `xmlns` equal to the inherited one; attributes are sorted (`xmlns` first, then `xmlns:*`, then the rest); text escapes only `& < >` and `\r` (**never** `'` or `"`: escaping them changes the digest and the SII rejects the whole envelope with `RFR`); empty elements render as `<X></X>`; comments are dropped; line breaks between elements are kept as text.
 
-- [ ] **Step 1: Test que falla**
+- [ ] **Step 1: Failing test**
 
 `tests/c14n.test.ts`:
 
@@ -4478,12 +4478,12 @@ describe('canonicalizeElement', () => {
 })
 ```
 
-- [ ] **Step 2: Correr y ver que falla**
+- [ ] **Step 2: Run it and watch it fail**
 
 Run: `npx jest tests/c14n.test.ts`
-Expected: FAIL, módulo no encontrado.
+Expected: FAIL, module not found.
 
-- [ ] **Step 3: Implementación**
+- [ ] **Step 3: Implementation**
 
 `src/xml/c14n.ts`:
 
@@ -4585,7 +4585,7 @@ export const canonicalizeElement = (element: Element): string => {
 }
 ```
 
-- [ ] **Step 4: Correr y ver que pasa**
+- [ ] **Step 4: Run it and watch it pass**
 
 Run: `npx jest tests/c14n.test.ts`
 Expected: PASS.
@@ -4601,13 +4601,13 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 14: Primitivas criptográficas y X.509 (`src/crypto/digest.ts`, `src/crypto/rsa.ts`, `src/crypto/x509.ts`)
+### Task 14: Cryptographic primitives and X.509 (`src/crypto/digest.ts`, `src/crypto/rsa.ts`, `src/crypto/x509.ts`)
 
 **Files:**
 - Create: `src/crypto/digest.ts`, `src/crypto/rsa.ts`, `src/crypto/x509.ts`
 - Test: `tests/crypto.test.ts`
 
-- [ ] **Step 1: Test que falla**
+- [ ] **Step 1: Failing test**
 
 `tests/crypto.test.ts`:
 
@@ -4713,12 +4713,12 @@ describe('x509', () => {
 })
 ```
 
-- [ ] **Step 2: Correr y ver que falla**
+- [ ] **Step 2: Run it and watch it fail**
 
 Run: `npx jest tests/crypto.test.ts`
-Expected: FAIL, módulos no encontrados.
+Expected: FAIL, modules not found.
 
-- [ ] **Step 3: Implementación**
+- [ ] **Step 3: Implementation**
 
 `src/crypto/digest.ts`:
 
@@ -4941,10 +4941,10 @@ export const parseCertificatePem = (certificatePem: string): ParsedCertificate =
 }
 ```
 
-- [ ] **Step 4: Correr y ver que pasa**
+- [ ] **Step 4: Run it and watch it pass**
 
 Run: `npx jest tests/crypto.test.ts`
-Expected: PASS. Si `attribute.shortName`/`attribute.name` quedan tipados como `string | undefined` en `@types/node-forge`, el filtro de `subjectFields` ya lo cubre; si TypeScript se queja por `attribute.value` de tipo `any`, deja el `String(...)`.
+Expected: PASS. If `attribute.shortName`/`attribute.name` are typed as `string | undefined` in `@types/node-forge`, the `subjectFields` filter already covers it; if TypeScript complains about `attribute.value` being `any`, keep the `String(...)`.
 
 - [ ] **Step 5: Commit**
 
@@ -4957,13 +4957,13 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 15: Certificado desde PFX y PEM (`src/certificate/certificate.ts`, `src/certificate/pem.ts`, `src/certificate/pkcs12.ts`)
+### Task 15: Certificate from PFX and PEM (`src/certificate/certificate.ts`, `src/certificate/pem.ts`, `src/certificate/pkcs12.ts`)
 
 **Files:**
 - Create: `src/certificate/certificate.ts`, `src/certificate/pem.ts`, `src/certificate/pkcs12.ts`
 - Test: `tests/certificate.test.ts`
 
-- [ ] **Step 1: Test que falla**
+- [ ] **Step 1: Failing test**
 
 `tests/certificate.test.ts`:
 
@@ -5074,12 +5074,12 @@ describe('loadCertificateFromPem', () => {
 })
 ```
 
-- [ ] **Step 2: Correr y ver que falla**
+- [ ] **Step 2: Run it and watch it fail**
 
 Run: `npx jest tests/certificate.test.ts`
-Expected: FAIL, módulos no encontrados.
+Expected: FAIL, modules not found.
 
-- [ ] **Step 3: Implementación**
+- [ ] **Step 3: Implementation**
 
 `src/certificate/certificate.ts`:
 
@@ -5285,10 +5285,10 @@ export const loadCertificateFromPkcs12 = (bytes: Uint8Array, password: string, o
 }
 ```
 
-- [ ] **Step 4: Correr y ver que pasa**
+- [ ] **Step 4: Run it and watch it pass**
 
 Run: `npx jest tests/certificate.test.ts`
-Expected: PASS. Si la cobertura marca sin cubrir la rama `nonCa ?? certificates[0]` o `no private key`, agrega en el test un PFX armado con `forge.pkcs12.toPkcs12Asn1` que contenga solo un certificado CA, y otro sin llave (`toPkcs12Asn1(null, [cert], 'pw')`).
+Expected: PASS. If coverage flags the `nonCa ?? certificates[0]` or `no private key` branch as uncovered, add to the test a PFX built with `forge.pkcs12.toPkcs12Asn1` that holds only a CA certificate, and another without a key (`toPkcs12Asn1(null, [cert], 'pw')`).
 
 - [ ] **Step 5: Commit**
 
@@ -5307,7 +5307,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Create: `src/caf/parse.ts`, `src/caf/validity.ts`, `src/caf/sign.ts`
 - Test: `tests/caf.test.ts`
 
-- [ ] **Step 1: Test que falla**
+- [ ] **Step 1: Failing test**
 
 `tests/caf.test.ts`:
 
@@ -5423,12 +5423,12 @@ describe('sign', () => {
 })
 ```
 
-- [ ] **Step 2: Correr y ver que falla**
+- [ ] **Step 2: Run it and watch it fail**
 
 Run: `npx jest tests/caf.test.ts`
-Expected: FAIL, módulos no encontrados.
+Expected: FAIL, modules not found.
 
-- [ ] **Step 3: Implementación**
+- [ ] **Step 3: Implementation**
 
 `src/caf/parse.ts`:
 
@@ -5619,7 +5619,7 @@ export const verifyWithCaf = (caf: Pick<Caf, 'publicKey'>, data: string, signatu
   rsaSha1VerifyBase64(caf.publicKey, data, 'latin1', signatureBase64)
 ```
 
-- [ ] **Step 4: Correr y ver que pasa**
+- [ ] **Step 4: Run it and watch it pass**
 
 Run: `npx jest tests/caf.test.ts`
 Expected: PASS.
@@ -5635,15 +5635,15 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 17: Timbre electrónico TED (`src/ted/build.ts`)
+### Task 17: TED electronic stamp (`src/ted/build.ts`)
 
 **Files:**
 - Create: `src/ted/build.ts`
 - Test: `tests/ted.test.ts`
 
-El string `<DD>` es exacto y sin espacios: `RE, TD, F, FE, RR, RSR, MNT, IT1, <CAF>…</CAF>, TSTED`. `RSR` e `IT1` se pliegan a ASCII **y después** se truncan a 40 (el plegado puede alargar: ß→ss). El `<CAF>` va byte a byte como lo emitió el SII. `TSTED` en hora de Chile. La firma es SHA1withRSA sobre los bytes Latin-1 del `<DD>`.
+The `<DD>` string is exact and has no whitespace: `RE, TD, F, FE, RR, RSR, MNT, IT1, <CAF>…</CAF>, TSTED`. `RSR` and `IT1` are folded to ASCII **and then** truncated to 40 (folding can lengthen: ß→ss). The `<CAF>` goes byte for byte as the SII issued it. `TSTED` in Chile time. The signature is SHA1withRSA over the Latin-1 bytes of `<DD>`.
 
-- [ ] **Step 1: Test que falla**
+- [ ] **Step 1: Failing test**
 
 `tests/ted.test.ts`:
 
@@ -5733,12 +5733,12 @@ describe('stampDocument', () => {
 })
 ```
 
-- [ ] **Step 2: Correr y ver que falla**
+- [ ] **Step 2: Run it and watch it fail**
 
 Run: `npx jest tests/ted.test.ts`
-Expected: FAIL, módulo no encontrado.
+Expected: FAIL, module not found.
 
-- [ ] **Step 3: Implementación**
+- [ ] **Step 3: Implementation**
 
 `src/ted/build.ts`:
 
@@ -5868,7 +5868,7 @@ export const verifyTed = (tedXml: string, caf: Pick<Caf, 'publicKey'>): boolean 
 }
 ```
 
-- [ ] **Step 4: Correr y ver que pasa**
+- [ ] **Step 4: Run it and watch it pass**
 
 Run: `npx jest tests/ted.test.ts`
 Expected: PASS.
@@ -5884,15 +5884,15 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 18: Firma XMLDSig envuelta (`src/signature/xmldsig.ts`)
+### Task 18: Enveloped XMLDSig signature (`src/signature/xmldsig.ts`)
 
 **Files:**
 - Create: `src/signature/xmldsig.ts`
 - Test: `tests/xmldsig.test.ts`
 
-Detalles que el SII exige: `SignedInfo` canónico firmado con los namespaces heredados (`xmlns:xsi` del raíz incluido) y elementos vacíos expandidos; `SignedInfo` guardado en forma compacta (`<X/>`), con o sin `xmlns:xsi` según el documento (en el DTE no se escribe, en sobres y libros sí: ambas canonicalizan igual); `SignatureValue`, `Modulus` y `X509Certificate` a 64 columnas; `KeyInfo` con `RSAKeyValue` y `X509Data`; la `Signature` va justo después del elemento firmado, antes del cierre del raíz.
+Details the SII demands: the canonical `SignedInfo` is signed with the inherited namespaces (the root `xmlns:xsi` included) and expanded empty elements; the stored `SignedInfo` is compact (`<X/>`), with or without `xmlns:xsi` depending on the document (not written in the DTE, written in envelopes and books: both canonicalize the same); `SignatureValue`, `Modulus` and `X509Certificate` at 64 columns; `KeyInfo` with `RSAKeyValue` and `X509Data`; the `Signature` goes right after the signed element, before the root closing tag.
 
-- [ ] **Step 1: Test que falla**
+- [ ] **Step 1: Failing test**
 
 `tests/xmldsig.test.ts`:
 
@@ -6055,12 +6055,12 @@ describe('verifyEnveloped resists signature wrapping', () => {
 })
 ```
 
-- [ ] **Step 2: Correr y ver que falla**
+- [ ] **Step 2: Run it and watch it fail**
 
 Run: `npx jest tests/xmldsig.test.ts`
-Expected: FAIL, módulo no encontrado.
+Expected: FAIL, module not found.
 
-- [ ] **Step 3: Implementación**
+- [ ] **Step 3: Implementation**
 
 `src/signature/xmldsig.ts`:
 
@@ -6269,7 +6269,7 @@ export const verifyEnveloped = (
 }
 ```
 
-- [ ] **Step 4: Correr y ver que pasa**
+- [ ] **Step 4: Run it and watch it pass**
 
 Run: `npx jest tests/xmldsig.test.ts`
 Expected: PASS.
@@ -6285,13 +6285,13 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 19: XML del documento, firma y pipeline (`src/document/build-xml.ts`, `src/document/sign.ts`, `src/document/issue.ts`)
+### Task 19: Document XML, signature and pipeline (`src/document/build-xml.ts`, `src/document/sign.ts`, `src/document/issue.ts`)
 
 **Files:**
 - Create: `src/document/build-xml.ts`, `src/document/sign.ts`, `src/document/issue.ts`
 - Test: `tests/document.test.ts`
 
-- [ ] **Step 1: Test que falla**
+- [ ] **Step 1: Failing test**
 
 `tests/document.test.ts`:
 
@@ -6395,12 +6395,12 @@ describe('signDocument / issueDocument', () => {
 })
 ```
 
-- [ ] **Step 2: Correr y ver que falla**
+- [ ] **Step 2: Run it and watch it fail**
 
 Run: `npx jest tests/document.test.ts`
-Expected: FAIL, módulos no encontrados.
+Expected: FAIL, modules not found.
 
-- [ ] **Step 3: Implementación**
+- [ ] **Step 3: Implementation**
 
 `src/document/build-xml.ts`:
 
@@ -6539,10 +6539,10 @@ export const issueDocument = ({ document, caf, certificate, now, checkCafExpiry 
 }
 ```
 
-- [ ] **Step 4: Correr y ver que pasa**
+- [ ] **Step 4: Run it and watch it pass**
 
 Run: `npx jest tests/document.test.ts`
-Expected: PASS; la primera corrida escribe `tests/__snapshots__/document.test.ts.snap`. Ábrelo y revisa que el XML sea el esperado antes de commitear.
+Expected: PASS; the first run writes `tests/__snapshots__/document.test.ts.snap`. Open it and check the XML is the expected one before committing.
 
 - [ ] **Step 5: Commit**
 
@@ -6555,13 +6555,13 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 20: Sobres EnvioDTE / EnvioBOLETA (`src/envelope/create.ts`, `src/envelope/build-xml.ts`, `src/envelope/sign.ts`)
+### Task 20: EnvioDTE / EnvioBOLETA envelopes (`src/envelope/create.ts`, `src/envelope/build-xml.ts`, `src/envelope/sign.ts`)
 
 **Files:**
 - Create: `src/envelope/create.ts`, `src/envelope/build-xml.ts`, `src/envelope/sign.ts`
 - Test: `tests/envelope.test.ts`
 
-- [ ] **Step 1: Test que falla**
+- [ ] **Step 1: Failing test**
 
 `tests/envelope.test.ts`:
 
@@ -6680,12 +6680,12 @@ describe('buildEnvelopeXml / signEnvelope', () => {
 })
 ```
 
-- [ ] **Step 2: Correr y ver que falla**
+- [ ] **Step 2: Run it and watch it fail**
 
 Run: `npx jest tests/envelope.test.ts`
-Expected: FAIL, módulos no encontrados.
+Expected: FAIL, modules not found.
 
-- [ ] **Step 3: Implementación**
+- [ ] **Step 3: Implementation**
 
 `src/envelope/create.ts`:
 
@@ -6849,10 +6849,10 @@ export const verifyEnvelopeSignature = (xml: string): SignatureVerification =>
   verifyEnveloped(xml, { elementTag: 'SetDTE', rootTag: xml.includes('<EnvioBOLETA') ? 'EnvioBOLETA' : 'EnvioDTE' })
 ```
 
-- [ ] **Step 4: Correr y ver que pasa**
+- [ ] **Step 4: Run it and watch it pass**
 
 Run: `npx jest tests/envelope.test.ts`
-Expected: PASS (incluido el sobre con dos DTE firmados: confirma el ajuste de `verifyEnveloped` de la Task 18).
+Expected: PASS (including the envelope with two signed DTEs: it confirms the `verifyEnveloped` adjustment from Task 18).
 
 - [ ] **Step 5: Commit**
 
@@ -6865,13 +6865,13 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 21: API pública, tests de tipos, smoke de `dist/` y documentación
+### Task 21: Public API, type-level tests, `dist/` smoke and documentation
 
 **Files:**
 - Modify: `src/index.ts`, `tests/dist.smoke.test.ts`, `README.md`, `llms.txt`, `CHANGELOG.md`
 - Create: `tests/types.test.ts`
 
-- [ ] **Step 1: Tests que fallan**
+- [ ] **Step 1: Failing tests**
 
 `tests/types.test.ts`:
 
@@ -6915,7 +6915,7 @@ test('public API types compile', () => {
 })
 ```
 
-Reemplazar `tests/dist.smoke.test.ts` completo por:
+Replace `tests/dist.smoke.test.ts` entirely with:
 
 ```ts
 import { execFileSync } from 'node:child_process'
@@ -7007,12 +7007,12 @@ guarded('dist smoke (dual ESM + CJS package)', () => {
 })
 ```
 
-- [ ] **Step 2: Correr y ver que fallan**
+- [ ] **Step 2: Run them and watch them fail**
 
 Run: `npx jest tests/types.test.ts`
-Expected: FAIL (`../src` no exporta nada todavía).
+Expected: FAIL (`../src` exports nothing yet).
 
-- [ ] **Step 3: Implementación**
+- [ ] **Step 3: Implementation**
 
 `src/index.ts`:
 
@@ -7158,7 +7158,7 @@ export { signEnvelope, verifyEnvelopeSignature } from './envelope/sign'
 export type { SignedEnvelope } from './envelope/sign'
 ```
 
-`README.md` (reemplazar completo):
+`README.md` (replace entirely):
 
 ```md
 <div align="center">
@@ -7295,7 +7295,7 @@ npm run scan         # no real RUTs, local paths or secrets in tracked files
 MIT
 ```
 
-`llms.txt` (reemplazar completo):
+`llms.txt` (replace entirely):
 
 ```md
 # dte-sdk
@@ -7310,7 +7310,7 @@ dte-sdk covers document types 33, 34, 39, 41, 43, 46, 52, 56 and 61. `createDocu
 - [Changelog](https://github.com/arrowsw/dte-sdk/blob/canary/CHANGELOG.md)
 ```
 
-`CHANGELOG.md`: bajo `## [Unreleased]` agregar:
+`CHANGELOG.md`: under `## [Unreleased]` add:
 
 ```md
 ### Added
@@ -7329,10 +7329,10 @@ dte-sdk covers document types 33, 34, 39, 41, 43, 46, 52, 56 and 61. `createDocu
 - The placeholder `hello()` export.
 ```
 
-- [ ] **Step 4: Correr y ver que pasa**
+- [ ] **Step 4: Run it and watch it pass**
 
 Run: `npx jest tests/types.test.ts && npm run build && npx jest tests/dist.smoke.test.ts`
-Expected: PASS en los tres.
+Expected: PASS on all three.
 
 - [ ] **Step 5: Commit**
 
@@ -7345,12 +7345,12 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 22: Property tests y test diferencial
+### Task 22: Property tests and differential test
 
 **Files:**
 - Create: `tests/property.test.ts`, `tests/differential.test.ts`
 
-El test diferencial compara, byte a byte, el `<DTE>` firmado y el sobre firmado contra un **harness externo** que no vive en el repositorio. El harness es cualquier ejecutable que lea por `stdin` un JSON con este contrato y escriba por `stdout` un JSON `{ "documentXml": string, "envelopeXml": string }`:
+The differential test compares, byte for byte, the signed `<DTE>` and the signed envelope against an **external harness** that does not live in the repository. The harness is any executable that reads from `stdin` a JSON with this contract and writes to `stdout` a JSON `{ "documentXml": string, "envelopeXml": string }`:
 
 ```json
 {
@@ -7364,7 +7364,7 @@ El test diferencial compara, byte a byte, el `<DTE>` firmado y el sobre firmado 
 }
 ```
 
-Se ejecuta solo con `RUN_DIFFERENTIAL=1` y `DTE_REFERENCE_HARNESS=/ruta/al/harness`; sin esas variables la suite se salta.
+It runs only with `RUN_DIFFERENTIAL=1` and `DTE_REFERENCE_HARNESS=/path/to/harness`; without those variables the suite is skipped.
 
 - [ ] **Step 1: Property tests**
 
@@ -7467,7 +7467,7 @@ describe('rut.ts integration', () => {
 })
 ```
 
-- [ ] **Step 2: Test diferencial (contrato genérico)**
+- [ ] **Step 2: Differential test (generic contract)**
 
 `tests/differential.test.ts`:
 
@@ -7536,10 +7536,10 @@ guarded('differential against the reference harness', () => {
 })
 ```
 
-- [ ] **Step 3: Correr**
+- [ ] **Step 3: Run**
 
 Run: `npx jest tests/property.test.ts tests/differential.test.ts`
-Expected: property PASS; differential **skipped** (sin variables). Con el harness local configurado: `RUN_DIFFERENTIAL=1 DTE_REFERENCE_HARNESS=<ruta> npx jest tests/differential.test.ts` → PASS en los 3 casos. Si un caso difiere, imprime ambos XML con `diff <(echo "$A") <(echo "$B")` y corrige el codec/serializador hasta que coincidan: la referencia manda en este test.
+Expected: property PASS; differential **skipped** (no variables). With the local harness configured: `RUN_DIFFERENTIAL=1 DTE_REFERENCE_HARNESS=<path> npx jest tests/differential.test.ts` → PASS on all 3 cases. If a case differs, print both XMLs with `diff <(echo "$A") <(echo "$B")` and fix the codec/serializer until they match: the reference rules in this test.
 
 - [ ] **Step 4: Commit**
 
@@ -7552,34 +7552,34 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 23: Verificación final
+### Task 23: Final verification
 
 **Files:**
-- Modify: `.size-limit.json`, `docs/superpowers/specs/2026-10-31-dte-sdk-architecture-and-phase-1-design.md` (estado)
+- Modify: `.size-limit.json`, `docs/superpowers/specs/2026-10-31-dte-sdk-architecture-and-phase-1-design.md` (status)
 
-- [ ] **Step 1: Formato, lint y tipos**
+- [ ] **Step 1: Format, lint and types**
 
 Run: `npm run prettier && npm run lint && npx tsc --noEmit`
-Expected: sin errores. Si Prettier reescribió archivos, revísalos con `git diff` y continúa.
+Expected: no errors. If Prettier rewrote files, review them with `git diff` and carry on.
 
-- [ ] **Step 2: Suite completa con cobertura**
+- [ ] **Step 2: Full suite with coverage**
 
 Run: `npm test -- --coverage`
-Expected: todos los tests pasan y la cobertura global es 100 % en statements, branches, functions y lines. Una rama sin cubrir se cubre con un test o se elimina si es inalcanzable; no se baja el umbral.
+Expected: every test passes and global coverage is 100 % in statements, branches, functions and lines. An uncovered branch gets a test, or is removed when unreachable; the threshold is never lowered.
 
-- [ ] **Step 3: Build, tamaño y smoke**
+- [ ] **Step 3: Build, size and smoke**
 
 Run: `npm run build && npm run size && npx jest tests/dist.smoke.test.ts`
-Expected: build OK; `size-limit` imprime el tamaño de cada bundle. Fijar en `.size-limit.json` cada `limit` al tamaño medido + 10 %, redondeado al kB superior (p. ej. medido 38.2 kB → `"42 kB"`), y volver a correr `npm run size`.
+Expected: build OK; `size-limit` prints the size of each bundle. Set each `limit` in `.size-limit.json` to the measured size + 10 %, rounded up to the next kB (e.g. measured 38.2 kB → `"42 kB"`), and run `npm run size` again.
 
-- [ ] **Step 4: Escaneo de datos y estado del árbol**
+- [ ] **Step 4: Data scan and working tree**
 
 Run: `npm run scan && git status --short`
-Expected: `Real-data scan ok`; sin archivos modificados fuera de los que se van a commitear (los `.snap`, fixtures y docs ya están versionados). `information.json` y `research_notes/` siguen sin trackear: no se agregan.
+Expected: `Real-data scan ok`; no modified files beyond the ones about to be committed (the `.snap`, fixtures and docs are already tracked). `information.json` and `research_notes/` stay untracked: do not add them.
 
-- [ ] **Step 5: Estado en la spec y commit final**
+- [ ] **Step 5: Spec status and final commit**
 
-En la spec cambiar `Estado: **borrador para revisión**` por `Estado: **aprobado; fase 1 implementada en la rama feat/core-issuance**`.
+In the spec change `Status: **draft for review**` to `Status: **approved; phase 1 implemented on the feat/core-issuance branch**`.
 
 ```bash
 git add .size-limit.json docs/superpowers/specs/2026-10-31-dte-sdk-architecture-and-phase-1-design.md
@@ -7588,6 +7588,6 @@ git commit -m "chore: size limits for the phase 1 bundles
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
 
-- [ ] **Step 6: Entrega**
+- [ ] **Step 6: Delivery**
 
-La rama `feat/core-issuance` queda lista para abrir PR contra `canary` (es decisión de Hans abrirlo o integrarla de otro modo). Descripción sugerida del PR: el `### Added` del CHANGELOG más el enlace a la spec y al plan.
+The `feat/core-issuance` branch is ready for a PR against `canary` (opening it, or integrating it another way, is Hans's call). Suggested PR description: the CHANGELOG `### Added` section plus the links to the spec and the plan.
