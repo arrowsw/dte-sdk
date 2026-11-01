@@ -1,6 +1,6 @@
 # dte-sdk — Phase 2 design (SII web services client)
 
-Date: 2026-11-01 · Status: **draft for Hans's review** · Author: Claude (with Hans)
+Date: 2026-11-01 · Status: **approved; phase 2 implemented** · Author: Claude (with Hans)
 
 Starting point: the architecture and phase 1 spec
 (`docs/superpowers/specs/2026-10-31-dte-sdk-architecture-and-phase-1-design.md`; decisions D1–D10, the phase table
@@ -684,7 +684,7 @@ const prod = createSiiClient({ environment: 'production', certificate, companyRu
 await uploadEnvelope(prod, { envelope: signedReceiptsEnvelope })
 
 // Received invoice: accept content
-const result = await registerClaim(sii, { issuerRut: '77111222-3', type: 33, folio: 1234, action: 'acceptContent' })
+const result = await registerClaim(sii, { issuerRut: '10000004-0', type: 33, folio: 1234, action: 'acceptContent' })
 if (!result.ok) console.log(claimResponseMessage(result.code))
 
 // Diagnostics
@@ -814,6 +814,35 @@ reintentos `RetryPolicy` · caché de token `TokenCache`.
 | WSRECLAMO token transport (`Cookie: TOKEN`) | convention, not in the PDF | implemented as the cookie; the live smoke confirms |
 | Receipts REST in certification | unreliable with test sets | D17 default to `DTEUpload` in certification; override available |
 | Behaviour of the legacy TLS flags on Node | not needed by any host today | opt-in, asserted on the agent options only |
+
+---
+
+## 7. Implementation notes (2026-11-01)
+
+Where the built client refines this design. Sections 2 and 3 are otherwise accurate.
+
+- **No re-send after an answer.** D18 and 3.9 say an upload is never re-sent once the SII answered, while the 3.5 table
+  calls `STATUS` 9 and REST 405 retryable. The strict rule won inside the upload path and also covers `registerClaim`:
+  only a failure with no answer at all is repeated (`TRANSPORT_FAILED`, `REQUEST_TIMEOUT`), and `details.responseStarted`
+  marks a failure after the response headers, which is not repeated either. `isRetryableError` stays true for `STATUS` 9
+  and 405/429, so the caller may retry later; `details.retryAfterMs` carries `X-Retry-After`. Renewal after a refused
+  token is the one exception.
+- **Token retries.** `getToken` retries around seed, signature and token together, so no attempt reuses a seed past its
+  2-minute validity. After a second refusal the token leaves the cache.
+- **Waiting.** During `waitForUploadStatus` each poll runs with `retry: false` and a timeout capped at the time remaining;
+  retryable errors count as pending. A poll that must renew the token can overrun by up to two more requests.
+- **Upload input.** XML must declare ISO-8859-1 or the upload throws `INVALID_OPTION { field: 'xml' }`, because the bytes
+  sent are Latin-1. A TrackID, whether from the SII or from the caller, must be digits only: it reaches file names and URLs.
+- **Errors.** `SII_UPLOAD_REJECTED.details.status` is a number, except `'TOO_MANY'`. `details.body` is redacted.
+- **Archive names.** A duplicate answer is stored as `<trackId>-<kind>-duplicate-<yyyymmddHHMMSS>`, so it cannot overwrite
+  the original record. Archived replies are redacted.
+- **TLS.** `tls.ca` is added to Node's bundled roots. Setting it stops `NODE_EXTRA_CA_CERTS` and system-store additions
+  from applying.
+- **Build.** esbuild keeps `import()` of `node:` modules in the CJS bundle too, instead of rewriting it as D12 expected.
+
+Not verified against the SII yet: the class and gloss of `RCO` (`rejected`, inferred from its neighbours; the OpenAPI
+document answered 503 on 2026-11-01), and `REST_ENDPOINTS.statusCatalog`, which answered HTTP 500 "no existe servicio"
+on both hosts that day and is not used by any operation. The live smoke has not been run yet.
 
 ---
 
