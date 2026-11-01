@@ -1,3 +1,10 @@
+/**
+ * EN: Converts the English domain model to the SII-shaped model and back. What each official tag means, and what
+ * its abbreviation stands for, is documented once on the fields of `./sii`; the keys below follow the XSD order.
+ * ES: Convierte el modelo de dominio en inglés al modelo con forma SII y viceversa. El significado de cada etiqueta
+ * oficial, y la expansión de su abreviatura, está documentado una sola vez en los campos de `./sii`; las claves de
+ * abajo siguen el orden del XSD.
+ */
 import { isReceipt, type DocumentType } from '../catalogs/document-types'
 import type { ExemptIndicator, ReferenceCode } from '../catalogs/codes'
 import type {
