@@ -64,19 +64,20 @@ const SENSITIVE_HEADERS: ReadonlySet<string> = new Set(['cookie', 'set-cookie', 
 // The elements that carry a secret, with an optional namespace prefix and in any case.
 const SECRET_ELEMENT = '(?:[\\w.-]+:)?(?:TOKEN|SEMILLA|RSASK)'
 
-// A secret element with its content, up to the closing tag or, when the text was cut short, to the end of the text.
-// A self-closing tag (`<TOKEN/>`) has no content and is left alone. `open`/`close` are the angle brackets as written
-// in the text: the raw ones or their XML-escaped forms.
-const secretElement = (open: string, close: string, attributeCharacter: string): RegExp =>
-  new RegExp(
-    `(${open}(${SECRET_ELEMENT})(?:\\s${attributeCharacter}*?)?(?<!/)${close})[\\s\\S]*?(?:${open}/\\2\\s*${close}|$)`,
-    'gi',
-  )
+// A bracket as written in the text: raw, as a named entity or as a numeric reference (the forms the SOAP parser
+// decodes), also with its `&` escaped again. The DTEWS SOAP channel carries the seed, the token and the signed seed
+// XML-escaped (`&lt;TOKEN&gt;…`) inside `<…Return>` and `<pszXml>`, so the escaped form is the common one there.
+const bracket = (raw: string, named: string, decimal: string, hex: string): string =>
+  `(?:${raw}|&(?:amp;)*(?:${named}|#0*${decimal}|#x0*${hex});)`
+const OPEN = bracket('<', 'lt', '60', '3c')
+const CLOSE = bracket('>', 'gt', '62', '3e')
 
-// The DTEWS SOAP channel carries the seed, the token and the signed seed XML-escaped (`&lt;TOKEN&gt;…`) inside
-// `<…Return>` and `<pszXml>`, so the escaped form is the common one there.
-const RAW_SECRET_ELEMENT = secretElement('<', '>', '[^<>]')
-const ESCAPED_SECRET_ELEMENT = secretElement('&lt;', '&gt;', '(?:(?!&lt;|&gt;)[^<>])')
+// A secret element with its content, up to the closing tag or, when the text was cut short, to the end of the text.
+// A self-closing tag (`<TOKEN/>`) has no content and is left alone.
+const SECRET_ELEMENT_WITH_CONTENT = new RegExp(
+  `(${OPEN})(${SECRET_ELEMENT})((?:\\s(?:(?!${OPEN}|${CLOSE})[\\s\\S])*?)?)(?<!/)(${CLOSE})[\\s\\S]*?(?:${OPEN}/\\2\\s*${CLOSE}|$)`,
+  'gi',
+)
 const TOKEN_ASSIGNMENT = /(TOKEN=)(["']?)[^;&\s"'<]+/gi
 const PRIVATE_KEY_BLOCK = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g
 
@@ -109,10 +110,10 @@ const capBytes = (text: string): string => {
 export const redactText = (text: string): string =>
   capBytes(
     text
-      .replace(RAW_SECRET_ELEMENT, (_whole, opening: string, name: string) => `${opening}${REDACTED}</${name}>`)
       .replace(
-        ESCAPED_SECRET_ELEMENT,
-        (_whole, opening: string, name: string) => `${opening}${REDACTED}&lt;/${name}&gt;`,
+        SECRET_ELEMENT_WITH_CONTENT,
+        (_whole, open: string, name: string, attributes: string, close: string) =>
+          `${open}${name}${attributes}${close}${REDACTED}${open}/${name}${close}`,
       )
       .replace(TOKEN_ASSIGNMENT, `$1$2${REDACTED}`)
       .replace(PRIVATE_KEY_BLOCK, REDACTED),

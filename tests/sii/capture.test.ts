@@ -68,6 +68,18 @@ describe('redactText', () => {
     ],
     ['<Token>A</Token> and <Token>B</Token>', '<Token>[redacted]</Token> and <Token>[redacted]</Token>'],
     ['<Token>ABC</TOKEN>', '<Token>[redacted]</Token>'],
+    // Every bracket form the SOAP parser decodes, so what it would read as a token, the redaction reads too.
+    ['&#60;TOKEN&#62;ABC&#60;/TOKEN&#62;', '&#60;TOKEN&#62;[redacted]&#60;/TOKEN&#62;'],
+    ['&#x3C;TOKEN&#x3E;ABC&#x3C;/TOKEN&#x3E;', '&#x3C;TOKEN&#x3E;[redacted]&#x3C;/TOKEN&#x3E;'],
+    ['&#x3c;Semilla&#x3e;78&#x3c;/Semilla&#x3e;', '&#x3c;Semilla&#x3e;[redacted]&#x3c;/Semilla&#x3e;'],
+    ['&#060;TOKEN&#062;ABC&#060;/TOKEN&#062;', '&#060;TOKEN&#062;[redacted]&#060;/TOKEN&#062;'],
+    ['&#60;TOKEN&#62;ABC', '&#60;TOKEN&#62;[redacted]&#60;/TOKEN&#62;'],
+    ['&amp;lt;TOKEN&amp;gt;ABC&amp;lt;/TOKEN&amp;gt;', '&amp;lt;TOKEN&amp;gt;[redacted]&amp;lt;/TOKEN&amp;gt;'],
+    [
+      '&amp;#60;SII:TOKEN&amp;#62;ABC&amp;#60;/SII:TOKEN&amp;#62;',
+      '&amp;#60;SII:TOKEN&amp;#62;[redacted]&amp;#60;/SII:TOKEN&amp;#62;',
+    ],
+    ['<TOKEN>ABC&lt;/TOKEN&gt;', '<TOKEN>[redacted]</TOKEN>'],
   ])('redacts XML-escaped and repeated elements: %s', (input, expected) => {
     expect(redactText(input)).toBe(expected)
   })
