@@ -295,3 +295,30 @@ describe('send', () => {
     expect(fake.requests[0].headers['content-length']).toBeUndefined()
   })
 })
+
+test('the charset of the capture can depend on the response', async () => {
+  const capture = createMemoryCapture()
+  const fake = createFakeSii([
+    {
+      url: 'https://x.test/a',
+      reply: { body: 'Ñuñoa', encoding: 'utf8', headers: { 'Content-Type': 'text/html; charset=utf-8' } },
+    },
+  ])
+  const sii = createSiiClient({
+    environment: 'certification',
+    certificate,
+    transport: fake.transport,
+    capture: capture.capture,
+  })
+  await send(sii, {
+    operation: 'x',
+    channel: 'soap',
+    method: 'GET',
+    url: 'https://x.test/a',
+    headers: {},
+    timeoutMs: 100,
+    attempt: 1,
+    responseEncoding: (response) => (response.headers['content-type']?.includes('utf-8') ? 'utf8' : 'latin1'),
+  })
+  expect(capture.exchanges()[0].response?.body).toBe('Ñuñoa')
+})

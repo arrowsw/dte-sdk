@@ -1,4 +1,5 @@
 import { expectTypeOf } from 'expect-type'
+import type { PortalClient } from '../src/portal/client'
 import {
   createDocument,
   issueDocument,
@@ -182,4 +183,13 @@ test('public API types compile', () => {
   const names: SiiWebServicesTypes | null = null
   expect(names).toBeNull()
   expect(typeof _typecheck).toBe('function')
+})
+
+describe('portal client', () => {
+  test('is immutable data', () => {
+    expectTypeOf<PortalClient['companyRut']>().toEqualTypeOf<SiiRut | null>()
+    // @ts-expect-error every field is readonly
+    const write = (portal: PortalClient): void => void (portal.timeoutMs = 1)
+    expect(typeof write).toBe('function')
+  })
 })

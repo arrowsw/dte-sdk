@@ -353,3 +353,31 @@ describe('createNodeHttpsTransport', () => {
     await expectCode(broken(get('/echo')), 'TRANSPORT_UNAVAILABLE', 'no node here')
   })
 })
+
+describe('client certificate', () => {
+  const clientKey = fixtureText('cert.key.pem')
+  const clientCert = fixtureText('cert.pem')
+
+  test('the certificate reaches a server that asks for one, and only then', async () => {
+    const server = createServer({ key, cert, requestCert: true, rejectUnauthorized: false }, (req, res) => {
+      const peer = (req.socket as import('node:tls').TLSSocket).getPeerCertificate()
+      res.writeHead(200, { 'X-Client': peer.subject?.CN ?? 'none' })
+      res.end()
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const base = `https://127.0.0.1:${(server.address() as AddressInfo).port}/`
+    const request = { method: 'GET' as const, url: base, headers: {}, timeoutMs: 5000 }
+    try {
+      const withCertificate = createNodeHttpsTransport({
+        tls: { ca: cert, clientCertificate: { privateKeyPem: clientKey, chainPem: clientCert }, maxVersion: 'TLSv1.2' },
+        keepAlive: false,
+      })
+      const answered = await withCertificate(request)
+      expect(answered.headers['x-client']).toBe('CAROLINA VALDES ROJAS')
+      const without = createNodeHttpsTransport({ tls: { ca: cert }, keepAlive: false })
+      expect((await without(request)).headers['x-client']).toBe('none')
+    } finally {
+      await new Promise((resolve) => server.close(resolve))
+    }
+  })
+})

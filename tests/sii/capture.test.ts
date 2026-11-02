@@ -329,3 +329,12 @@ describe('createMemoryCapture', () => {
     expect(memory.exchanges().map((e) => e.attempt)).toEqual([1, 2])
   })
 })
+
+describe('portal session cookies', () => {
+  test('are redacted when they show up in a body or a URL', () => {
+    const text = 'NETSCAPE_LIVEWIRE.rut=12345678; CSESSIONID="abc-def"; x=1 <a href="?NETSCAPE_LIVEWIRE=zz&y=2">'
+    expect(redactText(text)).toBe(
+      'NETSCAPE_LIVEWIRE.rut=[redacted]; CSESSIONID="[redacted]"; x=1 <a href="?NETSCAPE_LIVEWIRE=[redacted]&y=2">',
+    )
+  })
+})
