@@ -99,6 +99,13 @@ export const formEncode = (fields: Readonly<Record<string, string>>): string =>
 const portalEncoding = (response: Pick<HttpResponse, 'headers'>): BodyEncoding =>
   /charset=utf-?8/i.test(response.headers['content-type'] ?? '') ? 'utf8' : 'latin1'
 
+// The jar is flat, so the URL is all that keeps the session on the SII: no cookie goes to another host or in clear text,
+// and no other host writes into the jar.
+const isSiiUrl = (url: string): boolean => {
+  const { protocol, hostname } = new URL(url)
+  return protocol === 'https:' && hostname.endsWith('.sii.cl')
+}
+
 const requestHeaders = (
   url: string,
   method: HttpMethod,
@@ -124,7 +131,7 @@ const requestHeaders = (
       }
     : {}),
   ...(referer === undefined ? {} : { Referer: referer }),
-  ...(Object.keys(cookies).length === 0 ? {} : { Cookie: cookieHeader(cookies) }),
+  ...(Object.keys(cookies).length === 0 || !isSiiUrl(url) ? {} : { Cookie: cookieHeader(cookies) }),
 })
 
 /**
@@ -192,7 +199,7 @@ export const portalRequest = async (
         portal.logger.warn('sii portal retrying', { operation, attempt, delayMs, code: error.code }),
     },
   )
-  state.cookies = mergeSetCookie(state.cookies, response.headers['set-cookie'])
+  if (isSiiUrl(url)) state.cookies = mergeSetCookie(state.cookies, response.headers['set-cookie'])
   const html = decodeBody(response.body, portalEncoding(response))
   if (isBlockedPage(response.status, html))
     throw new DteError('SII_PORTAL_BLOCKED', {

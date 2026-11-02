@@ -1,8 +1,8 @@
 import { isSiiRut, type SiiRut } from '../model/rut'
 
 /**
- * EN: The session cookies: one `name → value` map sent to every SII host, as the portal is known to work.
- * ES: Las cookies de la sesión: un mapa `nombre → valor` que se envía a todos los hosts del SII, como se sabe que funciona.
+ * EN: The session cookies: one `name → value` map sent to every SII host and to no other, as the portal is known to work.
+ * ES: Las cookies de la sesión: un mapa `nombre → valor` que se envía a todos los hosts del SII y a ningún otro, como se sabe que funciona.
  */
 export type CookieJar = Readonly<Record<string, string>>
 

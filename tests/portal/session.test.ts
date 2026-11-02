@@ -497,3 +497,38 @@ describe('closePortalSession', () => {
     expect((await harness.portal.sessionCache.get(SESSION_KEY))!.token).toContain('LIVEWIRE')
   })
 })
+
+describe('cookies stay on the SII', () => {
+  const BACK = `${MAULLIN}/back`
+  const cookieOf = (harness: { fake: { requests: readonly { url: string; headers: Record<string, string> }[] } }) =>
+    Object.fromEntries(harness.fake.requests.map((request) => [request.url, request.headers['cookie']]))
+
+  test.each(['https://login.example.test/y', 'https://maullin.sii.cl.example.test/y', 'https://notsii.cl/y'])(
+    'a redirect to %s carries no cookie and sets none',
+    async (foreign) => {
+      const harness = await signedIn([
+        { url: `${MAULLIN}/start`, reply: { status: 302, headers: { Location: foreign } } },
+        {
+          url: foreign,
+          reply: { status: 302, headers: { Location: BACK, 'Set-Cookie': 'NETSCAPE_LIVEWIRE.rut=99; Path=/' } },
+        },
+        { url: BACK, reply: { body: page('x') } },
+      ])
+      await run(harness, (context) => navigate(context, 'x', 'GET', `${MAULLIN}/start`))
+      const cookies = cookieOf(harness)
+      expect(cookies[`${MAULLIN}/start`]).toContain('NETSCAPE_LIVEWIRE.rut=12345678')
+      expect(cookies[foreign]).toBeUndefined()
+      expect(cookies[BACK]).toContain('NETSCAPE_LIVEWIRE.rut=12345678')
+    },
+  )
+
+  test('nor does a redirect to the SII in clear text', async () => {
+    const clear = 'http://maullin.sii.cl/cvc_cgi/dte/x'
+    const harness = await signedIn([
+      { url: `${MAULLIN}/start`, reply: { status: 302, headers: { Location: clear } } },
+      { url: clear, reply: { body: page('x') } },
+    ])
+    await run(harness, (context) => navigate(context, 'x', 'GET', `${MAULLIN}/start`))
+    expect(cookieOf(harness)[clear]).toBeUndefined()
+  })
+})
