@@ -38,6 +38,7 @@ export const DTE_ERROR_CODES = {
   SII_UPLOAD_REJECTED: 'SII_UPLOAD_REJECTED',
   SII_QUERY_ERROR: 'SII_QUERY_ERROR',
   WAIT_TIMEOUT: 'WAIT_TIMEOUT',
+  BOOK_TOTAL_MISMATCH: 'BOOK_TOTAL_MISMATCH',
 } as const
 
 /**
@@ -88,6 +89,7 @@ const MESSAGES: Readonly<Record<DteErrorCode, string>> = {
   SII_UPLOAD_REJECTED: 'SII rejected the upload',
   SII_QUERY_ERROR: 'SII status query failed',
   WAIT_TIMEOUT: 'Timed out waiting for the SII status',
+  BOOK_TOTAL_MISMATCH: 'Book line total does not match the SII formula',
 }
 
 // Only these detail keys are safe to show: field names, codes and numbers, never user text, URLs or bodies.
@@ -108,6 +110,8 @@ const SAFE_DETAIL_KEYS = [
   'channel',
   'operation',
   'trackId',
+  'expected',
+  'actual',
 ] as const
 
 const formatMessage = (code: DteErrorCode, details: DteErrorDetails): string => {
