@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<LibroCompraVenta xmlns="http://www.sii.cl/SiiDte" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.sii.cl/SiiDte LibroCV_v10.xsd" version="1.0">
+<EnvioLibro ID="LIBRO_TEST">
+<Caratula>
+<RutEmisorLibro>76543210-3</RutEmisorLibro>
+<RutEnvia>11111111-1</RutEnvia>
+<PeriodoTributario>2026-10</PeriodoTributario>
+<FchResol>2026-01-15</FchResol>
+<NroResol>80</NroResol>
+<TipoOperacion>VENTA</TipoOperacion>
+<TipoLibro>MENSUAL</TipoLibro>
+<TipoEnvio>FINAL</TipoEnvio>
+</Caratula>
+<ResumenPeriodo>
+<TotalesPeriodo>
+<TpoDoc>33</TpoDoc>
+<TotDoc>4</TotDoc>
+<TotMntExe>0</TotMntExe>
+<TotMntNeto>400000</TotMntNeto>
+<TotMntIVA>76000</TotMntIVA>
+<TotMntTotal>476000</TotMntTotal>
+</TotalesPeriodo>
+<TotalesPeriodo>
+<TpoDoc>61</TpoDoc>
+<TotDoc>1</TotDoc>
+<TotMntExe>0</TotMntExe>
+<TotMntNeto>10000</TotMntNeto>
+<TotMntIVA>1900</TotMntIVA>
+<TotMntTotal>11900</TotMntTotal>
+</TotalesPeriodo>
+<TotalesPeriodo>
+<TpoDoc>39</TpoDoc>
+<TotDoc>120</TotDoc>
+<TotMntExe>0</TotMntExe>
+<TotMntNeto>840000</TotMntNeto>
+<TotMntIVA>159600</TotMntIVA>
+<TotMntTotal>999600</TotMntTotal>
+</TotalesPeriodo>
+</ResumenPeriodo>
+<TmstFirma>2026-11-15T15:30:00</TmstFirma>
+</EnvioLibro></LibroCompraVenta>

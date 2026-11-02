@@ -49,6 +49,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`CLAIM_WSDL_ENDPOINTS`).
 - Helpers for custom adapters and tests: `buildMultipartBody`, `buildSoapEnvelope`/`parseSoapResponse`,
   `signSeed`, `signRootElement`, `redactExchange` and `tokenCacheKey`.
+- SII books: the purchase and sales book (`createPurchaseSalesBook`, IECV), the dispatch guide book
+  (`createGuideBook`) and the folio consumption report (`createFolioConsumption`, RCOF), each with
+  `build*Xml`, `sign*`, `verify*Signature` and `toSii*`, in all the submission kinds of their
+  schemas. The SDK computes the summaries from the lines; `summaryOnlyTotals` and `previousTotals`
+  (with `accumulateBookTotals`/`accumulateGuideTotals`) carry what cannot be derived. An explicit
+  line total that differs from the SII formula is kept and reported in `totalMismatches`, and
+  `strictTotals: true` throws the new `BOOK_TOTAL_MISMATCH`. `bookEntryFromDocument`,
+  `guideEntryFromDocument` and `folioConsumptionEntryFromDocument` derive the lines from documents.
+- Book catalogs: `BOOK_OPERATIONS`, `BOOK_KINDS`, `BOOK_SUBMISSIONS`, `BOOK_DOCUMENT_TYPES`,
+  `isBookDocumentType`, `SUMMARY_ONLY_DOCUMENT_TYPES`, `NON_RECOVERABLE_VAT_CODES`,
+  `GUIDE_TRANSFER_TYPES`, `GUIDE_VOID_CODES`, plus `compactFolioRanges`.
+- `uploadBook` and `uploadFolioConsumption` accept `fileName`, and a `LibroGuia` uploads as
+  `LibroGuia.xml` by default.
 
 ### Removed
 

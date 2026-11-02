@@ -153,6 +153,41 @@ Options worth knowing:
   or XML.
 - Every call accepts `{ signal, timeoutMs, retry }` as a last argument.
 
+## SII books
+
+```typescript
+import { bookEntryFromDocument, createPurchaseSalesBook, signPurchaseSalesBook, uploadBook } from 'dte-sdk'
+
+const book = createPurchaseSalesBook({
+  cover: {
+    issuerRut: '76543210-3',
+    senderRut: '12345678-5',
+    period: '2026-10',
+    resolutionDate: '2026-01-15',
+    resolutionNumber: 0,
+    operation: 'sale',
+  },
+  entries: invoices.map((doc) => bookEntryFromDocument(doc, { bookRut: '76543210-3', operation: 'sale' })),
+  summaryOnlyTotals: [{ type: 39, documentCount: 120, netAmount: 840000, vatAmount: 159600, totalAmount: 999600 }],
+})
+book.totalMismatches // explicit line totals that differ from the SII formula; `strictTotals: true` throws instead
+
+const receipt = await uploadBook(sii, { xml: signPurchaseSalesBook(book, certificate).xml })
+```
+
+`createGuideBook`/`signGuideBook` build the dispatch guide book and
+`createFolioConsumption`/`signFolioConsumption` the folio consumption report, which goes up with
+`uploadFolioConsumption`. All three cover the submission kinds of their schemas (`total`, `partial`,
+`final`, `adjustment`), and the SDK computes the summaries from the lines. `previousTotals` carries
+the totals of earlier submissions: `book.periodTotals` is a plain JSON value you can store and pass
+back. `bookEntryFromDocument`, `guideEntryFromDocument` and `folioConsumptionEntryFromDocument`
+derive the lines from documents issued with this SDK.
+
+Their use today is narrow. The RCV replaced the purchase and sales book in production from period
+2017-08, and the guide book is sent only when the SII asks for it; both are still part of the
+certification test set. The folio consumption report (now Resumen de Ventas Diarias) is used in the
+receipts certification, and the SII probably no longer requires it in production.
+
 ## Errors
 
 ```typescript

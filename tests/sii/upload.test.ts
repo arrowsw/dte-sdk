@@ -991,6 +991,34 @@ describe('uploadBook / uploadFolioConsumption', () => {
     expect(memory.records().map((r) => r.kind)).toEqual(['book', 'folioConsumption'])
   })
 
+  test('a guide book uploads as LibroGuia.xml', async () => {
+    const { sii, fake } = cachedSii(cgi(reception('reception-ok.xml')))
+    const xml = '<?xml version="1.0" encoding="ISO-8859-1"?>\n<LibroGuia version="1.0"/>'
+    expect(await uploadBook(sii, { xml })).toMatchObject({ kind: 'book', fileName: 'LibroGuia.xml' })
+    expect(fake.requests[0].parts[4].fileName).toBe('LibroGuia.xml')
+  })
+
+  test('fileName overrides the default on both', async () => {
+    const { sii, fake } = cachedSii(cgi(reception('reception-ok.xml')))
+    expect(await uploadBook(sii, { xml: libroXml, fileName: 'LibroCVExentos.xml' })).toMatchObject({
+      fileName: 'LibroCVExentos.xml',
+    })
+    expect(await uploadFolioConsumption(sii, { xml: consumoXml, fileName: 'RCOF_1.xml' })).toMatchObject({
+      fileName: 'RCOF_1.xml',
+    })
+    expect(fake.requests[0].parts[4].fileName).toBe('LibroCVExentos.xml')
+    expect(fake.requests[1].parts[4].fileName).toBe('RCOF_1.xml')
+  })
+
+  test.each(['libro.txt', 'a b.xml', '../libro.xml', 'libro".xml', '.xml'])(
+    'a fileName like %s is refused before sending',
+    async (fileName) => {
+      const { sii, fake } = cachedSii(cgi(reception('reception-ok.xml')))
+      await expectCode(uploadBook(sii, { xml: libroXml, fileName }), 'INVALID_OPTION', { field: 'fileName' })
+      expect(posts(fake)).toBe(0)
+    },
+  )
+
   test('their rejections name their own operation', async () => {
     const book = cachedSii(cgi(withStatus('6')))
     await expectCode(uploadBook(book.sii, { xml: libroXml }), 'SII_UPLOAD_REJECTED', {

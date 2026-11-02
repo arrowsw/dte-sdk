@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<ConsumoFolios xmlns="http://www.sii.cl/SiiDte" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.sii.cl/SiiDte ConsumoFolio_v10.xsd" version="1.0">
+<DocumentoConsumoFolios ID="LIBRO_TEST">
+<Caratula version="1.0">
+<RutEmisor>76543210-3</RutEmisor>
+<RutEnvia>11111111-1</RutEnvia>
+<FchResol>2026-01-15</FchResol>
+<NroResol>80</NroResol>
+<FchInicio>2026-10-15</FchInicio>
+<FchFinal>2026-10-15</FchFinal>
+<Correlativo>1</Correlativo>
+<SecEnvio>2</SecEnvio>
+<TmstFirmaEnv>2026-11-15T15:30:00</TmstFirmaEnv>
+</Caratula>
+<Resumen>
+<TipoDocumento>39</TipoDocumento>
+<MntNeto>5882</MntNeto>
+<MntIva>1118</MntIva>
+<TasaIVA>19</TasaIVA>
+<MntExento>500</MntExento>
+<MntTotal>7500</MntTotal>
+<FoliosEmitidos>4</FoliosEmitidos>
+<FoliosAnulados>2</FoliosAnulados>
+<FoliosUtilizados>6</FoliosUtilizados>
+<RangoUtilizados>
+<Inicial>1</Inicial>
+<Final>3</Final>
+</RangoUtilizados>
+<RangoUtilizados>
+<Inicial>7</Inicial>
+<Final>7</Final>
+</RangoUtilizados>
+<RangoAnulados>
+<Inicial>4</Inicial>
+<Final>5</Final>
+</RangoAnulados>
+</Resumen>
+<Resumen>
+<TipoDocumento>41</TipoDocumento>
+<MntExento>900</MntExento>
+<MntTotal>900</MntTotal>
+<FoliosEmitidos>1</FoliosEmitidos>
+<FoliosAnulados>1</FoliosAnulados>
+<FoliosUtilizados>2</FoliosUtilizados>
+<RangoUtilizados>
+<Inicial>50</Inicial>
+<Final>50</Final>
+</RangoUtilizados>
+<RangoAnulados>
+<Inicial>51</Inicial>
+<Final>51</Final>
+</RangoAnulados>
+</Resumen>
+</DocumentoConsumoFolios></ConsumoFolios>

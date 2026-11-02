@@ -49,6 +49,12 @@ const EXPECTED_FUNCTIONS = [
   'queryDocumentStatus',
   'registerClaim',
   'signSeed',
+  'createPurchaseSalesBook',
+  'signPurchaseSalesBook',
+  'createGuideBook',
+  'signGuideBook',
+  'createFolioConsumption',
+  'signFolioConsumption',
   'DteError',
 ] as const
 

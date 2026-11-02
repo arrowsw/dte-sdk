@@ -1,8 +1,8 @@
 /**
- * EN: dte-sdk public API: documents, stamps, signatures and envelopes, plus the SII web services client (seed and
- * token, uploads, status queries, acceptance and claims). Everything is exported from this single entry.
- * ES: API pública de dte-sdk: documentos, timbres, firmas y sobres, más el cliente de los servicios web del SII
- * (semilla y token, envíos, consultas de estado, aceptación y reclamos). Todo se exporta desde esta única entrada.
+ * EN: dte-sdk public API: documents, stamps, signatures and envelopes, the SII books, and the SII web services client
+ * (seed and token, uploads, status queries, acceptance and claims). Everything is exported from this single entry.
+ * ES: API pública de dte-sdk: documentos, timbres, firmas y sobres, los libros del SII y el cliente de los servicios web
+ * del SII (semilla y token, envíos, consultas de estado, aceptación y reclamos). Todo se exporta desde esta única entrada.
  */
 export { DteError, DTE_ERROR_CODES, isDteError } from './errors'
 export type { DteErrorCode, DteErrorDetails } from './errors'
@@ -184,6 +184,110 @@ export type { Envelope, EnvelopeKind, CreateEnvelopeInput } from './envelope/cre
 export { buildEnvelopeXml, envelopeRootName } from './envelope/build-xml'
 export { signEnvelope, verifyEnvelopeSignature } from './envelope/sign'
 export type { SignedEnvelope } from './envelope/sign'
+
+export {
+  BOOK_OPERATIONS,
+  BOOK_KINDS,
+  BOOK_SUBMISSIONS,
+  BOOK_DOCUMENT_TYPES,
+  isBookDocumentType,
+  SUMMARY_ONLY_DOCUMENT_TYPES,
+  NON_RECOVERABLE_VAT_CODES,
+  GUIDE_TRANSFER_TYPES,
+  GUIDE_VOID_CODES,
+} from './catalogs/book-codes'
+export type {
+  BookOperation,
+  BookKind,
+  BookSubmission,
+  BookAdjustment,
+  BookDocumentType,
+  NonRecoverableVatCode,
+  GuideTransferType,
+  GuideVoidCode,
+} from './catalogs/book-codes'
+export type {
+  BookCoverInput,
+  BookCover,
+  PurchaseSalesCoverInput,
+  PurchaseSalesCover,
+  BookNonRecoverableVat,
+  BookOtherTax,
+  BookForeignReceiver,
+  BookSettlementInput,
+  BookTaxKind,
+  BookEntryInput,
+  BookEntry,
+  BookTotalMismatch,
+  BookNonRecoverableVatTotal,
+  BookOtherTaxTotal,
+  BookSettlementTotals,
+  BookTotals,
+  BookTotalsInput,
+  PurchaseSalesBookInput,
+  PurchaseSalesBook,
+  GuideBookCoverInput,
+  GuideBookCover,
+  GuideEntryInput,
+  GuideEntry,
+  GuideTransferTotal,
+  GuideTotals,
+  GuideBookInput,
+  GuideBook,
+  FolioConsumptionCoverInput,
+  FolioConsumptionCover,
+  FolioConsumptionType,
+  FolioConsumptionEntry,
+  VoidedFolio,
+  FolioRange,
+  FolioConsumptionSummary,
+  FolioConsumptionInput,
+  FolioConsumption,
+} from './model/book'
+export type {
+  SiiCaratulaLibro,
+  SiiTotIVANoRec,
+  SiiTotOtrosImp,
+  SiiTotLiquidaciones,
+  SiiTotalesSegmento,
+  SiiTotalesPeriodo,
+  SiiDetalleLibro,
+  SiiEnvioLibro,
+  SiiCaratulaLibroGuia,
+  SiiResumenLibroGuia,
+  SiiDetalleLibroGuia,
+  SiiEnvioLibroGuia,
+  SiiCaratulaConsumoFolios,
+  SiiResumenConsumoFolios,
+  SiiDocumentoConsumoFolios,
+} from './model/sii-book'
+export { toSiiPurchaseSalesBook, toSiiGuideBook, toSiiFolioConsumption } from './model/book-codec'
+export { accumulateBookTotals } from './books/totals'
+export {
+  createPurchaseSalesBook,
+  buildPurchaseSalesBookXml,
+  signPurchaseSalesBook,
+  verifyPurchaseSalesBookSignature,
+} from './books/purchase-sales'
+export type { SignedPurchaseSalesBook } from './books/purchase-sales'
+export {
+  createGuideBook,
+  buildGuideBookXml,
+  signGuideBook,
+  verifyGuideBookSignature,
+  accumulateGuideTotals,
+} from './books/guide'
+export type { SignedGuideBook } from './books/guide'
+export {
+  createFolioConsumption,
+  buildFolioConsumptionXml,
+  signFolioConsumption,
+  verifyFolioConsumptionSignature,
+  compactFolioRanges,
+} from './books/folio-consumption'
+export type { SignedFolioConsumption } from './books/folio-consumption'
+export { bookEntryFromDocument, guideEntryFromDocument, folioConsumptionEntryFromDocument } from './books/from-document'
+export type { BookEntryFromDocumentOptions } from './books/from-document'
 
 export { silentLogger } from './sii/logger'
 export type { Logger, LogFn, LogContext } from './sii/logger'

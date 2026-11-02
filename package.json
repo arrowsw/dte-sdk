@@ -34,7 +34,7 @@
     "scan": "node scripts/scan-real-data.mjs",
     "fixtures": "node scripts/make-fixtures.mjs",
     "fixtures:tls": "node scripts/make-tls-fixture.mjs",
-    "test:differential": "RUN_DIFFERENTIAL=1 jest --config jest.config.cjs tests/differential.test.ts"
+    "test:differential": "RUN_DIFFERENTIAL=1 jest --config jest.config.cjs differential"
   },
   "license": "MIT",
   "devDependencies": {
@@ -55,7 +55,8 @@
     "size-limit": "12.1.0",
     "ts-jest": "29.4.6",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.53.1"
+    "typescript-eslint": "8.53.1",
+    "xmllint-wasm": "5.3.0"
   },
   "engines": {
     "node": ">=20"
