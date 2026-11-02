@@ -5,7 +5,7 @@ import { retryFor, timeoutFor, type CallOverrides, type SiiClient } from './clie
 import type { RetryOptions } from './retry'
 import { send } from './send'
 import { buildSoapEnvelope, parseSoapResponse, SOAP_HEADERS, type SoapParam } from './soap'
-import type { TokenChannel } from './token-cache'
+import type { HttpChannel } from './capture'
 import { decodeBody, encodeUtf8, type HttpMethod, type HttpResponse } from './transport'
 
 const EXCERPT_CHARS = 2000
@@ -47,7 +47,7 @@ export const httpError = (
   response: HttpResponse,
   text: string,
   operation: string,
-  channel: TokenChannel,
+  channel: HttpChannel,
   url: string,
 ): DteError =>
   new DteError('SII_HTTP_ERROR', {
