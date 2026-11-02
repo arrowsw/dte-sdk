@@ -1,6 +1,6 @@
 # dte-sdk — Phase 4 design (SII portal and folios)
 
-Date: 2026-11-02 · Status: **written on Hans's instruction to advance without him; decisions in section 5 await his review** · Author: Claude (with Hans)
+Date: 2026-11-02 · Status: **approved: section 5 reviewed with Hans on 2026-11-02; nothing measured past the login yet** · Author: Claude (with Hans)
 
 Starting point: the architecture and phase 1 spec, the phase 2 spec (`2026-11-01-phase-2-sii-web-services-design.md`)
 and the phase 3 spec. Decisions D1–D27 and the glossaries are the contract. SII facts come from a read-only probe run
@@ -160,7 +160,11 @@ in the field annulled 296 folios before anyone stopped it.
 - ✅ A scope that cannot be read is `INVALID_OPTION { field }` before any request: `withinDays` must be positive and finite,
   `maxRanges` a positive integer, and `range` and each `exclude` a span of positive integers with `from <= to`. Unchecked,
   these widen the scope instead of narrowing it: `withinDays: NaN` passes every date and `maxRanges: 0` every range.
-- These add one explicit word and block nothing, so they respect D21.
+- ✅ `maxRanges` limits the ranges annulled in one call, and ranges the SII had already annulled do not spend it.
+  `requestCafExact` uses 20. Field behaviour limits each pass, which over four passes reaches 80 and 200 ranges; a call that
+  falls short here can simply be repeated.
+- ✅ `requestCafExact` takes `exclude` and `knownAnnulled`, because a caller must be able to protect a CAF still in use.
+- These add explicit words and block nothing, so they respect D21.
 
 ### D36. Root entry only
 
@@ -184,7 +188,8 @@ in the field annulled 296 folios before anyone stopped it.
 The portal keeps listing annulled ranges as unused forever, and repeating an annulment costs requests that can only
 fail (in one field run: 87 attempts, none annulled).
 
-- ✅ `annulFolios` takes `knownAnnulled` and returns the updated list. The caller persists it if it cares. No new port.
+- ✅ `annulFolios` and `requestCafExact` take `knownAnnulled` and return the updated list. The caller persists it if it
+  cares. No new port.
 
 ---
 
@@ -511,8 +516,8 @@ because nested tables break a read by columns. Rows without forms fall back to c
 
 **Annulling.** Up to 4 passes, each listing again, with 1.5 s between them. A range is skipped when it falls outside
 `range` or `withinDays` (a range with no readable date is skipped: when unsure, do not annul), overlaps `exclude` (CAFs
-the caller still holds) or is in `knownAnnulled`. At most `maxRanges` (50) per pass, the last ones of the listing, so one
-call can reach four times that. Then per range:
+the caller still holds) or is in `knownAnnulled`. Each pass takes at most `maxRanges` (50), the last ones of the listing,
+and the call ends once that many ranges were annulled. Then per range:
 
 1. `POST af_anular3` with `DIA`, `MES`, `ANO`, `COD_DOCTO`, `FOLIO_INI`, `FOLIO_FIN`, `CANT_DOCTOS`. "ya ha sido
    efectuado", "ya fue anulado", "efectuado anteriormente" or "anulado anteriormente" is `alreadyAnnulled`, without going
@@ -550,13 +555,13 @@ type FolioFlowResult = {
   readonly rejection: PortalRejection | null
   readonly portalMessage: string | null
 }
-requestCafExact(portal, { type, quantity, allowAnnul?, companyRut? }, overrides?): Promise<FolioFlowResult>
+requestCafExact(portal, { type, quantity, allowAnnul?, exclude?, knownAnnulled?, companyRut? }, overrides?): Promise<RequestCafExactResult>
 requestCafInBatches(portal, { type, quantity, maxBatches?, initialQuota?, companyRut? }, overrides?): Promise<FolioFlowResult>
 reobtainFolios(portal, { type, quantity, isIssued?, isFolioFree?, maxChecksPerRange?, companyRut? }, overrides?): Promise<ReobtainResult>
 ```
 
 - **`requestCafExact`** needs one CAF that covers everything. On `quotaInsufficient` or `stampingBlocked`, with
-  `allowAnnul` and unless `FOLIOS_DISP` is exactly 0, it annuls up to 20 ranges per pass (80 over the four passes) and asks once more; nothing annulled is
+  `allowAnnul` and unless `FOLIOS_DISP` is exactly 0, it annuls up to 20 ranges and asks once more; nothing annulled is
   `noAnnullableFolios`. `FOLIOS_DISP` is the annullable set, so with 0 an attempt only wastes requests; with the type
   blocked the field is absent, and that case does need the attempt. A short grant comes back with `complete: false` and
   `foliosShort`.
@@ -647,7 +652,7 @@ Types:
   `CertificationSet`, `CertificationSets`.
 - **Folios:** `StampableType`, `QuotaFields`, `FolioQuota`, `CafRequestInput`, `ObtainedCaf`, `UnusedFolioRange`, `FolioRanges`,
   `FolioSpan`, `AnnulFoliosInput`, `AnnulmentRejectionReason`, `AnnulmentResult`, `ReobtainableRange`, `RequestCafExactInput`,
-  `RequestCafInBatchesInput`, `ReobtainFoliosInput`, `FolioFlowResult`, `ReobtainResult`, `PortalRejection`.
+  `RequestCafExactResult`, `RequestCafInBatchesInput`, `ReobtainFoliosInput`, `FolioFlowResult`, `ReobtainResult`, `PortalRejection`.
 - **Registry:** `FolioScope`, `FolioRegistry`, `FolioEntry`, `FolioLedger`, `FolioLedgerStore`, `FolioSentRecord`, `FolioStats`,
   `DirectoryFolioRegistryOptions`.
 - **Phase 2 widening:** `HttpChannel`.
@@ -694,8 +699,8 @@ await closePortalSession(portal)
 
 The code of the plan was built and run before the plan was written: 1 626 tests pass with coverage at 100 % on the four
 metrics, and the bundle measures ESM 44.14 kB and CJS 44.32 kB, so `.size-limit.json` goes to 46 kB. The fixes made after
-reading the result, before the pull request (the scope checks of D35, the host check of D31), moved it to ESM 44.25 kB and
-CJS 44.51 kB.
+reading the result (the scope checks of D35, the host check of D31) and the decisions of section 5 moved it to ESM 44.31 kB
+and CJS 44.51 kB.
 
 ---
 
@@ -728,23 +733,29 @@ rango anulado `annulled` · campos del formulario `formFields`, `downloadFields`
 
 ---
 
-## 5. Decisions to review with Hans
+## 5. Decisions reviewed with Hans
 
-Taken on 2026-11-02 under the instruction to advance as far as possible without waiting for a review, and to make it work.
-The first two are Hans's; the rest are recommendations not reviewed yet.
+The spec was written under the instruction to advance as far as possible without waiting for a review, and to make it work.
+Hans reviewed these on 2026-11-02. Decisions 1 and 2 were already his.
 
-| # | Decision | Taken by | What changes if overruled |
-|---|---|---|---|
-| 1 | Scope: portal base + folios + registry now; RCV and MIPYME in a phase 4b | Hans | Phase 4b merges in |
-| 2 | Port field behaviour almost one to one; only the form changes (functional, no classes, English, bilingual JSDoc) | Hans | — |
-| 3 | TLS: verification on, 1.2 cap, no legacy flags (D29) | Claude | One line in `client.ts` |
-| 4 | Separate `PortalClient` (D28) | Claude | Public API |
-| 5 | `TokenCache` for the session plus a `PortalLock` port (D30) | Claude | Two options |
-| 6 | Flat cookie jar until a scoped one is measured (D31) | Claude | `cookies.ts` |
-| 7 | No public parser override (D32) | Claude | One option, additive |
-| 8 | Annulment needs an explicit scope; `allowAnnul` off by default (D35): **the one place the design asks for more than field behaviour does** | Claude | Two defaults |
-| 9 | Composite flows return rejections as data; single steps throw (D33) | Claude | Three return types |
-| 10 | Root entry only (D36) | Claude | Build, exports |
+| # | Decision | Outcome |
+|---|---|---|
+| 1 | Scope: portal base + folios + registry now; RCV and MIPYME in a phase 4b | Hans's from the start |
+| 2 | Port field behaviour almost one to one; only the form changes (functional, no classes, English, bilingual JSDoc) | Hans's from the start |
+| 3 | TLS: verification on, 1.2 cap, no legacy flags (D29) | Confirmed |
+| 4 | Separate `PortalClient` (D28) | Confirmed |
+| 5 | `TokenCache` for the session plus a `PortalLock` port (D30) | Confirmed |
+| 6 | Flat cookie jar until a scoped one is measured, only over `https` under `.sii.cl`; a redirect elsewhere is followed without cookies (D31) | Confirmed |
+| 7 | No public parser override (D32) | Confirmed |
+| 8 | Annulment needs an explicit scope; `allowAnnul` off by default (D35): asks for more than field behaviour does | Confirmed |
+| 9 | Composite flows return rejections as data; single steps throw (D33) | Confirmed |
+| 10 | Root entry only (D36) | Confirmed |
+| 11 | `maxRanges` limits one call, not one pass (D35): asks for more than field behaviour does | Decided in the review |
+| 12 | `requestCafExact` takes `exclude` and `knownAnnulled` and returns the memory (D35, D38) | Decided in the review |
+| 13 | `requestCaf` may grant less than asked, as in the field; the README warns about it | Confirmed |
+| 14 | `closePreviousSessions` is true by default, as in the field | Confirmed |
+| 15 | The reCAPTCHA and `Cambiar clave` rules stay until the first authenticated run (section 6) | Confirmed |
+| 16 | Merge to `canary` without waiting for the probe; the live proof stays required before the first release | Confirmed |
 
 ---
 

@@ -215,8 +215,11 @@ present a client certificate.
 - **To lift a block, issue with the folios you have.** `reobtainFolios` gets lost CAFs back without spending quota.
   `requestCafInBatches` is for a small `MAX_AUTOR` with nothing unused, and `requestCafExact` wants one CAF for the
   whole quantity.
+- **A grant can be smaller than asked.** `requestCaf` caps at `MAX_AUTOR` and, past the effective maximum with no
+  `minQuantity`, asks for one folio, so read `granted`. `minQuantity` and `requestCafExact` are the strict forms.
 - **Annulling cannot be undone** and counts against the quota for six months. `annulFolios` needs `range`,
-  `withinDays` or `all: true`, and `requestCafExact` annuls only with `allowAnnul: true`. Pass `knownAnnulled` back
+  `withinDays` or `all: true`, and `requestCafExact` annuls only with `allowAnnul: true`. One call annuls at most
+  `maxRanges` ranges (50, or 20 in `requestCafExact`), and `exclude` protects a CAF still in use. Pass `knownAnnulled` back
   between runs: the portal keeps listing annulled ranges forever.
 
 `createFolioRegistry`, `createMemoryFolioRegistry` and `createDirectoryFolioRegistry` keep local track of the folios of
