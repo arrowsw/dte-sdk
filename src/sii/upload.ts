@@ -73,6 +73,8 @@ export type UploadXmlInput = {
   readonly companyRut?: string
   /** EN: Sender RUT; defaults to the client's. ES: `rutSender` — RUT de quien envía; por defecto el del cliente. */
   readonly senderRut?: string
+  /** EN: Name of the multipart file; letters, digits, `_`, `.` and `-`, ending in `.xml`. Defaults to `LibroGuia.xml` for a guide book, `LibroCV.xml` for any other book and `ConsumoFolios.xml` for a report. ES: Nombre del archivo del multipart; letras, dígitos, `_`, `.` y `-`, terminado en `.xml`. Por defecto `LibroGuia.xml` en un libro de guías, `LibroCV.xml` en otro libro y `ConsumoFolios.xml` en un reporte. */
+  readonly fileName?: string
 }
 
 type ReceptionBase = {
@@ -182,6 +184,17 @@ const FILE_NAMES: Readonly<Record<UploadKind, string>> = {
   folioConsumption: 'ConsumoFolios.xml',
 }
 const MAX_REST_RECEIPTS = 500
+const GUIDE_BOOK_FILE_NAME = 'LibroGuia.xml'
+const GUIDE_BOOK_ROOT = /<LibroGuia[\s>]/
+// It travels in the multipart `filename`, so it cannot be free text.
+const SAFE_FILE_NAME = /^[\w.-]+\.xml$/
+
+const resolveFileName = (kind: UploadKind, xml: string, fileName: string | undefined): string => {
+  if (fileName !== undefined && !SAFE_FILE_NAME.test(fileName))
+    throw new DteError('INVALID_OPTION', { field: 'fileName' })
+  if (fileName !== undefined) return fileName
+  return kind === 'book' && GUIDE_BOOK_ROOT.test(xml) ? GUIDE_BOOK_FILE_NAME : FILE_NAMES[kind]
+}
 
 // The file bytes are ISO-8859-1, so the XML has to say so: with another encoding, or none (XML then defaults to UTF-8),
 // the SII would read a different text than the one that was signed. The declaration is also what the SII's parser
@@ -199,12 +212,12 @@ const buildJob = (
   kind: UploadKind,
   operation: string,
   xml: string,
-  ruts: { readonly companyRut?: string; readonly senderRut?: string },
+  ruts: { readonly companyRut?: string; readonly senderRut?: string; readonly fileName?: string },
   channel: TokenChannel,
 ): UploadJob => ({
   kind,
   operation,
-  fileName: FILE_NAMES[kind],
+  fileName: resolveFileName(kind, xml, ruts.fileName),
   // The declaration names ISO-8859-1, so the file bytes are Latin-1 on both channels.
   bytes: encodeLatin1(latin1Xml(xml)),
   companyRut: resolveCompanyRut(sii, ruts.companyRut),
@@ -432,10 +445,12 @@ export const uploadEnvelope = async (
 }
 
 /**
- * EN: Uploads a signed book (`LibroCompraVenta`, `LibroGuia`) through `DTEUpload` as `LibroCV.xml`; the XML must
- * declare ISO-8859-1, as for `uploadEnvelope` (`INVALID_OPTION { field: 'xml' }` otherwise).
- * ES: Sube un libro firmado (`LibroCompraVenta`, `LibroGuia`) por `DTEUpload` como `LibroCV.xml`; el XML debe declarar
- * ISO-8859-1, igual que en `uploadEnvelope` (si no, `INVALID_OPTION { field: 'xml' }`).
+ * EN: Uploads a signed book through `DTEUpload`, as `LibroGuia.xml` for a `LibroGuia` and `LibroCV.xml` otherwise unless
+ * `fileName` says differently; the XML must declare ISO-8859-1, as for `uploadEnvelope` (`INVALID_OPTION { field: 'xml' }`
+ * otherwise).
+ * ES: Sube un libro firmado por `DTEUpload`, como `LibroGuia.xml` si es un `LibroGuia` y como `LibroCV.xml` en otro caso,
+ * salvo que `fileName` diga otra cosa; el XML debe declarar ISO-8859-1, igual que en `uploadEnvelope` (si no,
+ * `INVALID_OPTION { field: 'xml' }`).
  */
 export const uploadBook = async (
   sii: SiiClient,
@@ -445,10 +460,12 @@ export const uploadBook = async (
   performUpload(sii, buildJob(sii, 'book', 'uploadBook', input.xml, input, 'soap'), overrides)
 
 /**
- * EN: Uploads a signed folio consumption report (RCOF, `ConsumoFolios`) through `DTEUpload` as `ConsumoFolios.xml`; the
- * XML must declare ISO-8859-1, as for `uploadEnvelope` (`INVALID_OPTION { field: 'xml' }` otherwise).
- * ES: Sube un Reporte de Consumo de Folios firmado (`ConsumoFolios`) por `DTEUpload` como `ConsumoFolios.xml`; el XML
- * debe declarar ISO-8859-1, igual que en `uploadEnvelope` (si no, `INVALID_OPTION { field: 'xml' }`).
+ * EN: Uploads a signed folio consumption report (RCOF, `ConsumoFolios`) through `DTEUpload` as `ConsumoFolios.xml`, unless
+ * `fileName` says differently; the XML must declare ISO-8859-1, as for `uploadEnvelope` (`INVALID_OPTION { field: 'xml' }`
+ * otherwise).
+ * ES: Sube un Reporte de Consumo de Folios firmado (`ConsumoFolios`) por `DTEUpload` como `ConsumoFolios.xml`, salvo que
+ * `fileName` diga otra cosa; el XML debe declarar ISO-8859-1, igual que en `uploadEnvelope` (si no,
+ * `INVALID_OPTION { field: 'xml' }`).
  */
 export const uploadFolioConsumption = async (
   sii: SiiClient,
