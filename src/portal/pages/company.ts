@@ -86,6 +86,9 @@ export const isCompanyNotAuthorized = (html: string): boolean =>
 const cellsOf = (row: string): readonly string[] =>
   [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((match) => stripTags(match[1]))
 
+// A row can lack either tag: HTML 4.01 needs no `</tr>`, and the regional office row of the real page has no `<tr>`.
+const rowsOf = (html: string): readonly string[] => html.split(/<\/?tr\b[^>]*>/i)
+
 const dmyToIso = (value: string): string => value.replace(/^(\d{2})-(\d{2})-(\d{4})$/, '$3-$2-$1')
 
 const integerOrNull = (value: string | null): number | null => {
@@ -94,14 +97,13 @@ const integerOrNull = (value: string | null): number | null => {
 }
 
 /**
- * EN: Reads the `ad_empresa2` table, row by row split on the opening tag because HTML 4.01 needs no `</tr>`; labels are
- * matched loosely to survive encoding changes. Null when the page has neither a date nor a number.
- * ES: Lee la tabla de `ad_empresa2`, fila por fila separando por la etiqueta de apertura porque HTML 4.01 no exige
- * `</tr>`; las etiquetas se comparan con holgura para resistir cambios de codificación. Null si la página no trae ni
- * fecha ni número.
+ * EN: Reads the `ad_empresa2` table, row by row; labels are matched loosely to survive encoding changes. Null when the
+ * page has neither a date nor a number.
+ * ES: Lee la tabla de `ad_empresa2`, fila por fila; las etiquetas se comparan con holgura para resistir cambios de
+ * codificación. Null si la página no trae ni fecha ni número.
  */
 export const parseCompanyResolution = (html: string): CompanyResolution | null => {
-  const rows = html.split(/<tr[^>]*>/i).flatMap((row) => {
+  const rows = rowsOf(html).flatMap((row) => {
     const cells = cellsOf(row)
     return cells.length >= 2 && cells[0] !== '' ? [[cells[0], cells[1]] as const] : []
   })
@@ -156,7 +158,6 @@ export const splitAddress = (
 }
 
 const BRANCHES_SECTION = /DIRECCI(?:&Oacute;|Ó|O)N\s+SUCURSALES[\s\S]*?(?=ACTIVIDADES\s+ECON|$)/i
-const rowsOf = (html: string): readonly string[] => [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)].map((m) => m[0])
 
 /**
  * EN: Reads the `ce_consulta_muestra_e` tables. Activity codes are three-cell rows too, so branches are read only between

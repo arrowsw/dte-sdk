@@ -35,6 +35,12 @@ test.each([
   expect(hardRejection(page(text))).toBe(rejection)
 })
 
+test('the contribuyente wording of not authorized counts too', () => {
+  expect(hardRejection(page('el Contribuyente no est&aacute; autorizado para operar en esta modalidad'))).toBe(
+    'companyNotAuthorized',
+  )
+})
+
 test('half of a two-part wording, a script or a normal page are not rejections', () => {
   expect(hardRejection(page('no cumple con los requisitos'))).toBeNull()
   expect(hardRejection('<script>var a="NO SE AUTORIZA TIMBRAJE"</script>')).toBeNull()
