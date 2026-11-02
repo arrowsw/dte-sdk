@@ -36,8 +36,11 @@ import type {
   SiiTransporte,
 } from './sii'
 
-// Drops undefined values while keeping insertion order (the XML element order).
-const compact = <T extends object>(value: T): T =>
+/**
+ * EN: Drops undefined values while keeping insertion order, which is the XML element order.
+ * ES: Quita los valores undefined conservando el orden de inserción, que es el orden de los elementos del XML.
+ */
+export const compact = <T extends object>(value: T): T =>
   Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T
 
 const toSiiIdDoc = (header: Header): SiiIdDoc => {
