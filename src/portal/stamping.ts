@@ -23,6 +23,7 @@ import {
   type StampableType,
 } from './pages/stamping'
 import {
+  assertNotRejected,
   companyFields,
   ensurePage,
   forgetSession,
@@ -424,8 +425,7 @@ export const listStampableTypes = (
       ...inputValues(form.html),
       ...company,
     })
-    const rejection = hardRejection(page.html)
-    if (rejection !== null) throw rejected(context, rejection, { portalMessage: portalMessageOf(page.html) })
+    assertNotRejected(context, page.html)
     const types = stampableTypes(page.html)
     if (types === null) throw unexpectedPage(context, SELECTOR, page.html)
     return types

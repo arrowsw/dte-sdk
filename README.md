@@ -227,8 +227,9 @@ each CAF: reserve, mark as sent or annulled, release. A service with its own dat
 its own transactions.
 
 A refusal of the SII is `SII_PORTAL_REJECTED`, with `details.rejection` and `portalRejectionMessage` saying what it means
-and what to do; the composite flows return it as data, so the CAFs already obtained are not lost. This module has not
-been run against an authenticated portal session yet: see the phase 4 design.
+and what to do; the composite flows return it as data, so the CAFs already obtained are not lost. Login, logout and the
+refusal pages were measured against the real SII, but the pages of an enrolled company (quota, CAF, folio ranges) have not
+been seen yet: see the phase 4 design.
 
 ## Errors
 

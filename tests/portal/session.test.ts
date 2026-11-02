@@ -10,6 +10,7 @@ import {
   withFreshSessionRetry,
   withPortalSession,
 } from '../../src/portal/session'
+import { queryFolioQuota } from '../../src/portal/stamping'
 import { createMemoryCapture } from '../../src/sii/capture'
 import type { Logger } from '../../src/sii/logger'
 import { FIXED_NOW, ISSUER_RUT } from '../support/fixtures'
@@ -23,7 +24,17 @@ import {
   SESSION_KEY,
   signedIn,
 } from '../support/portal'
-import { AUTH_PAGE, COMPANY_FORM, NOT_ENABLED_PAGE, page, SESSION_LIMIT_PAGE } from '../support/portal-pages'
+import {
+  AUTH_PAGE,
+  COMPANY_FORM,
+  loginScriptAnswer,
+  NOT_ENABLED_PAGE,
+  page,
+  quotaForm,
+  REPRESENTATION_REFUSED,
+  SESSION_LIMIT_PAGE,
+  STAMP_ENTRY,
+} from '../support/portal-pages'
 
 const ENTRY = 'https://zeusr.sii.cl/AUT2000/InicioAutenticacion/IngresoCertificado.html*'
 const LOGIN_OK = {
@@ -474,14 +485,22 @@ describe('withFreshSessionRetry', () => {
 })
 
 describe('closePortalSession', () => {
-  test('tries every logout URL, once, and removes the session', async () => {
+  const LOGOUT = 'https://zeusr.sii.cl/cgi_AUT2000/autTermino.cgi'
+
+  test('calls the logout URL once and removes the session, without following it off the SII', async () => {
     const harness = await signedIn([
-      { url: 'https://zeusr.sii.cl/cgi_AUT2000/autTermino.cgi', reply: new DteError('TRANSPORT_FAILED') },
-      { url: 'https://herculesr.sii.cl/cgi_AUT2000/autLogout.cgi', reply: { status: 404 } },
-      { url: 'https://www.sii.cl/AUT2000/autLogout.cgi', reply: { status: 503 } },
+      { url: LOGOUT, reply: { body: "<SCRIPT>location.replace('https://accounts.example.test/logout');</SCRIPT>" } },
     ])
     await closePortalSession(harness.portal)
-    expect(harness.fake.requests).toHaveLength(3)
+    expect(harness.urls()).toEqual([LOGOUT])
+    expect(await harness.portal.sessionCache.get(SESSION_KEY)).toBeNull()
+  })
+
+  test('a logout that fails is logged and the session still goes', async () => {
+    const log = logger()
+    const harness = await signedIn([{ url: LOGOUT, reply: new DteError('TRANSPORT_FAILED') }], { logger: log })
+    await closePortalSession(harness.portal)
+    expect(log.lines).toContain('sii portal logout failed')
     expect(await harness.portal.sessionCache.get(SESSION_KEY)).toBeNull()
   })
 
@@ -530,5 +549,116 @@ describe('cookies stay on the SII', () => {
     ])
     await run(harness, (context) => navigate(context, 'x', 'GET', `${MAULLIN}/start`))
     expect(cookieOf(harness)[clear]).toBeUndefined()
+  })
+})
+
+describe('the real login answer: HTTP 200 and a script', () => {
+  const COOKIES = {
+    'Set-Cookie':
+      'NETSCAPE_LIVEWIRE.rut=12345678; path=/; domain=.sii.cl; SameSite=Strict; secure, NETSCAPE_LIVEWIRE.dv=5; path=/; domain=.sii.cl; SameSite=Strict; secure',
+  }
+  const scriptLogin = (target: string) => ({
+    url: `${HERCULES}*`,
+    method: 'POST' as const,
+    reply: { body: loginScriptAnswer(target), headers: COOKIES },
+  })
+  const asked = (target: string) => ({
+    status: 302,
+    headers: { Location: `https://zeus.sii.cl/AUT2000/InicioAutenticacion/IngresoRutClave.html?${target}` },
+  })
+
+  test('a login on demand goes on to the page it was asked for', async () => {
+    const target = `${MAULLIN}/ad_empresa1`
+    const harness = portalWith([
+      { url: target, reply: [asked(target), { body: COMPANY_FORM }] },
+      ZEUS,
+      scriptLogin(target),
+    ])
+    const reached = await run(harness, (context) => ensurePage(context, 'x', target))
+    expect(reached.html).toBe(COMPANY_FORM)
+    expect(harness.urls().filter((url) => url === target)).toHaveLength(2)
+  })
+
+  test('a flow that reads its entry page works on the first call, with no session in the cache', async () => {
+    const target = `${MAULLIN}/of_solicita_folios`
+    const harness = portalWith([
+      { url: target, reply: [asked(target), { body: STAMP_ENTRY }] },
+      ZEUS,
+      scriptLogin(target),
+      { url: `${MAULLIN}/of_solicita_folios_dcto`, method: 'POST', reply: { body: quotaForm(5, 2) } },
+    ])
+    await expect(queryFolioQuota(harness.portal, { type: 33 })).resolves.toMatchObject({
+      maxAuthorized: 5,
+      availableFolios: 2,
+    })
+    expect(await harness.portal.sessionCache.get(SESSION_KEY)).not.toBeNull()
+  })
+
+  test('an explicit login goes on to the landing page', async () => {
+    const landing = 'https://misiir.sii.cl/cgi_misii/siihome.cgi'
+    const harness = portalWith([{ url: ENTRY, reply: { body: page('x') } }, scriptLogin(landing), HOME])
+    await expect(openPortalSession(harness.portal)).resolves.toEqual({ userRut: '12345678-5', reused: false })
+    expect(harness.urls().filter((url) => url === landing)).toHaveLength(1)
+  })
+
+  test('a limit met on the way to the target is still the limit', async () => {
+    const target = `${MAULLIN}/ad_empresa1`
+    const harness = portalWith([
+      { url: target, reply: [asked(target), { body: SESSION_LIMIT_PAGE }] },
+      ZEUS,
+      scriptLogin(target),
+    ])
+    const error = await failure(run(harness, (context) => ensurePage(context, 'x', target)))
+    expect(error.code).toBe('SII_PORTAL_SESSION_LIMIT')
+  })
+
+  test('a script that leaves the SII is not followed', async () => {
+    const harness = portalWith([
+      { url: ENTRY, reply: { body: page('x') } },
+      scriptLogin('https://accounts.example.test/logout'),
+    ])
+    await expect(openPortalSession(harness.portal)).resolves.toMatchObject({ reused: false })
+    expect(harness.urls().some((url) => url.includes('example.test'))).toBe(false)
+  })
+})
+
+describe('stale cookies end in the representation page', () => {
+  const REFUSED_URL = 'https://zeusr.sii.cl/AUT2000/RepresentacionNoAut.htm'
+  const refused = { url: REFUSED_URL, reply: { body: REPRESENTATION_REFUSED } }
+  const toRefused = { status: 302, headers: { Location: REFUSED_URL } }
+  const target = `${MAULLIN}/ad_empresa1`
+  const login = {
+    url: `${HERCULES}*`,
+    method: 'POST' as const,
+    reply: {
+      body: loginScriptAnswer(target),
+      headers: { 'Set-Cookie': 'NETSCAPE_LIVEWIRE.rut=12345678; path=/, NETSCAPE_LIVEWIRE.dv=5; path=/' },
+    },
+  }
+
+  test('they are dropped and one fresh login takes the target from the request', async () => {
+    const harness = await signedIn([
+      { url: target, reply: [toRefused, { body: COMPANY_FORM }] },
+      refused,
+      { url: ENTRY, reply: { body: page('x') } },
+      login,
+    ])
+    const reached = await run(harness, (context) => ensurePage(context, 'x', target))
+    expect(reached.html).toBe(COMPANY_FORM)
+    const posted = harness.fake.requests.find((request) => request.url.startsWith(HERCULES))
+    expect(posted?.url).toBe(`${HERCULES}?${target}`)
+    expect(posted?.headers['cookie'] ?? '').not.toContain('cookie-value')
+  })
+
+  test('still refused after a fresh login, it is a refusal', async () => {
+    const harness = await signedIn([
+      { url: target, reply: toRefused },
+      refused,
+      { url: ENTRY, reply: { body: page('x') } },
+      login,
+    ])
+    const error = await failure(run(harness, (context) => ensurePage(context, 'x', target)))
+    expect(error).toMatchObject({ code: 'SII_PORTAL_REJECTED', details: { rejection: 'optionNotAuthorized' } })
+    expect(harness.fake.requests.filter((request) => request.url.startsWith(HERCULES))).toHaveLength(1)
   })
 })

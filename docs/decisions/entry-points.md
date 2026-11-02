@@ -13,7 +13,7 @@ Minified and brotli-compressed, whole bundle:
 | Phase 1 | under 16 kB | under 16 kB |
 | Phase 2 | 25.65 kB | 25.9 kB |
 | Phase 3 | 31.85 kB | 32.07 kB |
-| Phase 4 | 44.31 kB | 44.51 kB |
+| Phase 4 | 44.45 kB | 44.64 kB |
 
 ## Why not subpaths now
 

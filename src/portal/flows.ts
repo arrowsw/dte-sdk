@@ -142,7 +142,14 @@ export const requestCafExact = (
       knownAnnulled: known,
       ...(input.exclude === undefined ? {} : { exclude: input.exclude }),
       ...(input.companyRut === undefined ? {} : { companyRut: input.companyRut }),
-    })
+    }).catch((error: unknown) => asRefusal(error))
+    if ('rejection' in annulment)
+      return {
+        ...first,
+        rejection: annulment.rejection,
+        portalMessage: annulment.details.portalMessage as string,
+        knownAnnulled: known,
+      }
     if (annulment.totalAnnulled === 0)
       return {
         ...first,
@@ -284,6 +291,8 @@ export type ReobtainResult = {
   readonly available: number
   /** EN: Why it fell short, in words, or null. ES: Por qué no alcanzó, en palabras, o null. */
   readonly reason: string | null
+  /** EN: The refusal behind it, when the SII refused the listing; otherwise null. ES: El rechazo detrás de eso, si el SII rechazó el listado; si no, null. */
+  readonly rejection: PortalRejection | null
 }
 
 const freeFoliosOf = async (
@@ -318,7 +327,20 @@ const usableRanges = async (
 
 const reobtainInSession = async (context: PortalContext, input: ReobtainFoliosInput): Promise<ReobtainResult> => {
   const company = input.companyRut === undefined ? {} : { companyRut: input.companyRut }
-  const usable = await usableRanges(await listReobtainableInSession(context, { type: input.type, ...company }), input)
+  const listed = await listReobtainableInSession(context, { type: input.type, ...company }).catch((error: unknown) =>
+    asRefusal(error),
+  )
+  if ('rejection' in listed)
+    return {
+      complete: false,
+      cafs: [],
+      ranges: [],
+      expired: [],
+      available: 0,
+      reason: listed.details.portalMessage as string,
+      rejection: listed.rejection,
+    }
+  const usable = await usableRanges(listed, input)
   const total = usable.reduce((sum, range) => sum + range.quantity, 0)
   if (total < input.quantity)
     return {
@@ -328,6 +350,7 @@ const reobtainInSession = async (context: PortalContext, input: ReobtainFoliosIn
       expired: [],
       available: total,
       reason: `usable ranges do not reach the quantity: ${total} of ${input.quantity}`,
+      rejection: null,
     }
   const cafs: ObtainedCaf[] = []
   const used: { from: number; to: number; freeFolios: readonly number[] }[] = []
@@ -361,6 +384,7 @@ const reobtainInSession = async (context: PortalContext, input: ReobtainFoliosIn
     expired,
     available: covered.folios,
     reason: complete ? null : `usable ranges do not reach the quantity: ${covered.folios} of ${input.quantity}`,
+    rejection: null,
   }
 }
 

@@ -2,7 +2,7 @@ import { DteError } from '../../src/errors'
 import { annulFolios, listFolioRanges } from '../../src/portal/annulment'
 import type { Logger } from '../../src/sii/logger'
 import { failure, MAULLIN, signedIn } from '../support/portal'
-import { ANNUL_ENTRY, ANNUL_FORM, ANNUL_OK, page, unusedRangesPage } from '../support/portal-pages'
+import { ANNUL_ENTRY, ANNUL_FORM, ANNUL_OK, page, refusedPage, unusedRangesPage } from '../support/portal-pages'
 
 const entry = { url: `${MAULLIN}/af_anular1`, method: 'GET' as const, reply: { body: ANNUL_ENTRY } }
 const list = (...bodies: readonly string[]) => ({
@@ -81,6 +81,32 @@ describe('listFolioRanges', () => {
     const lost = await signedIn([{ url: `${MAULLIN}/af_anular1`, reply: { body: page('otra') } }])
     expect((await failure(listFolioRanges(lost.portal, { type: 33 }))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
     expect((await failure(listFolioRanges(lost.portal, { type: 1 as never }))).code).toBe('INVALID_DOCUMENT_TYPE')
+  })
+})
+
+describe('a refused listing is a refusal, not an empty list', () => {
+  const refusal = { code: 'SII_PORTAL_REJECTED', details: { rejection: 'optionNotAuthorized' } }
+  const refused = refusedPage('ANULACION DE FOLIOS')
+
+  test('at the entry page, with nothing posted', async () => {
+    const harness = await signedIn([{ url: `${MAULLIN}/af_anular1`, reply: { body: refused } }])
+    expect(await failure(listFolioRanges(harness.portal, { type: 33 }))).toMatchObject(refusal)
+    expect(harness.posted('af_anular2')).toEqual([])
+  })
+
+  test('at the first page of the listing', async () => {
+    const harness = await signedIn([entry, list(refused)])
+    expect(await failure(listFolioRanges(harness.portal, { type: 33 }))).toMatchObject(refusal)
+  })
+
+  test('at a later page of the listing', async () => {
+    const harness = await signedIn([entry, list(unusedRangesPage([[1, 3]], 2), refused)])
+    expect(await failure(listFolioRanges(harness.portal, { type: 33 }))).toMatchObject(refusal)
+  })
+
+  test('annulFolios says so too', async () => {
+    const harness = await signedIn([entry, list(refused)])
+    expect(await failure(annulFolios(harness.portal, { type: 33, all: true }))).toMatchObject(refusal)
   })
 })
 
