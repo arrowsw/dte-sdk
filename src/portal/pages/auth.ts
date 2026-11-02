@@ -77,10 +77,10 @@ export const closeSessionsOffer = (html: string): CloseSessionsOffer | null => {
 }
 
 /**
- * EN: The SII firewall or a captcha stopped the request: HTTP 403, "acceso restringido" or "Transaccion Rechazada" (a
- * page with a support ID). Waiting is the only remedy.
- * ES: El firewall del SII o un captcha detuvo la petición: HTTP 403, "acceso restringido" o "Transaccion Rechazada" (una
- * página con un ID de soporte). La única salida es esperar.
+ * EN: The SII firewall stopped the request: HTTP 403, "acceso restringido" or "Transaccion Rechazada" (a page with a
+ * support ID). Waiting is the only remedy.
+ * ES: El firewall del SII detuvo la petición: HTTP 403, "acceso restringido" o "Transaccion Rechazada" (una página con un
+ * ID de soporte). La única salida es esperar.
  */
 export const isBlockedPage = (status: number, html: string): boolean =>
   status === 403 || html.includes('acceso restringido') || html.includes('Transaccion Rechazada')

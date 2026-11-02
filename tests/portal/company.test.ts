@@ -84,8 +84,8 @@ describe('fetchIssuerProfile', () => {
     await expect(fetchIssuerProfile(harness.portal)).resolves.toEqual({
       rut: '76543210-3',
       businessName: 'COMERCIAL ANDINA SPA',
-      businessActivity: 'ACTIVIDADES DE PROGRAMACION',
-      activityCode: 620100,
+      businessActivity: 'SERVICIOS DE SOPORTE ANDINOS',
+      activityCode: 631100,
       address: 'AV. LOS ANDES 123',
       commune: 'MACHALI',
       city: 'RANCAGUA',

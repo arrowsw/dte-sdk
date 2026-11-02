@@ -1685,7 +1685,7 @@ export const taxpayerPage = (
 <table><tr><td>123456</td><td>SUCURSAL</td><td>CALLE UNO 45</td></tr><tr><td>abc</td><td>x</td><td>y</td></tr></table>
 <h3>ACTIVIDADES ECON&Oacute;MICAS</h3>
 <table>
-<tr><td>620100</td><td>ACTIVIDADES DE PROGRAMACION</td><td>SI</td></tr>
+<tr><td>631100</td><td>SERVICIOS DE SOPORTE ANDINOS</td><td>SI</td></tr>
 <tr><td>x</td><td>not a code</td><td>NO</td></tr>
 </table>
 <table><tr><td>GLOSA DESCRIPTIVA</td><td>Desarrollo de sistemas</td></tr></table>`)
@@ -4275,15 +4275,15 @@ test('taxpayer data: the address splits, branches and activities stay apart', ()
   expect(parseTaxpayerData(taxpayerPage())).toEqual({
     rut: '76543210-3',
     businessName: 'COMERCIAL ANDINA SPA',
-    businessActivity: 'ACTIVIDADES DE PROGRAMACION',
-    activityCode: 620100,
+    businessActivity: 'SERVICIOS DE SOPORTE ANDINOS',
+    activityCode: 631100,
     address: 'AV. LOS ANDES 123',
     neighborhood: 'EL BOSQUE',
     city: 'RANCAGUA',
     commune: 'MACHALI',
     portalAddress: 'AV. LOS ANDES 123, Villa/Pob. EL BOSQUE, Ciudad RANCAGUA, Comuna MACHALI',
     regionalOffice: 'RANCAGUA',
-    activities: [{ code: 620100, description: 'ACTIVIDADES DE PROGRAMACION', vatAffected: 'SI' }],
+    activities: [{ code: 631100, description: 'SERVICIOS DE SOPORTE ANDINOS', vatAffected: 'SI' }],
     branches: [{ code: 123456, kind: 'SUCURSAL', address: 'CALLE UNO 45' }],
     description: 'Desarrollo de sistemas',
   })
@@ -4409,8 +4409,8 @@ describe('fetchIssuerProfile', () => {
     await expect(fetchIssuerProfile(harness.portal)).resolves.toEqual({
       rut: '76543210-3',
       businessName: 'COMERCIAL ANDINA SPA',
-      businessActivity: 'ACTIVIDADES DE PROGRAMACION',
-      activityCode: 620100,
+      businessActivity: 'SERVICIOS DE SOPORTE ANDINOS',
+      activityCode: 631100,
       address: 'AV. LOS ANDES 123',
       commune: 'MACHALI',
       city: 'RANCAGUA',
@@ -4646,10 +4646,10 @@ export const parseCompanyResolution = (html: string): CompanyResolution | null =
 }
 
 /**
- * EN: Splits the address cell (`CALLE 123, Villa/Pob. X, Ciudad Y, Comuna Z`). The labels are SII text, not data: glued
+ * EN: Splits the address cell (`AV. UNO 45, Villa/Pob. X, Ciudad Y, Comuna Z`). The labels are SII text, not data: glued
  * into `DirOrigen` the field passes its 70 characters and the SII rejects the whole envelope. They come off from the end,
  * in any order.
- * ES: Separa la celda del domicilio (`CALLE 123, Villa/Pob. X, Ciudad Y, Comuna Z`). Las etiquetas son texto del SII, no
+ * ES: Separa la celda del domicilio (`AV. UNO 45, Villa/Pob. X, Ciudad Y, Comuna Z`). Las etiquetas son texto del SII, no
  * datos: pegadas en `DirOrigen` el campo pasa sus 70 caracteres y el SII rechaza el envío completo. Se quitan desde el
  * final, en cualquier orden.
  */

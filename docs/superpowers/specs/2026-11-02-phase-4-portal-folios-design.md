@@ -110,6 +110,8 @@ overlap.
 
 - ✅ One `name → value` map per session, sent to every SII host, ignoring `Domain` and `Path`. This is what is proven to
   work across `zeusr`, `herculesr`, `maullin` and `palena`.
+- ✅ Only over `https` to a host under `.sii.cl`. A redirect elsewhere is still followed, but it carries no cookie and writes
+  none into the jar, since a flat jar has no other way to keep a session on the SII.
 - `D30` removes the race that made a flat jar dangerous. A scoped jar is measured by the probe when the certificate is
   enabled and can replace this without changing the public API.
 - `Set-Cookie` values are read from the joined header the transports deliver (spec 3.3 of phase 2), split on a comma
@@ -155,6 +157,9 @@ in the field annulled 296 folios before anyone stopped it.
 
 - ✅ `annulFolios` needs `range`, `withinDays` or `all: true`; none of them is `INVALID_OPTION { field: 'range' }`.
 - ✅ `requestCafExact` annuls only with `allowAnnul: true`.
+- ✅ A scope that cannot be read is `INVALID_OPTION { field }` before any request: `withinDays` must be positive and finite,
+  `maxRanges` a positive integer, and `range` and each `exclude` a span of positive integers with `from <= to`. Unchecked,
+  these widen the scope instead of narrowing it: `withinDays: NaN` passes every date and `maxRanges: 0` every range.
 - These add one explicit word and block nothing, so they respect D21.
 
 ### D36. Root entry only
@@ -310,8 +315,9 @@ the form before accepting a `POST`:
 5. A body mentioning `/cvc_cgi/dte/af_anular1`: `GET` the target once more, which is how that page settles after a
    login.
 
-Any page may also be a block: HTTP 403, "acceso restringido", reCAPTCHA or "Transaccion Rechazada" (measured, with a
-support ID in the page) throw `SII_PORTAL_BLOCKED` at once.
+Any page may also be a block: HTTP 403, "acceso restringido" or "Transaccion Rechazada" (measured, with a support ID in
+the page) throw `SII_PORTAL_BLOCKED` at once. reCAPTCHA counts as a block only in the answer of `requestCaf`: whether
+ordinary pages embed it has not been seen, and treating it as a block everywhere could stop a login that works.
 
 **`submitForm(context, step, action, fields, referer)`** posts to an action resolved against the page host, follows
 redirects and checks for a block.
@@ -375,7 +381,7 @@ fetchIssuerProfile(portal, { companyRut?, environment? }, overrides?): Promise<I
   `SII_PORTAL_UNEXPECTED_PAGE`.
 - **Taxpayer data only lives on maullin:** `POST ce_consulta_muestra_e` with `ACEPTAR=CONSULTAR` goes there whatever the
   environment. `pe_construccion_dte` only returns the form.
-- **The address cell mixes labels with data** (`CALLE 123, Villa/Pob. X, Ciudad Y, Comuna Z`). The labels come off from
+- **The address cell mixes labels with data** (`AV. UNO 45, Villa/Pob. X, Ciudad Y, Comuna Z`). The labels come off from
   the end, in any order, so `address` fits the 70 characters of `DirOrigen`; `portalAddress` keeps the original.
 - Branches are read only between the `DIRECCIÓN SUCURSALES` title and `ACTIVIDADES ECON`, because activity codes are
   three-cell rows too.
@@ -686,7 +692,9 @@ await closePortalSession(portal)
   live test: they spend folios or quota.
 
 The code of the plan was built and run before the plan was written: 1 626 tests pass with coverage at 100 % on the four
-metrics, and the bundle measures ESM 44.14 kB and CJS 44.32 kB, so `.size-limit.json` goes to 46 kB.
+metrics, and the bundle measures ESM 44.14 kB and CJS 44.32 kB, so `.size-limit.json` goes to 46 kB. The fixes made after
+reading the result, before the pull request (the scope checks of D35, the host check of D31), moved it to ESM 44.25 kB and
+CJS 44.51 kB.
 
 ---
 
@@ -721,8 +729,8 @@ rango anulado `annulled` · campos del formulario `formFields`, `downloadFields`
 
 ## 5. Decisions to review with Hans
 
-Taken on 2026-11-02 under his instruction to advance on his own judgement while he is away ("avanza tu lo que mas puedas",
-"quiero que funcione"). The first two are his; the rest are recommendations he has not seen yet.
+Taken on 2026-11-02 under the instruction to advance as far as possible without waiting for a review, and to make it work.
+The first two are Hans's; the rest are recommendations not reviewed yet.
 
 | # | Decision | Taken by | What changes if overruled |
 |---|---|---|---|
@@ -772,3 +780,4 @@ This must happen **before the first release that ships phase 4**. Merging to `ca
 | Rate of `EPROTO` with the Node adapter | Retried per D34 |
 | Session limit value | Not assumed; the SII says when it is reached |
 | Spacing across certificates | Per certificate only; the process-wide pacing a single static gave is not reproduced |
+| reCAPTCHA outside `requestCaf` | Not treated as a block; such a page ends in `SII_PORTAL_UNEXPECTED_PAGE` with its visible text |

@@ -47,12 +47,12 @@ const defaultEncoding = (channel: HttpChannel): BodyEncoding => (channel === 're
 const hasHeader = (headers: Readonly<Record<string, string>>, name: string): boolean =>
   Object.keys(headers).some((key) => key.toLowerCase() === name)
 
-// The SII CGI dislikes chunked uploads: every body travels with an explicit Content-Length.
 const responseEncodingOf = (input: SendInput, response: HttpResponse): BodyEncoding =>
   typeof input.responseEncoding === 'function'
     ? input.responseEncoding(response)
     : (input.responseEncoding ?? defaultEncoding(input.channel))
 
+// The SII CGI dislikes chunked uploads: every body travels with an explicit Content-Length.
 const withContentLength = (
   headers: Readonly<Record<string, string>>,
   body: Uint8Array | undefined,

@@ -120,10 +120,10 @@ export const parseCompanyResolution = (html: string): CompanyResolution | null =
 }
 
 /**
- * EN: Splits the address cell (`CALLE 123, Villa/Pob. X, Ciudad Y, Comuna Z`). The labels are SII text, not data: glued
+ * EN: Splits the address cell (`AV. UNO 45, Villa/Pob. X, Ciudad Y, Comuna Z`). The labels are SII text, not data: glued
  * into `DirOrigen` the field passes its 70 characters and the SII rejects the whole envelope. They come off from the end,
  * in any order.
- * ES: Separa la celda del domicilio (`CALLE 123, Villa/Pob. X, Ciudad Y, Comuna Z`). Las etiquetas son texto del SII, no
+ * ES: Separa la celda del domicilio (`AV. UNO 45, Villa/Pob. X, Ciudad Y, Comuna Z`). Las etiquetas son texto del SII, no
  * datos: pegadas en `DirOrigen` el campo pasa sus 70 caracteres y el SII rechaza el envío completo. Se quitan desde el
  * final, en cualquier orden.
  */

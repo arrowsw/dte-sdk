@@ -51,15 +51,15 @@ test('taxpayer data: the address splits, branches and activities stay apart', ()
   expect(parseTaxpayerData(taxpayerPage())).toEqual({
     rut: '76543210-3',
     businessName: 'COMERCIAL ANDINA SPA',
-    businessActivity: 'ACTIVIDADES DE PROGRAMACION',
-    activityCode: 620100,
+    businessActivity: 'SERVICIOS DE SOPORTE ANDINOS',
+    activityCode: 631100,
     address: 'AV. LOS ANDES 123',
     neighborhood: 'EL BOSQUE',
     city: 'RANCAGUA',
     commune: 'MACHALI',
     portalAddress: 'AV. LOS ANDES 123, Villa/Pob. EL BOSQUE, Ciudad RANCAGUA, Comuna MACHALI',
     regionalOffice: 'RANCAGUA',
-    activities: [{ code: 620100, description: 'ACTIVIDADES DE PROGRAMACION', vatAffected: 'SI' }],
+    activities: [{ code: 631100, description: 'SERVICIOS DE SOPORTE ANDINOS', vatAffected: 'SI' }],
     branches: [{ code: 123456, kind: 'SUCURSAL', address: 'CALLE UNO 45' }],
     description: 'Desarrollo de sistemas',
   })

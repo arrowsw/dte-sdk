@@ -38,7 +38,7 @@ export const taxpayerPage = (
 <table><tr><td>123456</td><td>SUCURSAL</td><td>CALLE UNO 45</td></tr><tr><td>abc</td><td>x</td><td>y</td></tr></table>
 <h3>ACTIVIDADES ECON&Oacute;MICAS</h3>
 <table>
-<tr><td>620100</td><td>ACTIVIDADES DE PROGRAMACION</td><td>SI</td></tr>
+<tr><td>631100</td><td>SERVICIOS DE SOPORTE ANDINOS</td><td>SI</td></tr>
 <tr><td>x</td><td>not a code</td><td>NO</td></tr>
 </table>
 <table><tr><td>GLOSA DESCRIPTIVA</td><td>Desarrollo de sistemas</td></tr></table>`)
