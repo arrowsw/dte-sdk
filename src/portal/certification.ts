@@ -1,10 +1,8 @@
 import { cgiUrl } from '../catalogs/portal'
 import type { CallOverrides } from '../sii/client'
 import { resolvePortalCompany, type PortalClient } from './client'
-import { portalMessageOf } from './pages/auth'
 import { parseCertificationSets, type CertificationSet } from './pages/certification'
-import { hardRejection } from './pages/stamping'
-import { companyFields, ensurePage, rejected, submitForm, unexpectedPage, withPortalSession } from './session'
+import { assertNotRejected, companyFields, ensurePage, submitForm, unexpectedPage, withPortalSession } from './session'
 
 const REQUIRED_SETS = ['SET BASICO', 'SET GUIA DE DESPACHO', 'SET FACTURA EXENTA', 'SET CASO GENERAL FACTURA COMPRA']
 const REQUIRED_BOOKS = ['LIBRO DE VENTAS', 'LIBRO DE COMPRAS', 'LIBRO DE GUIAS']
@@ -52,8 +50,7 @@ export const queryCertificationSets = (
       { ...company, ACEPTAR: 'Continuar' },
       entry.url,
     )
-    const rejection = hardRejection(page.html)
-    if (rejection !== null) throw rejected(context, rejection, { portalMessage: portalMessageOf(page.html) })
+    assertNotRejected(context, page.html)
     const sets = parseCertificationSets(page.html)
     if (sets.length === 0) throw unexpectedPage(context, 'pe_avance2', page.html)
     return {

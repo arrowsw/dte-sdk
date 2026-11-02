@@ -14,6 +14,7 @@ import {
   REOBTAIN_RESOLUTION,
   reobtainDetailPage,
   reobtainListPage,
+  refusedPage,
   STAMP_ENTRY,
   unusedRangesPage,
 } from '../support/portal-pages'
@@ -185,6 +186,27 @@ describe('requestCafExact', () => {
     expect(result).toMatchObject({ complete: false, rejection: 'noAnnullableFolios', availableFolios: 6 })
   })
 
+  test('a listing refused while trying to annul comes back as data, with the quota it had', async () => {
+    const harness = await signedIn([
+      entry,
+      replies('of_solicita_folios_dcto', quotaForm(2, 6)),
+      { url: `${MAULLIN}/af_anular1`, reply: { body: refusedPage('ANULACION DE FOLIOS') } },
+    ])
+    const result = await requestCafExact(harness.portal, {
+      type: 33,
+      quantity: 5,
+      allowAnnul: true,
+      knownAnnulled: ['3-4'],
+    })
+    expect(result).toMatchObject({
+      complete: false,
+      rejection: 'optionNotAuthorized',
+      availableFolios: 6,
+      portalMessage: expect.stringContaining('autorizado'),
+      knownAnnulled: ['3-4'],
+    })
+  })
+
   test('a refusal annulling cannot help is returned as it is', async () => {
     const harness = await signedIn([entry, replies('of_solicita_folios_dcto', REJECTION_PAGES.companyNotAuthorized)])
     const result = await requestCafExact(harness.portal, { type: 33, quantity: 5, allowAnnul: true })
@@ -320,6 +342,21 @@ describe('requestCafInBatches', () => {
 })
 
 describe('reobtainFolios', () => {
+  test('a refused listing comes back as data', async () => {
+    const harness = await signedIn([
+      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: refusedPage('REOBTENCION DE FOLIOS') } },
+    ])
+    await expect(reobtainFolios(harness.portal, { type: 33, quantity: 2 })).resolves.toEqual({
+      complete: false,
+      cafs: [],
+      ranges: [],
+      expired: [],
+      available: 0,
+      reason: expect.stringContaining('autorizado'),
+      rejection: 'optionNotAuthorized',
+    })
+  })
+
   const listRoutes = (ranges: readonly (readonly [number, number])[], annulled: readonly number[] = []) => [
     { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: page('form') } },
     { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: { body: reobtainListPage(ranges) } },

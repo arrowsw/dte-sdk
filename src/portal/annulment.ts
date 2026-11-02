@@ -16,6 +16,7 @@ import {
   type UnusedFolioRange,
 } from './pages/annulment'
 import {
+  assertNotRejected,
   companyFields,
   ensurePage,
   submitForm,
@@ -121,6 +122,7 @@ const moreRanges = async (
     { ...inputValues(form), ...(button.page === null ? {} : { PAGINA: String(button.page) }) },
     at(context, 'af_anular2'),
   )
+  assertNotRejected(context, next.html)
   const merged = uniqueRanges([...ranges, ...parseUnusedRanges(next.html)])
   return moreRanges(
     context,
@@ -133,6 +135,7 @@ const moreRanges = async (
 const listInSession = async (context: PortalContext, type: number, companyRut?: string): Promise<FolioRanges> => {
   const company = companyFields(resolvePortalCompany(context.portal, companyRut))
   const entry = await ensurePage(context, 'af_anular1', at(context, 'af_anular1'))
+  assertNotRejected(context, entry.html)
   if (!entry.html.includes('ANULACION DE FOLIOS')) throw unexpectedPage(context, 'af_anular1', entry.html)
   const first = await submitForm(
     context,
@@ -142,6 +145,7 @@ const listInSession = async (context: PortalContext, type: number, companyRut?: 
     { ...inputValues(entry.html), ...company, PAGINA: '1', COD_DOCTO: String(type), ACEPTAR: 'Consultar' },
     at(context, 'af_anular1'),
   )
+  assertNotRejected(context, first.html)
   const ranges = await moreRanges(context, first, parseUnusedRanges(first.html), MAX_EXTRA_PAGES)
   return { ranges, lastFolio: ranges.length === 0 ? null : Math.max(...ranges.map((range) => range.to)) }
 }
@@ -175,7 +179,7 @@ const assertScope = (input: AnnulFoliosInput): void => {
  * @param input EN: document type and company. ES: tipo de documento y empresa.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: the ranges and the highest folio. ES: los rangos y el mayor folio.
- * @throws {DteError} EN: `SII_PORTAL_UNEXPECTED_PAGE`, session and transport codes. ES: los mismos códigos.
+ * @throws {DteError} EN: `SII_PORTAL_REJECTED`, `SII_PORTAL_UNEXPECTED_PAGE`, session and transport codes. ES: los mismos códigos.
  */
 export const listFolioRanges = (
   portal: PortalClient,
@@ -384,7 +388,7 @@ export const annulFoliosInSession = async (
  * @param input EN: type and an explicit scope. ES: tipo y un alcance explícito.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: what was annulled, what was not, and the memory to persist. ES: lo anulado, lo no anulado y la memoria que guardar.
- * @throws {DteError} EN: `INVALID_OPTION { field }` without a scope or with one that cannot be read, `SII_PORTAL_UNEXPECTED_PAGE`, session and block codes. ES: `INVALID_OPTION { field }` sin alcance o con uno ilegible, `SII_PORTAL_UNEXPECTED_PAGE`, códigos de sesión y bloqueo.
+ * @throws {DteError} EN: `INVALID_OPTION { field }` without a scope or with one that cannot be read, `SII_PORTAL_REJECTED`, `SII_PORTAL_UNEXPECTED_PAGE`, session and block codes. ES: `INVALID_OPTION { field }` sin alcance o con uno ilegible, `SII_PORTAL_REJECTED`, `SII_PORTAL_UNEXPECTED_PAGE`, códigos de sesión y bloqueo.
  */
 export const annulFolios = (
   portal: PortalClient,

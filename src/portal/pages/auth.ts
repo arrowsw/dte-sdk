@@ -21,6 +21,21 @@ export const isCertificateNotEnabledPage = (html: string): boolean =>
 export const asksForAuthentication = (html: string): boolean => html.includes('Autenticaci')
 
 /**
+ * EN: Where a page sends the browser with `location.replace(...)`, or null. A good login answers this way: HTTP 200 and a
+ * script, with no `Location` header.
+ * ES: Adónde envía una página al navegador con `location.replace(...)`, o null. Un inicio de sesión correcto responde así:
+ * HTTP 200 y un script, sin cabecera `Location`.
+ */
+export const scriptRedirect = (html: string): string | null =>
+  /location\.replace\(\s*['"]([^'"]+)['"]\s*\)/.exec(html)?.[1] ?? null
+
+/**
+ * EN: The page the portal ends in when it refuses a representation, which is also where stale session cookies lead.
+ * ES: La página en que termina el portal cuando rechaza una representación, que es también adonde llevan cookies de sesión vencidas.
+ */
+export const isRepresentationRefused = (html: string): boolean => html.includes('NO ESTA AUTORIZADO PARA REPRESENTAR')
+
+/**
  * EN: What a page left behind by an expired session looks like when no redirect carried it there.
  * ES: Cómo se ve una página dejada por una sesión vencida cuando ninguna redirección la trajo.
  */

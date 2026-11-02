@@ -65,6 +65,24 @@ test('taxpayer data: the address splits, branches and activities stay apart', ()
   })
 })
 
+test('a row may lack its opening tag: the regional office does on the real page', () => {
+  const html = page(`<table><tr><td>NOMBRE O RAZ&Oacute;N SOCIAL</td><td>COMERCIAL ANDINA SPA</td></tr><tr>
+<td>DIRECCI&Oacute;N DE LA EMPRESA</td><td>&nbsp; CALLE UNO 45 , Comuna PUCON </td></tr>
+<td>DIRECCI&Oacute;N REGIONAL DEL CONTRIBUYENTE</td><td>&nbsp; RANCAGUA </td></tr><tr> </table>`)
+  expect(parseTaxpayerData(html)).toMatchObject({
+    businessName: 'COMERCIAL ANDINA SPA',
+    address: 'CALLE UNO 45',
+    commune: 'PUCON',
+    regionalOffice: 'RANCAGUA',
+  })
+})
+
+test('a resolution row may lack its opening tag too', () => {
+  const html = page(`<table><tr><td>Rut</td><td>76543210-3</td></tr>
+<td>Fecha Resoluci&oacute;n</td><td>21-09-2026</td></tr><tr><td>Resoluci&oacute;n</td><td>80</td></table>`)
+  expect(parseCompanyResolution(html)).toMatchObject({ resolutionDate: '2026-09-21', resolutionNumber: 80 })
+})
+
 test('a page without those tables gives nulls and empty lists', () => {
   expect(parseTaxpayerData(page('nada <table><tr><td>ETIQUETA</td><td></td></tr></table>'))).toEqual({
     rut: null,

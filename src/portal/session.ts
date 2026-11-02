@@ -3,7 +3,7 @@ import {
   CERTIFICATE_LOGIN_URL,
   cgiUrl,
   PORTAL_LANDING_URL,
-  PORTAL_LOGOUT_URLS,
+  PORTAL_LOGOUT_URL,
   type PortalRejection,
 } from '../catalogs/portal'
 import { DteError, errorMessage, isDteError } from '../errors'
@@ -30,10 +30,13 @@ import {
   isBlockedPage,
   isCertificateNotEnabledPage,
   isRepresentationChoice,
+  isRepresentationRefused,
   isSessionLimitPage,
   portalMessageOf,
   representationContinueLink,
+  scriptRedirect,
 } from './pages/auth'
+import { hardRejection } from './pages/stamping'
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
@@ -155,6 +158,15 @@ export const rejected = (
   rejection: PortalRejection,
   details: Readonly<Record<string, unknown>>,
 ): DteError => new DteError('SII_PORTAL_REJECTED', { rejection, operation: context.operation, ...details })
+
+/**
+ * EN: Throws the refusal a page states, if any: a refused listing must not read as an empty one.
+ * ES: Lanza el rechazo que declara una página, si lo hay: un listado rechazado no debe leerse como uno vacío.
+ */
+export const assertNotRejected = (context: PortalContext, html: string): void => {
+  const rejection = hardRejection(html)
+  if (rejection !== null) throw rejected(context, rejection, { portalMessage: portalMessageOf(html) })
+}
 
 /**
  * EN: One request and no redirects: one `send` inside the retry loop. Cookies go into the jar; a block throws. Any other
@@ -285,7 +297,11 @@ const login = async (context: PortalContext, referencia: string): Promise<Portal
       operation: context.operation,
       portalMessage: portalMessageOf(page.html),
     })
-  return page
+  // A good login answers 200 with a script that goes on: no `Location`, so nothing has reached the target yet.
+  const target = scriptRedirect(page.html)
+  if (target === null || !isSiiUrl(target)) return page
+  const goOn = (): Promise<PortalPage> => navigate(context, 'login.target', 'GET', target)
+  return settleSessionLimit(context, 'login', await goOn(), goOn)
 }
 
 const referenciaOf = (location: string): string | null => {
@@ -298,7 +314,19 @@ const referenciaOf = (location: string): string | null => {
   }
 }
 
-const authenticateIfAsked = async (context: PortalContext, step: string, page: PortalPage): Promise<PortalPage> => {
+// Stale cookies end in the representation page, with no target to go back to: they are dropped and the session starts
+// over, as an explicit login does. If the page comes back after that, the refusal is real and `ensurePage` says so.
+const authenticateIfAsked = async (
+  context: PortalContext,
+  step: string,
+  url: string,
+  page: PortalPage,
+): Promise<PortalPage> => {
+  if (isRepresentationRefused(page.html) && !context.state.loggedIn) {
+    forgetSession(context)
+    await portalRequest(context, 'entry', 'GET', `${CERTIFICATE_ENTRY_URL}?${url}`)
+    return login(context, url)
+  }
   if (!asksForAuthentication(page.html) || isRepresentationChoice(page.html) || page.lastLocation === null) return page
   const referencia = referenciaOf(page.lastLocation)
   if (referencia === null) return page
@@ -316,12 +344,14 @@ const continueRepresentation = async (context: PortalContext, step: string, page
  * limit, a login on demand when the portal asks for one, and the representation screen.
  * ES: Llega a una página CGI: un `GET` fresco (el SII le liga la sesión antes de aceptar un `POST`), redirecciones, el
  * límite de sesiones, un inicio de sesión a pedido cuando el portal lo solicita y la pantalla de representación.
- * @throws {DteError} EN: `SII_PORTAL_SESSION_LIMIT`, `SII_PORTAL_CERT_NOT_ENABLED`, `SII_PORTAL_LOGIN_FAILED`, `SII_PORTAL_SESSION_EXPIRED`, `SII_PORTAL_BLOCKED`. ES: los mismos códigos.
+ * @throws {DteError} EN: `SII_PORTAL_SESSION_LIMIT`, `SII_PORTAL_CERT_NOT_ENABLED`, `SII_PORTAL_LOGIN_FAILED`, `SII_PORTAL_SESSION_EXPIRED`, `SII_PORTAL_BLOCKED`, `SII_PORTAL_REJECTED`. ES: los mismos códigos.
  */
 export const ensurePage = async (context: PortalContext, step: string, url: string): Promise<PortalPage> => {
   const visit = (): Promise<PortalPage> => navigate(context, step, 'GET', url)
   const reached = await settleSessionLimit(context, step, await visit(), visit)
-  const authenticated = await authenticateIfAsked(context, step, reached)
+  const authenticated = await authenticateIfAsked(context, step, url, reached)
+  if (isRepresentationRefused(authenticated.html))
+    throw rejected(context, 'optionNotAuthorized', { portalMessage: portalMessageOf(authenticated.html) })
   const settled = isRepresentationChoice(authenticated.html)
     ? await continueRepresentation(context, step, authenticated)
     : authenticated
@@ -463,21 +493,19 @@ export const openPortalSession = (portal: PortalClient, overrides?: CallOverride
   })
 
 /**
- * EN: Closes the session to give its slot back: tries each logout URL best-effort and always removes the cached session.
- * Which URL really ends a session is not confirmed yet; the SII expires it on its own anyway.
- * ES: Cierra la sesión para devolver su cupo: prueba cada URL de cierre sin garantía y siempre borra la sesión en caché.
- * Aún no se confirma cuál URL termina la sesión de verdad; de todos modos el SII la vence por su cuenta.
+ * EN: Closes the session to give its slot back, and always removes the cached session. A failed logout is only logged: the
+ * SII expires the session on its own anyway.
+ * ES: Cierra la sesión para devolver su cupo y siempre borra la sesión en caché. Un cierre fallido solo se registra: de todos
+ * modos el SII vence la sesión por su cuenta.
  * @param portal EN: the client. ES: el cliente.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  */
 export const closePortalSession = (portal: PortalClient, overrides?: CallOverrides): Promise<void> =>
   withPortalSession(portal, 'closePortalSession', { ...overrides, retry: false }, async (context) => {
     if (hasSessionCookie(context.state.cookies)) {
-      for (const url of PORTAL_LOGOUT_URLS) {
-        await portalRequest(context, 'logout', 'GET', url).catch((error: unknown) => {
-          portal.logger.warn('sii portal logout failed', { reason: errorMessage(error) })
-        })
-      }
+      await portalRequest(context, 'logout', 'GET', PORTAL_LOGOUT_URL).catch((error: unknown) => {
+        portal.logger.warn('sii portal logout failed', { reason: errorMessage(error) })
+      })
     }
     forgetSession(context)
   })
