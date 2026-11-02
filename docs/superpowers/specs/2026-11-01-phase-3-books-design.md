@@ -81,8 +81,6 @@ D1–D20 stay in force. Phase 3 adds D21–D27.
 - ✅ `signEnveloped` with `elementTag: 'EnvioLibro'` (or `'DocumentoConsumoFolios'`) and the root as `rootTag`. The
   reference is `URI="#ID"`. `signRootElement` (`URI=""`) is for the seed only and does not apply.
 - The stored `SignedInfo` carries `xmlns:xsi`, as on envelopes, which is the default of `signEnveloped`.
-- The `Signature` element uses the XMLDSig namespace on all three books, including `LibroGuia`, whose published 2004 XSD
-  declares `Signature` in the SII namespace (section 6).
 
 ### D24. A line break between every pair of adjacent tags
 
@@ -95,7 +93,7 @@ D1–D20 stay in force. Phase 3 adds D21–D27.
 
 ### D25. Official XSD validation in the test suite (Hans, 2026-11-01)
 
-- ✅ The eight official XSD files live in `tests/fixtures/xsd/` (169 kB, not published). `tests/support/xsd.ts` validates
+- ✅ The eight official XSD files live in `tests/fixtures/xsd/` (164 kB, not published). `tests/support/xsd.ts` validates
   with `xmllint-wasm` (MIT, pure WASM, no native build), a devDependency. No new runtime dependencies.
 - Why: schema errors are the most common book failure. Twelve `STATUS` 7 replies captured from real runs were all books
   with `cvc-*` details. The trial on 2026-11-01 validated all three schemas in about 30 ms each and caught
@@ -142,10 +140,11 @@ src/
   catalogs/
     book-codes.ts         operations, kinds, submissions, document types, non-recoverable VAT codes, guide codes
 tests/
-  books/                  one test file per module above
+  books/                  one test file per module above, property.test.ts and differential.test.ts
   support/xsd.ts          validateAgainstXsd(xml, schema)
+  support/book-fixtures.ts, purchase-sales-samples.ts, guide-samples.ts, report-samples.ts
   fixtures/xsd/           official XSD files
-  fixtures/books/         golden unsigned XML
+  fixtures/books/         golden unsigned XML, one per sample
 ```
 
 Phase 1 and 2 files that change:
@@ -153,12 +152,12 @@ Phase 1 and 2 files that change:
 | File | Change |
 |---|---|
 | `src/errors.ts` | new code `BOOK_TOTAL_MISMATCH`; `SAFE_DETAIL_KEYS` gains `expected`, `actual` |
+| `src/model/codec.ts` | exports `compact` for the books; it stays out of the root exports |
 | `src/sii/upload.ts` | `UploadXmlInput.fileName?`; default name by root element |
 | `src/index.ts` | re-exports section 3.13 |
 | `.size-limit.json` | limits raised to the measured size rounded up to the next 2 kB |
 | `tests/public-api.test.ts`, `tests/dist.smoke.test.ts` | new exports |
-| `tests/differential.test.ts` | the three books |
-| `package.json` | devDependency `xmllint-wasm` |
+| `package.json` | devDependency `xmllint-wasm`; `test:differential` also runs `tests/books/differential.test.ts` |
 | `README.md`, `llms.txt`, `CHANGELOG.md` | the new API and the validity notes of section 1 |
 
 ### 3.2 Cover
@@ -202,7 +201,7 @@ Rules:
   (`INVALID_OPTION { field: 'cover.resolutionNumber' }`).
 - `segmentNumber` is required on `partial` and emitted only there. `notificationFolio` is required on `special` and on
   every guide book, because the XSD makes it mandatory there. `rectificationCode` (at most 10 characters) is required on
-  `rectification`. Absent ones throw `MISSING_FIELD { field }`.
+  `rectification` and emitted only there. Absent ones throw `MISSING_FIELD { field }`.
 - `LibroGuia` has no `operation` and no `kind`: its XSD only admits `TipoLibro` `ESPECIAL`, although the 2003 PDF also
   mentions `MENSUAL`. The XSD wins.
 - `Caratula` carries `version="1.0"` on `ConsumoFolios` only, per the XSD.
@@ -267,8 +266,9 @@ type PurchaseSalesBook = {
 1. **Validation.** `type` in `BOOK_DOCUMENT_TYPES` (`INVALID_DOCUMENT_TYPE`). `folio` a positive integer of at most 10
    digits (`INVALID_FOLIO`). RUTs through `toSiiRut`. `date` through `toIsoDate`, within 2000-01-01 to 2050-12-31
    (`INVALID_DATE`). `counterpartyName` through `sanitizeText`, at most 50 characters (`FIELD_TOO_LONG`). Amounts are
-   integers of at most 18 digits (`INVALID_AMOUNT`). Fields typed `MontoType` in the `Detalle` XSD reject negatives
-   (`INVALID_AMOUNT`). `nonRecoverableVat` holds at most 5 items and `otherTaxes` at most 20 (`INVALID_OPTION`).
+   safe integers (`INVALID_AMOUNT`): the XSD admits 18 digits, but a JavaScript number is exact only up to 16. Fields
+   typed `MontoType` in the `Detalle` XSD reject negatives (`INVALID_AMOUNT`). `nonRecoverableVat` holds at most 5 items
+   and `otherTaxes` at most 20 (`INVALID_OPTION`). The `rate` of another tax is optional, as in the XSD.
 2. **Voided lines.** `voided: true` keeps only `type`, `folio`, `voided` and `adjustment`. It counts in `TotDoc` and
    `TotAnulado` and adds no amounts.
 3. **Defaults on sale books.** `exemptAmount`, `netAmount` and `vatAmount` become 0 when absent, so all three are always
@@ -400,7 +400,7 @@ Line rules:
 | `TasaImp`, `IVA` | always emitted, 0 when absent: this is the output known to pass, and the XSD accepts it |
 | `IVA` absent with `taxRate` and `netAmount` | `round(net × rate / 100)` |
 | `MntTotal` absent | `net + IVA`; `folio` and `guide` voids emit 0 |
-| `transferType` | 1 to 7, else `INVALID_OPTION { field: 'transferType' }` (values 8 and 9 of `IndTraslado` are not in this XSD and would be a `cvc-*` rejection) |
+| `transferType` | 1 to 7, else `INVALID_OPTION { field: 'transferType' }`. `TpoOper` stops at 7 in the XSD, so values 8 and 9 of `IndTraslado` on a line would be a `cvc-*` rejection, although `TotTraslado` admits them |
 | `receiverName` | sanitized, at most 50 characters (`FIELD_TOO_LONG`) |
 | `adjustment` | emitted as `Operacion` when given, default `add` on `adjustment` submissions; `remove` subtracts in the totals |
 
@@ -429,7 +429,7 @@ type FolioConsumptionInput = {
   /** EN: One line per receipt issued. ES: Una línea por boleta emitida. */
   readonly entries?: readonly FolioConsumptionEntry[]
   /** EN: Folios voided in the system before reaching the SII. ES: Folios anulados en el sistema antes de llegar al SII. */
-  readonly voidedFolios?: readonly { readonly type: 39 | 41; readonly folio: number }[]
+  readonly voidedFolios?: readonly VoidedFolio[]
   readonly id?: string
   readonly now?: Date
 }
@@ -514,29 +514,29 @@ formula`. Every other failure reuses existing codes:
 Three layers, per D25 and the decision of section 5:
 
 1. **Official XSD in `npm test`.** `validateAgainstXsd(xml, 'LibroCV' | 'LibroGuia' | 'ConsumoFolio')` in
-   `tests/support/xsd.ts`. Every test that signs a book passes its XML through it. For `LibroGuia`, the helper rewrites
-   the XMLDSig namespace off `Signature` and `SignedInfo` before validating, because the 2004 XSD declares that element
-   in the SII namespace; the XML that would be sent is not altered.
-2. **Golden unsigned XML, byte for byte.** `tests/fixtures/books/*.xml`, one per book and submission: IECV sale `total`,
-   purchase `total` with common-use and non-recoverable VAT, `partial`, `final`, `adjustment` with add and remove,
-   `rectification`, `special`; guide `total` with voids and transfers, `adjustment`; report with both types and voids, a
-   day with no sales. All with `FIXED_NOW` and invented data (`Comercial Andina SpA`, `Comercializadora Rapel Ltda`,
-   RUTs from the scan allow-list).
-3. **Opt-in differential.** `tests/differential.test.ts` adds the three books with an external harness located through
-   `DTE_REFERENCE_HARNESS`, as in phase 1 (JSON contract in the plan). For the IECV, `<EnvioLibro>` is compared byte for
+   `tests/support/xsd.ts`. The signed XML of every sample passes through it.
+2. **Golden unsigned XML, byte for byte.** `tests/fixtures/books/*.xml`, one per sample: IECV `sale-total`,
+   `purchase-special` with common-use and non-recoverable VAT, `sale-partial`, `sale-final`, `sale-adjustment` with add
+   and remove, `sale-rectification`; `guide-total` with voids and transfers, `guide-adjustment`; `report-day` with both
+   types and voids, `report-no-sales`. All with `FIXED_NOW` and invented data (`Comercializadora Rapel Ltda`,
+   `Hortalizas del Maule Ltda`, RUTs from the scan allow-list). A trailing newline in a golden file is not significant.
+3. **Opt-in differential.** `tests/books/differential.test.ts` compares the three books with an external harness located
+   through `DTE_REFERENCE_BOOKS_HARNESS` (JSON contract in the plan). For the IECV, `<EnvioLibro>` is compared byte for
    byte and `DigestValue` and `SignatureValue` are compared after whitespace removal, because the harness wraps base64
    differently. For guides and the report, the comparison strips whitespace between tags, because the harness emits them
-   on one line.
+   on one line. Measured on 2026-11-01 with the code of the plan: sale, purchase and adjustment byte-identical, including
+   digest, guide and report identical apart from whitespace.
 
-   `TmstFirma` and the ids are pinned on both sides. **Expected differences**, each a deliberate decision of this spec:
+   `TmstFirma` and the ids are pinned on both sides. **Expected differences**, each a deliberate decision of this spec,
+   which the cases avoid:
    - `TotMntModificado` on a guide book, and `TotalesSegmento` of an `adjustment` with `remove` lines.
    - Rounding of `TotCredIVAUsoComun` on cases built to expose it.
-   - `RUTDoc` of a type 46 on a purchase book: the supplier here, per the format.
+   - `RUTDoc` of a type 46 from `bookEntryFromDocument` on a purchase book: the supplier here, per the format.
 
 Also: `verify*Signature` valid and tampered; property tests with `fast-check` (sum of lines equals the summary, add then
-remove returns to zero, `compactFolioRanges` recomposes its input, `accumulateBookTotals` is associative); type tests
-with `expect-type`; one entry in `tests/public-api.test.ts` per export; `dist` smoke; `tests/sii/upload.test.ts` gains
-`fileName`. No network.
+remove returns to zero, `compactFolioRanges` recomposes its input, `accumulateBookTotals` and `accumulateGuideTotals` are
+associative); type tests with `expect-type`; one entry in `tests/public-api.test.ts` per export; `dist` smoke;
+`tests/sii/upload.test.ts` gains `fileName`. No network.
 
 ### 3.12 Typical flows
 
@@ -591,19 +591,28 @@ Runtime exports added to the root and to `RUNTIME_EXPORTS`:
 - **Catalogs:** `BOOK_OPERATIONS`, `BOOK_KINDS`, `BOOK_SUBMISSIONS`, `BOOK_DOCUMENT_TYPES`, `isBookDocumentType`,
   `SUMMARY_ONLY_DOCUMENT_TYPES`, `NON_RECOVERABLE_VAT_CODES`, `GUIDE_TRANSFER_TYPES`, `GUIDE_VOID_CODES`.
 
-Types: `BookOperation`, `BookKind`, `BookSubmission`, `BookAdjustment`, `BookDocumentType`, `NonRecoverableVatCode`,
-`GuideTransferType`, `GuideVoidCode`, `BookCoverInput`, `BookCover`, `PurchaseSalesCoverInput`, `PurchaseSalesCover`,
-`GuideBookCoverInput`, `GuideBookCover`, `FolioConsumptionCoverInput`, `FolioConsumptionCover`, `BookEntryInput`,
-`BookEntry`, `BookTotals`, `BookTotalsInput`, `BookTotalMismatch`, `PurchaseSalesBookInput`, `PurchaseSalesBook`,
-`SignedPurchaseSalesBook`, `BookEntryFromDocumentOptions`, `GuideEntryInput`, `GuideEntry`, `GuideTotals`,
-`GuideBookInput`, `GuideBook`, `SignedGuideBook`, `FolioConsumptionEntry`, `FolioRange`, `FolioConsumptionSummary`,
-`FolioConsumptionInput`, `FolioConsumption`, `SignedFolioConsumption`, and the SII-shaped `SiiLibroCompraVenta`,
-`SiiEnvioLibro`, `SiiCaratulaLibro`, `SiiTotalesSegmento`, `SiiTotalesPeriodo`, `SiiDetalleLibro`, `SiiLibroGuia`,
-`SiiEnvioLibroGuia`, `SiiCaratulaLibroGuia`, `SiiResumenLibroGuia`, `SiiDetalleLibroGuia`, `SiiConsumoFolios`,
-`SiiDocumentoConsumoFolios`, `SiiCaratulaConsumoFolios`, `SiiResumenConsumoFolios`.
+Types:
+
+- **Catalogs:** `BookOperation`, `BookKind`, `BookSubmission`, `BookAdjustment`, `BookDocumentType`,
+  `NonRecoverableVatCode`, `GuideTransferType`, `GuideVoidCode`.
+- **IECV:** `BookCoverInput`, `BookCover`, `PurchaseSalesCoverInput`, `PurchaseSalesCover`, `BookNonRecoverableVat`,
+  `BookOtherTax`, `BookForeignReceiver`, `BookSettlementInput`, `BookTaxKind`, `BookEntryInput`, `BookEntry`,
+  `BookTotalMismatch`, `BookNonRecoverableVatTotal`, `BookOtherTaxTotal`, `BookSettlementTotals`, `BookTotals`,
+  `BookTotalsInput`, `PurchaseSalesBookInput`, `PurchaseSalesBook`, `SignedPurchaseSalesBook`,
+  `BookEntryFromDocumentOptions`.
+- **Guides:** `GuideBookCoverInput`, `GuideBookCover`, `GuideEntryInput`, `GuideEntry`, `GuideTransferTotal`, `GuideTotals`,
+  `GuideBookInput`, `GuideBook`, `SignedGuideBook`.
+- **Report:** `FolioConsumptionCoverInput`, `FolioConsumptionCover`, `FolioConsumptionType`, `FolioConsumptionEntry`,
+  `VoidedFolio`, `FolioRange`, `FolioConsumptionSummary`, `FolioConsumptionInput`, `FolioConsumption`,
+  `SignedFolioConsumption`.
+- **SII-shaped:** `SiiCaratulaLibro`, `SiiTotIVANoRec`, `SiiTotOtrosImp`, `SiiTotLiquidaciones`, `SiiTotalesSegmento`,
+  `SiiTotalesPeriodo`, `SiiDetalleLibro`, `SiiEnvioLibro`, `SiiCaratulaLibroGuia`, `SiiResumenLibroGuia`,
+  `SiiDetalleLibroGuia`, `SiiEnvioLibroGuia`, `SiiCaratulaConsumoFolios`, `SiiResumenConsumoFolios`,
+  `SiiDocumentoConsumoFolios`.
 
 Scaffolding: `xmllint-wasm` as a pinned devDependency; `.size-limit.json` raised to the measured post-phase-3 size
-rounded up to the next 2 kB, with the numbers posted to issue #5; CI unchanged, since the WASM runs on every Node of the
+rounded up to the next 2 kB (ESM 31.9 kB, CJS 32.1 kB on the code of the plan, so 34 kB), with the numbers posted to
+issue #5; CI unchanged, since the WASM runs on every Node of the
 matrix; the Deno and Bun smokes unchanged.
 
 ---
@@ -682,7 +691,6 @@ FoliosEmitidos `issuedCount` · FoliosAnulados `voidedCount` · FoliosUtilizados
 
 | Point | Status | Handling |
 |---|---|---|
-| Namespace of `Signature` in `LibroGuia`: the published 2004 XSD declares it in the SII namespace | Field-proven output uses XMLDSig and completes certification | XMLDSig; the test helper rewrites it only for XSD validation; confirm in the first live guide book |
 | Contents of `RangoUtilizados` when there are voided folios: the format text and its worked example disagree | Unverified; field-proven reports never carry voids | Follow the worked example (issued folios only); confirm with a live report that has voids |
 | `TotOp*` counters that the SDK does not compute | Optional in the XSD and the format; field-proven books omit them; the official sample includes them | Omit; adding them later is free |
 | `Emisor=1` on notes affecting a purchase invoice | The format asks for it; field-proven purchase books omit it | Field available, not inferred by the helper |
@@ -695,28 +703,30 @@ FoliosEmitidos `issuedCount` · FoliosAnulados `voidedCount` · FoliosUtilizados
 
 ## Appendix A. SII format facts the implementation relies on (verified 2026-11-01)
 
-**Sources.** `LibroCV_v10.xsd` (last modified 2011-03-02), `LceCal_v10.xsd`, `LceCoCertif_v10.xsd`,
-`LceSiiTypes_v10.xsd`, `LibroGuia_v10.xsd` (2004), `ConsumoFolio_v10.xsd`, `SiiTypes_v10.xsd` (2026-02-06),
-`xmldsignature_v10.xsd`, from the SII XML format page. Format PDFs: IECV version 3.0 (March 2016), guide book version
-1.0 (2003-10-29), folio consumption 1.0 (2009-02-05), daily sales summary 2.0 (2020-08-03).
+**Sources.** `LibroCV_v10.xsd` (file dated 2015-02-10), `LceCal_v10.xsd`, `LceCoCertif_v10.xsd`, `LceSiiTypes_v10.xsd`,
+`LibroGuia_v10.xsd` (2007-01-25), `ConsumoFolio_v10.xsd`, `SiiTypes_v10.xsd` (2026-02-06), `xmldsignature_v10.xsd`, from
+the links of the SII XML format page, under `www.sii.cl/factura_electronica/factura_mercado/`. Older copies with the same
+names remain under `www.sii.cl/factura_electronica/`: there `LibroGuia_v10.xsd` is from 2004 and declares `Signature` in
+the SII namespace, so they must not be used. Format PDFs: IECV version 3.0 (March 2016), guide book version 1.0
+(2003-10-29), folio consumption 1.0 (2009-02-05), daily sales summary 2.0 (2020-08-03).
 
 **`LibroCompraVenta`.** `EnvioLibro @ID { Caratula, ResumenSegmento?, ResumenPeriodo?, Detalle*, (LceCal | LceCoCertif)?,
 TmstFirma }`, then `ds:Signature`. `TotalesSegmento` and `TotalesPeriodo`, 1 to 40 each. `DoctoType`: 29 30 32 33 34 35
-38 39 40 41 43 45 46 53 55 56 60 61 101–106 108–112 175 180 185 900–907 909–911 914 918–922 924 500 501. Types 47 and 48
-appear in the PDF but not in the XSD. Only in `TotalesPeriodo`: `FctProp`, `TotCredIVAUsoComun`, `TotImpVehiculo`,
+38 39 40 41 43 45 46 48 53 55 56 60 61 101–106 108–112 175 180 185 900–907 909–911 914 918–922 924 500 501. Type 47
+appears in the PDF but not in the XSD. Only in `TotalesPeriodo`: `FctProp`, `TotCredIVAUsoComun`, `TotImpVehiculo`,
 `FctImpAdic`, `TotCredImp`. In `TotalesPeriodo`, `TotAnulado`, `TotOpExe`, `TotOpIVARec`, `TotOpActivoFijo`,
 `TotOpIVANoRec`, `TotOpIVAUsoComun`, `TotOpIVARetTotal`, `TotOpIVARetParcial` and `TotOpIVANoRetenido` are
 `positiveInteger`. `TotalesSegmento` counters and amounts are signed integers. `RznSoc` at most 50. `FchDoc` from
 2000-01-01 to 2050-12-31. `CdgSIISucur` at most 9 digits. `IVANoRec` at most 5, codes 1 2 3 4 9. `OtrosImp` at most 20,
-`MntImp` signed. `MontoType` fields of `Detalle` (non-negative): `MntActivoFijo`, `MntIVAActivoFijo`, `MntIVANoRec`,
+`MntImp` signed, `TasaImp` optional. `MontoType` fields of `Detalle` (non-negative): `MntActivoFijo`, `MntIVAActivoFijo`, `MntIVANoRec`,
 `IVAUsoComun`, `IVAFueraPlazo`, `Ley18211`, `MntSinCred`, `IVARetTotal`, `IVARetParcial`, `CredEC`, `DepEnvase`,
 `IVANoRetenido`, `PsjNac`, `PsjInt`, `TabPuros`, `TabCigarrillos`, `TabElaborado`, `ImpVehiculo`.
 
-**Summary-only types (PDF section 4.1 and 6).** 35, 38, 39, 41, 105, 919, 920, 922, 924, 500, 501.
+**Summary-only types (PDF sections 4.1 and 6).** 35, 38, 39, 41, 48, 105, 919, 920, 922, 924, 500, 501.
 
-**`LibroGuia`.** `EnvioLibro @ID { Caratula, ResumenSegmento?, ResumenPeriodo?, Detalle*, TmstFirma }`, then `Signature`
-(SII namespace in the XSD). `TipoLibro` only `ESPECIAL`. `FolioNotificacion` required. `TotGuiaVenta` and `TotMntGuiaVta`
-required. `TotTraslado` at most 6, types 2 to 7. `Anulado` 1 2 3. `Operacion` 1 2. `TpoOper` 1 to 7. `RznSoc` at most 50.
+**`LibroGuia`.** `EnvioLibro @ID { Caratula, ResumenSegmento?, ResumenPeriodo?, Detalle*, TmstFirma }`, then
+`ds:Signature`. `TipoLibro` only `ESPECIAL`. `FolioNotificacion` required. `TotGuiaVenta` and `TotMntGuiaVta` required.
+`TotTraslado` at most 6, types 2 to 9. `Anulado` 1 2 3. `Operacion` 1 2. `TpoOper` 1 to 7. `RznSoc` at most 50.
 `ResumenSegmento` amounts are signed, `ResumenPeriodo` ones are not.
 
 **`ConsumoFolios`.** `DocumentoConsumoFolios @ID { Caratula @version { RutEmisor, RutEnvia, FchResol, NroResol, FchInicio,
