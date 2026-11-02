@@ -147,7 +147,11 @@ export const DEFAULT_TIMEOUTS: SiiTimeouts = Object.freeze({ soap: 30000, rest: 
 /** EN: Default token lifetime in the cache: 55 minutes. ES: Vigencia por defecto del token en caché: 55 minutos. */
 export const DEFAULT_TOKEN_TTL_MS = 55 * 60 * 1000
 
-const defaultSleep: SleepFn = (ms, signal) =>
+/**
+ * EN: Default wait: a timer that the caller's signal can cancel with `REQUEST_ABORTED`.
+ * ES: Espera por defecto: un temporizador que el signal del llamador puede cancelar con `REQUEST_ABORTED`.
+ */
+export const defaultSleep: SleepFn = (ms, signal) =>
   new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(new DteError('REQUEST_ABORTED'))
@@ -164,7 +168,11 @@ const defaultSleep: SleepFn = (ms, signal) =>
     signal?.addEventListener('abort', onAbort, { once: true })
   })
 
-const assertPositive = (value: number | undefined, field: string): void => {
+/**
+ * EN: `INVALID_OPTION` unless the value is absent or a positive finite number.
+ * ES: `INVALID_OPTION` salvo que el valor falte o sea un número finito positivo.
+ */
+export const assertPositive = (value: number | undefined, field: string): void => {
   if (value !== undefined && !(Number.isFinite(value) && value > 0)) throw new DteError('INVALID_OPTION', { field })
 }
 

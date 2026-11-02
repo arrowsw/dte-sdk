@@ -73,6 +73,9 @@ export {
 } from './catalogs/claim-codes'
 export type { ClaimAction, ClaimActionCode } from './catalogs/claim-codes'
 
+export { PORTAL_REJECTIONS, portalRejectionMessage } from './catalogs/portal'
+export type { PortalRejection } from './catalogs/portal'
+
 export { toSiiRut, isSiiRut, splitSiiRut } from './model/rut'
 export type { SiiRut } from './model/rut'
 export type {
@@ -301,6 +304,7 @@ export { createNodeHttpsTransport } from './sii/node-transport'
 export type { NodeTlsOptions, NodeHttpsTransportOptions, TlsVersion } from './sii/node-transport'
 export { redactExchange, createMemoryCapture } from './sii/capture'
 export type {
+  HttpChannel,
   HttpExchange,
   HttpExchangeRequest,
   HttpExchangeResponse,
@@ -353,3 +357,39 @@ export type {
   ReceiverStatus,
   ReceiverStatusResult,
 } from './sii/claims'
+
+export { createPortalClient, DEFAULT_PORTAL_RETRY_POLICY, isRetryablePortalError } from './portal/client'
+export type { PortalClient, PortalClientOptions } from './portal/client'
+export { createMemoryPortalLock } from './portal/lock'
+export type { PortalLock } from './portal/lock'
+export { openPortalSession, closePortalSession } from './portal/session'
+export type { PortalSessionInfo } from './portal/session'
+export { fetchCompanyResolution, fetchTaxpayerData, fetchIssuerProfile } from './portal/company'
+export type { IssuerProfile } from './portal/company'
+export type { CompanyResolution, TaxpayerData, TaxpayerActivity, TaxpayerBranch } from './portal/pages/company'
+export { queryCertificationSets } from './portal/certification'
+export type { CertificationSets } from './portal/certification'
+export type { CertificationSet } from './portal/pages/certification'
+export { listStampableTypes, queryFolioQuota, requestCaf } from './portal/stamping'
+export type { CafRequestInput, FolioQuota, ObtainedCaf } from './portal/stamping'
+export type { QuotaFields, StampableType } from './portal/pages/stamping'
+export { listFolioRanges, annulFolios } from './portal/annulment'
+export type { AnnulFoliosInput, AnnulmentResult, FolioRanges, FolioSpan } from './portal/annulment'
+export type { AnnulmentRejectionReason, UnusedFolioRange } from './portal/pages/annulment'
+export { listReobtainableRanges, reobtainCaf } from './portal/reobtain'
+export type { ReobtainableRange } from './portal/reobtain'
+export { requestCafExact, requestCafInBatches, reobtainFolios } from './portal/flows'
+export type {
+  FolioFlowResult,
+  ReobtainFoliosInput,
+  ReobtainResult,
+  RequestCafExactInput,
+  RequestCafExactResult,
+  RequestCafInBatchesInput,
+} from './portal/flows'
+
+export { cafFingerprint, createFolioRegistry, createMemoryFolioRegistry } from './folios/registry'
+export type { FolioLedgerStore, FolioRegistry } from './folios/registry'
+export { createDirectoryFolioRegistry } from './folios/node-registry'
+export type { DirectoryFolioRegistryOptions } from './folios/node-registry'
+export type { FolioEntry, FolioLedger, FolioScope, FolioSentRecord, FolioStats } from './folios/ledger'

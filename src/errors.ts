@@ -39,6 +39,13 @@ export const DTE_ERROR_CODES = {
   SII_QUERY_ERROR: 'SII_QUERY_ERROR',
   WAIT_TIMEOUT: 'WAIT_TIMEOUT',
   BOOK_TOTAL_MISMATCH: 'BOOK_TOTAL_MISMATCH',
+  SII_PORTAL_LOGIN_FAILED: 'SII_PORTAL_LOGIN_FAILED',
+  SII_PORTAL_CERT_NOT_ENABLED: 'SII_PORTAL_CERT_NOT_ENABLED',
+  SII_PORTAL_SESSION_LIMIT: 'SII_PORTAL_SESSION_LIMIT',
+  SII_PORTAL_SESSION_EXPIRED: 'SII_PORTAL_SESSION_EXPIRED',
+  SII_PORTAL_BLOCKED: 'SII_PORTAL_BLOCKED',
+  SII_PORTAL_REJECTED: 'SII_PORTAL_REJECTED',
+  SII_PORTAL_UNEXPECTED_PAGE: 'SII_PORTAL_UNEXPECTED_PAGE',
 } as const
 
 /**
@@ -90,6 +97,13 @@ const MESSAGES: Readonly<Record<DteErrorCode, string>> = {
   SII_QUERY_ERROR: 'SII status query failed',
   WAIT_TIMEOUT: 'Timed out waiting for the SII status',
   BOOK_TOTAL_MISMATCH: 'Book line total does not match the SII formula',
+  SII_PORTAL_LOGIN_FAILED: 'SII portal login gave no session',
+  SII_PORTAL_CERT_NOT_ENABLED: 'Certificate is not enabled as a login method at the SII',
+  SII_PORTAL_SESSION_LIMIT: 'SII reports too many authenticated sessions for this RUT',
+  SII_PORTAL_SESSION_EXPIRED: 'SII portal keeps asking to authenticate',
+  SII_PORTAL_BLOCKED: 'SII firewall or captcha blocked the request',
+  SII_PORTAL_REJECTED: 'SII portal refused the request',
+  SII_PORTAL_UNEXPECTED_PAGE: 'SII portal answered a page that could not be interpreted',
 }
 
 // Only these detail keys are safe to show: field names, codes and numbers, never user text, URLs or bodies.
@@ -112,6 +126,8 @@ const SAFE_DETAIL_KEYS = [
   'trackId',
   'expected',
   'actual',
+  'rejection',
+  'step',
 ] as const
 
 const formatMessage = (code: DteErrorCode, details: DteErrorDetails): string => {
