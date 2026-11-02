@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<ConsumoFolios xmlns="http://www.sii.cl/SiiDte" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.sii.cl/SiiDte ConsumoFolio_v10.xsd" version="1.0">
+<DocumentoConsumoFolios ID="LIBRO_TEST">
+<Caratula version="1.0">
+<RutEmisor>76543210-3</RutEmisor>
+<RutEnvia>11111111-1</RutEnvia>
+<FchResol>2026-01-15</FchResol>
+<NroResol>80</NroResol>
+<FchInicio>2026-10-16</FchInicio>
+<FchFinal>2026-10-16</FchFinal>
+<SecEnvio>1</SecEnvio>
+<TmstFirmaEnv>2026-11-15T15:30:00</TmstFirmaEnv>
+</Caratula>
+<Resumen>
+<TipoDocumento>39</TipoDocumento>
+<TasaIVA>19</TasaIVA>
+<MntTotal>0</MntTotal>
+<FoliosEmitidos>0</FoliosEmitidos>
+<FoliosAnulados>0</FoliosAnulados>
+<FoliosUtilizados>0</FoliosUtilizados>
+</Resumen>
+</DocumentoConsumoFolios></ConsumoFolios>

@@ -21,8 +21,24 @@ import {
   receiverStatus,
   registerClaim,
   folioReceived,
+  createPurchaseSalesBook,
+  signPurchaseSalesBook,
+  createGuideBook,
+  signGuideBook,
+  createFolioConsumption,
+  signFolioConsumption,
+  bookEntryFromDocument,
 } from '../src'
 import type {
+  BookEntryInput,
+  BookTotals,
+  FolioConsumption,
+  GuideBook,
+  GuideTotals,
+  PurchaseSalesBook,
+  SignedFolioConsumption,
+  SignedGuideBook,
+  SignedPurchaseSalesBook,
   Document,
   SignedDocument,
   StampedDocument,
@@ -146,6 +162,15 @@ const _typecheck = () => {
   expectTypeOf<ReceiverStatus>().toEqualTypeOf<'accepted' | 'goodsReceived' | 'claimed' | 'none' | 'unknown'>()
   expectTypeOf<UploadKind>().toEqualTypeOf<'dte' | 'receipt' | 'book' | 'folioConsumption'>()
   expectTypeOf<TokenChannel>().toEqualTypeOf<'soap' | 'rest'>()
+  expectTypeOf(createPurchaseSalesBook).returns.toEqualTypeOf<PurchaseSalesBook>()
+  expectTypeOf(signPurchaseSalesBook).returns.toEqualTypeOf<SignedPurchaseSalesBook>()
+  expectTypeOf(createGuideBook).returns.toEqualTypeOf<GuideBook>()
+  expectTypeOf(signGuideBook).returns.toEqualTypeOf<SignedGuideBook>()
+  expectTypeOf(createFolioConsumption).returns.toEqualTypeOf<FolioConsumption>()
+  expectTypeOf(signFolioConsumption).returns.toEqualTypeOf<SignedFolioConsumption>()
+  expectTypeOf(bookEntryFromDocument).returns.toEqualTypeOf<BookEntryInput>()
+  expectTypeOf<PurchaseSalesBook['periodTotals']>().toEqualTypeOf<readonly BookTotals[] | null>()
+  expectTypeOf<GuideBook['periodTotals']>().toEqualTypeOf<GuideTotals | null>()
 
   // The client is frozen data: its fields cannot be assigned.
   const sii = createSiiClient({} as SiiClientOptions)

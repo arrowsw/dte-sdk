@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<LibroCompraVenta xmlns="http://www.sii.cl/SiiDte" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.sii.cl/SiiDte LibroCV_v10.xsd" version="1.0">
+<EnvioLibro ID="LIBRO_TEST">
+<Caratula>
+<RutEmisorLibro>76543210-3</RutEmisorLibro>
+<RutEnvia>11111111-1</RutEnvia>
+<PeriodoTributario>2026-10</PeriodoTributario>
+<FchResol>2026-01-15</FchResol>
+<NroResol>80</NroResol>
+<TipoOperacion>VENTA</TipoOperacion>
+<TipoLibro>RECTIFICA</TipoLibro>
+<TipoEnvio>TOTAL</TipoEnvio>
+<CodAutRec>AUT123</CodAutRec>
+</Caratula>
+<ResumenPeriodo>
+<TotalesPeriodo>
+<TpoDoc>33</TpoDoc>
+<TotDoc>1</TotDoc>
+<TotMntExe>0</TotMntExe>
+<TotMntNeto>100000</TotMntNeto>
+<TotMntIVA>19000</TotMntIVA>
+<TotMntTotal>119000</TotMntTotal>
+</TotalesPeriodo>
+</ResumenPeriodo>
+<Detalle>
+<TpoDoc>33</TpoDoc>
+<NroDoc>101</NroDoc>
+<TasaImp>19</TasaImp>
+<FchDoc>2026-10-05</FchDoc>
+<RUTDoc>12345678-5</RUTDoc>
+<RznSoc>Comercializadora Rapel Ltda</RznSoc>
+<MntExe>0</MntExe>
+<MntNeto>100000</MntNeto>
+<MntIVA>19000</MntIVA>
+<MntTotal>119000</MntTotal>
+</Detalle>
+<TmstFirma>2026-11-15T15:30:00</TmstFirma>
+</EnvioLibro></LibroCompraVenta>
