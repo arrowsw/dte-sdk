@@ -1,7 +1,7 @@
 import { isDocumentType, type DocumentType } from '../catalogs/document-types'
 import { cgiUrl } from '../catalogs/portal'
 import { DteError } from '../errors'
-import type { CallOverrides } from '../sii/client'
+import { assertPositive, type CallOverrides } from '../sii/client'
 import { isRetryablePortalError, resolvePortalCompany, type PortalClient } from './client'
 import { formAction, inputValues, namedForm } from './html'
 import {
@@ -148,6 +148,24 @@ const listInSession = async (context: PortalContext, type: number, companyRut?: 
 
 const assertDocumentType = (type: unknown): void => {
   if (!isDocumentType(type)) throw new DteError('INVALID_DOCUMENT_TYPE', { field: 'type' })
+}
+
+const isPositiveInteger = (value: number): boolean => Number.isInteger(value) && value > 0
+
+const isSpan = (span: { readonly from: number; readonly to: number }): boolean =>
+  isPositiveInteger(span.from) && isPositiveInteger(span.to) && span.from <= span.to
+
+// Annulling cannot be undone, and a value the filters cannot read would widen the scope instead of narrowing it:
+// `withinDays: NaN` passes every date, `maxRanges: 0` every range and `exclude` with `NaN` protects nothing.
+const assertScope = (input: AnnulFoliosInput): void => {
+  if (input.range === undefined && input.withinDays === undefined && input.all !== true)
+    throw new DteError('INVALID_OPTION', { field: 'range' })
+  if (input.range !== undefined && !isSpan(input.range)) throw new DteError('INVALID_OPTION', { field: 'range' })
+  assertPositive(input.withinDays, 'withinDays')
+  if (input.maxRanges !== undefined && !isPositiveInteger(input.maxRanges))
+    throw new DteError('INVALID_OPTION', { field: 'maxRanges' })
+  if (input.exclude !== undefined && !input.exclude.every(isSpan))
+    throw new DteError('INVALID_OPTION', { field: 'exclude' })
 }
 
 /**
@@ -311,8 +329,7 @@ export const annulFoliosInSession = async (
   input: AnnulFoliosInput,
 ): Promise<AnnulmentResult> => {
   assertDocumentType(input.type)
-  if (input.range === undefined && input.withinDays === undefined && input.all !== true)
-    throw new DteError('INVALID_OPTION', { field: 'range' })
+  assertScope(input)
   const company = companyFields(resolvePortalCompany(context.portal, input.companyRut))
   const earliestMs = input.withinDays === undefined ? null : context.portal.now().getTime() - input.withinDays * DAY_MS
   const tally: Tally = { annulled: [], rejected: [], known: new Set(input.knownAnnulled ?? []) }
@@ -359,7 +376,7 @@ export const annulFoliosInSession = async (
  * @param input EN: type and an explicit scope. ES: tipo y un alcance explícito.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: what was annulled, what was not, and the memory to persist. ES: lo anulado, lo no anulado y la memoria que guardar.
- * @throws {DteError} EN: `INVALID_OPTION { field: 'range' }` without a scope, `SII_PORTAL_UNEXPECTED_PAGE`, session and block codes. ES: `INVALID_OPTION { field: 'range' }` sin alcance, `SII_PORTAL_UNEXPECTED_PAGE`, códigos de sesión y bloqueo.
+ * @throws {DteError} EN: `INVALID_OPTION { field }` without a scope or with one that cannot be read, `SII_PORTAL_UNEXPECTED_PAGE`, session and block codes. ES: `INVALID_OPTION { field }` sin alcance o con uno ilegible, `SII_PORTAL_UNEXPECTED_PAGE`, códigos de sesión y bloqueo.
  */
 export const annulFolios = (
   portal: PortalClient,

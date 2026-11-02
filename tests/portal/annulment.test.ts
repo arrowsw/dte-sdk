@@ -98,6 +98,35 @@ describe('annulFolios', () => {
     expect(harness.fake.requests).toHaveLength(0)
   })
 
+  // Each of these used to widen the scope: `withinDays: NaN` passed every date, `maxRanges: 0` every range.
+  test.each([
+    ['withinDays', { withinDays: Number.NaN }],
+    ['withinDays', { withinDays: Number.POSITIVE_INFINITY }],
+    ['withinDays', { withinDays: 0 }],
+    ['maxRanges', { all: true, maxRanges: 0 }],
+    ['maxRanges', { all: true, maxRanges: Number.NaN }],
+    ['maxRanges', { all: true, maxRanges: 1.5 }],
+    ['range', { range: { from: 6, to: 3 } }],
+    ['range', { range: { from: Number.NaN, to: 3 } }],
+    ['range', { range: { from: 3, to: Number.NaN } }],
+    ['range', { range: { from: 0, to: 3 } }],
+    [
+      'exclude',
+      {
+        all: true,
+        exclude: [
+          { from: 1, to: 2 },
+          { from: Number.NaN, to: Number.NaN },
+        ],
+      },
+    ],
+  ])('a scope that cannot be read annuls nothing: %s %#', async (field, scope) => {
+    const harness = await signedIn([])
+    const error = await failure(annulFolios(harness.portal, { type: 33, ...scope }))
+    expect(error).toMatchObject({ code: 'INVALID_OPTION', details: { field } })
+    expect(harness.fake.requests).toHaveLength(0)
+  })
+
   test('annuls a range with the fields of the SII form', async () => {
     const harness = await signedIn([
       entry,
