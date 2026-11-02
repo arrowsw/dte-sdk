@@ -511,7 +511,8 @@ because nested tables break a read by columns. Rows without forms fall back to c
 
 **Annulling.** Up to 4 passes, each listing again, with 1.5 s between them. A range is skipped when it falls outside
 `range` or `withinDays` (a range with no readable date is skipped: when unsure, do not annul), overlaps `exclude` (CAFs
-the caller still holds) or is in `knownAnnulled`. At most `maxRanges` (50), the last ones of the listing. Then per range:
+the caller still holds) or is in `knownAnnulled`. At most `maxRanges` (50) per pass, the last ones of the listing, so one
+call can reach four times that. Then per range:
 
 1. `POST af_anular3` with `DIA`, `MES`, `ANO`, `COD_DOCTO`, `FOLIO_INI`, `FOLIO_FIN`, `CANT_DOCTOS`. "ya ha sido
    efectuado", "ya fue anulado", "efectuado anteriormente" or "anulado anteriormente" is `alreadyAnnulled`, without going
@@ -555,7 +556,7 @@ reobtainFolios(portal, { type, quantity, isIssued?, isFolioFree?, maxChecksPerRa
 ```
 
 - **`requestCafExact`** needs one CAF that covers everything. On `quotaInsufficient` or `stampingBlocked`, with
-  `allowAnnul` and unless `FOLIOS_DISP` is exactly 0, it annuls up to 20 ranges and asks once more; nothing annulled is
+  `allowAnnul` and unless `FOLIOS_DISP` is exactly 0, it annuls up to 20 ranges per pass (80 over the four passes) and asks once more; nothing annulled is
   `noAnnullableFolios`. `FOLIOS_DISP` is the annullable set, so with 0 an attempt only wastes requests; with the type
   blocked the field is absent, and that case does need the attempt. A short grant comes back with `complete: false` and
   `foliosShort`.

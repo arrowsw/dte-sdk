@@ -74,7 +74,7 @@ export type AnnulFoliosInput = {
   readonly all?: boolean
   /** EN: Reason; "Folios no utilizados" by default. ES: `MOTIVO` — Motivo; "Folios no utilizados" por defecto. */
   readonly reason?: string
-  /** EN: Most ranges per pass, the last ones of the listing; 50 by default. ES: Máximo de rangos por pasada, los últimos del listado; 50 por defecto. */
+  /** EN: Most ranges per pass, the last ones of the listing; 50 by default, and up to four passes run, so one call can reach four times this. ES: Máximo de rangos por pasada, los últimos del listado; 50 por defecto, y corren hasta cuatro pasadas, así que una llamada puede llegar a cuatro veces esto. */
   readonly maxRanges?: number
   /** EN: Folios never to touch, such as a CAF still in use. ES: Folios que no se tocan, como un CAF todavía en uso. */
   readonly exclude?: readonly { readonly from: number; readonly to: number }[]
