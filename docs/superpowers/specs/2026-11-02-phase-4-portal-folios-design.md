@@ -82,9 +82,9 @@ Measured on 2026-11-02 (Node 24.22.1) with a real certificate against `herculesr
 - ✅ The default transport is `createNodeHttpsTransport({ tls: { clientCertificate: certificate, maxVersion: 'TLSv1.2' } })`.
   Server verification stays on and `legacyRenegotiation` stays off: the server verifies and supports RFC 5746, and the
   handshake above needs neither.
-- The TLS 1.2 cap is the field-proven configuration of authenticated portal sessions (D21). An authenticated session
-  worked on TLS 1.3 on 2026-11-02 (section 6), and one on TLS 1.2 with these flags has not been measured yet, so the
-  default stays until both are. A caller passes its own `transport` to change this.
+- The TLS 1.2 cap is the field-proven configuration of authenticated portal sessions (D21). Authenticated sessions worked
+  on TLS 1.3 and on TLS 1.2 with these flags on 2026-11-02 (section 6). The default stays at TLS 1.2, since nothing
+  measured asks to change it. A caller passes its own `transport` to change this.
 - The fetch adapter cannot present a client certificate. Passing it is allowed (a proxy may terminate TLS) and fails
   as `TRANSPORT_TLS` or as a login failure otherwise. The portal is documented as Node ≥ 20; other runtimes need their
   own transport.
@@ -794,21 +794,25 @@ Hans reviewed these on 2026-11-02. Decisions 1 and 2 were already his.
 
 These pages were then replayed offline through the code, which is how the fixes of 2026-11-02 were checked.
 
+**Measured through the client with `tests/live/portal.live.test.ts` on 2026-11-02, same company, 4 of 4:**
+
+- The default transport, TLS 1.2 with the server verified and no legacy flags, carried an authenticated session.
+- An explicit login, the taxpayer data, closing the session, and a login on demand with no session in the cache.
+- `fetchCompanyResolution`, `listStampableTypes`, `queryFolioQuota` and `listFolioRanges` got an answer. The smoke counts a
+  refusal as one and does not record which of them were refused, so this shows they reached the portal, not that their
+  success paths work.
+
 **Not measured yet:**
 
 - The pages of an enrolled company: the `ad_empresa2` table, the type selector, the quota form, the CAF download, the folio
   ranges and the certification state. They come from behaviour known to work in the field and the fixtures model that.
-- A login on demand against the real SII. It was reproduced offline with the real answer of an explicit login.
-- An authenticated session on TLS 1.2 with no legacy flags, which is the default of `createPortalClient`, and whether a
-  scoped jar works (D31).
+- Whether a scoped jar works (D31).
 
 To close this, before the **first release that ships phase 4** (merging to `canary` publishes nothing):
 
-1. `tests/live/portal.live.test.ts` runs once through the client, which covers TLS 1.2 and the login on demand, and the
-   outcome goes on issue 8. A refusal counts as an answer there, because an enrolled company is not required for it.
-2. The private read-only probe runs again for the scoped jar and `pe_avance`.
-3. The company enrolls in the certification environment, and the probe compares the pages of an enrolled company with the
-   fixtures.
+1. The private read-only probe runs again for the scoped jar and `pe_avance`.
+2. The company enrolls in the certification environment, the probe compares the pages of an enrolled company with the
+   fixtures, and the live smoke runs again with no refusals.
 
 | Point | Handling until measured |
 |---|---|
