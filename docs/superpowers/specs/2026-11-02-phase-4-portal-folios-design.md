@@ -1,6 +1,6 @@
 # dte-sdk — Phase 4 design (SII portal and folios)
 
-Date: 2026-11-02 · Status: **approved: section 5 reviewed with Hans on 2026-11-02; nothing measured past the login yet** · Author: Claude (with Hans)
+Date: 2026-11-02 · Status: **approved: section 5 reviewed with Hans on 2026-11-02; login, logout and refusals measured; the pages of an enrolled company not yet** · Author: Claude (with Hans)
 
 Starting point: the architecture and phase 1 spec, the phase 2 spec (`2026-11-01-phase-2-sii-web-services-design.md`)
 and the phase 3 spec. Decisions D1–D27 and the glossaries are the contract. SII facts come from a read-only probe run
@@ -82,8 +82,9 @@ Measured on 2026-11-02 (Node 24.22.1) with a real certificate against `herculesr
 - ✅ The default transport is `createNodeHttpsTransport({ tls: { clientCertificate: certificate, maxVersion: 'TLSv1.2' } })`.
   Server verification stays on and `legacyRenegotiation` stays off: the server verifies and supports RFC 5746, and the
   handshake above needs neither.
-- The TLS 1.2 cap is the field-proven configuration of authenticated portal sessions (D21). TLS 1.3 reached the login
-  CGI, but no authenticated session has been seen on it yet. A caller passes its own `transport` to change this.
+- The TLS 1.2 cap is the field-proven configuration of authenticated portal sessions (D21). An authenticated session
+  worked on TLS 1.3 on 2026-11-02 (section 6), and one on TLS 1.2 with these flags has not been measured yet, so the
+  default stays until both are. A caller passes its own `transport` to change this.
 - The fetch adapter cannot present a client certificate. Passing it is allowed (a proxy may terminate TLS) and fails
   as `TRANSPORT_TLS` or as a login failure otherwise. The portal is documented as Node ≥ 20; other runtimes need their
   own transport.
@@ -126,7 +127,7 @@ overlap.
 - Detection runs on visible text with `<script>` and `<style>` removed and entities decoded, because the SII writes
   `&aacute;`. The two exceptions are deliberate: `alert()` messages, which is how the old portal reports errors, and
   form fields.
-- The markup assumed: HTML 4.01 without closing `</tr>`, attributes with or without quotes (`value = 1`), Latin-1 unless
+- The markup assumed: HTML 4.01 with rows that lack `</tr>` or, as the regional office row measured does, `<tr>`, attributes with or without quotes (`value = 1`), Latin-1 unless
   the `Content-Type` says UTF-8.
 - Discarded for now: a public override of the parsers. Adding one later breaks nothing; removing one would.
 
@@ -297,7 +298,8 @@ it.
 **Redirects.** The transports never follow them, so `followRedirects` does, up to 8 hops, keeping the last `Location`.
 
 **Login.** `POST https://herculesr.sii.cl/cgi_AUT2000/CAutInicio.cgi?{referencia}` with the body `referencia={encoded}`,
-then redirects. `openPortalSession` first does `GET https://zeusr.sii.cl/AUT2000/InicioAutenticacion/IngresoCertificado.html?{TARGET}`
+then redirects. A good login really answers HTTP 200 with `location.replace(target)` and no `Location` (measured), so a
+target under `.sii.cl` is followed too. `openPortalSession` first does `GET https://zeusr.sii.cl/AUT2000/InicioAutenticacion/IngresoCertificado.html?{TARGET}`
 for the load balancer cookies, with `TARGET = https://misiir.sii.cl/cgi_misii/siihome.cgi`. The page then decides:
 
 | Page | Outcome |
@@ -317,12 +319,15 @@ the form before accepting a `POST`:
 4. Otherwise, a page asking to authenticate after a redirect: log in with the `referencia` taken from the last
    `Location` query, once per operation. A second request for login within one operation is
    `SII_PORTAL_SESSION_EXPIRED`.
-5. A body mentioning `/cvc_cgi/dte/af_anular1`: `GET` the target once more, which is how that page settles after a
+5. `RepresentacionNoAut.htm`, where stale cookies end (measured): the cookies are dropped and the session starts over with
+   the entry page and a login for the requested URL, once per operation. If it comes back after that, the refusal is real:
+   `SII_PORTAL_REJECTED { rejection: 'optionNotAuthorized' }`.
+6. A body mentioning `/cvc_cgi/dte/af_anular1`: `GET` the target once more, which is how that page settles after a
    login.
 
 Any page may also be a block: HTTP 403, "acceso restringido" or "Transaccion Rechazada" (measured, with a support ID in
-the page) throw `SII_PORTAL_BLOCKED` at once. reCAPTCHA counts as a block only in the answer of `requestCaf`: whether
-ordinary pages embed it has not been seen, and treating it as a block everywhere could stop a login that works.
+the page) throw `SII_PORTAL_BLOCKED` at once. reCAPTCHA counts as a block only in the answer of `requestCaf`: none of the
+pages seen embeds it, and treating it as a block everywhere could stop a login that works.
 
 **`submitForm(context, step, action, fields, referer)`** posts to an action resolved against the page host, follows
 redirects and checks for a block.
@@ -332,9 +337,9 @@ otherwise logs in. It returns `PortalSessionInfo { userRut, reused }`, reading t
 and `.dv` cookies. The other operations do not call it: they log in on demand through `ensurePage`, which costs nothing
 when the session is alive.
 
-**`closePortalSession(portal)`** tries each of `PORTAL_LOGOUT_URLS` best-effort, in order, and always removes the cached
-session. Which URL really ends a session is not confirmed yet (section 6). It never throws for a transport failure,
-because the entry is gone either way and the SII expires the session on its own.
+**`closePortalSession(portal)`** calls `PORTAL_LOGOUT_URL`, `https://zeusr.sii.cl/cgi_AUT2000/autTermino.cgi`, measured to
+end a session, and always removes the cached session. Its answer is a script that leaves the SII, which is not followed. It
+never throws for a transport failure, because the entry is gone either way and the SII expires the session on its own.
 
 ### 3.4 Company data
 
@@ -512,7 +517,8 @@ annulFolios(portal, {
 **Listing.** `ensurePage(af_anular1)`, which must show "ANULACION DE FOLIOS", then `POST af_anular2` with `PAGINA=1`,
 `COD_DOCTO`, `ACEPTAR=Consultar`, following the "Ver siguiente" button (`cambiapag(n)`) for up to 20 more pages. Ranges
 come from each row's `<form>` hidden fields (`FOLIO_INI`, `FOLIO_FIN`, `CANT_DOCTOS`, `DIA`, `MES`, `ANO`), deduplicated,
-because nested tables break a read by columns. Rows without forms fall back to columns.
+because nested tables break a read by columns. Rows without forms fall back to columns. A refusal stated on any of these
+pages is `SII_PORTAL_REJECTED`, never an empty list: the portal keeps the usual title on a refused page (measured).
 
 **Annulling.** Up to 4 passes, each listing again, with 1.5 s between them. A range is skipped when it falls outside
 `range` or `withinDays` (a range with no readable date is skipped: when unsure, do not annul), overlaps `exclude` (CAFs
@@ -577,6 +583,7 @@ reobtainFolios(portal, { type, quantity, isIssued?, isFolioFree?, maxChecksPerRa
   is not discarded: its free folios are used, because discarding a 100-folio range for one issued folio left that taxpayer
   with no way out. An expired CAF does not count and the walk moves on. Whatever was downloaded comes back even when it
   falls short, so the caller asks only for the difference.
+  A refused listing comes back with `rejection`, and the portal's words in `reason`.
 
 The order among them (stored CAF, re-download, request in batches, annul last) is the caller's choice and phase 5's job.
 
@@ -699,8 +706,8 @@ await closePortalSession(portal)
 
 The code of the plan was built and run before the plan was written: 1 626 tests pass with coverage at 100 % on the four
 metrics, and the bundle measures ESM 44.14 kB and CJS 44.32 kB, so `.size-limit.json` goes to 46 kB. The fixes made after
-reading the result (the scope checks of D35, the host check of D31) and the decisions of section 5 moved it to ESM 44.31 kB
-and CJS 44.51 kB.
+reading the result (the scope checks of D35, the host check of D31) and the decisions of section 5 and the fixes of the first authenticated run moved it to
+ESM 44.45 kB and CJS 44.64 kB.
 
 ---
 
@@ -761,34 +768,51 @@ Hans reviewed these on 2026-11-02. Decisions 1 and 2 were already his.
 
 ## 6. What is measured and what is not
 
-**Measured against the real SII on 2026-11-02:**
+**Measured against the real SII on 2026-11-02, without a session:**
 
 - The TLS table of D29, and that `herculesr` serves the login CGI.
 - The answer for a certificate not enabled: HTTP 200, `alert()` with code `01.01.215.500.473.33` and `history.go(-2)`.
-- An expired session redirects to `zeus.sii.cl/AUT2000/InicioAutenticacion/IngresoRutClave.html?{target}`, then to `zeusr`.
-- `palena` answered "Transaccion Rechazada" with a support ID to a `GET` of a non-existent CGI, without a session.
-- `autLogout.cgi` without a session: 404 with the certificate at `herculesr`, 404 at `www`, redirect to `Error404` at
-  `maullin`. `autTermino.cgi` exists at `zeusr` (200).
+- With no cookies, an expired session redirects to `zeus.sii.cl/AUT2000/InicioAutenticacion/IngresoRutClave.html?{target}`,
+  then to `zeusr`.
+- `palena` answered "Transaccion Rechazada" with a support ID to a `GET` of a non-existent CGI.
 - Cookies set by `zeusr`: one with `Domain=.zeusr.sii.cl`, one host-only.
 
-**Not measured, because the certificate is not enabled for login yet:**
+**Measured with an authenticated session on 2026-11-02, for a company not yet enrolled as an issuer:**
 
-Nothing after the login has been seen by this project. Every page shape, field name and text of sections 3.4–3.8 comes
-from behaviour known to work in the field, and the synthetic fixtures model that. To close this, Hans enables the
-certificate at sii.cl (*Cambiar Clave y datos de autenticación*, section "¿Cómo se identificará…", option "Utilizando Clave
-Tributaria o Certificado Digital", never "sólo Certificado Digital"), and then:
+- The login answers HTTP 200 with `location.replace(target)` under the title "Autenticación", with no `Location`. The
+  `NETSCAPE_LIVEWIRE.*` cookies arrive with `Domain=.sii.cl`, along with several expired cookies, one of them named `path`.
+- One session on TLS 1.3 with the server verified, sent as a flat jar, worked across `herculesr`, `misiir`, `maullin`,
+  `palena` and `zeusr`.
+- `zeusr/cgi_AUT2000/autTermino.cgi` ends the session: it answers 200 with a script that leaves the SII, and after it
+  `maullin` asks to authenticate again.
+- With the cookies of a finished session, the redirects end in `zeusr/AUT2000/RepresentacionNoAut.htm`, with no target.
+- A company not enrolled gets "el Contribuyente no está autorizado para operar en esta modalidad" at `ad_empresa2`, and "no
+  está autorizado para ingresar a esta opción" at `of_*`, `af_*` and `rf_*`, under their usual titles. The same holds on
+  `maullin` and `palena`.
+- `ce_consulta_muestra_e` answers on `maullin` even so, and "Transaccion Rechazada" on `palena`.
+- `Cambiar clave` and reCAPTCHA appear on none of these pages.
 
-1. The private read-only probe runs again and its pages are compared with the fixtures.
-2. It settles three open points: which logout URL ends a session (`PORTAL_LOGOUT_URLS` keeps the candidates until then),
-   whether a scoped jar works (D31), and whether authenticated sessions work on TLS 1.3 (D29).
-3. `tests/live/portal.live.test.ts` runs once and the outcome goes on the pull request or on issue 8.
+These pages were then replayed offline through the code, which is how the fixes of 2026-11-02 were checked.
 
-This must happen **before the first release that ships phase 4**. Merging to `canary` publishes nothing.
+**Not measured yet:**
+
+- The pages of an enrolled company: the `ad_empresa2` table, the type selector, the quota form, the CAF download, the folio
+  ranges and the certification state. They come from behaviour known to work in the field and the fixtures model that.
+- A login on demand against the real SII. It was reproduced offline with the real answer of an explicit login.
+- An authenticated session on TLS 1.2 with no legacy flags, which is the default of `createPortalClient`, and whether a
+  scoped jar works (D31).
+
+To close this, before the **first release that ships phase 4** (merging to `canary` publishes nothing):
+
+1. `tests/live/portal.live.test.ts` runs once through the client, which covers TLS 1.2 and the login on demand, and the
+   outcome goes on issue 8. A refusal counts as an answer there, because an enrolled company is not required for it.
+2. The private read-only probe runs again for the scoped jar and `pe_avance`.
+3. The company enrolls in the certification environment, and the probe compares the pages of an enrolled company with the
+   fixtures.
 
 | Point | Handling until measured |
 |---|---|
-| Real logout URL | Try all candidates, best-effort; the session expires by itself |
-| `of_*`, `af_*`, `rf_*` markup | Field-known; `SII_PORTAL_UNEXPECTED_PAGE` says so if it differs, with the visible text |
+| `of_*`, `af_*`, `rf_*` markup of an enrolled company | Field-known; `SII_PORTAL_UNEXPECTED_PAGE` says so if it differs, with the visible text |
 | Rate of `EPROTO` with the Node adapter | Retried per D34 |
 | Session limit value | Not assumed; the SII says when it is reached |
 | Spacing across certificates | Per certificate only; the process-wide pacing a single static gave is not reproduced |

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { loadCertificateFromPkcs12 } from '../../src/certificate/pkcs12'
+import { isDteError } from '../../src/errors'
 import { createPortalClient } from '../../src/portal/client'
 import { fetchCompanyResolution, fetchTaxpayerData } from '../../src/portal/company'
 import { listFolioRanges } from '../../src/portal/annulment'
@@ -19,6 +20,16 @@ const enabled =
   env.SII_COMPANY_RUT !== undefined
 const guarded = enabled ? describe : describe.skip
 
+// A refusal is an answer: a company not yet enrolled as an issuer gets one, and that says nothing about the client.
+const answered = async (call: Promise<unknown>): Promise<void> => {
+  await expect(
+    call.catch((error: unknown) => {
+      if (isDteError(error) && error.code === 'SII_PORTAL_REJECTED') return error.details.rejection
+      throw error
+    }),
+  ).resolves.toBeDefined()
+}
+
 guarded('live: portal', () => {
   const portal = enabled
     ? createPortalClient({
@@ -35,14 +46,18 @@ guarded('live: portal', () => {
   }, 120000)
 
   test('company data', async () => {
-    await expect(fetchCompanyResolution(portal!)).resolves.toBeDefined()
+    await answered(fetchCompanyResolution(portal!))
     await expect(fetchTaxpayerData(portal!)).resolves.toBeDefined()
   }, 120000)
 
   test('folios, read only', async () => {
-    const types = await listStampableTypes(portal!)
-    expect(Array.isArray(types)).toBe(true)
-    await expect(queryFolioQuota(portal!, { type: 33 })).resolves.toBeDefined()
-    await expect(listFolioRanges(portal!, { type: 33 })).resolves.toBeDefined()
+    await answered(listStampableTypes(portal!))
+    await answered(queryFolioQuota(portal!, { type: 33 }))
+    await answered(listFolioRanges(portal!, { type: 33 }))
+  }, 120000)
+
+  test('a closed session logs in again on demand', async () => {
+    await closePortalSession(portal!)
+    await expect(fetchTaxpayerData(portal!)).resolves.toBeDefined()
   }, 120000)
 })
