@@ -34,7 +34,7 @@
     "scan": "node scripts/scan-real-data.mjs",
     "fixtures": "node scripts/make-fixtures.mjs",
     "fixtures:tls": "node scripts/make-tls-fixture.mjs",
-    "test:differential": "RUN_DIFFERENTIAL=1 jest --config jest.config.cjs tests/differential.test.ts"
+    "test:differential": "RUN_DIFFERENTIAL=1 jest --config jest.config.cjs differential"
   },
   "license": "MIT",
   "devDependencies": {
