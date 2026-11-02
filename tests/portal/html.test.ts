@@ -17,6 +17,10 @@ test('entities: named, decimal, hex and unknown', () => {
   expect(decodeEntities('Autenticaci&oacute;n &amp; &#241;&#xF1; &Ntilde; &bogus;!')).toBe('Autenticación & ññ Ñ  !')
 })
 
+test('a numeric entity past the last code point is unknown too, not a crash', () => {
+  expect(decodeEntities('a&#x10FFFF;b&#x110000;c&#99999999;d')).toBe('a\u{10FFFF}b c d')
+})
+
 test('tags become spaces and whitespace collapses', () => {
   expect(stripTags('<td>&nbsp;Hola <b>Mundo</b>\n</td>')).toBe('Hola Mundo')
 })

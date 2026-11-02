@@ -141,8 +141,8 @@ export const reserveInLedger = (
   const used = new Set(entry.used)
   const unsent = entry.used.filter((folio) => entry.sent[String(folio)] === undefined && !annulled.has(folio))
   const start = unsent[0] ?? (entry.lastReserved === null ? scope.range.from : entry.lastReserved + 1)
-  const walk = (folio: number): number => (used.has(folio) || annulled.has(folio) ? walk(folio + 1) : folio)
-  const folio = walk(Math.max(start, scope.range.from))
+  let folio = Math.max(start, scope.range.from)
+  while (used.has(folio) || annulled.has(folio)) folio += 1
   if (folio > scope.range.to) throw outOfRange(scope, folio)
   const nextUsed = [...entry.used, folio].sort((a, b) => a - b)
   return {

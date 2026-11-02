@@ -37,6 +37,16 @@ test('folios go out in order, then the range ends', () => {
   )
 })
 
+test('a long run of used folios after an unsent one does not overflow the stack', () => {
+  const wide = { ...scope, range: { from: 1, to: 50000 } }
+  const seeded = markSentInLedger(emptyLedger(), wide, 2, {}, AT)
+  const [key] = Object.keys(seeded.entries)
+  const used = Array.from({ length: 30000 }, (_, index) => index + 1)
+  const sent = Object.fromEntries(used.slice(1).map((folio) => [String(folio), { trackId: null, sentAt: AT }]))
+  const ledger = { ...seeded, entries: { [key]: { ...seeded.entries[key], used, lastReserved: 30000, sent } } }
+  expect(reserveInLedger(ledger, wide, AT).folio).toBe(30001)
+})
+
 test('the input is never changed', () => {
   const ledger = emptyLedger()
   reserveInLedger(ledger, scope, AT)

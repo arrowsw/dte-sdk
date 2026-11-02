@@ -1,6 +1,7 @@
 // The SII portal serves HTML 4.01: rows without `</tr>`, attributes with or without quotes, entities for accents. These
 // helpers read exactly what the page modules need; nothing outside `src/portal/` looks at markup.
 
+const LAST_CODE_POINT = 0x10ffff
 const NAMED_ENTITIES: Readonly<Record<string, string>> = {
   nbsp: ' ',
   amp: '&',
@@ -30,7 +31,8 @@ export const decodeEntities = (text: string): string =>
   text.replace(/&(#\d+|#x[0-9a-f]+|[a-z]+);/gi, (_whole, entity: string) => {
     if (entity.startsWith('#')) {
       const hex = entity[1].toLowerCase() === 'x'
-      return String.fromCodePoint(Number.parseInt(entity.slice(hex ? 2 : 1), hex ? 16 : 10))
+      const code = Number.parseInt(entity.slice(hex ? 2 : 1), hex ? 16 : 10)
+      return code <= LAST_CODE_POINT ? String.fromCodePoint(code) : ' '
     }
     return NAMED_ENTITIES[entity] ?? ' '
   })
