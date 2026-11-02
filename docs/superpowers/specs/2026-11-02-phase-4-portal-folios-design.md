@@ -168,8 +168,7 @@ in the field annulled 296 folios before anyone stopped it.
 
 ### D37. The registry is a port over a pure ledger
 
-- ✅ `FolioRegistry` has five async functions plus one for annulled folios. A service with its own database implements
-  it with its own transactions. `createFolioRegistry(store)` builds one from a `load`/`save` pair plus a queue in the
+- ✅ `FolioRegistry` is six async functions. A service with its own database implements them with its own transactions. `createFolioRegistry(store)` builds one from a `load`/`save` pair plus a queue in the
   process, and `createMemoryFolioRegistry` and `createDirectoryFolioRegistry` are the bundled adapters. The state
   transitions are pure functions over a JSON ledger.
 - The directory adapter writes atomically (temp file and rename) but is for a single process; several replicas need
@@ -222,9 +221,11 @@ Phase 1–3 files that change:
 
 | File | Change |
 |---|---|
-| `src/errors.ts` | new codes (section 3.9); `SAFE_DETAIL_KEYS` gains `rejection` and `step` |
+| `src/errors.ts` | new codes (section 3.10); `SAFE_DETAIL_KEYS` gains `rejection` and `step` |
 | `src/sii/capture.ts` | `HttpChannel = TokenChannel \| 'portal'` for `HttpExchange.channel`; `redactText` also redacts `NETSCAPE_LIVEWIRE*=` and `CSESSIONID=` assignments |
 | `src/sii/send.ts` | `SendClient` narrows the first parameter to `transport`, `capture`, `logger`, `now`; `channel` is `HttpChannel`; `responseEncoding` may be a function of the response |
+| `src/sii/operation.ts` | `httpError` takes an `HttpChannel` |
+| `src/sii/client.ts` | `defaultSleep` and `assertPositive` are exported from the module, not from the root |
 | `src/index.ts` | re-exports section 3.11 |
 | `tests/public-api.test.ts`, `tests/dist.smoke.test.ts`, `.github/workflows/ci.yml` | new exports; `createPortalClient` in the Deno and Bun smokes |
 | `.size-limit.json`, `README.md`, `llms.txt`, `CHANGELOG.md` | size, documentation |
@@ -504,7 +505,7 @@ because nested tables break a read by columns. Rows without forms fall back to c
 
 **Annulling.** Up to 4 passes, each listing again, with 1.5 s between them. A range is skipped when it falls outside
 `range` or `withinDays` (a range with no readable date is skipped: when unsure, do not annul), overlaps `exclude` (CAFs
-the caller still holds) or is in `knownAnnulled`. At most `maxRanges` (50), the newest ones. Then per range:
+the caller still holds) or is in `knownAnnulled`. At most `maxRanges` (50), the last ones of the listing. Then per range:
 
 1. `POST af_anular3` with `DIA`, `MES`, `ANO`, `COD_DOCTO`, `FOLIO_INI`, `FOLIO_FIN`, `CANT_DOCTOS`. "ya ha sido
    efectuado", "ya fue anulado", "efectuado anteriormente" or "anulado anteriormente" is `alreadyAnnulled`, without going
@@ -615,8 +616,8 @@ New `DTE_ERROR_CODES`. Messages stay generic; values live in `details`.
 `noAnnullableFolios`, `rangeAlreadyAuthorized`, `rangeAnnulled`, `reobtainFormMissing`, `reobtainDownloadMissing`,
 `reobtainCafMissing`.
 
-Secrets: cookies never reach a message, a detail or a capture (`Cookie` and `Set-Cookie` were already redacted; D30 adds
-`NETSCAPE_LIVEWIRE*=` and `CSESSIONID=` inside bodies and URLs). `RSASK` stays redacted in captures, although the XML
+Secrets: cookies never reach a message, a detail or a capture (`Cookie` and `Set-Cookie` were already redacted; this phase
+adds `NETSCAPE_LIVEWIRE*=` and `CSESSIONID=` inside bodies and URLs). `RSASK` stays redacted in captures, although the XML
 returned to the caller keeps it. `portalMessage` is visible page text capped at 400 characters: it may hold a RUT, so it
 stays in `details`, never in `message`, like the rest of the SDK.
 
@@ -637,10 +638,11 @@ Types:
 - **Client:** `PortalClient`, `PortalClientOptions`, `PortalLock`, `PortalSessionInfo`.
 - **Company:** `CompanyResolution`, `TaxpayerData`, `TaxpayerActivity`, `TaxpayerBranch`, `IssuerProfile`,
   `CertificationSet`, `CertificationSets`.
-- **Folios:** `StampableType`, `FolioQuota`, `ObtainedCaf`, `UnusedFolioRange`, `FolioRanges`, `FolioSpan`,
-  `AnnulmentRejectionReason`, `AnnulmentResult`, `ReobtainableRange`, `FolioFlowResult`, `ReobtainResult`,
-  `PortalRejection`.
-- **Registry:** `FolioScope`, `FolioRegistry`, `FolioLedger`, `FolioLedgerStore`, `FolioSentRecord`, `FolioStats`.
+- **Folios:** `StampableType`, `QuotaFields`, `FolioQuota`, `CafRequestInput`, `ObtainedCaf`, `UnusedFolioRange`, `FolioRanges`,
+  `FolioSpan`, `AnnulFoliosInput`, `AnnulmentRejectionReason`, `AnnulmentResult`, `ReobtainableRange`, `RequestCafExactInput`,
+  `RequestCafInBatchesInput`, `ReobtainFoliosInput`, `FolioFlowResult`, `ReobtainResult`, `PortalRejection`.
+- **Registry:** `FolioScope`, `FolioRegistry`, `FolioEntry`, `FolioLedger`, `FolioLedgerStore`, `FolioSentRecord`, `FolioStats`,
+  `DirectoryFolioRegistryOptions`.
 - **Phase 2 widening:** `HttpChannel`.
 
 ### 3.12 Typical flows
@@ -682,8 +684,9 @@ await closePortalSession(portal)
 - **Redaction:** no cookie value survives in a captured exchange, and no `RSASK` of a CAF.
 - **Live smoke:** `tests/live/portal.live.test.ts` only runs with `SII_LIVE=1` and only reads. Mutating calls have no
   live test: they spend folios or quota.
-- **Differential:** the page modules were compared once, privately, with field-proven code on the same pages. Not in
-  the repository.
+
+The code of the plan was built and run before the plan was written: 1 626 tests pass with coverage at 100 % on the four
+metrics, and the bundle measures ESM 44.14 kB and CJS 44.32 kB, so `.size-limit.json` goes to 46 kB.
 
 ---
 
