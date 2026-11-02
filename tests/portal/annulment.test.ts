@@ -278,6 +278,28 @@ describe('annulFolios', () => {
       expect(result.rejected).toEqual([{ from: 21, to: 25, count: 5, reason: 'alreadyAnnulled' }])
     })
 
+    test('it holds when a later pass would go past it', async () => {
+      const harness = await signedIn([
+        entry,
+        {
+          url: `${MAULLIN}/af_anular2`,
+          reply: {
+            body: unusedRangesPage([
+              [1, 2],
+              [3, 4],
+              [5, 6],
+              [7, 8],
+            ]),
+          },
+        },
+        respond('af_anular3', ANNUL_FORM, page('ya fue anulado'), ANNUL_FORM),
+        respond('af_anular', ANNUL_OK, ANNUL_OK),
+      ])
+      const result = await annulFolios(harness.portal, { type: 33, all: true, maxRanges: 2 })
+      expect(result.annulled.map((span) => span.from)).toEqual([5, 1])
+      expect(harness.posted('af_anular3').map((form) => form.FOLIO_INI)).toEqual(['5', '7', '1'])
+    })
+
     test('a range annulled folio by folio counts once', async () => {
       const harness = await signedIn([
         entry,
