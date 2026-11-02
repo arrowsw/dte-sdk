@@ -20,14 +20,10 @@ export const CERTIFICATE_ENTRY_URL = 'https://zeusr.sii.cl/AUT2000/InicioAutenti
 export const PORTAL_LANDING_URL = 'https://misiir.sii.cl/cgi_misii/siihome.cgi'
 
 /**
- * EN: Logout candidates, tried in order and best-effort: which one really ends a session is not confirmed yet.
- * ES: Candidatas para cerrar sesión, probadas en orden y sin garantía: aún no se confirma cuál la termina de verdad.
+ * EN: Where a session ends, as measured: after it, the portal asks to authenticate again.
+ * ES: Dónde termina una sesión, según lo medido: después de ella, el portal vuelve a pedir autenticación.
  */
-export const PORTAL_LOGOUT_URLS: readonly string[] = [
-  'https://zeusr.sii.cl/cgi_AUT2000/autTermino.cgi',
-  'https://herculesr.sii.cl/cgi_AUT2000/autLogout.cgi',
-  'https://www.sii.cl/AUT2000/autLogout.cgi',
-]
+export const PORTAL_LOGOUT_URL = 'https://zeusr.sii.cl/cgi_AUT2000/autTermino.cgi'
 
 /**
  * EN: URL of a DTE CGI page on the host of an environment.

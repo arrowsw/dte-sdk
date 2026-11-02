@@ -143,3 +143,26 @@ export const certificationPage = (basic = 'REVISADO CONFORME'): string =>
 <tr><td><font>LIBRO DE COMPRAS</font></td><td><b>EN REVISION</b></td></tr>
 <tr><td><font>LIBRO DE GUIAS</font></td><td></td></tr>
 </table>`)
+
+// The shapes below were measured on an authenticated session. The data in them is invented.
+
+/** The answer to a good login: HTTP 200 and a script, with no `Location`, under a title that says "Autenticación". */
+export const loginScriptAnswer = (target: string): string => `<!DOCTYPE html>
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><title>AutenticaciÃ³n</title></head>
+<body><script type="text/javascript">
+var expira = new Date();
+setCookie('NETSCAPE_LIVEWIRE.locexp',expira.toGMTString(), null, '/', '.sii.cl', 'secure');
+location.replace('${target}');
+//sendMethodPost('${target}');
+</script></body></html>`
+
+/** Where stale cookies end up: it mentions the login page only inside a script. */
+export const REPRESENTATION_REFUSED = page(
+  `<script type="text/javascript">mostrar("/AUT2000/InicioAutenticacion/IngresoRutClave.html|Clave Secreta||");</script>
+<h2 class="title">NO ESTA AUTORIZADO PARA REPRESENTAR EN ESTA OPCION</h2><p>La autorizaci&oacute;n no lo faculta para ingresar a la opci&oacute;n.</p>`,
+)
+
+/** A CGI page refused under its usual title, which is how the portal answers a company it does not recognize. */
+export const refusedPage = (title: string): string =>
+  page(`<font size="4"><strong><B> ${title} </b></strong></font>
+<font class="texto"> No ha sido posible completar su solicitud. Esto debido a que <b>no est&aacute; autorizado para ingresar a esta opci&oacute;n</b>.</font>`)
