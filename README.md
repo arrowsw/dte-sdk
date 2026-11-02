@@ -189,6 +189,44 @@ Their use today is narrow. The RCV replaced the purchase and sales book in produ
 certification test set. The folio consumption report (now Resumen de Ventas Diarias) is used in the
 receipts certification, and the SII probably no longer requires it in production.
 
+## SII portal and folios
+
+```typescript
+import { createPortalClient, fetchIssuerProfile, queryFolioQuota, requestCaf, closePortalSession } from 'dte-sdk'
+
+const portal = createPortalClient({ environment: 'certification', certificate, companyRut: '76543210-3' })
+
+const issuer = await fetchIssuerProfile(portal) // resolution of this environment, name, address, activity
+const quota = await queryFolioQuota(portal, { type: 33 }) // reads MAX_AUTOR and FOLIOS_DISP; stamps nothing
+const { xml, caf } = await requestCaf(portal, { type: 33, quantity: 50 })
+await closePortalSession(portal)
+```
+
+The portal is the certificate-authenticated site of the SII, read as HTML. The certificate must be enabled as a login
+method first, a manual step at sii.cl (*Cambiar Clave y datos de autenticación*, option "Utilizando Clave Tributaria o
+Certificado Digital"); otherwise the login throws `SII_PORTAL_CERT_NOT_ENABLED`. It needs Node ≥ 20: `fetch` cannot
+present a client certificate.
+
+- **CAF XML is a secret.** `xml` holds the private key of the CAF. Where you keep it is up to you.
+- **One session per certificate.** The SII rations sessions per RUT, so `sessionCache` and `lock` are ports: several
+  replicas need shared ones. Sessions are reused for 90 minutes and logged in on demand.
+- **Rationing.** `MAX_AUTOR` and `FOLIOS_DISP` appear only while the SII rations a type. Unused folios lower what it
+  authorizes and eventually block stamping.
+- **To lift a block, issue with the folios you have.** `reobtainFolios` gets lost CAFs back without spending quota.
+  `requestCafInBatches` is for a small `MAX_AUTOR` with nothing unused, and `requestCafExact` wants one CAF for the
+  whole quantity.
+- **Annulling cannot be undone** and counts against the quota for six months. `annulFolios` needs `range`,
+  `withinDays` or `all: true`, and `requestCafExact` annuls only with `allowAnnul: true`. Pass `knownAnnulled` back
+  between runs: the portal keeps listing annulled ranges forever.
+
+`createFolioRegistry`, `createMemoryFolioRegistry` and `createDirectoryFolioRegistry` keep local track of the folios of
+each CAF: reserve, mark as sent or annulled, release. A service with its own database implements `FolioRegistry` with
+its own transactions.
+
+A refusal of the SII is `SII_PORTAL_REJECTED`, with `details.rejection` and `portalRejectionMessage` saying what it means
+and what to do; the composite flows return it as data, so the CAFs already obtained are not lost. This module has not
+been run against an authenticated portal session yet: see the phase 4 design.
+
 ## Errors
 
 ```typescript
