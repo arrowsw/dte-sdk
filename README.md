@@ -177,11 +177,12 @@ const receipt = await uploadBook(sii, { xml: signPurchaseSalesBook(book, certifi
 
 `createGuideBook`/`signGuideBook` build the dispatch guide book and
 `createFolioConsumption`/`signFolioConsumption` the folio consumption report, which goes up with
-`uploadFolioConsumption`. All three cover the submission kinds of their schemas (`total`, `partial`,
-`final`, `adjustment`), and the SDK computes the summaries from the lines. `previousTotals` carries
-the totals of earlier submissions: `book.periodTotals` is a plain JSON value you can store and pass
-back. `bookEntryFromDocument`, `guideEntryFromDocument` and `folioConsumptionEntryFromDocument`
-derive the lines from documents issued with this SDK.
+`uploadFolioConsumption`. The SDK computes the summaries of all three from the lines. The two books
+cover every submission kind of their schemas (`total`, `partial`, `final`, `adjustment`), and
+`previousTotals` carries the totals of earlier submissions: `book.periodTotals` is a plain JSON value
+you can store and pass back. The report has no submission kinds: to correct one, send it whole again
+with a higher `sequence`. `bookEntryFromDocument`, `guideEntryFromDocument` and
+`folioConsumptionEntryFromDocument` derive the lines from documents issued with this SDK.
 
 Their use today is narrow. The RCV replaced the purchase and sales book in production from period
 2017-08, and the guide book is sent only when the SII asks for it; both are still part of the
