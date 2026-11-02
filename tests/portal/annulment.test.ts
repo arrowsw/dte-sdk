@@ -236,7 +236,70 @@ describe('annulFolios', () => {
     ])
     await annulFolios(harness.portal, { type: 33, all: true, maxRanges: 1 })
     expect(harness.posted('af_anular3')[0]).toMatchObject({ FOLIO_INI: '5' })
-    expect(harness.posted('af_anular3')).toHaveLength(3)
+    expect(harness.posted('af_anular3')).toHaveLength(1)
+  })
+
+  describe('maxRanges limits the whole call', () => {
+    const ranges = (count: number) =>
+      unusedRangesPage(
+        Array.from({ length: count }, (_, index) => [index * 10 + 1, index * 10 + 5] as [number, number]),
+      )
+    const routes = (count: number) => [
+      entry,
+      { url: `${MAULLIN}/af_anular2`, reply: { body: ranges(count) } },
+      { url: `${MAULLIN}/af_anular3`, reply: { body: ANNUL_FORM } },
+      { url: `${MAULLIN}/af_anular`, reply: { body: ANNUL_OK } },
+    ]
+
+    test('across passes, and the walk ends there without listing again', async () => {
+      const harness = await signedIn(routes(30))
+      const result = await annulFolios(harness.portal, { type: 33, all: true, maxRanges: 8 })
+      expect(harness.posted('af_anular')).toHaveLength(8)
+      expect(result.totalAnnulled).toBe(40)
+      expect(harness.posted('af_anular2')).toHaveLength(1)
+      expect(harness.sleeps).toEqual([])
+    })
+
+    test('50 ranges by default', async () => {
+      const harness = await signedIn(routes(300))
+      await annulFolios(harness.portal, { type: 33, all: true })
+      expect(harness.posted('af_anular')).toHaveLength(50)
+    })
+
+    test('ranges already annulled do not spend it', async () => {
+      const harness = await signedIn([
+        entry,
+        { url: `${MAULLIN}/af_anular2`, reply: { body: ranges(3) } },
+        respond('af_anular3', page('ya fue anulado'), ANNUL_FORM),
+        respond('af_anular', ANNUL_OK),
+      ])
+      const result = await annulFolios(harness.portal, { type: 33, all: true, maxRanges: 1 })
+      expect(result.annulled).toEqual([{ from: 11, to: 15, count: 5 }])
+      expect(result.rejected).toEqual([{ from: 21, to: 25, count: 5, reason: 'alreadyAnnulled' }])
+    })
+
+    test('a range annulled folio by folio counts once', async () => {
+      const harness = await signedIn([
+        entry,
+        {
+          url: `${MAULLIN}/af_anular2`,
+          reply: {
+            body: unusedRangesPage([
+              [1, 2],
+              [3, 4],
+            ]),
+          },
+        },
+        { url: `${MAULLIN}/af_anular3`, reply: { body: ANNUL_FORM } },
+        respond('af_anular', page('ya fue anulado'), ANNUL_OK, ANNUL_OK),
+      ])
+      const result = await annulFolios(harness.portal, { type: 33, all: true, maxRanges: 1 })
+      expect(result.annulled).toEqual([
+        { from: 3, to: 3, count: 1 },
+        { from: 4, to: 4, count: 1 },
+      ])
+      expect(harness.posted('af_anular3')).toHaveLength(1)
+    })
   })
 
   test('a range annulled before is remembered, without going further', async () => {

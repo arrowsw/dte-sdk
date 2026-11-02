@@ -74,7 +74,7 @@ export type AnnulFoliosInput = {
   readonly all?: boolean
   /** EN: Reason; "Folios no utilizados" by default. ES: `MOTIVO` — Motivo; "Folios no utilizados" por defecto. */
   readonly reason?: string
-  /** EN: Most ranges per pass, the last ones of the listing; 50 by default, and up to four passes run, so one call can reach four times this. ES: Máximo de rangos por pasada, los últimos del listado; 50 por defecto, y corren hasta cuatro pasadas, así que una llamada puede llegar a cuatro veces esto. */
+  /** EN: Most ranges annulled in one call, taken from the end of the listing; 50 by default. Ranges the SII had already annulled do not count. ES: Máximo de rangos anulados en una llamada, tomados del final del listado; 50 por defecto. Los que el SII ya tenía anulados no cuentan. */
   readonly maxRanges?: number
   /** EN: Folios never to touch, such as a CAF still in use. ES: Folios que no se tocan, como un CAF todavía en uso. */
   readonly exclude?: readonly { readonly from: number; readonly to: number }[]
@@ -334,15 +334,19 @@ export const annulFoliosInSession = async (
   const earliestMs = input.withinDays === undefined ? null : context.portal.now().getTime() - input.withinDays * DAY_MS
   const tally: Tally = { annulled: [], rejected: [], known: new Set(input.knownAnnulled ?? []) }
   const seen = new Set<string>()
+  const limit = input.maxRanges ?? DEFAULT_MAX_RANGES
+  // Only ranges really annulled spend the limit: the listing keeps offering old ones, and the passes walk past them.
+  const spent = { ranges: 0 }
   for (let pass = 0; pass < MAX_PASSES; pass += 1) {
     const { ranges } = await listInSession(context, input.type, input.companyRut)
     const candidates = ranges
       .filter((range) => inScope(range, input, earliestMs))
       .filter((range) => !tally.known.has(`${range.from}-${range.to}`) && !seen.has(`${range.from}-${range.to}`))
-      .slice(-(input.maxRanges ?? DEFAULT_MAX_RANGES))
+      .slice(-limit)
     if (candidates.length === 0) break
     const counter = { refusals: 0 }
     for (const range of candidates) {
+      if (spent.ranges >= limit) break
       if (counter.refusals >= MAX_REFUSALS_IN_A_ROW) {
         context.portal.logger.warn('sii portal stopped annulling: the SII keeps refusing', {
           operation: context.operation,
@@ -351,9 +355,12 @@ export const annulFoliosInSession = async (
         break
       }
       seen.add(`${range.from}-${range.to}`)
+      const annulledBefore = tally.annulled.length
       const added = await annulRange(context, range, input, company, tally)
+      if (tally.annulled.length > annulledBefore) spent.ranges += 1
       counter.refusals = added === null ? 0 : counter.refusals + added
     }
+    if (spent.ranges >= limit) break
     if (pass < MAX_PASSES - 1) await context.portal.sleep(PASS_PAUSE_MS, context.overrides?.signal)
   }
   return {
@@ -367,11 +374,12 @@ export const annulFoliosInSession = async (
 
 /**
  * EN: Annuls unused folios: up to four passes over the listing, by range and folio by folio when the range conflicts,
- * stopping after two real refusals in a row. Annulment cannot be undone and counts against the quota for six months; to
- * lift a stamping block, issuing with the unused folios works and annulling makes it worse.
+ * stopping after two real refusals in a row or at `maxRanges` ranges annulled. Annulment cannot be undone and counts
+ * against the quota for six months; to lift a stamping block, issuing with the unused folios works and annulling makes it
+ * worse.
  * ES: Anula folios sin usar: hasta cuatro pasadas por el listado, por rango y folio por folio cuando el rango choca,
- * deteniéndose tras dos negativas reales seguidas. La anulación no se puede deshacer y pesa contra el cupo seis meses; para
- * levantar un bloqueo de timbraje, emitir con los folios sin usar sirve y anular lo empeora.
+ * deteniéndose tras dos negativas reales seguidas o al anular `maxRanges` rangos. La anulación no se puede deshacer y pesa
+ * contra el cupo seis meses; para levantar un bloqueo de timbraje, emitir con los folios sin usar sirve y anular lo empeora.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: type and an explicit scope. ES: tipo y un alcance explícito.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.

@@ -70,8 +70,21 @@ export type RequestCafExactInput = {
   readonly quantity: number
   /** EN: Annul unused folios to lift the limit, and ask once more. Off by default: it cannot be undone and counts against the quota for six months. ES: Anular folios sin usar para levantar el límite y pedir una vez más. Apagado por defecto: no se puede deshacer y pesa contra el cupo seis meses. */
   readonly allowAnnul?: boolean
+  /** EN: Folios annulling never touches, such as a CAF still in use. ES: Folios que la anulación no toca, como un CAF todavía en uso. */
+  readonly exclude?: readonly { readonly from: number; readonly to: number }[]
+  /** EN: `knownAnnulled` of the previous run: these are not tried again. ES: `knownAnnulled` de la corrida anterior: estos no se vuelven a intentar. */
+  readonly knownAnnulled?: readonly string[]
   /** EN: Company RUT; the client's by default. ES: `RUT_EMP` + `DV_EMP` — RUT de la empresa; por defecto el del cliente. */
   readonly companyRut?: string
+}
+
+/**
+ * EN: The outcome of `requestCafExact`, plus the memory of annulled ranges.
+ * ES: El resultado de `requestCafExact`, más la memoria de rangos anulados.
+ */
+export type RequestCafExactResult = FolioFlowResult & {
+  /** EN: `from-to` keys that are final: persist it and pass it back, because the portal keeps listing them forever. ES: Claves `desde-hasta` definitivas: guárdalas y devuélvelas, porque el portal las sigue listando para siempre. */
+  readonly knownAnnulled: readonly string[]
 }
 
 const fromCaf = (caf: ObtainedCaf, quantity: number): FolioFlowResult => ({
@@ -86,24 +99,22 @@ const fromCaf = (caf: ObtainedCaf, quantity: number): FolioFlowResult => ({
 
 /**
  * EN: Requests one CAF that covers the whole quantity; below it nothing is stamped. With `allowAnnul`, a limit caused by
- * unused folios is lifted by annulling up to 20 ranges per pass, over up to four passes (80 in all), and asking once more.
- * `FOLIOS_DISP` 0 means nothing is annullable, so that attempt is skipped; while blocked the field is absent, and that case
- * does try.
+ * unused folios is lifted by annulling up to 20 ranges, never those in `exclude`, and asking once more. `FOLIOS_DISP` 0
+ * means nothing is annullable, so that attempt is skipped; while blocked the field is absent, and that case does try.
  * ES: Solicita un CAF que cubra toda la cantidad; bajo ella no se timbra nada. Con `allowAnnul`, un límite causado por folios
- * sin usar se levanta anulando hasta 20 rangos por pasada, en hasta cuatro pasadas (80 en total), y pidiendo una vez más.
- * `FOLIOS_DISP` 0 significa que nada es anulable, así que ese intento se omite; con el timbraje bloqueado el campo no viene,
- * y ese caso sí lo intenta.
+ * sin usar se levanta anulando hasta 20 rangos, nunca los de `exclude`, y pidiendo una vez más. `FOLIOS_DISP` 0 significa que
+ * nada es anulable, así que ese intento se omite; con el timbraje bloqueado el campo no viene, y ese caso sí lo intenta.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: type, quantity and whether annulling is allowed. ES: tipo, cantidad y si se permite anular.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
- * @returns EN: the outcome; a refusal is data. ES: el resultado; un rechazo es un dato.
+ * @returns EN: the outcome, where a refusal is data, and the memory to persist. ES: el resultado, donde un rechazo es un dato, y la memoria que guardar.
  * @throws {DteError} EN: session, block and transport codes. ES: códigos de sesión, bloqueo y transporte.
  */
 export const requestCafExact = (
   portal: PortalClient,
   input: RequestCafExactInput,
   overrides?: CallOverrides,
-): Promise<FolioFlowResult> =>
+): Promise<RequestCafExactResult> =>
   withPortalSession(portal, 'requestCafExact', overrides, async (context) => {
     const ask = async (): Promise<FolioFlowResult> => {
       try {
@@ -119,18 +130,27 @@ export const requestCafExact = (
         return refusalResult([], refusal.rejection, refusal.details)
       }
     }
+    const known = input.knownAnnulled ?? []
     const first = await ask()
     const recoverable = first.rejection === 'quotaInsufficient' || first.rejection === 'stampingBlocked'
-    if (!recoverable || input.allowAnnul !== true || first.availableFolios === 0) return first
+    if (!recoverable || input.allowAnnul !== true || first.availableFolios === 0)
+      return { ...first, knownAnnulled: known }
     const annulment = await annulFoliosInSession(context, {
       type: input.type,
       all: true,
       maxRanges: MAX_RANGES_TO_ANNUL,
+      knownAnnulled: known,
+      ...(input.exclude === undefined ? {} : { exclude: input.exclude }),
       ...(input.companyRut === undefined ? {} : { companyRut: input.companyRut }),
     })
     if (annulment.totalAnnulled === 0)
-      return { ...first, rejection: 'noAnnullableFolios', portalMessage: first.portalMessage }
-    return ask()
+      return {
+        ...first,
+        rejection: 'noAnnullableFolios',
+        portalMessage: first.portalMessage,
+        knownAnnulled: annulment.knownAnnulled,
+      }
+    return { ...(await ask()), knownAnnulled: annulment.knownAnnulled }
   })
 
 /**

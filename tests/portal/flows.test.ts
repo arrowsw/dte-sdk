@@ -73,6 +73,7 @@ describe('requestCafExact', () => {
       availableFolios: 6,
       rejection: 'quotaInsufficient',
       portalMessage: expect.any(String),
+      knownAnnulled: [],
     })
     expect(harness.urls().some((url) => url.includes('af_anular'))).toBe(false)
   })
@@ -87,6 +88,72 @@ describe('requestCafExact', () => {
     const result = await requestCafExact(harness.portal, { type: 33, quantity: 5, allowAnnul: true })
     expect(result).toMatchObject({ complete: true, availableFolios: 0 })
     expect(harness.posted('af_anular')).not.toEqual([])
+  })
+
+  test('annulling stops at 20 ranges in all', async () => {
+    const many = unusedRangesPage(
+      Array.from({ length: 30 }, (_, index) => [index * 10 + 1, index * 10 + 5] as [number, number]),
+    )
+    const harness = await signedIn([
+      entry,
+      replies('of_solicita_folios_dcto', quotaForm(2, 6), quotaForm(100, 0)),
+      replies('of_confirma_folio', CAF_XML),
+      ...annulRoutes(many),
+    ])
+    await requestCafExact(harness.portal, { type: 33, quantity: 5, allowAnnul: true })
+    expect(harness.posted('af_anular')).toHaveLength(20)
+  })
+
+  test('exclude and knownAnnulled reach the annulment, and the memory comes back', async () => {
+    const harness = await signedIn([
+      entry,
+      replies('of_solicita_folios_dcto', quotaForm(2, 6), quotaForm(100, 0)),
+      replies('of_confirma_folio', CAF_XML),
+      ...annulRoutes(
+        unusedRangesPage([
+          [1, 2],
+          [3, 4],
+          [5, 6],
+        ]),
+      ),
+    ])
+    const result = await requestCafExact(harness.portal, {
+      type: 33,
+      quantity: 5,
+      allowAnnul: true,
+      exclude: [{ from: 5, to: 6 }],
+      knownAnnulled: ['3-4'],
+    })
+    expect(harness.posted('af_anular3').map((form) => form.FOLIO_INI)).toEqual(['1'])
+    expect(result).toMatchObject({ complete: true, knownAnnulled: ['3-4', '1-2'] })
+  })
+
+  test('with nothing to annul the memory comes back as it was', async () => {
+    const asked = await signedIn([
+      entry,
+      replies('of_solicita_folios_dcto', quotaForm(100, 0)),
+      replies('of_confirma_folio', CAF_XML),
+    ])
+    const known = await requestCafExact(asked.portal, { type: 33, quantity: 5, knownAnnulled: ['3-4'] })
+    expect(known.knownAnnulled).toEqual(['3-4'])
+    const empty = await signedIn([
+      entry,
+      replies('of_solicita_folios_dcto', quotaForm(100, 0)),
+      replies('of_confirma_folio', CAF_XML),
+    ])
+    expect((await requestCafExact(empty.portal, { type: 33, quantity: 5 })).knownAnnulled).toEqual([])
+    const none = await signedIn([
+      entry,
+      replies('of_solicita_folios_dcto', quotaForm(2, 6)),
+      ...annulRoutes(page('sin rangos')),
+    ])
+    const refused = await requestCafExact(none.portal, {
+      type: 33,
+      quantity: 5,
+      allowAnnul: true,
+      knownAnnulled: ['3-4'],
+    })
+    expect(refused).toMatchObject({ rejection: 'noAnnullableFolios', knownAnnulled: ['3-4'] })
   })
 
   test('a blocked type has no FOLIOS_DISP, and that case does try', async () => {

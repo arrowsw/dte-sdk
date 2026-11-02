@@ -384,6 +384,7 @@ export type {
   ReobtainFoliosInput,
   ReobtainResult,
   RequestCafExactInput,
+  RequestCafExactResult,
   RequestCafInBatchesInput,
 } from './portal/flows'
 
