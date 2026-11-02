@@ -177,9 +177,10 @@ const receipt = await uploadBook(sii, { xml: signPurchaseSalesBook(book, certifi
 
 `createGuideBook`/`signGuideBook` build the dispatch guide book and
 `createFolioConsumption`/`signFolioConsumption` the folio consumption report, which goes up with
-`uploadFolioConsumption`. All three cover the submission kinds of their schemas (`total`, `partial`,
-`final`, `adjustment`), and the SDK computes the summaries from the lines. `previousTotals` carries
-the totals of earlier submissions: `book.periodTotals` is a plain JSON value you can store and pass
+`uploadFolioConsumption`. The purchase and sales book and the guide book cover the submission kinds
+of their schemas (`total`, `partial`, `final`, `adjustment`); the report's schema has none. The SDK
+computes the summaries of all three from the lines. On those two books, `previousTotals` carries the
+totals of earlier submissions: `book.periodTotals` is a plain JSON value you can store and pass
 back. `bookEntryFromDocument`, `guideEntryFromDocument` and `folioConsumptionEntryFromDocument`
 derive the lines from documents issued with this SDK.
 
