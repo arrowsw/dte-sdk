@@ -8,7 +8,7 @@ import {
 import { listReobtainableRanges, reobtainCaf, type ReobtainableRange } from '../../src/portal/reobtain'
 import { fixturePath } from '../support/fixtures'
 import { failure, MAULLIN, signedIn } from '../support/portal'
-import { page, REOBTAIN_RESOLUTION, reobtainDetailPage, reobtainListPage } from '../support/portal-pages'
+import { page, refusedPage, REOBTAIN_RESOLUTION, reobtainDetailPage, reobtainListPage } from '../support/portal-pages'
 
 const CAF_XML = readFileSync(fixturePath('caf-33.xml'), 'latin1')
 
@@ -28,6 +28,19 @@ test('page readers', () => {
 })
 
 describe('listReobtainableRanges', () => {
+  test('a refused listing is a refusal, not an empty list', async () => {
+    const refusal = { code: 'SII_PORTAL_REJECTED', details: { rejection: 'optionNotAuthorized' } }
+    const refused = refusedPage('REOBTENCION DE FOLIOS')
+    const atEntry = await signedIn([{ url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: refused } }])
+    expect(await failure(listReobtainableRanges(atEntry.portal, { type: 33 }))).toMatchObject(refusal)
+    expect(atEntry.posted('rf_reobtencion2_folios')).toEqual([])
+    const atList = await signedIn([
+      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: page('form') } },
+      { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: { body: refused } },
+    ])
+    expect(await failure(listReobtainableRanges(atList.portal, { type: 33 }))).toMatchObject(refusal)
+  })
+
   test('opens each range, because only its detail says it is annulled', async () => {
     const harness = await signedIn([
       { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: page('form') } },

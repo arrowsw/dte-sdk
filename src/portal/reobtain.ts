@@ -6,7 +6,15 @@ import type { CallOverrides } from '../sii/client'
 import { resolvePortalCompany, type PortalClient } from './client'
 import { isRangeAnnulled, parseReobtainList, reobtainDownloadFields, reobtainFormFields } from './pages/reobtain'
 import { hasCaf } from './pages/stamping'
-import { companyFields, ensurePage, rejected, submitForm, withPortalSession, type PortalContext } from './session'
+import {
+  assertNotRejected,
+  companyFields,
+  ensurePage,
+  rejected,
+  submitForm,
+  withPortalSession,
+  type PortalContext,
+} from './session'
 import type { ObtainedCaf } from './stamping'
 
 /**
@@ -47,6 +55,7 @@ export const listReobtainableInSession = async (
   assertDocumentType(input.type)
   const company = companyFields(resolvePortalCompany(context.portal, input.companyRut))
   const entry = await ensurePage(context, 'rf_reobtencion1', at(context, 'rf_reobtencion1_folios'))
+  assertNotRejected(context, entry.html)
   const list = await submitForm(
     context,
     'rf_reobtencion2',
@@ -55,6 +64,7 @@ export const listReobtainableInSession = async (
     { ...company, PAGINA: '1', COD_DOCTO: String(input.type), ACEPTAR: 'Consultar' },
     at(context, 'rf_reobtencion1_folios'),
   )
+  assertNotRejected(context, list.html)
   const ranges: ReobtainableRange[] = []
   for (const formFields of parseReobtainList(list.html)) {
     const detail = await submitForm(
@@ -131,7 +141,7 @@ export const reobtainCafInSession = async (
  * @param input EN: document type and company. ES: tipo de documento y empresa.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: the ranges. ES: los rangos.
- * @throws {DteError} EN: session and transport codes. ES: códigos de sesión y de transporte.
+ * @throws {DteError} EN: `SII_PORTAL_REJECTED`, session and transport codes. ES: `SII_PORTAL_REJECTED`, códigos de sesión y de transporte.
  */
 export const listReobtainableRanges = (
   portal: PortalClient,
