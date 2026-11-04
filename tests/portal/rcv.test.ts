@@ -1,9 +1,12 @@
 import { RCV_SERVICES } from '../../src/catalogs/portal'
 import {
+  changePurchaseType,
   fetchPurchaseDocument,
   fetchRegisterSummary,
   listPeriodDocuments,
   listPurchaseTypes,
+  moveVatToCommonUse,
+  moveVatToRecoverable,
 } from '../../src/portal/rcv'
 import { createMemoryCapture } from '../../src/sii/capture'
 import { DteError } from '../../src/errors'
@@ -439,5 +442,134 @@ describe('complements', () => {
     )
     await fetchPurchaseDocument(harness.portal, { ...KEY, companyRut: ISSUER_RUT })
     expect(sent(posts(harness)[0]).data).toMatchObject({ rut: '76543210', dv: '3' })
+  })
+})
+
+describe('writes', () => {
+  const KEY = { type: 33, folio: 1234, period: '2026-10', counterpartyRut: RECEIVER_RUT }
+  const write = (method: string, reply: FakeRoute['reply']) => [
+    app('consdcvinternetui'),
+    api(`${COMPLEMENTS_API}/${method}`, reply),
+  ]
+
+  test('changing the type sends it after the period, and only OK confirms', async () => {
+    const harness = await signedIn(write('cambiaTipoCompra', json({ data: 'OK' })), options)
+    await expect(changePurchaseType(harness.portal, { ...KEY, purchaseType: '4' })).resolves.toBeUndefined()
+    const [post] = posts(harness)
+    expect(sent(post).metaData).toMatchObject({
+      namespace: `${RCV_SERVICES.complements.namespace}/cambiaTipoCompra`,
+      transactionId: '1',
+      page: { pageSize: 1, pageIndex: 1 },
+    })
+    expect(Object.entries(sent(post).data)).toEqual([
+      ['rut', '76543210'],
+      ['dv', '3'],
+      ['operacion', 'COMPRA'],
+      ['tipoDocumento', '33'],
+      ['numeroDocumento', '1234'],
+      ['periodoTributario', '202610'],
+      ['tipoCompra', '4'],
+      ['rutContraparte', '12345678'],
+      ['dvContraparte', '5'],
+    ])
+  })
+
+  test('moving to common use sends final amounts, and an absent one goes empty', async () => {
+    const harness = await signedIn(write('cambiaIvaRec2Comun', json({ data: 'OK' })), options)
+    await moveVatToCommonUse(harness.portal, { ...KEY, commonUseVat: 19000 })
+    expect(sent(posts(harness)[0]).data).toMatchObject({ ivaComun: '19000', ivaRec: '' })
+  })
+
+  test('moving back to recoverable sends a zero as a zero', async () => {
+    const harness = await signedIn(write('cambiaIvaComun2Recuperable', json({ data: 'OK' })), options)
+    await moveVatToRecoverable(harness.portal, { ...KEY, commonUseVat: 0, recoverableVat: 19000 })
+    expect(sent(posts(harness)[0]).data).toMatchObject({ ivaComun: '0', ivaRec: '19000' })
+  })
+
+  test('an amount left out on that side goes empty too', async () => {
+    const harness = await signedIn(write('cambiaIvaComun2Recuperable', json({ data: 'OK' })), options)
+    await moveVatToRecoverable(harness.portal, { ...KEY, recoverableVat: 19000 })
+    expect(sent(posts(harness)[0]).data).toMatchObject({ ivaComun: '', ivaRec: '19000' })
+  })
+
+  test.each([
+    ['another word', { data: 'CONFIRMADO' }],
+    ['no data', { data: null }],
+    ['nothing', {}],
+  ])('%s does not confirm', async (_name, answer) => {
+    const harness = await signedIn(write('cambiaTipoCompra', json(answer)), options)
+    const error = await failure(changePurchaseType(harness.portal, { ...KEY, purchaseType: '4' }))
+    expect(error).toMatchObject({
+      code: 'SII_PORTAL_REJECTED',
+      details: { rejection: 'purchaseChangeNotConfirmed', operation: 'changePurchaseType' },
+    })
+    expect(error.details.portalMessage).toBeUndefined()
+  })
+
+  test('the message of the SII goes along, and the rest of the answer does not', async () => {
+    const harness = await signedIn(
+      write(
+        'cambiaIvaRec2Comun',
+        json({
+          data: null,
+          metaData: { conversationId: TOKEN, errors: [{ descripcion: 'Documento no modificable' }] },
+        }),
+      ),
+      options,
+    )
+    const error = await failure(moveVatToCommonUse(harness.portal, { ...KEY, commonUseVat: 19000 }))
+    expect(error.details).toMatchObject({
+      rejection: 'purchaseChangeNotConfirmed',
+      portalMessage: 'Documento no modificable',
+    })
+    expect(JSON.stringify(error.details)).not.toContain(TOKEN)
+  })
+
+  test('a lost answer is never repeated, even when the caller asks for retries', async () => {
+    const harness = await signedIn(
+      write('cambiaTipoCompra', [new DteError('TRANSPORT_FAILED', {}), json({ data: 'OK' })]),
+      { ...options, retry: {} },
+    )
+    const error = await failure(
+      changePurchaseType(harness.portal, { ...KEY, purchaseType: '4' }, { retry: { maxAttempts: 4 } }),
+    )
+    expect(error.code).toBe('TRANSPORT_FAILED')
+    expect(posts(harness)).toHaveLength(1)
+    expect(harness.sleeps).toEqual([])
+  })
+
+  test('an unreadable answer is not repeated with a fresh session either', async () => {
+    const harness = await signedIn(write('cambiaTipoCompra', { body: page('Intermedia') }), options)
+    const error = await failure(changePurchaseType(harness.portal, { ...KEY, purchaseType: '4' }))
+    expect(error.code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
+    expect(posts(harness)).toHaveLength(1)
+  })
+
+  test('the visit to the app keeps its retries, because repeating it changes nothing', async () => {
+    const harness = await signedIn(
+      [
+        {
+          url: `${CERTIFICATION}/consdcvinternetui/`,
+          reply: [new DteError('TRANSPORT_FAILED', {}), { headers: COOKIE, body: page('app') }],
+        },
+        api(`${COMPLEMENTS_API}/cambiaTipoCompra`, json({ data: 'OK' })),
+      ],
+      { ...options, retry: {} },
+    )
+    await changePurchaseType(harness.portal, { ...KEY, purchaseType: '4' })
+    expect(harness.sleeps).toEqual([2000])
+  })
+
+  test('a bad key is refused before any request', async () => {
+    const harness = await signedIn([], options)
+    const error = await failure(changePurchaseType(harness.portal, { ...KEY, period: '10-2026', purchaseType: '4' }))
+    expect(error).toMatchObject({ code: 'INVALID_DATE', details: { field: 'period' } })
+    expect(harness.fake.requests).toHaveLength(0)
+  })
+
+  test('a certification client writes to certification', async () => {
+    const harness = await signedIn(write('cambiaTipoCompra', json({ data: 'OK' })), options)
+    await changePurchaseType(harness.portal, { ...KEY, purchaseType: '4' })
+    expect(harness.urls().every((url) => url.startsWith(`${CERTIFICATION}/`))).toBe(true)
   })
 })

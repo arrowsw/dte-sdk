@@ -16,6 +16,7 @@ import type { CallOverrides } from '../sii/client'
 import { isPeriod } from '../time/chile'
 import { resolvePortalCompany, siiCodeOf, type PortalClient } from './client'
 import {
+  changeMessageOf,
   parseRcvAnswer,
   periodDocumentsOf,
   periodSummaryOf,
@@ -31,6 +32,7 @@ import {
 import {
   ensurePage,
   portalRequest,
+  rejected,
   unexpectedPage,
   withFreshSessionRetry,
   withPortalSession,
@@ -80,6 +82,26 @@ export type PurchaseDocumentKey = {
   readonly counterpartyRut: string
   /** EN: Company, when it is not the client's. ES: `rut` + `dv` — Empresa, si no es la del cliente. */
   readonly companyRut?: string
+}
+
+/**
+ * EN: What `changePurchaseType` needs.
+ * ES: Lo que necesita `changePurchaseType`.
+ */
+export type ChangePurchaseTypeInput = PurchaseDocumentKey & {
+  /** EN: An `id` from `listPurchaseTypes`. ES: `tipoCompra` — Un `id` de `listPurchaseTypes`. */
+  readonly purchaseType: string
+}
+
+/**
+ * EN: What the functions that move VAT need: the final amount of each bucket after the change, not a delta. An absent amount goes empty.
+ * ES: Lo que necesitan las funciones que mueven IVA: el monto final de cada casilla tras el cambio, no una diferencia. Un monto ausente va vacío.
+ */
+export type MoveVatInput = PurchaseDocumentKey & {
+  /** EN: Final common use VAT. ES: `ivaComun` — IVA de uso común final. */
+  readonly commonUseVat?: number
+  /** EN: Final recoverable VAT. ES: `ivaRec` — IVA recuperable final. */
+  readonly recoverableVat?: number
 }
 
 const assertPeriod = (period: string): void => {
@@ -286,3 +308,89 @@ export const fetchPurchaseDocument = (
       purchaseDocumentOf(await call('obtieneDetalleDocumento', data)),
     )
   })
+
+// One attempt, always: nothing here can tell whether a lost answer means the change was applied.
+const writeComplement = (
+  portal: PortalClient,
+  operation: string,
+  overrides: CallOverrides | undefined,
+  method: string,
+  fields: () => RcvObject,
+): Promise<void> =>
+  withPortalSession(portal, operation, overrides, async (context) => {
+    const data = fields()
+    const token = await openService(context, RCV_SERVICES.complements)
+    const once: PortalContext = { ...context, overrides: { ...context.overrides, retry: false } }
+    const answer = await callService(once, token, RCV_SERVICES.complements, method, data)
+    if (answer.data === 'OK') return
+    const portalMessage = changeMessageOf(answer)
+    throw rejected(context, 'purchaseChangeNotConfirmed', portalMessage === null ? {} : { portalMessage })
+  })
+
+const vatFields = (input: MoveVatInput): Readonly<Record<string, string>> => ({
+  ivaComun: String(input.commonUseVat ?? ''),
+  ivaRec: String(input.recoverableVat ?? ''),
+})
+
+/**
+ * EN: Changes the type of purchase of a document. In production this changes the real register. One attempt; anything other
+ * than the SII's `OK` throws, and then the change may have applied, so read the document again with `fetchPurchaseDocument`
+ * before retrying.
+ * ES: Cambia el tipo de compra de un documento. En producción esto cambia el registro real. Un solo intento; cualquier cosa
+ * distinta del `OK` del SII lanza, y entonces el cambio pudo aplicarse, así que hay que releer el documento con
+ * `fetchPurchaseDocument` antes de reintentar.
+ * @param portal EN: the client. ES: el cliente.
+ * @param input EN: which purchase and its new type. ES: qué compra y su nuevo tipo.
+ * @param overrides EN: per-call overrides; `retry` does not reach the change. ES: ajustes de la llamada; `retry` no alcanza al cambio.
+ * @throws {DteError} EN: `SII_PORTAL_REJECTED { rejection: 'purchaseChangeNotConfirmed' }`, `INVALID_DATE`, `MISSING_FIELD`, `INVALID_RUT`, `SII_PORTAL_UNEXPECTED_PAGE`, session and transport codes. ES: los mismos códigos.
+ */
+export const changePurchaseType = (
+  portal: PortalClient,
+  input: ChangePurchaseTypeInput,
+  overrides?: CallOverrides,
+): Promise<void> =>
+  writeComplement(portal, 'changePurchaseType', overrides, 'cambiaTipoCompra', () =>
+    complementFields(portal, input, { tipoCompra: String(input.purchaseType) }),
+  )
+
+/**
+ * EN: Moves the VAT of a document from recoverable to common use. In production this changes the real register. The amounts
+ * are the final amount of each bucket after the change, not a delta: moving it all leaves `commonUseVat` with the total and
+ * `recoverableVat` absent. One attempt; anything other than the SII's `OK` throws, and then the change may have applied, so
+ * read the document again with `fetchPurchaseDocument` before retrying.
+ * ES: Mueve el IVA de un documento de recuperable a uso común. En producción esto cambia el registro real. Los montos son el
+ * monto final de cada casilla tras el cambio, no una diferencia: al mover todo, `commonUseVat` lleva el total y
+ * `recoverableVat` queda ausente. Un solo intento; cualquier cosa distinta del `OK` del SII lanza, y entonces el cambio pudo
+ * aplicarse, así que hay que releer el documento con `fetchPurchaseDocument` antes de reintentar.
+ * @param portal EN: the client. ES: el cliente.
+ * @param input EN: which purchase and the final amounts. ES: qué compra y los montos finales.
+ * @param overrides EN: per-call overrides; `retry` does not reach the change. ES: ajustes de la llamada; `retry` no alcanza al cambio.
+ * @throws {DteError} EN: `SII_PORTAL_REJECTED { rejection: 'purchaseChangeNotConfirmed' }`, `INVALID_DATE`, `MISSING_FIELD`, `INVALID_RUT`, `SII_PORTAL_UNEXPECTED_PAGE`, session and transport codes. ES: los mismos códigos.
+ */
+export const moveVatToCommonUse = (
+  portal: PortalClient,
+  input: MoveVatInput,
+  overrides?: CallOverrides,
+): Promise<void> =>
+  writeComplement(portal, 'moveVatToCommonUse', overrides, 'cambiaIvaRec2Comun', () =>
+    complementFields(portal, input, vatFields(input)),
+  )
+
+/**
+ * EN: Moves the VAT of a document from common use back to recoverable: the inverse of `moveVatToCommonUse`, with the same
+ * rules. Moving it all back leaves `commonUseVat` at 0 and `recoverableVat` with the total.
+ * ES: Mueve el IVA de un documento de uso común de vuelta a recuperable: lo inverso de `moveVatToCommonUse`, con las mismas
+ * reglas. Al devolver todo, `commonUseVat` queda en 0 y `recoverableVat` lleva el total.
+ * @param portal EN: the client. ES: el cliente.
+ * @param input EN: which purchase and the final amounts. ES: qué compra y los montos finales.
+ * @param overrides EN: per-call overrides; `retry` does not reach the change. ES: ajustes de la llamada; `retry` no alcanza al cambio.
+ * @throws {DteError} EN: `SII_PORTAL_REJECTED { rejection: 'purchaseChangeNotConfirmed' }`, `INVALID_DATE`, `MISSING_FIELD`, `INVALID_RUT`, `SII_PORTAL_UNEXPECTED_PAGE`, session and transport codes. ES: los mismos códigos.
+ */
+export const moveVatToRecoverable = (
+  portal: PortalClient,
+  input: MoveVatInput,
+  overrides?: CallOverrides,
+): Promise<void> =>
+  writeComplement(portal, 'moveVatToRecoverable', overrides, 'cambiaIvaComun2Recuperable', () =>
+    complementFields(portal, input, vatFields(input)),
+  )
