@@ -120,10 +120,33 @@ export const findEnvelopeFiles = async (
 }
 
 /**
+ * EN: Path of a sample inside the folder of its set. The name comes from the type and the folio of the document, so a
+ * name that would land outside the folder (`..` or a separator in the folio) is refused with `INVALID_FOLIO` instead of
+ * written. `renderPrintedSamples` already rejects such folios; this keeps the adapter safe on its own.
+ * ES: Ruta de una muestra dentro de la carpeta de su conjunto. El nombre sale del tipo y del folio del documento, así
+ * que un nombre que caería fuera de la carpeta (`..` o un separador en el folio) se rechaza con `INVALID_FOLIO` en vez
+ * de escribirse. `renderPrintedSamples` ya rechaza esos folios; esto mantiene seguro al adaptador por sí solo.
+ * @param path EN: the `node:path` module. ES: módulo `node:path`.
+ * @param directory EN: folder of the set. ES: carpeta del conjunto.
+ * @param name EN: file name of the sample. ES: nombre de archivo de la muestra.
+ * @returns EN: `directory/name` as `path.join` builds it. ES: `directory/name` tal como lo arma `path.join`.
+ * @throws {DteError} EN: `INVALID_FOLIO` when the name leaves the folder. ES: `INVALID_FOLIO` si el nombre sale de la carpeta.
+ */
+export const samplePath = (path: NodeFsModules['path'], directory: string, name: string): string => {
+  const target = path.join(directory, name)
+  if (path.dirname(path.resolve(target)) !== path.resolve(directory)) {
+    throw new DteError('INVALID_FOLIO', { field: 'Folio' })
+  }
+  return target
+}
+
+/**
  * EN: Renders the samples of every file into `{outDir}/SET-PRUEBAS` and `{outDir}/SET-SIMULACION`, one PDF per sample
- * under its sample name. A file that cannot be read, parsed or rendered is a failure entry and the rest goes on.
+ * under its sample name. A file that cannot be read, parsed or rendered, or a sample whose name would leave the folder
+ * of its set, is a failure entry and the rest goes on.
  * ES: Genera las muestras de cada archivo en `{outDir}/SET-PRUEBAS` y `{outDir}/SET-SIMULACION`, un PDF por muestra
- * con su nombre de muestra. Un archivo que no se puede leer, parsear o dibujar es una entrada de falla y el resto sigue.
+ * con su nombre de muestra. Un archivo que no se puede leer, parsear o dibujar, o una muestra cuyo nombre saldría de la
+ * carpeta de su conjunto, es una entrada de falla y el resto sigue.
  * @param input EN: files, output directory, options, logo path and `transferable`. ES: archivos, directorio de salida, opciones, ruta del logo y `transferable`.
  * @param load EN: loader of `node:fs`, for tests. ES: cargador de `node:fs`, para tests.
  * @throws {DteError} EN: `TRANSPORT_UNAVAILABLE` when `node:fs` cannot be loaded. ES: `TRANSPORT_UNAVAILABLE` si `node:fs` no se puede cargar.
@@ -162,8 +185,8 @@ export const writePrintedSamples = async (
     documents += result.documents
     failures.push(...result.failures)
     for (const { bytes, ...sample } of result.samples) {
-      const target = path.join(directories[sample.set], sample.name)
       try {
+        const target = samplePath(path, directories[sample.set], sample.name)
         await fs.writeFile(target, bytes)
         samples.push({ ...sample, path: target, size: bytes.length })
       } catch (error) {
