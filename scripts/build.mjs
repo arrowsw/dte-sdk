@@ -1,7 +1,7 @@
 // Build: ES modules only, one file per public entry plus the chunks they share, minified, with source maps that point at
 // the shipped `src/` instead of embedding them. A shared chunk is what keeps one copy of `DteError` across the entries.
-// Dependencies stay external (they are real runtime dependencies in package.json). `dist/` starts empty because chunk
-// names carry a hash, so a stale one would otherwise be published.
+// Dependencies and the optional peers stay external. `dist/` starts empty because chunk names carry a hash, so a stale one
+// would otherwise be published.
 import { rm } from 'node:fs/promises'
 import { build } from 'esbuild'
 

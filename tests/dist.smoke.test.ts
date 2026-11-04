@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -167,15 +168,28 @@ guarded('dist smoke (ES modules)', () => {
     expect(probeLoad(entryFile(name))).toEqual({ ok: true, output: 'loaded\n' })
   })
 
-  test('the root entry reaches no node: module and no printed-sample library', () => {
+  test('the root entry reaches no node: module', () => {
     const code = [...closure(entryFile('index'))].map((file) => readFileSync(file, 'utf8')).join('\n')
     expect(code).not.toMatch(/"node:/)
+  })
+
+  // `pdf-lib` and `bwip-js` are optional peers: only `dte-sdk/pdf` may name them.
+  test.each(['index', 'node', 'portal'])('%s reaches no optional peer, in code or in types', (name) => {
+    const code = [...closure(entryFile(name))].map((file) => readFileSync(file, 'utf8')).join('\n')
     expect(code).not.toMatch(/"(pdf-lib|bwip-js)"/)
+    const declarations = readdirSync(distRoot, { recursive: true, encoding: 'utf8' }).filter(
+      (file) => file.endsWith('.d.ts') && !file.startsWith('pdf'),
+    )
+    const named = declarations.filter((file) =>
+      /['"](pdf-lib|bwip-js)['"]/.test(readFileSync(join(distRoot, file), 'utf8')),
+    )
+    expect(named).toEqual([])
   })
 
   test('the closure walk does find what an entry reaches', () => {
-    const code = [...closure(entryFile('portal'))].map((file) => readFileSync(file, 'utf8')).join('\n')
-    expect(code).toContain('"node:https"')
+    const code = (name: string) => [...closure(entryFile(name))].map((file) => readFileSync(file, 'utf8')).join('\n')
+    expect(code('portal')).toContain('"node:https"')
+    expect(code('pdf')).toContain('"pdf-lib"')
   })
 
   test('the root entry bundles for the browser with no configuration, and the portal does not', () => {
