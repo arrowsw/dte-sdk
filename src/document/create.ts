@@ -260,7 +260,13 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
   const transport = normalizeTransport(input.transport)
   const totals =
     input.totals ??
-    calculateTotals(items, { type, pricesIncludeVat: input.pricesIncludeVat, vatRate: VAT_RATE, globalAdjustments })
+    calculateTotals(items, {
+      type,
+      pricesIncludeVat: input.pricesIncludeVat,
+      vatRate: VAT_RATE,
+      globalAdjustments,
+      withholdVat: input.withholdVat,
+    })
   const headerOptions: HeaderOptions = compact({
     ...input.options,
     serviceIndicator: input.options?.serviceIndicator ?? (receipt ? SERVICE_INDICATORS.salesAndServices : undefined),
