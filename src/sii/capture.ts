@@ -98,6 +98,7 @@ const SECRET_ELEMENT_WITH_CONTENT = new RegExp(
 )
 const TOKEN_ASSIGNMENT = /(TOKEN=)(["']?)[^;&\s"'<]+/gi
 const SESSION_COOKIE_ASSIGNMENT = /((?:NETSCAPE_LIVEWIRE[\w.]*|CSESSIONID)=)(["']?)[^;&\s"'<]+/gi
+const CONVERSATION_ID = /("conversationId"\s*:\s*")[^"]*/g
 const PRIVATE_KEY_BLOCK = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g
 
 const utf8Encoder = new TextEncoder()
@@ -117,11 +118,11 @@ const capBytes = (text: string): string => {
 }
 
 /**
- * EN: Replaces tokens, seeds, portal session cookies, `RSASK` and PEM private keys inside a text with `[redacted]` (as raw or XML-escaped
+ * EN: Replaces tokens, seeds, portal session cookies, `conversationId`, `RSASK` and PEM private keys inside a text with `[redacted]` (as raw or XML-escaped
  * elements, in any case, with or without a namespace prefix, and also when the text was cut before the closing tag)
  * and cuts the result at 512 KiB of UTF-8, suffixed with the number of dropped bytes. RUTs and XML stay: SII support
  * needs them to diagnose an upload.
- * ES: Reemplaza tokens, semillas, cookies de sesión del portal, `RSASK` y llaves privadas PEM dentro de un texto por `[redacted]` (como elementos
+ * ES: Reemplaza tokens, semillas, cookies de sesión del portal, `conversationId`, `RSASK` y llaves privadas PEM dentro de un texto por `[redacted]` (como elementos
  * crudos o escapados en XML, en cualquier caja, con o sin prefijo de espacio de nombres, y también cuando el texto
  * quedó cortado antes de la etiqueta de cierre) y corta el resultado a 512 KiB de UTF-8, con el número de bytes
  * descartados como sufijo. Los RUT y el XML se conservan: el soporte del SII los necesita para diagnosticar un envío.
@@ -136,6 +137,7 @@ export const redactText = (text: string): string =>
       )
       .replace(TOKEN_ASSIGNMENT, `$1$2${REDACTED}`)
       .replace(SESSION_COOKIE_ASSIGNMENT, `$1$2${REDACTED}`)
+      .replace(CONVERSATION_ID, `$1${REDACTED}`)
       .replace(PRIVATE_KEY_BLOCK, REDACTED),
   )
 

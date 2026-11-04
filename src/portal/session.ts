@@ -9,6 +9,7 @@ import {
 import { DteError, errorMessage, isDteError } from '../errors'
 import { splitSiiRut, type SiiRut } from '../model/rut'
 import type { CallOverrides } from '../sii/client'
+import { redactText } from '../sii/capture'
 import { bodyExcerpt, httpError } from '../sii/operation'
 import { mergeRetryPolicy, withRetry } from '../sii/retry'
 import { send } from '../sii/send'
@@ -42,6 +43,7 @@ const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
 const ACCEPT =
   'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7'
+const ACCEPT_LANGUAGE = 'es-419,es-US;q=0.9,es;q=0.8,en;q=0.7'
 const RETRYABLE_STATUS: ReadonlySet<number> = new Set([502, 503, 504])
 const REDIRECT_STATUS: ReadonlySet<number> = new Set([301, 302, 303, 307, 308])
 const MAX_REDIRECTS = 8
@@ -109,6 +111,15 @@ const isSiiUrl = (url: string): boolean => {
   return protocol === 'https:' && hostname.endsWith('.sii.cl')
 }
 
+const contextHeaders = (
+  url: string,
+  cookies: CookieJar,
+  referer: string | undefined,
+): Readonly<Record<string, string>> => ({
+  ...(referer === undefined ? {} : { Referer: referer }),
+  ...(Object.keys(cookies).length === 0 || !isSiiUrl(url) ? {} : { Cookie: cookieHeader(cookies) }),
+})
+
 const requestHeaders = (
   url: string,
   method: HttpMethod,
@@ -117,7 +128,7 @@ const requestHeaders = (
 ): Readonly<Record<string, string>> => ({
   'User-Agent': USER_AGENT,
   Accept: ACCEPT,
-  'Accept-Language': 'es-419,es-US;q=0.9,es;q=0.8,en;q=0.7',
+  'Accept-Language': ACCEPT_LANGUAGE,
   'sec-ch-ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
   'sec-ch-ua-mobile': '?0',
   'sec-ch-ua-platform': '"Windows"',
@@ -133,9 +144,25 @@ const requestHeaders = (
         'Content-Type': 'application/x-www-form-urlencoded',
       }
     : {}),
-  ...(referer === undefined ? {} : { Referer: referer }),
-  ...(Object.keys(cookies).length === 0 || !isSiiUrl(url) ? {} : { Cookie: cookieHeader(cookies) }),
+  ...contextHeaders(url, cookies, referer),
 })
+
+// The headers of a JSON service: these got good answers in both environments.
+const jsonHeaders = (
+  url: string,
+  cookies: CookieJar,
+  referer: string | undefined,
+): Readonly<Record<string, string>> => ({
+  'User-Agent': USER_AGENT,
+  Accept: 'application/json, text/plain, */*',
+  'Accept-Language': ACCEPT_LANGUAGE,
+  'Content-Type': 'application/json',
+  Origin: new URL(url).origin,
+  ...contextHeaders(url, cookies, referer),
+})
+
+// A document or a JSON answer may say anything: only a page can be the firewall's.
+const isStructuredBody = (text: string): boolean => /^\s*(?:<\?xml|[{[])/.test(text)
 
 /**
  * EN: The error for a page the code cannot interpret, with what the page said.
@@ -170,20 +197,27 @@ export const assertNotRejected = (context: PortalContext, html: string): void =>
 
 /**
  * EN: One request and no redirects: one `send` inside the retry loop. Cookies go into the jar; a block throws. Any other
- * status is a page, except 502, 503 and 504, which are repeated.
+ * status is a page, except 502, 503 and 504, which are repeated. A body that is a document or JSON is not read for the
+ * firewall's words, although HTTP 403 still blocks.
  * ES: Una petición sin redirecciones: un `send` dentro del ciclo de reintentos. Las cookies entran a la bolsa; un bloqueo
- * lanza. Cualquier otro estado es una página, salvo 502, 503 y 504, que se repiten.
+ * lanza. Cualquier otro estado es una página, salvo 502, 503 y 504, que se repiten. Un cuerpo que sea un documento o JSON
+ * no se revisa en busca de las palabras del firewall, aunque un HTTP 403 igual bloquea.
  */
 export const portalRequest = async (
   context: PortalContext,
   step: string,
   method: HttpMethod,
   url: string,
-  options: { readonly form?: Readonly<Record<string, string>>; readonly referer?: string } = {},
+  options: {
+    readonly form?: Readonly<Record<string, string>>
+    readonly json?: unknown
+    readonly referer?: string
+  } = {},
 ): Promise<PortalPage> => {
   const { portal, overrides, state } = context
   const operation = `${context.operation}.${step}`
-  const body = options.form === undefined ? undefined : encodeUtf8(formEncode(options.form))
+  const text = options.json === undefined ? options.form && formEncode(options.form) : JSON.stringify(options.json)
+  const body = text === undefined ? undefined : encodeUtf8(text)
   const response = await withRetry(
     mergeRetryPolicy(portal.retry, overrides?.retry),
     async (attempt) => {
@@ -192,7 +226,10 @@ export const portalRequest = async (
         channel: 'portal',
         method,
         url,
-        headers: requestHeaders(url, method, state.cookies, options.referer),
+        headers:
+          options.json === undefined
+            ? requestHeaders(url, method, state.cookies, options.referer)
+            : jsonHeaders(url, state.cookies, options.referer),
         body,
         timeoutMs: overrides?.timeoutMs ?? portal.timeoutMs,
         signal: overrides?.signal,
@@ -213,12 +250,12 @@ export const portalRequest = async (
   )
   if (isSiiUrl(url)) state.cookies = mergeSetCookie(state.cookies, response.headers['set-cookie'])
   const html = decodeBody(response.body, portalEncoding(response))
-  if (isBlockedPage(response.status, html))
+  if (isBlockedPage(response.status, isStructuredBody(html) ? '' : html))
     throw new DteError('SII_PORTAL_BLOCKED', {
       operation: context.operation,
       step,
       httpStatus: response.status,
-      portalMessage: portalMessageOf(html),
+      portalMessage: portalMessageOf(redactText(html)),
     })
   return { status: response.status, headers: response.headers, html, url, lastLocation: null }
 }

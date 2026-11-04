@@ -231,6 +231,61 @@ and what to do; the composite flows return it as data, so the CAFs already obtai
 refusal pages were measured against the real SII, but the pages of an enrolled company (quota, CAF, folio ranges) have not
 been seen yet: see the phase 4 design.
 
+## Purchase and sales register and MIPYME backup
+
+These run on the same session as the rest of the portal.
+
+```typescript
+import {
+  listPeriodDocuments,
+  fetchRegisterSummary,
+  listPurchaseTypes,
+  changePurchaseType,
+  fetchPurchaseDocument,
+  moveVatToCommonUse,
+  downloadMipymeBackup,
+} from 'dte-sdk'
+
+const { summary, documents } = await listPeriodDocuments(portal, { period: '2026-10', direction: 'received' })
+const { rows, header } = await fetchRegisterSummary(portal, { period: '2026-10', operation: 'purchase' })
+
+const types = await listPurchaseTypes(portal)
+const key = { type: 33, folio: 1234, period: '2026-10', counterpartyRut: '12345678-5' }
+await changePurchaseType(portal, { ...key, purchaseType: '4' })
+const purchase = await fetchPurchaseDocument(portal, key)
+await moveVatToCommonUse(portal, { ...key, commonUseVat: 19000 })
+
+await downloadMipymeBackup(portal, {
+  from: '2026-10-01',
+  to: '2026-10-31',
+  direction: 'received',
+  onChunk: async ({ from, to, xml }) => saveBackup(`${from}_${to}.xml`, xml),
+})
+```
+
+| I need | Function | SII service |
+|---|---|---|
+| Each document of a period (folio, date, amounts), with no receipts and no XML | `listPeriodDocuments` | `consemitidosinternetui` |
+| Official totals per document type and accounting status, with receipts aggregated | `fetchRegisterSummary` | `consdcvinternetui` |
+| How a purchase is classified, and changing it | `fetchPurchaseDocument` and the writes | `complementoscvui` |
+| The full XML of a document | `downloadMipymeBackup` | MIPYME backup |
+
+- **A refused month reads as empty.** Response codes are not looked at, so `listPeriodDocuments` and
+  `fetchRegisterSummary` cannot tell a month the SII refuses to show from one with no movement. `raw` holds each row as the
+  SII sent it. The row names come from the SII's client code and have not been seen with real documents: an absent field is
+  `null`.
+- **A write changes the real register** on a production client. Each one is a single attempt and only the SII's `OK` confirms it.
+  Anything else throws `purchaseChangeNotConfirmed`, and the change may have applied, so read the document again before retrying.
+- **VAT amounts are final amounts,** the value of each bucket after the change and not a delta.
+- **The backup reads production from any client,** because the service exists only there. It reads real documents even from a
+  certification client, and a development environment that stores them needs its own gate. It needs only the certificate, not
+  being enrolled as an issuer.
+- **The backup downloads at most 20 documents at a time,** so it splits the range, and by document type within a day. The whole plan
+  comes first: a day that cannot be downloaded throws `backupDayOverLimit` or `backupDayUnknownTypes` before any download. Use
+  `onChunk` for long histories, so the XML does not stay in memory.
+- **Known defect:** a two-day range with more than 20 documents downloads only its first day, while `total` counts both.
+- **`backupNoData` is definitive.** `backupCaptcha` and `backupIndeterminate` mean try later, never in a loop.
+
 ## Printed samples (Node)
 
 ```typescript

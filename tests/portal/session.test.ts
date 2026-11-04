@@ -338,6 +338,53 @@ describe('requests', () => {
     expect(error.details).toMatchObject({ httpStatus: 503, channel: 'portal', operation: 'test.x' })
   })
 
+  test('a document or a JSON answer may say the words of the firewall', async () => {
+    const harness = await signedIn([
+      { url: `${MAULLIN}/xml`, reply: { body: '\n<?xml version="1.0"?><Glosa>acceso restringido</Glosa>' } },
+      { url: `${MAULLIN}/object`, reply: { body: '{"glosa":"Transaccion Rechazada"}' } },
+      { url: `${MAULLIN}/list`, reply: { body: '["acceso restringido"]' } },
+    ])
+    for (const path of ['xml', 'object', 'list']) {
+      const reached = await run(harness, (context) => portalRequest(context, 'x', 'GET', `${MAULLIN}/${path}`))
+      expect(reached.status).toBe(200)
+    }
+  })
+
+  test('HTTP 403 blocks whatever the body is, and a token in it does not reach the details', async () => {
+    const harness = await signedIn([
+      { url: `${MAULLIN}/a`, reply: { status: 403, body: '{"metaData":{"conversationId":"TOKEN-ABC"}}' } },
+    ])
+    const error = await failure(run(harness, (context) => portalRequest(context, 'x', 'GET', `${MAULLIN}/a`)))
+    expect(error.code).toBe('SII_PORTAL_BLOCKED')
+    expect(error.details.portalMessage).not.toContain('TOKEN-ABC')
+  })
+
+  test('JSON goes as JSON, with the headers of a JSON service and no browser navigation headers', async () => {
+    const harness = await signedIn([{ url: `${MAULLIN}/a`, method: 'POST', reply: { body: '{}' } }])
+    await run(harness, (context) =>
+      portalRequest(context, 'x', 'POST', `${MAULLIN}/a`, { json: { data: null }, referer: `${MAULLIN}/` }),
+    )
+    const [request] = harness.fake.requests
+    expect(request.text).toBe('{"data":null}')
+    expect(request.headers).toMatchObject({
+      accept: 'application/json, text/plain, */*',
+      'content-type': 'application/json',
+      origin: 'https://maullin.sii.cl',
+      referer: `${MAULLIN}/`,
+    })
+    expect(request.headers.cookie).toContain('NETSCAPE_LIVEWIRE.rut=12345678')
+    expect(request.headers['user-agent']).toContain('Mozilla')
+    expect(request.headers['accept-language']).toContain('es-419')
+    expect(Object.keys(request.headers).filter((name) => name.startsWith('sec-'))).toEqual([])
+  })
+
+  test('without a referer or cookies, a JSON request says nothing of them', async () => {
+    const harness = portalWith([{ url: `${MAULLIN}/a`, method: 'POST', reply: { body: '{}' } }])
+    await run(harness, (context) => portalRequest(context, 'x', 'POST', `${MAULLIN}/a`, { json: {} }))
+    expect(harness.fake.requests[0].headers.referer).toBeUndefined()
+    expect(harness.fake.requests[0].headers.cookie).toBeUndefined()
+  })
+
   test('any other status is a page', async () => {
     const harness = await signedIn([{ url: `${MAULLIN}/a`, reply: { status: 500, body: 'Error 500' } }])
     const reached = await run(harness, (context) => portalRequest(context, 'x', 'GET', `${MAULLIN}/a`))

@@ -68,6 +68,7 @@ export const chileTimestamp = (now: Date = new Date()): string => {
 }
 
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
+const PERIOD = /^\d{4}-(0[1-9]|1[0-2])$/
 
 /**
  * EN: True when `value` is a real calendar date in `YYYY-MM-DD`.
@@ -84,6 +85,12 @@ export const isIsoDate = (value: string): boolean => {
     date.getUTCDate() === Number(day)
   )
 }
+
+/**
+ * EN: True when `value` is a tax period, `YYYY-MM`.
+ * ES: True cuando `value` es un período tributario, `AAAA-MM`.
+ */
+export const isPeriod = (value: string): boolean => PERIOD.test(value)
 
 /**
  * EN: Normalizes `DD-MM-YYYY`, `DD/MM/YYYY` or `YYYY-MM-DD` (as the SII portal and resolutions show dates) to ISO.
