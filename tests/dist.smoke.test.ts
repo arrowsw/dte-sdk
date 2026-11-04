@@ -87,8 +87,18 @@ const EXPECTED_FUNCTIONS: Record<string, readonly string[]> = {
     'createMemoryCertificationStore',
     'createDirectoryCertificationStore',
     'runCertification',
+    'gwtBody',
+    'createExchangeAnswers',
+    'runExchange',
+    'uploadPrintedSamples',
   ],
-  pdf: ['parsePrintableDocuments', 'renderPrintedSample', 'renderPrintedSamples', 'writePrintedSamples'],
+  pdf: [
+    'parsePrintableDocuments',
+    'renderPrintedSample',
+    'renderPrintedSamples',
+    'writePrintedSamples',
+    'readPrintedSamples',
+  ],
 }
 const ENTRIES = Object.keys(EXPECTED_FUNCTIONS)
 
