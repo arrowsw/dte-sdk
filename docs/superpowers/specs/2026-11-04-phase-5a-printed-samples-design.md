@@ -1,6 +1,6 @@
 # dte-sdk — Phase 5a design (printed representation: PDF samples and the PDF417 stamp)
 
-Date: 2026-11-04 · Status: **draft for Hans's review: sections 1 to 3.4 approved on 2026-11-04; sections 3.5 to 3.11 written at his request without a section-by-section review** · Author: Claude (with Hans)
+Date: 2026-11-04 · Status: **approved by Hans on 2026-11-04 (sections 1 to 3.4 one by one, the rest on the written file); amended the same day after the plan's code ran: 3.2, 3.7, 3.8, 3.10, 3.11 and sections 6 and 7** · Author: Claude (with Hans)
 
 Starting point: the architecture and phase 1 spec (`2026-10-31-dte-sdk-architecture-and-phase-1-design.md`), the phase 2,
 3 and 4 specs. Decisions D1–D38 and the glossaries are the contract; D40 and D41 below amend D3 and D4 for the PDF
@@ -140,7 +140,7 @@ export type PrintableTotals = {
   readonly vatRate?: number  // TasaIVA
   readonly total?: number    // MntTotal
 }
-export type PrintableAdjustment = { readonly kind: 'D' | 'R'; readonly value?: number; readonly percent?: number } // DscRcgGlobal
+export type PrintableAdjustment = { readonly kind: 'D' | 'R'; readonly valueType: '%' | '$'; readonly value?: number } // DscRcgGlobal: TpoMov, TpoValor, ValorDR
 export type PrintableItem = {
   readonly code: string               // CdgItem/VlrCodigo (the first code when there are several)
   readonly name: string               // NmbItem
@@ -176,7 +176,8 @@ schema admits `SET` and codes that are not DTE types. `Transporte` is not mapped
 1. `parseXml` of the SDK (values as strings, `XML_PARSE_FAILED` when not well-formed), then the root: `EnvioDTE`,
    `EnvioDTEB`, `EnvioDTETraslado` or `EnvioBOLETA` → its `SetDTE/DTE` list; a bare `SetDTE` → its `DTE` list; a bare
    `DTE` → a list of one (the only adaptation, so `SignedDocument.xml` enters without an envelope). Any other root →
-   an empty list. One `DTE` or many: both are lists.
+   an empty list. One `DTE` or many: both are lists. The document element is `Documento`, `Liquidacion` (type 43) or
+   `Exportaciones` (export types).
 2. Every `<TED…>…</TED>` is captured on the input text with one non-greedy regular expression, never rebuilt. Each
    document gets the TED whose `<F>` and `<TD>` equal its folio and type; with no match, the TED at the document's
    position; with none at all, `''`.
@@ -244,7 +245,7 @@ dark grey (0.4), mid grey (0.5), light grey (0.88).
 | 4 | Transfer line | Only type 52 with a transfer reason: `Tipo de Traslado: {n} - {name}` 9, names from the catalog of `IndTraslado` (1 Operación constituye venta … 9 Venta para exportación) |
 | 5 | References | Only when there are any: title `Referencias a otros documentos` bold 10; table with light-grey header, columns Tipo Documento 30 %, Folio 15 %, Fecha 20 %, Razón Referencia the rest; rows 12 pt, text 8 pt |
 | 6 | Detail | Title `Detalle` bold 10; columns `#` 5 % centred, `Código` 10 %, `Descripción` the rest wrapped, `Cant.` 9 % right, `Unid.` 7 % centred with `UN` when absent, `P.Unit.` 13 % right, `Valor` 14 % right; the last two read `P.Unit. c/IVA` and `Valor c/IVA` when `grossAmounts`. Amounts as `$` plus `toLocaleString('es-CL')`. A row grows with its wrapped description and gains a mid-grey 7 pt line `Dcto: $…` or `Dcto: …%` when the item has a discount |
-| 7 | Totals | Box 45 % of the page width aligned right, label 55 % and value 45 %, 10 pt, dark-grey 0.5 borders. Type 34: only `Monto Exento` and `Monto Total`. Others: one row per global adjustment (`Descuento Global` for `D`, `Recargo Global` for `R`, with `$value` or `percent%`), `Monto Neto`, `Monto Exento`, `IVA ({rate}%)` with 19 when the rate is absent, `Monto Total` bold. A row prints only when its amount is non-zero |
+| 7 | Totals | Box 45 % of the page width aligned right, label 55 % and value 45 %, 10 pt, dark-grey 0.5 borders. Type 34: only `Monto Exento` and `Monto Total`. Others: one row per global adjustment (`Descuento Global` for `D`, `Recargo Global` for `R`, with `$value` when `TpoValor` is `$` and `value%` when it is `%`, empty without a value), `Monto Neto`, `Monto Exento`, `IVA ({rate}%)` with 19 when the rate is absent or 0, `Monto Total` bold. A row prints only when its amount is non-zero |
 | 8 | Acknowledgement | Only on the transferable copy: box with black 0.5 border; `Acuse de Recibo` bold 9; `Nombre:` and `R.U.T.:` on one line, `Fecha:` and `Recinto:` on the next, `Firma:` on the third, each with underscores; a mid-grey rule; then the Ley 19.983 text (Appendix A) wrapped at 7 pt |
 | 9 | Stamp | Only when `tedXml` is not empty: the PNG of 3.4 at the margin plus 56.69 pt from the left; width clamped to 141.73–255.12 pt, height clamped separately to 56.69–113.39 pt; under it `Timbre Electrónico SII` bold 7, the resolution text 7, `Verifique documento: www.sii.cl` 7 |
 | 10 | CEDIBLE mark | Only on the transferable copy: bottom right, bold 11, `CEDIBLE CON SU FACTURA` for 52 and `CEDIBLE` for the rest |
@@ -351,7 +352,9 @@ Existing codes used: `XML_PARSE_FAILED` (parser), `MISSING_FIELD` with `TipoDTE`
 with type 0) or `TED` (`renderTedBarcode` without a `<TED`), `ENCODING_UNSUPPORTED_CHAR` (stamp), `TRANSPORT_UNAVAILABLE`
 (Node adapter). A logo the library cannot embed is not an error: the sample prints without it, as in the field.
 
-The batch never throws for one envelope or one document: everything above becomes a failure entry with its `code`.
+The batch never throws for one envelope or one document: everything above becomes a failure entry with its `code`,
+read with `errorCode(error)`, a new helper of `src/errors.ts` (exported) that gives the code of a thrown `DteError`
+and undefined for anything else.
 
 ### 3.8 Public API additions
 
@@ -360,6 +363,7 @@ Runtime exports added to the root and to `RUNTIME_EXPORTS`:
 - **Parser:** `parsePrintableDocuments`, `needsTransferableCopy`.
 - **Rendering:** `renderPrintedSample`, `renderTedBarcode`.
 - **Batch:** `renderPrintedSamples`, `writePrintedSamples`, `findEnvelopeFiles`.
+- **Errors:** `errorCode`.
 
 Types:
 
@@ -406,16 +410,16 @@ const png = await renderTedBarcode(doc.tedXml)
 - **Parser:** table-driven mapping of every field of 3.2; the TED equals the substring of the input; the fallbacks of
   type, folio and date; coercion (`"0"` totals, `"2.000"` quantities); the root variants.
 - **Renderer:** every PDF is loaded back with the library: one page, width 609.45, height within the bounds, the minimum
-  height for a tiny document and the maximum for a long detail; the page content is read (inflated when the library
-  compresses it; the plan's first task settles which) and asserted to contain the printed type name, `N° {folio}`,
+  height for a tiny document and the maximum for a long detail; the page content is read (the library Flate-compresses
+  it; the test helper inflates it and reads the `Tj` strings as Latin-1) and asserted to contain the printed type name, `N° {folio}`,
   `IVA (19%)`, `P.Unit. c/IVA` on a gross document, `Tipo de Traslado` on a guide, `CEDIBLE CON SU FACTURA` on a guide's
   transferable copy and `Acuse de Recibo` on it; and not to contain the acknowledgement on a plain copy, nor on a guide
   that is not a sale, nor on a credit note; an image object is present with a TED and absent without one; the logo is
   embedded for PNG and JPEG and ignored for bytes that are not an image. Every fixture PDF measures at most 500 KB.
-- **Stamp:** the PNG is decoded (`pngjs`) and read with the PDF417 reader of `@zxing/library` (dev dependencies): the
-  decoded bytes, as Latin-1, equal the TED XML, including an `ñ` and an `ó` in the receiver name. If the reader cannot
-  decode a 1 010-byte symbol (section 6), the fallback is to assert that the PNG's module matrix equals the matrix the
-  library's `raw` call returns for the same options, which proves the bytes handed to the encoder.
+- **Stamp:** the PNG is decoded (`pngjs`), composited over white (the library draws on a transparent background) and
+  read with the PDF417 reader of `@zxing/library` (dev dependencies): the decoded text equals the TED XML, including an
+  `Ñ` and an `Ó` in the receiver name. The image embedded in the PDF is rebuilt from its XObject (Flate data plus
+  `SMask`) and decoded the same way, so the test covers the stamp as it is printed.
 - **Properties (fast-check):** wrapped lines never exceed the column width and re-join to the input words; the page
   height stays within its bounds for random item counts and name lengths (few runs: each render takes tens of
   milliseconds).
@@ -432,10 +436,10 @@ const png = await renderTedBarcode(doc.tedXml)
 
 ### 3.11 Build, dependencies and docs
 
-- `package.json`: `pdf-lib` 1.17.1 and `bwip-js` 4.11.4 in `dependencies`; `@zxing/library`, `pngjs` and
-  `@types/pngjs` in `devDependencies`, exact versions.
+- `package.json`: `pdf-lib` 1.17.1 and `bwip-js` 4.11.4 in `dependencies`; `@zxing/library` 0.23.0, `pngjs` 7.0.0 and
+  `@types/pngjs` 6.0.5 in `devDependencies`, exact versions.
 - `scripts/build.mjs`: `pdf-lib` and `bwip-js` join `EXTERNAL`.
-- `.size-limit.json`: both limits to 54 kB. The plan records the measured sizes.
+- `.size-limit.json`: both limits to 54 kB. Measured with the plan's code: ESM 50.15 kB, CJS 50.26 kB.
 - Type declarations: `import('bwip-js')` and `import('pdf-lib')` resolve through the packages' own declarations; the
   loader types stay internal (not exported from the root), as `NodeFsModules` is.
 - `README.md`: a "Printed samples (Node)" section with the flows of 3.9 and the Node-only note of D45. `CHANGELOG.md`:
@@ -469,7 +473,7 @@ const png = await renderTedBarcode(doc.tedXml)
 | 5 | No layout improvements in this phase; the three found are deferred to after the first real certification (D44, section 7) | Hans's, 2026-11-04 |
 | 6 | Approach: a direct functional port, one measure and one draw function per block, over a declarative layout engine or HTML plus a headless browser | Approved 2026-11-04 |
 | 7 | Sections 3.1 (layout), 3.2 (model and parser), 3.3 and 3.4 (rendering and stamp) | Approved 2026-11-04 |
-| 8 | Sections 3.5 to 3.11 (batch, adapter, errors, API, tests, build) | Written without a section review at Hans's request, to finish sooner; pending his review of this file |
+| 8 | Sections 3.5 to 3.11 (batch, adapter, errors, API, tests, build) | Written without a section review at Hans's request, to finish sooner; approved on the written file on 2026-11-04 |
 
 ---
 
@@ -483,20 +487,29 @@ const png = await renderTedBarcode(doc.tedXml)
   about 12 MB. Bundled and brotli-compressed, 175 kB and 186 kB; neither enters the bundle (D40).
 - The layout code of the field-proven output, minified with the libraries external: 28.1 kB, 8.2 kB brotli (D41).
 - A TED issued from the fixtures measures 1 010 characters (1 024-bit keys). At error correction level 5 the encoder
-  produces a symbol of 16 data columns and 52 rows, 341 × 52 modules. With `scale` 3 and `padding` 6 that is a PNG of
-  about 1 035 × 480 px, which scaled to the 9 cm maximum gives about 292 DPI and a module of 0.26 mm (10 mils, above the
-  6.7 mils minimum); the natural height is 4.17 cm, clamped to 4 cm. These last figures are arithmetic on the module
-  counts, not yet read from a PNG: the plan's first task confirms them. With byte compaction alone the same TED needs
-  908 of the 928 codewords a PDF417 can hold and overflows with a 40-character `RSR` and `IT1`; the library mixes text
-  and byte compaction, which is what the field output carries and what the SII reader accepted.
+  produces a symbol of 16 data columns and 52 rows, 341 × 52 modules; the longer TED of the test fixtures gives 17
+  columns. Read from the PNG: with `scale` 3, `padding` 6 and `height` 10 the symbol is drawn with 3 px modules, an
+  18 px quiet zone and rows as tall as one module (1 110 × 192 px for the 17-column symbol), because `height` squashes
+  the rows. Scaled to the 9 cm maximum that is about 292 DPI for 16 columns and 313 DPI for 17, a module of about
+  0.25 mm (10 mils, above the 6.7 mils minimum), and a natural height of about 1.6 cm that the 2 cm minimum stretches
+  to a row-to-module ratio of about 1.6:1, under the 3:1 the instructions recommend (section 7). With byte compaction
+  alone the 1 010-character TED needs 908 of the 928 codewords a PDF417 can hold and overflows with a 40-character `RSR`
+  and `IT1`; the library mixes text and byte compaction, which is what the field output carries and what the SII reader
+  accepted.
 - The SII rules of Appendix A, from the two public documents.
+
+**Measured on 2026-11-04 with the plan's code:**
+
+- `pdf-lib` Flate-compresses the page content streams and writes text as hexadecimal strings; the test helper inflates
+  and decodes them. The PDF417 reader of `@zxing/library` decodes the field symbol once the PNG's alpha channel is
+  composited over white: the 1 010-character TED, an accented one, and the image rebuilt from the PDF all decode to
+  the exact bytes, at level 5.
+- 1 758 tests pass with coverage at 100 % on the four metrics; the bundles measure ESM 50.15 kB and CJS 50.26 kB.
 
 **Not measured:**
 
 - The SII's acceptance of the generated samples. It needs the company enrolled and the `pdfdteInternet` upload of phase
-  5c. Until then the proof is parity with the output known to pass, plus the decoding test of 3.10.
-- Whether `pdf-lib` compresses page content streams, which decides how the tests read the printed text (3.10).
-- Whether the PDF417 reader of `@zxing/library` decodes a 1 010-byte symbol at level 5; 3.10 names the fallback.
+  5c. Until then the proof is parity with the output known to pass, plus the decoding tests of 3.10.
 
 ---
 
@@ -509,8 +522,11 @@ Kept out of this phase on purpose (D44); to be reconsidered after the first real
    subject format shows the withheld VAT.
 2. **Commissions of the settlement invoice (43).** The `Comisiones` block (net, exempt and VAT of the commission) is
    not printed; the manual asks for it on type 43. Phase 1 already models it.
-3. **Stamp raster at 300 DPI or more.** `scale` 3 gives about 292 DPI at 9 cm, just under the minimum of the issuance
-   instructions; `scale` 4 would give about 389 DPI with no visible change.
+3. **Stamp raster at 300 DPI or more, and 3:1 rows.** `scale` 3 gives about 292 DPI at 9 cm for a 16-column symbol,
+   just under the minimum of the issuance instructions (313 DPI for 17 columns); `scale` 4 would give 389 DPI with no
+   visible change. The field `height` 10 squashes the rows to the height of a module, so the printed ratio is about
+   1.6:1 instead of the 3:1 the instructions recommend; dropping `height` restores 3:1 (section 6). Both stay as they
+   are because that output passed the SII review.
 
 Minor: `MontoNF` is not printed; the stamp height is clamped independently of its width, so a tall symbol loses up to
 4 % of its 3:1 row ratio; a logo the library rejects is ignored silently; a document taller than 33 cm is cut silently.
