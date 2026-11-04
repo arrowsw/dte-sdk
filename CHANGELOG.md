@@ -84,6 +84,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `bwip-js`, loaded on first use. Error codes `DEPENDENCY_UNAVAILABLE` and `PDF_RENDER_FAILED`, and `errorCode`.
   A folio that is not a run of digits is an `INVALID_FOLIO` failure of its document and never names a file, and the
   Node adapter refuses a sample path outside the folder of its set.
+- Certification, the deterministic half: `parseTestSetText` (the SII test-set text to typed sets and cases),
+  `planCertificationSets`, `createFolioAllocator` (a `FolioSource` over one or several CAFs), `issueTestSet` (the
+  basic, exempt, guide and purchase sets through phase 1, with the `SET` reference and the field rules), `issueSimulation`
+  (every case again in one envelope) and `createCertificationSalesBook`, `createCertificationPurchaseBook`,
+  `createCertificationGuideBook` through phase 3. Catalog `TEST_SET_KINDS`, `TEST_SET_PORTAL_NAMES`,
+  `TEST_SET_REFERENCE_TYPE`, `TEST_SET_ENVELOPE_ID`, `CERTIFICATION_COUNTERPARTY`. `DocumentInput.withholdVat` withholds
+  the VAT on the notes of a purchase invoice. Bundle limit to 64 kB.
 
 ### Removed
 

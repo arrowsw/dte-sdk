@@ -291,3 +291,41 @@ describe('createDocument', () => {
     expect(FIELD_LIMITS.DscItem).toBe(1000)
   })
 })
+
+test('withholdVat withholds the whole VAT on a note that affects a purchase invoice', () => {
+  const base = {
+    folio: 1,
+    issueDate: '2026-11-15',
+    issuer: {
+      rut: '76543210-3',
+      businessName: 'Comercial Andina SpA',
+      businessActivity: 'Software',
+      address: 'Av. 1',
+      commune: 'Santiago',
+    },
+    receiver: {
+      rut: '76543210-3',
+      businessName: 'Comercial Andina SpA',
+      businessActivity: 'Software',
+      address: 'Av. 1',
+      commune: 'Santiago',
+    },
+    items: [{ name: 'Chatarra', quantity: 10, unitPrice: 1000, additionalTaxCodes: [15] }],
+    references: [{ documentType: 46, folio: 7, date: '2026-11-15', code: 3 as const, reason: 'DEVOLUCION' }],
+  }
+  const withheld = createDocument({ ...base, type: 61, withholdVat: true })
+  expect(withheld.header.totals).toEqual({
+    netAmount: 10000,
+    vatRate: 19,
+    vatAmount: 1900,
+    withholdings: [{ taxCode: 15, rate: 19, amount: 1900 }],
+    totalAmount: 10000,
+  })
+  expect(createDocument({ ...base, type: 61 }).header.totals).toEqual({
+    netAmount: 10000,
+    vatRate: 19,
+    vatAmount: 1900,
+    totalAmount: 11900,
+  })
+  expect(createDocument({ ...base, type: 46, withholdVat: false }).header.totals.totalAmount).toBe(11900)
+})

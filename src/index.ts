@@ -447,3 +447,45 @@ export type {
 } from './pdf/samples'
 export { findEnvelopeFiles, writePrintedSamples } from './pdf/node-samples'
 export type { WritePrintedSamplesInput, WritePrintedSamplesResult, WrittenPrintedSample } from './pdf/node-samples'
+
+export {
+  TEST_SET_KINDS,
+  TEST_SET_PORTAL_NAMES,
+  TEST_SET_REFERENCE_TYPE,
+  CERTIFICATION_COUNTERPARTY,
+} from './catalogs/certification'
+export type { TestSetKind } from './catalogs/certification'
+export { parseTestSetText } from './certification/set-text'
+export type { TestSet, TestCase, TestCaseItem, TestBookDocument } from './certification/set-text'
+export { planCertificationSets } from './certification/set-plan'
+export type {
+  CertificationPlan,
+  BasicSetPlan,
+  ExemptSetPlan,
+  GuideSetPlan,
+  PurchaseSetPlan,
+  PurchaseBookPlan,
+  PlannedInvoice,
+  PlannedNote,
+  PlannedGuide,
+  PlannedItem,
+  SetFolios,
+} from './certification/set-plan'
+export { createFolioAllocator } from './certification/folios'
+export type { FolioSource, FolioAllocatorOptions } from './certification/folios'
+export { issueTestSet, TEST_SET_ENVELOPE_ID } from './certification/issue-set'
+export type { IssueSetOptions, IssuableSetPlan, IssuedCase, IssuedSet } from './certification/issue-set'
+export { issueSimulation } from './certification/simulation'
+export type { IssuedSimulation } from './certification/simulation'
+export {
+  createCertificationSalesBook,
+  createCertificationPurchaseBook,
+  createCertificationGuideBook,
+} from './certification/books'
+export type {
+  CertificationBookInput,
+  CertificationSalesBookInput,
+  CertificationGuideBookInput,
+  BookReceiver,
+  GuideBookCaseFlag,
+} from './certification/books'

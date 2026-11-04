@@ -286,6 +286,27 @@ await downloadMipymeBackup(portal, {
 - **Known defect:** a two-day range with more than 20 documents downloads only its first day, while `total` counts both.
 - **`backupNoData` is definitive.** `backupCaptcha` and `backupIndeterminate` mean try later, never in a loop.
 
+## Certification: test sets, simulation and books
+
+```typescript
+import { parseTestSetText, planCertificationSets, createFolioAllocator, issueTestSet, issueSimulation, createCertificationSalesBook } from 'dte-sdk'
+
+const plan = planCertificationSets(parseTestSetText(setText)) // the text the SII generated for the applicant
+const options = { issuer, receiver, certificate, folios: createFolioAllocator(cafs), resolution: { number: 0, date: '2026-01-01' } }
+const basic = await issueTestSet(plan.basic!, options) // documents and the signed envelope, with the SET references
+const sales = createCertificationSalesBook(basic, { period: '2026-11', issuerRut, senderRut, resolution, certificate, receiver: { rut, name } })
+const simulation = await issueSimulation(plan, { ...options, folios: createFolioAllocator(freshCafs) })
+```
+
+The SII test set is parsed line by line into cases; `planCertificationSets` turns them into what each set issues and the
+folios each type needs; `issueTestSet` issues the basic, exempt, guide and purchase sets through the phase 1 functions
+with the `SET` reference (`CASO <id>`) and the rules the SII review expects (returned goods at the original price,
+cancellations taking the cancelled document's items, the issuer as receiver of purchase invoices and internal
+transfers); `issueSimulation` re-issues every case in one envelope; the three `createCertification*Book` functions
+build and sign the sales, purchase and guide books. Everything is data: sending, waiting for the status and declaring
+belong to the certification runner. No real test-set text was available while writing this: the grammar follows the
+sets the SII delivers in the field, and the first download should be kept as a fixture.
+
 ## Printed samples (Node)
 
 ```typescript

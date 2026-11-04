@@ -516,6 +516,8 @@ export type DocumentInput = {
   readonly options?: HeaderOptions
   /** EN: Unit prices already include VAT: emits `MntBruto=1` and derives net/VAT from the gross. ES: Los precios unitarios ya incluyen IVA: emite `MntBruto=1` y deriva neto/IVA del bruto. */
   readonly pricesIncludeVat?: boolean
+  /** EN: Withhold the whole VAT (`ImptoReten` 15, total without VAT); true by default on purchase invoices, settable on the notes that affect one. ES: `ImptoReten` — Retener todo el IVA (código 15, total sin IVA); true por defecto en facturas de compra (46), se puede fijar en las notas que las afectan. */
+  readonly withholdVat?: boolean
   /** EN: Explicit totals (advanced); computed when omitted. ES: Totales explícitos (uso avanzado); se calculan si se omiten. */
   readonly totals?: Totals
 }
