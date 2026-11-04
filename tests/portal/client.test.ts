@@ -1,9 +1,11 @@
+import { BACKUP_ORIGINS, DOCUMENT_OPERATIONS } from '../../src/catalogs/portal'
 import { DteError } from '../../src/errors'
 import {
   createPortalClient,
   DEFAULT_PORTAL_RETRY_POLICY,
   isRetryablePortalError,
   resolvePortalCompany,
+  siiCodeOf,
 } from '../../src/portal/client'
 import { certificate, failure } from '../support/portal'
 
@@ -92,4 +94,19 @@ test('anything else is not retried', () => {
 
 test('the failure helper needs a rejection', async () => {
   await expect(failure(Promise.resolve())).rejects.toThrow('expected a rejection')
+})
+
+test('transaction ids are UUIDs by default, and can be injected', () => {
+  expect(createPortalClient(options).randomId()).toMatch(/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/)
+  expect(createPortalClient({ ...options, randomId: () => 'tx-1' }).randomId()).toBe('tx-1')
+})
+
+test('values of the caller become codes of the SII, and an unknown one is refused', () => {
+  expect(siiCodeOf(DOCUMENT_OPERATIONS, 'received', 'direction')).toBe(2)
+  expect(siiCodeOf(BACKUP_ORIGINS, 'issued', 'direction')).toBe('ENV')
+  for (const value of ['sideways', 'toString']) {
+    expect(() => siiCodeOf(BACKUP_ORIGINS, value as 'issued', 'direction')).toThrow(
+      expect.objectContaining({ code: 'INVALID_OPTION', details: { field: 'direction' } }),
+    )
+  }
 })
