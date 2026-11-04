@@ -4,13 +4,16 @@ import { isDteError } from '../../src/errors'
 import { createPortalClient } from '../../src/portal/client'
 import { fetchCompanyResolution, fetchTaxpayerData } from '../../src/portal/company'
 import { listFolioRanges } from '../../src/portal/annulment'
+import { downloadMipymeBackup } from '../../src/portal/backup'
+import { fetchRegisterSummary, listPeriodDocuments, listPurchaseTypes } from '../../src/portal/rcv'
 import { closePortalSession, openPortalSession } from '../../src/portal/session'
 import { listStampableTypes, queryFolioQuota } from '../../src/portal/stamping'
 
 /**
  * Live smoke against the SII portal. Never runs in CI: it needs a real certificate enabled as a login method at sii.cl.
  *   SII_LIVE=1 SII_CERT_PFX=/path/to/cert.pfx SII_CERT_PASSWORD=… SII_COMPANY_RUT=… npx jest tests/live/portal
- * It only reads: nothing here stamps or annuls, because those spend folios and quota. Nothing from here is committed.
+ * It only reads: nothing here stamps or annuls, because those spend folios and quota, and nothing changes the register.
+ * The MIPYME backup reads production even from this certification client. Nothing from here is committed.
  */
 const env = process.env
 const enabled =
@@ -54,6 +57,19 @@ guarded('live: portal', () => {
     await answered(listStampableTypes(portal!))
     await answered(queryFolioQuota(portal!, { type: 33 }))
     await answered(listFolioRanges(portal!, { type: 33 }))
+  }, 120000)
+
+  test('RCV, read only', async () => {
+    const period = new Date().toISOString().slice(0, 7)
+    await answered(listPeriodDocuments(portal!, { period }))
+    await answered(listPeriodDocuments(portal!, { period, direction: 'received' }))
+    await answered(fetchRegisterSummary(portal!, { period, operation: 'purchase' }))
+    await answered(listPurchaseTypes(portal!))
+  }, 120000)
+
+  test('MIPYME backup of one day, keeping nothing', async () => {
+    const day = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+    await answered(downloadMipymeBackup(portal!, { from: day, to: day, onChunk: () => undefined }))
   }, 120000)
 
   test('a closed session logs in again on demand', async () => {

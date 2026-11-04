@@ -1,6 +1,6 @@
 # Entry points
 
-Status: decided on 2026-11-02, for phases 1 to 4. Tracks [issue #5](https://github.com/arrowsw/dte-sdk/issues/5).
+Status: decided on 2026-11-02, for phases 1 to 4 and 4b. Tracks [issue #5](https://github.com/arrowsw/dte-sdk/issues/5).
 
 **Decision: keep one root entry.** Phase 5 reopens this if the PDF dependencies justify a subpath.
 
@@ -14,6 +14,7 @@ Minified and brotli-compressed, whole bundle:
 | Phase 2 | 25.65 kB | 25.9 kB |
 | Phase 3 | 31.85 kB | 32.07 kB |
 | Phase 4 | 44.45 kB | 44.64 kB |
+| Phase 4b | 53.61 kB | 53.72 kB |
 
 ## Why not subpaths now
 
