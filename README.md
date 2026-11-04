@@ -48,7 +48,7 @@ npm install pdf-lib bwip-js
 |---|---|---|
 | `dte-sdk` | Documents, stamps, signatures, envelopes, books and the SII web services client over `fetch` | Node, Bun, Deno; bundles for the browser with no configuration |
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryFolioRegistry` | Node |
-| `dte-sdk/portal` | SII portal, folios and CAF requests, purchase and sales register, MIPYME backup, certification sets | Node |
+| `dte-sdk/portal` | SII portal, folios and CAF requests, purchase and sales register, MIPYME backup, certification sets and runner | Node |
 | `dte-sdk/pdf` | Printed samples | Node, with `pdf-lib` and `bwip-js` installed |
 
 `DteError` and `isDteError` come from `dte-sdk` and recognize what every entry throws.
@@ -325,6 +325,67 @@ transfers); `issueSimulation` re-issues every case in one envelope; the three `c
 build and sign the sales, purchase and guide books. Everything is data: sending, waiting for the status and declaring
 belong to the certification runner. No real test-set text was available while writing this: the grammar follows the
 sets the SII delivers in the field, and the first download should be kept as a fixture.
+
+## Certification: the runner
+
+```typescript
+import { createSiiClient } from 'dte-sdk'
+import { createDirectoryFolioRegistry } from 'dte-sdk/node'
+import {
+  createPortalClient,
+  createDirectoryCertificationStore,
+  runCertification,
+  sendTestSet,
+  declareTestSets,
+} from 'dte-sdk/portal'
+
+const deps = {
+  portal: createPortalClient({ environment: 'certification', certificate, companyRut }),
+  sii: createSiiClient({ environment: 'certification', certificate, companyRut }),
+  store: createDirectoryCertificationStore({ dir: './certification' }), // state.json and the artefacts; holds CAF keys
+  registry: createDirectoryFolioRegistry({ dir: './folios' }),
+  issuer,
+  receiver,
+  certificate,
+  resolution: { number: 0, date: resolutionDate },
+  onProgress: (event) => console.log(event.step),
+}
+
+// The whole HTML side, resumable: run it again after a fix, or after phase 5c did the exchange and the samples
+const first = await runCertification(deps) // stops with `exchange` once the simulation is confirmed
+// Once the portal stands past the printed samples, the sworn statement needs an explicit go
+const second = await runCertification(deps, { declareCompliance: true })
+
+// One step alone, after the SII rejected a set with observations
+let state = (await deps.store.load())!
+state = (await sendTestSet(deps, state, { kind: 'basic' })).state
+state = (await declareTestSets(deps, state)).state
+```
+
+The runner does what the field does, in its order: it downloads the test set once (downloading again regenerates it
+at the SII, so a run with a plan starts over), gets the folios through the registry (CAFs in hand first, then the
+quota, re-obtaining and annulling only as a last resort), sends each set and keeps its envelope and documents as
+artefacts for the printed samples, declares the track ids on `pe_avance2` with every field in form order and reads
+the page again to verify, waits for the approval, runs the books (the history of books the SII holds marks the
+occupied periods; a closed book is resent as an adjustment or in the next free month, at most 24 times), advances the
+stage, sends and declares the simulation and confirms it, and stops at the exchange, which is phase 5c's. Once the
+portal stands past the printed samples it stops again, at `compliance`: the declaration of compliance is the sworn
+statement of the legal representative, it cannot be undone, and the runner makes it only with
+`declareCompliance: true`.
+
+- **Everything is a step.** `obtainTestSet`, `prepareFolios`, `sendTestSet`, `declareTestSets`,
+  `waitForTestSetsApproval`, `runBooks`, `advanceToNextStage`, `sendSimulation`, `declareSimulation`,
+  `waitForSimulationApproval` and `declareComplianceFinal` take the dependencies and the state and return the saved
+  state with an outcome; the portal operations beneath them (`downloadTestSet`, `declareProgress`, `readProgress`,
+  `advanceStage`, `listBookHistory`, `declareCompliance`) are exported too.
+- **The state is a secret.** It holds the CAF files, each with a private key; the directory store writes them readable
+  by the user only. A service may implement `CertificationStore` over its own storage.
+- **Dates are Chile dates.** The declaration date and the base book period come from the clock in `America/Santiago`;
+  a process in UTC once declared the next day and the SII answered that the date did not match.
+- **The waits are the field's:** 5 polls of 10 s for the sets, 40 of 15 s for the books, 30 of 10 s for the
+  simulation, 10 declaration attempts 5 s apart after 10 s. Inject `sleep` and `now` to test without waiting.
+- **Nothing here has been run against the portal yet.** Every page shape comes from field behaviour; the first
+  enrolled run should keep the artefacts the store writes (every portal answer is there) as fixtures.
 
 ## Printed samples (Node)
 

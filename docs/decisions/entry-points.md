@@ -7,13 +7,14 @@ D40 and D41 of the design specs). Tracks [issue #5](https://github.com/arrowsw/d
 
 | Entry | Holds | Size | Reaches `node:` |
 |---|---|---|---|
-| `dte-sdk` | Documents, stamps, signatures, envelopes, books, SII web services client over `fetch` | 30.07 kB | No |
+| `dte-sdk` | Documents, stamps, signatures, envelopes, books, SII web services client over `fetch` | 30.06 kB | No |
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryFolioRegistry` | 4.19 kB | Yes, on first use |
-| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, certification sets | 39.35 kB | Yes, on first use |
-| `dte-sdk/pdf` | Printed samples; `pdf-lib` and `bwip-js` are optional peers | 8.33 kB | Yes, on first use |
+| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, certification sets and runner | 55.86 kB | Yes, on first use |
+| `dte-sdk/pdf` | Printed samples; `pdf-lib` and `bwip-js` are optional peers | 8.32 kB | Yes, on first use |
 
 Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
-it at phase 5b-1. The phase 5b-2 runner goes in `dte-sdk/portal`.
+it at phase 5b-2, which took `dte-sdk/portal` from 39.35 kB to 55.86 kB. Each limit is the measure rounded up to the next
+2 kB.
 
 ## Why
 
