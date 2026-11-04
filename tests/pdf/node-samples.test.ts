@@ -1,7 +1,7 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { PNG } from 'pngjs'
-import { findEnvelopeFiles, writePrintedSamples } from '../../src/pdf/node-samples'
+import { findEnvelopeFiles, samplePath, writePrintedSamples } from '../../src/pdf/node-samples'
 import { loadNodeFs, type NodeFsModules } from '../../src/sii/node-fs'
 import { FIXED_NOW } from '../support/fixtures'
 import { pdfImages } from '../support/pdf'
@@ -165,5 +165,16 @@ describe('writePrintedSamples', () => {
     expect((await failure(writePrintedSamples({ xmlFiles: [], outDir: 'x' }, failingLoad))).code).toBe(
       'TRANSPORT_UNAVAILABLE',
     )
+  })
+})
+
+describe('samplePath', () => {
+  test('keeps a sample inside the folder of its set and refuses a name that would leave it', async () => {
+    const { path } = await loadNodeFs()
+    const directory = join('out', 'SET-PRUEBAS')
+    expect(samplePath(path, directory, 'muestra_33_7.pdf')).toBe(join(directory, 'muestra_33_7.pdf'))
+    for (const name of ['../muestra_33_7.pdf', 'muestra_33_../7.pdf', join('nested', 'muestra_33_7.pdf')]) {
+      expect(() => samplePath(path, directory, name)).toThrow('Folio must be a positive integer (field=Folio)')
+    }
   })
 })

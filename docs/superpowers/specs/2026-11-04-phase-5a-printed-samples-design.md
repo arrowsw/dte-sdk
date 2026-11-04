@@ -352,6 +352,11 @@ Existing codes used: `XML_PARSE_FAILED` (parser), `MISSING_FIELD` with `TipoDTE`
 with type 0) or `TED` (`renderTedBarcode` without a `<TED`), `ENCODING_UNSUPPORTED_CHAR` (stamp), `TRANSPORT_UNAVAILABLE`
 (Node adapter). A logo the library cannot embed is not an error: the sample prints without it, as in the field.
 
+`INVALID_FOLIO` with `{ field: 'Folio' }` guards the file names (added after the merge, on a security review): the folio
+is part of `muestra_{type}_{folio}.pdf`, and an XML from elsewhere could carry `..` or a separator in `<Folio>`. The
+batch refuses a folio that is not a run of digits before it can name a file, and the Node adapter refuses on its own a
+sample path that would leave the folder of its set (`samplePath`), so each layer is safe without the other.
+
 The batch never throws for one envelope or one document: everything above becomes a failure entry with its `code`,
 read with `errorCode(error)`, a new helper of `src/errors.ts` (exported) that gives the code of a thrown `DteError`
 and undefined for anything else.

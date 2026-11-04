@@ -75,6 +75,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `renderPrintedSamples` (in-memory batch classified into the test and simulation sets, failures as data) and the Node
   adapter `writePrintedSamples`/`findEnvelopeFiles` (`SET-PRUEBAS` and `SET-SIMULACION` on disk). Dependencies `pdf-lib`
   and `bwip-js`, loaded on first use. Error codes `DEPENDENCY_UNAVAILABLE` and `PDF_RENDER_FAILED`, and `errorCode`.
+  A folio that is not a run of digits is an `INVALID_FOLIO` failure of its document and never names a file, and the
+  Node adapter refuses a sample path outside the folder of its set.
 
 ### Removed
 

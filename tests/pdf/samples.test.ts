@@ -94,3 +94,31 @@ test('an envelope that cannot be parsed and a document that cannot be rendered a
   expect(result).toMatchObject({ documents: 2, tests: 2, simulation: 0 })
   expect(result.samples.map((sample) => sample.name)).toEqual(['muestra_33_100.pdf', 'muestra_33_100_cedible.pdf'])
 })
+
+test('a folio that is not a run of digits never becomes a file name: the document is a failure, the rest goes on', async () => {
+  const escaping = thirdPartyXml.replace('<Folio>100</Folio>', '<Folio>../../100</Folio>')
+  const result = await renderPrintedSamples({
+    envelopes: [
+      { name: 'envio-set-exenta.xml', xml: escaping },
+      { name: 'envio-set-basico.xml', xml: basicSetXml },
+    ],
+    options,
+  })
+  expect(result.success).toBe(false)
+  expect(result.failures).toEqual([
+    {
+      source: 'envio-set-exenta.xml',
+      type: 33,
+      folio: '../../100',
+      transferable: false,
+      code: 'INVALID_FOLIO',
+      reason: 'Folio must be a positive integer (field=Folio)',
+    },
+  ])
+  expect(result.samples.map((sample) => sample.name)).toEqual([
+    'muestra_33_7.pdf',
+    'muestra_61_5.pdf',
+    'muestra_56_8.pdf',
+  ])
+  expect(result).toMatchObject({ documents: 4, tests: 3, simulation: 0 })
+})
