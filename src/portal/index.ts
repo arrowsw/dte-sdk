@@ -1,10 +1,10 @@
 /**
  * EN: dte-sdk/portal entry: the certificate-authenticated SII portal (session, company data, folios and CAF requests, the
- * purchase and sales register, the MIPYME backup) and the certification sets. Node only: `fetch` cannot present a client
- * certificate.
+ * purchase and sales register, the MIPYME backup), the certification sets and the certification runner. Node only: `fetch`
+ * cannot present a client certificate.
  * ES: Entrada dte-sdk/portal: el portal del SII autenticado con certificado (sesión, datos de la empresa, folios y
- * solicitudes de CAF, el registro de compras y ventas, el respaldo MIPYME) y los sets de certificación. Solo Node: `fetch`
- * no puede presentar un certificado de cliente.
+ * solicitudes de CAF, el registro de compras y ventas, el respaldo MIPYME), los sets de certificación y el proceso de
+ * certificación. Solo Node: `fetch` no puede presentar un certificado de cliente.
  */
 export { PORTAL_REJECTIONS, portalRejectionMessage } from '../catalogs/portal'
 export type { AccountingStatus, DocumentDirection, PortalRejection, RegisterOperation } from '../catalogs/portal'
@@ -109,4 +109,94 @@ export type {
   CertificationGuideBookInput,
   BookReceiver,
   GuideBookCaseFlag,
+  BookCaseTotals,
+  SalesBookCase,
+  GuideBookCase,
+  SalesBookSource,
+  GuideBookSource,
 } from '../certification/books'
+
+// Phase 5b-2: the certification portal (declarations, books, the runner).
+export {
+  SET_KEYS,
+  BOOK_KEYS,
+  MANDATORY_BOOK_KEYS,
+  BOOK_FILE_NAMES,
+  BOOK_ARTEFACT_NAMES,
+  SET_ARTEFACT_NAMES,
+  DEFAULT_OPTIONAL_SETS,
+  CERTIFICATION_STAGES,
+  PORTAL_STAGE_WORDS,
+  CERTIFICATION_STEPS,
+} from '../catalogs/certification'
+export type { SetKey, BookKey, DeclarationKey, CertificationStage, CertificationStep } from '../catalogs/certification'
+export {
+  downloadTestSet,
+  declareProgress,
+  readProgress,
+  advanceStage,
+  listBookHistory,
+  declareCompliance,
+} from './certification'
+export type {
+  DownloadTestSetInput,
+  DownloadedTestSet,
+  DeclarationEntry,
+  DeclarationEntries,
+  DeclareProgressInput,
+  DeclarationOutcome,
+  DeclarationResult,
+  ProgressReport,
+  AdvanceResult,
+  BookHistory,
+  ComplianceResult,
+} from './certification'
+export type { SetGenerationState, OptionalSetOption, SetGenerationPage } from './pages/certification-set'
+export type {
+  DeclarationRow,
+  DeclarationForm,
+  DeclarationAnswer,
+  VerificationState,
+  AdvanceAnswer,
+  ItemState,
+  ProgressPage,
+} from './pages/certification-progress'
+export type { BookHistoryEntry } from './pages/certification-books'
+export type { ComplianceForm } from './pages/certification-compliance'
+export { createCertificationState, createMemoryCertificationStore, assertArtefactName } from '../certification/state'
+export type {
+  CertificationState,
+  CertificationStore,
+  SentEnvelope,
+  SentCase,
+  SentSet,
+  SentBook,
+  BooksState,
+  AccumulatedTotals,
+  EnvelopeDiagnosis,
+} from '../certification/state'
+export { createDirectoryCertificationStore } from '../certification/node-store'
+export type { DirectoryCertificationStoreOptions } from '../certification/node-store'
+export type {
+  CertificationDependencies,
+  CertificationProgressEvent,
+  PollingLabel,
+  StepResult,
+} from '../certification/runtime'
+export {
+  obtainTestSet,
+  sendTestSet,
+  declareTestSets,
+  waitForTestSetsApproval,
+  advanceToNextStage,
+  sendSimulation,
+  declareSimulation,
+  waitForSimulationApproval,
+  declareComplianceFinal,
+} from '../certification/steps'
+export { prepareFolios, setFolioNeeds, simulationFolioNeeds } from '../certification/folios-step'
+export type { PrepareFoliosOptions, PrepareFoliosResult } from '../certification/folios-step'
+export { runBooks, previousPeriod, nextFreePeriod } from '../certification/books-step'
+export type { BooksOutcome } from '../certification/books-step'
+export { runCertification } from '../certification/runner'
+export type { RunCertificationOptions, RunCertificationResult, RunStop } from '../certification/runner'
