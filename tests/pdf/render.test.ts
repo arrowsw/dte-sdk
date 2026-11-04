@@ -17,6 +17,9 @@ import {
   withoutTed,
 } from '../support/printed-fixtures'
 
+// Issuing and rendering several documents per test is slow on instrumented CI runners, as in the books suites.
+jest.setTimeout(30_000)
+
 const first = (xml: string): PrintableDocument => parsePrintableDocuments(xml)[0]
 const invoiceDoc = first(invoice.xml)
 const render = (doc: PrintableDocument, options = {}) => renderPrintedSample(doc, { now: () => FIXED_NOW, ...options })

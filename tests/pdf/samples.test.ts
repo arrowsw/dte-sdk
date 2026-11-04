@@ -3,6 +3,9 @@ import { FIXED_NOW } from '../support/fixtures'
 import { pdfText } from '../support/pdf'
 import { basicSetXml, receiptsXml, thirdPartyXml, withoutTed } from '../support/printed-fixtures'
 
+// Issuing and rendering several documents per test is slow on instrumented CI runners, as in the books suites.
+jest.setTimeout(30_000)
+
 const options = { now: () => FIXED_NOW }
 
 test('the set of an envelope comes from its name', () => {

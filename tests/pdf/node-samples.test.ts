@@ -9,6 +9,9 @@ import { failure } from '../support/portal'
 import { basicSetXml, receiptsXml } from '../support/printed-fixtures'
 import { createTempDirs } from '../support/temp-dir'
 
+// Issuing and rendering several documents per test is slow on instrumented CI runners, as in the books suites.
+jest.setTimeout(30_000)
+
 const dirs = createTempDirs()
 afterAll(() => dirs.cleanup())
 
