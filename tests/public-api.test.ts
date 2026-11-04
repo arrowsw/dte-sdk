@@ -5,6 +5,19 @@ import * as sdk from '../src'
  * the CHANGELOG in the same commit.
  */
 const RUNTIME_EXPORTS = [
+  'CERTIFICATION_COUNTERPARTY',
+  'TEST_SET_ENVELOPE_ID',
+  'TEST_SET_KINDS',
+  'TEST_SET_PORTAL_NAMES',
+  'TEST_SET_REFERENCE_TYPE',
+  'createCertificationGuideBook',
+  'createCertificationPurchaseBook',
+  'createCertificationSalesBook',
+  'createFolioAllocator',
+  'issueSimulation',
+  'issueTestSet',
+  'parseTestSetText',
+  'planCertificationSets',
   'errorCode',
   'findEnvelopeFiles',
   'needsTransferableCopy',

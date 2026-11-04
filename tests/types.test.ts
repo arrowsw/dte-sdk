@@ -35,8 +35,20 @@ import {
   renderPrintedSamples,
   writePrintedSamples,
   needsTransferableCopy,
+  parseTestSetText,
+  planCertificationSets,
+  createFolioAllocator,
+  issueTestSet,
+  issueSimulation,
+  createCertificationSalesBook,
+  createCertificationGuideBook,
 } from '../src'
 import type {
+  TestSet,
+  CertificationPlan,
+  FolioSource,
+  IssuedSet,
+  IssuedSimulation,
   PrintableDocument,
   PrintedSamplesResult,
   WritePrintedSamplesResult,
@@ -185,6 +197,13 @@ const _typecheck = () => {
   expectTypeOf(renderTedBarcode).returns.resolves.toEqualTypeOf<Uint8Array>()
   expectTypeOf(renderPrintedSamples).returns.resolves.toEqualTypeOf<PrintedSamplesResult>()
   expectTypeOf(writePrintedSamples).returns.resolves.toEqualTypeOf<WritePrintedSamplesResult>()
+  expectTypeOf(parseTestSetText).returns.toEqualTypeOf<readonly TestSet[]>()
+  expectTypeOf(planCertificationSets).returns.toEqualTypeOf<CertificationPlan>()
+  expectTypeOf(createFolioAllocator).returns.toEqualTypeOf<FolioSource>()
+  expectTypeOf(issueTestSet).returns.resolves.toEqualTypeOf<IssuedSet>()
+  expectTypeOf(issueSimulation).returns.resolves.toEqualTypeOf<IssuedSimulation>()
+  expectTypeOf(createCertificationSalesBook).returns.toEqualTypeOf<SignedPurchaseSalesBook>()
+  expectTypeOf(createCertificationGuideBook).returns.toEqualTypeOf<SignedGuideBook>()
   expectTypeOf<PurchaseSalesBook['periodTotals']>().toEqualTypeOf<readonly BookTotals[] | null>()
   expectTypeOf<GuideBook['periodTotals']>().toEqualTypeOf<GuideTotals | null>()
 
