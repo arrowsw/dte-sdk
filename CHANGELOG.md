@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `toSiiDocument`/`fromSiiDocument` codec.
 - Certificates from PKCS#12 and PEM, CAF parsing and validity, Chile-local timestamps,
   text sanitization and ISO-8859-1 encoding, SII status code classification.
-- Dependencies: `node-forge`, `@xmldom/xmldom`, `fast-xml-parser`, `rut.ts`, `pdf-lib`, `bwip-js`.
+- Dependencies: `node-forge`, `@xmldom/xmldom`, `fast-xml-parser`, `rut.ts`. Optional peers of `dte-sdk/pdf`: `pdf-lib`,
+  `bwip-js`.
 - SII web services client: `createSiiClient` (plain data, no methods) and free functions
   for seed/token on the DTEWS SOAP and receipts REST channels (`getSeed`, `getToken`),
   uploads (`uploadEnvelope`, `uploadBook`, `uploadFolioConsumption`) with duplicate
@@ -80,8 +81,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TED` verbatim), `renderPrintedSample` (one single-page PDF per the SII printed-samples manual, with the transferable
   copy and acknowledgement box), `renderTedBarcode` (the PDF417 stamp as PNG with the signed bytes), `needsTransferableCopy`,
   `renderPrintedSamples` (in-memory batch classified into the test and simulation sets, failures as data) and the Node
-  adapter `writePrintedSamples`/`findEnvelopeFiles` (`SET-PRUEBAS` and `SET-SIMULACION` on disk). Dependencies `pdf-lib`
-  and `bwip-js`, loaded on first use. Error codes `DEPENDENCY_UNAVAILABLE` and `PDF_RENDER_FAILED`, and `errorCode`.
+  adapter `writePrintedSamples`/`findEnvelopeFiles` (`SET-PRUEBAS` and `SET-SIMULACION` on disk). `pdf-lib`
+  and `bwip-js` load on first use. Error codes `DEPENDENCY_UNAVAILABLE` and `PDF_RENDER_FAILED`, and `errorCode`.
   A folio that is not a run of digits is an `INVALID_FOLIO` failure of its document and never names a file, and the
   Node adapter refuses a sample path outside the folder of its set.
 - Certification, the deterministic half: `parseTestSetText` (the SII test-set text to typed sets and cases),
@@ -91,6 +92,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `createCertificationGuideBook` through phase 3. Catalog `TEST_SET_KINDS`, `TEST_SET_PORTAL_NAMES`,
   `TEST_SET_REFERENCE_TYPE`, `TEST_SET_ENVELOPE_ID`, `CERTIFICATION_COUNTERPARTY`. `DocumentInput.withholdVat` withholds
   the VAT on the notes of a purchase invoice. Bundle limit to 64 kB.
+
+### Changed
+
+- **Four entries.** `dte-sdk` keeps documents, stamps, signatures, envelopes, books and the web services client over
+  `fetch`, and reaches no `node:` module, so it bundles for the browser with no configuration. `dte-sdk/node` holds
+  `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive` and `createDirectoryFolioRegistry`.
+  `dte-sdk/portal` holds the portal, the folio registry, the register, the MIPYME backup and the certification sets.
+  `dte-sdk/pdf` holds the printed samples. One `DteError` crosses them. Why and the measurements:
+  `docs/decisions/entry-points.md`.
+- **ES modules only, on Node ≥ 22.12.** The CommonJS build is gone. `require()` still loads every entry from that version
+  on. Jest in its default CommonJS mode needs its ESM mode or `transformIgnorePatterns`.
+- **`pdf-lib` and `bwip-js` are optional peers of `dte-sdk/pdf`.** The install drops from 44 MB to 6.6 MB. Whoever prints
+  installs them; without them the render functions throw `DEPENDENCY_UNAVAILABLE`.
+
+### Fixed
+
+- ES module consumers on `moduleResolution: nodenext` get the real types. The declarations lacked extensions in their
+  relative imports, which was 165 errors, or every type silently `any` under `skipLibCheck`.
 
 ### Removed
 

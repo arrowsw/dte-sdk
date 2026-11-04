@@ -169,6 +169,8 @@ in the field annulled 296 folios before anyone stopped it.
 
 ### D36. Root entry only
 
+> Superseded on 2026-11-04 by `docs/decisions/entry-points.md`: four entries, ES modules only.
+
 - ✅ Phase 4 stays on the root entry (D3, D12). Separate bundles per subpath would each carry their own `DteError`, so
   `instanceof` would fail between entries, and the portal shares `send`, `withRetry` and the redaction with the
   web services client. The root entry is tree-shakable (`sideEffects: false`) and already loads no `node:` module at
