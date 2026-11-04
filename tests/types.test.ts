@@ -29,8 +29,17 @@ import {
   createFolioConsumption,
   signFolioConsumption,
   bookEntryFromDocument,
+  parsePrintableDocuments,
+  renderPrintedSample,
+  renderTedBarcode,
+  renderPrintedSamples,
+  writePrintedSamples,
+  needsTransferableCopy,
 } from '../src'
 import type {
+  PrintableDocument,
+  PrintedSamplesResult,
+  WritePrintedSamplesResult,
   BookEntryInput,
   BookTotals,
   FolioConsumption,
@@ -170,6 +179,12 @@ const _typecheck = () => {
   expectTypeOf(createFolioConsumption).returns.toEqualTypeOf<FolioConsumption>()
   expectTypeOf(signFolioConsumption).returns.toEqualTypeOf<SignedFolioConsumption>()
   expectTypeOf(bookEntryFromDocument).returns.toEqualTypeOf<BookEntryInput>()
+  expectTypeOf(parsePrintableDocuments).returns.toEqualTypeOf<readonly PrintableDocument[]>()
+  expectTypeOf(needsTransferableCopy).returns.toEqualTypeOf<boolean>()
+  expectTypeOf(renderPrintedSample).returns.resolves.toEqualTypeOf<Uint8Array>()
+  expectTypeOf(renderTedBarcode).returns.resolves.toEqualTypeOf<Uint8Array>()
+  expectTypeOf(renderPrintedSamples).returns.resolves.toEqualTypeOf<PrintedSamplesResult>()
+  expectTypeOf(writePrintedSamples).returns.resolves.toEqualTypeOf<WritePrintedSamplesResult>()
   expectTypeOf<PurchaseSalesBook['periodTotals']>().toEqualTypeOf<readonly BookTotals[] | null>()
   expectTypeOf<GuideBook['periodTotals']>().toEqualTypeOf<GuideTotals | null>()
 
