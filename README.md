@@ -254,8 +254,9 @@ and 33 cm, the red type box with the RUT, the type name and the folio, issuer, d
 totals, the acknowledgement box and `CEDIBLE` mark on the transferable copy (33, 34, 43, 46 and sale guides), and the
 PDF417 stamp of the TED with its legends. The stamp encodes the signed bytes exactly (`renderTedBarcode` gives the PNG
 alone). It needs Node: `pdf-lib` and `bwip-js` are loaded on first use, so importing the package still evaluates
-nothing. Failures of a batch come back as data (`failures[].code`), never as thrown errors. Retentions, the commission
-block of settlement invoices and a stamp raster above 300 DPI are not printed yet: see the phase 5a design.
+nothing. Failures of a batch come back as data (`failures[].code`), never as thrown errors; a folio that is not a run
+of digits is an `INVALID_FOLIO` failure, since it would name the file. Retentions, the commission block of settlement
+invoices and a stamp raster above 300 DPI are not printed yet: see the phase 5a design.
 
 ## Errors
 

@@ -1,4 +1,4 @@
-import { errorCode, errorMessage, type DteErrorCode } from '../errors'
+import { DteError, errorCode, errorMessage, type DteErrorCode } from '../errors'
 import { parsePrintableDocuments, type PrintableDocument } from './parse'
 import { needsTransferableCopy, renderPrintedSample, type PrintedSampleOptions } from './render'
 
@@ -109,6 +109,10 @@ export const sampleSetOf = (name: string): PrintedSampleSet =>
 export const sampleName = (doc: PrintableDocument, transferable: boolean): string =>
   `muestra_${doc.type}_${doc.folio}${transferable ? '_cedible' : ''}.pdf`
 
+// The folio becomes part of the file name, so only a run of digits may reach `sampleName`: an XML from elsewhere could
+// carry `..` or a separator in `<Folio>` and name a file outside the folder of its set.
+const FOLIO_PATTERN = /^\d+$/
+
 const failure = (
   source: string,
   error: unknown,
@@ -123,11 +127,13 @@ const failure = (
 
 /**
  * EN: Renders every document of every envelope, in memory: one sample per document and, with `transferable`, a second
- * one for each document that admits a transferable copy. A parse failure skips the envelope and a render failure skips
- * the document; both are reported as data and the batch goes on. Nothing is logged.
+ * one for each document that admits a transferable copy. A parse failure skips the envelope; a folio that is not a run
+ * of digits (`INVALID_FOLIO`, it would name the file) or a render failure skips the document; all are reported as data
+ * and the batch goes on. Nothing is logged.
  * ES: Genera cada documento de cada envío, en memoria: una muestra por documento y, con `transferable`, una segunda
- * por cada documento que admite copia cedible. Una falla de parseo salta el envío y una de dibujo salta el documento;
- * ambas se reportan como datos y el lote sigue. No se escribe nada en consola.
+ * por cada documento que admite copia cedible. Una falla de parseo salta el envío; un folio que no sea solo dígitos
+ * (`INVALID_FOLIO`, daría nombre al archivo) o una falla de dibujo saltan el documento; todo se reporta como datos y el
+ * lote sigue. No se escribe nada en consola.
  * @param input EN: envelopes, options and `transferable`. ES: envíos, opciones y `transferable`.
  */
 export const renderPrintedSamples = async (input: PrintedSamplesInput): Promise<PrintedSamplesResult> => {
@@ -145,6 +151,10 @@ export const renderPrintedSamples = async (input: PrintedSamplesInput): Promise<
     const set = sampleSetOf(envelope.name)
     for (const doc of parsed) {
       documents += 1
+      if (!FOLIO_PATTERN.test(doc.folio)) {
+        failures.push(failure(envelope.name, new DteError('INVALID_FOLIO', { field: 'Folio' }), doc, false))
+        continue
+      }
       const copies = input.transferable && needsTransferableCopy(doc) ? [false, true] : [false]
       for (const transferable of copies) {
         try {
