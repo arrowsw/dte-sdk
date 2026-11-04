@@ -10,61 +10,73 @@ import { pathToFileURL } from 'node:url'
  */
 const packageRoot = join(__dirname, '..')
 const distRoot = join(packageRoot, 'dist')
-const rootEntry = join(distRoot, 'index.min.js')
+const entryFile = (name: string): string => join(distRoot, `${name}.min.js`)
 const href = (file: string): string => pathToFileURL(file).href
 
-const EXPECTED_FUNCTIONS = [
-  'createDocument',
-  'stampDocument',
-  'signDocument',
-  'issueDocument',
-  'verifyDocumentSignature',
-  'verifyTed',
-  'createEnvelope',
-  'signEnvelope',
-  'verifyEnvelopeSignature',
-  'buildEnvelopeXml',
-  'buildDocumentXml',
-  'toSiiDocument',
-  'fromSiiDocument',
-  'parseCaf',
-  'isCafExpired',
-  'loadCertificateFromPkcs12',
-  'loadCertificateFromPem',
-  'toSiiRut',
-  'sanitizeText',
-  'foldToAscii',
-  'encodeLatin1',
-  'chileTimestamp',
-  'calculateTotals',
-  'classifyUploadStatus',
-  'classifyDocumentStatus',
-  'createSiiClient',
-  'createPortalClient',
-  'requestCaf',
-  'annulFolios',
-  'createMemoryFolioRegistry',
-  'listPeriodDocuments',
-  'changePurchaseType',
-  'downloadMipymeBackup',
-  'createFetchTransport',
-  'createNodeHttpsTransport',
-  'createMemoryTokenCache',
-  'uploadEnvelope',
-  'queryUploadStatus',
-  'queryDocumentStatus',
-  'registerClaim',
-  'signSeed',
-  'createPurchaseSalesBook',
-  'signPurchaseSalesBook',
-  'createGuideBook',
-  'signGuideBook',
-  'createFolioConsumption',
-  'signFolioConsumption',
-  'DteError',
-  'parsePrintableDocuments',
-  'renderPrintedSample',
-] as const
+const EXPECTED_FUNCTIONS: Record<string, readonly string[]> = {
+  index: [
+    'createDocument',
+    'stampDocument',
+    'signDocument',
+    'issueDocument',
+    'verifyDocumentSignature',
+    'verifyTed',
+    'createEnvelope',
+    'signEnvelope',
+    'verifyEnvelopeSignature',
+    'buildEnvelopeXml',
+    'buildDocumentXml',
+    'toSiiDocument',
+    'fromSiiDocument',
+    'parseCaf',
+    'isCafExpired',
+    'loadCertificateFromPkcs12',
+    'loadCertificateFromPem',
+    'toSiiRut',
+    'sanitizeText',
+    'foldToAscii',
+    'encodeLatin1',
+    'chileTimestamp',
+    'calculateTotals',
+    'classifyUploadStatus',
+    'classifyDocumentStatus',
+    'createSiiClient',
+    'createFetchTransport',
+    'createMemoryTokenCache',
+    'uploadEnvelope',
+    'queryUploadStatus',
+    'queryDocumentStatus',
+    'registerClaim',
+    'signSeed',
+    'createPurchaseSalesBook',
+    'signPurchaseSalesBook',
+    'createGuideBook',
+    'signGuideBook',
+    'createFolioConsumption',
+    'signFolioConsumption',
+    'DteError',
+    'isDteError',
+  ],
+  node: [
+    'createNodeHttpsTransport',
+    'createDirectoryCapture',
+    'createDirectoryUploadArchive',
+    'createDirectoryFolioRegistry',
+  ],
+  portal: [
+    'createPortalClient',
+    'requestCaf',
+    'annulFolios',
+    'createMemoryFolioRegistry',
+    'listPeriodDocuments',
+    'changePurchaseType',
+    'downloadMipymeBackup',
+    'parseTestSetText',
+    'issueTestSet',
+  ],
+  pdf: ['parsePrintableDocuments', 'renderPrintedSample', 'renderPrintedSamples', 'writePrintedSamples'],
+}
+const ENTRIES = Object.keys(EXPECTED_FUNCTIONS)
 
 const nodeImportGuard = href(join(__dirname, 'support', 'node-import-guard.mjs'))
 const fixtures = join(__dirname, 'fixtures')
@@ -83,21 +95,30 @@ const probeLoad = (entry: string): ProbeResult => {
   return runNode(['--input-type=module', '-e', script])
 }
 
-/** Runs `body`, in a fresh process, with the root entry as `sdk`. */
-const withSdk = (body: string): ProbeResult => {
+/** Runs `body`, in a fresh process, with every entry loaded as `root`, `node`, `portal` and `pdf`. */
+const withEntries = (body: string): ProbeResult => {
   const script = `
 const fs = require('node:fs')
 const fixtures = ${JSON.stringify(fixtures)}
-import(${JSON.stringify(href(rootEntry))}).then(async (sdk) => {
+Promise.all(${JSON.stringify(ENTRIES.map((name) => href(entryFile(name))))}.map((file) => import(file))).then(async ([root, node, portal, pdf]) => {
 ${body}
 }).catch((error) => { console.error(error); process.exit(1) })`
   return runNode(['-e', script])
 }
 
+/** The files `entry` loads when it loads: itself and the chunks it reaches. */
+const closure = (entry: string, seen: Set<string> = new Set()): Set<string> => {
+  if (seen.has(entry)) return seen
+  seen.add(entry)
+  const relative = readFileSync(entry, 'utf8').matchAll(/(?:from ?|import ?)"(\.[^"]+\.js)"/g)
+  for (const [, specifier] of relative) closure(join(dirname(entry), specifier as string), seen)
+  return seen
+}
+
 const ISSUE_DOCUMENT = `
-  const caf = sdk.parseCaf(fs.readFileSync(fixtures + '/caf-33.xml', 'utf8'))
-  const certificate = sdk.loadCertificateFromPkcs12(new Uint8Array(fs.readFileSync(fixtures + '/cert.pfx')), 'secret')
-  const signed = sdk.issueDocument({
+  const caf = root.parseCaf(fs.readFileSync(fixtures + '/caf-33.xml', 'utf8'))
+  const certificate = root.loadCertificateFromPkcs12(new Uint8Array(fs.readFileSync(fixtures + '/cert.pfx')), 'secret')
+  const signed = root.issueDocument({
     document: {
       type: 33, folio: 1,
       issuer: { rut: '76543210-3', businessName: 'Comercial Andina SpA', businessActivity: 'Software', address: 'Av. 1', commune: 'Santiago' },
@@ -107,7 +128,7 @@ const ISSUE_DOCUMENT = `
     caf, certificate, checkCafExpiry: false,
   })`
 
-const distExists = existsSync(rootEntry)
+const distExists = ENTRIES.every((name) => existsSync(entryFile(name)))
 const guarded = distExists ? describe : describe.skip
 
 guarded('dist smoke (ES modules)', () => {
@@ -121,20 +142,75 @@ guarded('dist smoke (ES modules)', () => {
     expect(files.filter((file) => !existsSync(join(packageRoot, file)))).toEqual([])
   })
 
-  test('the root entry loads under the real ESM loader and exposes the public API', () => {
-    const script = `import * as m from ${JSON.stringify(href(rootEntry))}; const missing = ${JSON.stringify(EXPECTED_FUNCTIONS)}.filter((n) => typeof m[n] !== 'function'); if (missing.length) { console.error(missing.join(',')); process.exit(1) } console.log(m.DOCUMENT_TYPES.invoice)`
-    expect(runNode(['--input-type=module', '-e', script])).toEqual({ ok: true, output: '33\n' })
+  test.each(ENTRIES)('%s loads under the real ESM loader and exposes its API', (name) => {
+    const script = `import * as m from ${JSON.stringify(href(entryFile(name)))}; const missing = ${JSON.stringify(EXPECTED_FUNCTIONS[name])}.filter((n) => typeof m[n] !== 'function'); if (missing.length) { console.error(missing.join(',')); process.exit(1) } console.log('ok')`
+    expect(runNode(['--input-type=module', '-e', script])).toEqual({ ok: true, output: 'ok\n' })
   })
 
-  test('a CommonJS consumer gets the same module with require()', () => {
-    const script = `const m = require(${JSON.stringify(rootEntry)}); import(${JSON.stringify(href(rootEntry))}).then((n) => console.log(typeof m.createDocument, m.DteError === n.DteError))`
+  test.each(ENTRIES)('a CommonJS consumer gets the same %s module with require()', (name) => {
+    const script = `const m = require(${JSON.stringify(entryFile(name))}); import(${JSON.stringify(href(entryFile(name)))}).then((n) => console.log(Object.keys(m).length > 0 && Object.keys(m).every((key) => m[key] === n[key])))`
     const result = runNode(['-e', script])
     expect(result.ok).toBe(true)
-    expect(result.output).toContain('function true')
+    expect(result.output).toContain('true')
   })
 
-  test('the entry evaluates no node: module while it loads', () => {
-    expect(probeLoad(rootEntry)).toEqual({ ok: true, output: 'loaded\n' })
+  test.each(ENTRIES)('%s evaluates no node: module while it loads', (name) => {
+    expect(probeLoad(entryFile(name))).toEqual({ ok: true, output: 'loaded\n' })
+  })
+
+  test('the root entry reaches no node: module and no printed-sample library', () => {
+    const code = [...closure(entryFile('index'))].map((file) => readFileSync(file, 'utf8')).join('\n')
+    expect(code).not.toMatch(/"node:/)
+    expect(code).not.toMatch(/"(pdf-lib|bwip-js)"/)
+  })
+
+  test('the closure walk does find what an entry reaches', () => {
+    const code = [...closure(entryFile('portal'))].map((file) => readFileSync(file, 'utf8')).join('\n')
+    expect(code).toContain('"node:https"')
+  })
+
+  test('the root entry bundles for the browser with no configuration, and the portal does not', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dte-sdk-browser-'))
+    const esbuild = join(packageRoot, 'node_modules', '.bin', 'esbuild')
+    const bundle = (name: string) =>
+      spawnSync(
+        esbuild,
+        [
+          entryFile(name),
+          '--bundle',
+          '--platform=browser',
+          '--format=esm',
+          '--log-level=error',
+          `--outfile=${join(dir, `${name}.js`)}`,
+        ],
+        {
+          encoding: 'utf8',
+          cwd: packageRoot,
+        },
+      )
+    try {
+      expect(bundle('index')).toMatchObject({ status: 0, stderr: '' })
+      expect(bundle('portal').stderr).toContain('node:https')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('one DteError crosses the entries: what a subpath throws satisfies the root checks', () => {
+    const result = withEntries(`
+  const thrown = async (run) => { try { await run() } catch (error) { return error } throw new Error('did not throw') }
+  const errors = [
+    await thrown(() => node.createNodeHttpsTransport({})({ method: 'GET', url: 'not a url', headers: {}, timeoutMs: 10 })),
+    await thrown(() => portal.createPortalClient({ environment: 'nope' })),
+    await thrown(() => pdf.parsePrintableDocuments('<x')),
+  ]
+  console.log(JSON.stringify(errors.map((error) => [error.code, error instanceof root.DteError, root.isDteError(error), root.errorCode(error)])))`)
+    expect(result.ok).toBe(true)
+    expect(JSON.parse(result.output)).toEqual([
+      ['TRANSPORT_FAILED', true, true, 'TRANSPORT_FAILED'],
+      ['INVALID_OPTION', true, true, 'INVALID_OPTION'],
+      ['XML_PARSE_FAILED', true, true, 'XML_PARSE_FAILED'],
+    ])
   })
 
   test('the node: probe does catch an entry that imports a node: module eagerly', () => {
@@ -149,14 +225,14 @@ guarded('dist smoke (ES modules)', () => {
   })
 
   // A loopback HTTPS server in a fresh process, so the lazy `node:https` import runs for real inside the built artefact.
-  test('the lazy node:https import works inside the minified bundle', () => {
-    const result = withSdk(`
+  test('the lazy node:https import works inside the minified build', () => {
+    const result = withEntries(`
   const https = require('node:https')
   const certificate = fs.readFileSync(fixtures + '/tls-localhost.pem', 'utf8')
   const key = fs.readFileSync(fixtures + '/tls-localhost.key.pem', 'utf8')
   const server = https.createServer({ key, cert: certificate }, (request, response) => response.end('pong'))
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-  const transport = sdk.createNodeHttpsTransport({ tls: { ca: certificate } })
+  const transport = node.createNodeHttpsTransport({ tls: { ca: certificate } })
   const response = await transport({ method: 'GET', url: 'https://127.0.0.1:' + server.address().port + '/', headers: {}, timeoutMs: 5000 })
   console.log(response.status + ' ' + Buffer.from(response.body).toString())
   server.closeAllConnections()
@@ -164,29 +240,29 @@ guarded('dist smoke (ES modules)', () => {
     expect(result).toEqual({ ok: true, output: '200 pong\n' })
   })
 
-  test('the bundle issues and verifies a document end to end', () => {
-    const result = withSdk(`${ISSUE_DOCUMENT}
-  console.log(sdk.verifyDocumentSignature(signed.xml).valid)`)
+  test('the root entry issues and verifies a document end to end', () => {
+    const result = withEntries(`${ISSUE_DOCUMENT}
+  console.log(root.verifyDocumentSignature(signed.xml).valid)`)
     expect(result).toEqual({ ok: true, output: 'true\n' })
   })
 
-  test('the bundle builds a client, signs a seed and obtains a token without touching the network', () => {
-    const result = withSdk(`
+  test('the root entry builds a client, signs a seed and obtains a token without touching the network', () => {
+    const result = withEntries(`
   const reply = (name) => ({ status: 200, headers: {}, body: new Uint8Array(fs.readFileSync(fixtures + '/sii/' + name)) })
   const requests = []
   const transport = async (request) => {
     requests.push(request.url)
     return reply(request.url.endsWith('CrSeed.jws') ? 'soap-seed-ok.xml' : 'soap-token-ok.xml')
   }
-  const certificate = sdk.loadCertificateFromPem({
+  const certificate = root.loadCertificateFromPem({
     privateKeyPem: fs.readFileSync(fixtures + '/cert.key.pem', 'utf8'),
     certificatePem: fs.readFileSync(fixtures + '/cert.pem', 'utf8'),
   })
-  const sii = sdk.createSiiClient({ environment: 'certification', certificate, transport })
+  const sii = root.createSiiClient({ environment: 'certification', certificate, transport })
   console.log(JSON.stringify({
     channel: sii.receiptsChannel,
-    seed: sdk.signSeed('000000000078', certificate).includes('<Reference URI="">'),
-    token: await sdk.getToken(sii, 'soap'),
+    seed: root.signSeed('000000000078', certificate).includes('<Reference URI="">'),
+    token: await root.getToken(sii, 'soap'),
     requests,
   }))`)
     expect(result.ok).toBe(true)
@@ -198,11 +274,11 @@ guarded('dist smoke (ES modules)', () => {
     })
   })
 
-  test('the bundle loads pdf-lib and bwip-js on first use and renders a printed sample', () => {
-    const result = withSdk(`${ISSUE_DOCUMENT}
-  const [doc] = sdk.parsePrintableDocuments(signed.xml)
-  const pdf = await sdk.renderPrintedSample(doc, { transferable: true })
-  console.log(Buffer.from(pdf.subarray(0, 5)).toString() + ' ' + (pdf.length > 10000))`)
+  test('dte-sdk/pdf loads pdf-lib and bwip-js on first use and renders a printed sample', () => {
+    const result = withEntries(`${ISSUE_DOCUMENT}
+  const [doc] = pdf.parsePrintableDocuments(signed.xml)
+  const sample = await pdf.renderPrintedSample(doc, { transferable: true })
+  console.log(Buffer.from(sample.subarray(0, 5)).toString() + ' ' + (sample.length > 10000))`)
     expect(result).toEqual({ ok: true, output: '%PDF- true\n' })
   })
 })

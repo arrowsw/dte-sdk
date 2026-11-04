@@ -29,12 +29,8 @@ import {
   createFolioConsumption,
   signFolioConsumption,
   bookEntryFromDocument,
-  parsePrintableDocuments,
-  renderPrintedSample,
-  renderTedBarcode,
-  renderPrintedSamples,
-  writePrintedSamples,
-  needsTransferableCopy,
+} from '../src'
+import {
   parseTestSetText,
   planCertificationSets,
   createFolioAllocator,
@@ -42,16 +38,16 @@ import {
   issueSimulation,
   createCertificationSalesBook,
   createCertificationGuideBook,
-} from '../src'
+} from '../src/portal'
+import {
+  parsePrintableDocuments,
+  renderPrintedSample,
+  renderTedBarcode,
+  renderPrintedSamples,
+  writePrintedSamples,
+  needsTransferableCopy,
+} from '../src/pdf'
 import type {
-  TestSet,
-  CertificationPlan,
-  FolioSource,
-  IssuedSet,
-  IssuedSimulation,
-  PrintableDocument,
-  PrintedSamplesResult,
-  WritePrintedSamplesResult,
   BookEntryInput,
   BookTotals,
   FolioConsumption,
@@ -103,6 +99,8 @@ import type {
   ReceiverStatusResult,
   ReceptionDateResult,
 } from '../src'
+import type { TestSet, CertificationPlan, FolioSource, IssuedSet, IssuedSimulation } from '../src/portal'
+import type { PrintableDocument, PrintedSamplesResult, WritePrintedSamplesResult } from '../src/pdf'
 
 // Every type the SII web services design names is exported: a missing one fails the import above, and this tuple
 // keeps each import in use.
