@@ -38,6 +38,11 @@ import {
   issueSimulation,
   createCertificationSalesBook,
   createCertificationGuideBook,
+  runCertification,
+  runBooks,
+  declareProgress,
+  createMemoryCertificationStore,
+  createDirectoryCertificationStore,
 } from '../src/portal'
 import {
   parsePrintableDocuments,
@@ -99,7 +104,20 @@ import type {
   ReceiverStatusResult,
   ReceptionDateResult,
 } from '../src'
-import type { TestSet, CertificationPlan, FolioSource, IssuedSet, IssuedSimulation } from '../src/portal'
+import type {
+  RunCertificationResult,
+  BooksOutcome,
+  StepResult,
+  DeclarationResult,
+  CertificationStore,
+  CertificationProgressEvent,
+  CertificationStep,
+  TestSet,
+  CertificationPlan,
+  FolioSource,
+  IssuedSet,
+  IssuedSimulation,
+} from '../src/portal'
 import type { PrintableDocument, PrintedSamplesResult, WritePrintedSamplesResult } from '../src/pdf'
 
 // Every type the SII web services design names is exported: a missing one fails the import above, and this tuple
@@ -204,6 +222,12 @@ const _typecheck = () => {
   expectTypeOf(createCertificationGuideBook).returns.toEqualTypeOf<SignedGuideBook>()
   expectTypeOf<PurchaseSalesBook['periodTotals']>().toEqualTypeOf<readonly BookTotals[] | null>()
   expectTypeOf<GuideBook['periodTotals']>().toEqualTypeOf<GuideTotals | null>()
+  expectTypeOf(runCertification).returns.resolves.toEqualTypeOf<RunCertificationResult>()
+  expectTypeOf(runBooks).returns.resolves.toEqualTypeOf<StepResult<BooksOutcome>>()
+  expectTypeOf(declareProgress).returns.resolves.toEqualTypeOf<DeclarationResult>()
+  expectTypeOf(createMemoryCertificationStore).returns.toEqualTypeOf<CertificationStore>()
+  expectTypeOf(createDirectoryCertificationStore).returns.toEqualTypeOf<CertificationStore>()
+  expectTypeOf<CertificationProgressEvent['step']>().toEqualTypeOf<CertificationStep>()
 
   // The client is frozen data: its fields cannot be assigned.
   const sii = createSiiClient({} as SiiClientOptions)

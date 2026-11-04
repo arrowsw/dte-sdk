@@ -92,6 +92,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `createCertificationGuideBook` through phase 3. Catalog `TEST_SET_KINDS`, `TEST_SET_PORTAL_NAMES`,
   `TEST_SET_REFERENCE_TYPE`, `TEST_SET_ENVELOPE_ID`, `CERTIFICATION_COUNTERPARTY`. `DocumentInput.withholdVat` withholds
   the VAT on the notes of a purchase invoice. Bundle limit to 64 kB.
+- Certification, the portal half, in `dte-sdk/portal`: `downloadTestSet`, `declareProgress`, `readProgress`,
+  `advanceStage`, `listBookHistory`, `declareCompliance` on the phase 4 session, with pure page modules;
+  `CertificationState` and the `CertificationStore` port (`createMemoryCertificationStore`,
+  `createDirectoryCertificationStore`, private files); the steps `obtainTestSet`, `prepareFolios`, `sendTestSet`,
+  `declareTestSets`, `waitForTestSetsApproval`, `runBooks`, `advanceToNextStage`, `sendSimulation`, `declareSimulation`,
+  `waitForSimulationApproval`, `declareComplianceFinal`, each returning the saved state with an outcome, with typed
+  progress events; and `runCertification`, which chains them in the field's order, resumes from the saved state, stops
+  at the exchange for phase 5c and makes the irreversible declaration of compliance only with
+  `declareCompliance: true`. Catalog `SET_KEYS`, `BOOK_KEYS`, `CERTIFICATION_STAGES`, `CERTIFICATION_STEPS`,
+  `DEFAULT_OPTIONAL_SETS`; portal rejections `notEnrolled`, `advanceRefused`, `declarationDeclined`. The 5b-1 books
+  accept the cases a run keeps and an adjustment submission. `dte-sdk/portal` limit to 56 kB.
 
 ### Changed
 

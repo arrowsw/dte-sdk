@@ -83,6 +83,10 @@ const EXPECTED_FUNCTIONS: Record<string, readonly string[]> = {
     'downloadMipymeBackup',
     'parseTestSetText',
     'issueTestSet',
+    'declareProgress',
+    'createMemoryCertificationStore',
+    'createDirectoryCertificationStore',
+    'runCertification',
   ],
   pdf: ['parsePrintableDocuments', 'renderPrintedSample', 'renderPrintedSamples', 'writePrintedSamples'],
 }
