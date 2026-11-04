@@ -1,6 +1,6 @@
 # dte-sdk — Phase 5b-1 design (certification: test sets, simulation and books)
 
-Date: 2026-11-04 · Status: **draft for Hans's review: the split and the scope were decided with him; section 1 was presented in chat and the rest was written on his go-ahead to advance** · Author: Claude (with Hans)
+Date: 2026-11-04 · Status: **written on Hans's go-ahead to advance (the split, the scope and section 1 were decided with him in chat); amended the same day after the plan's code ran: D63, 3.1, 3.5, 3.7, 3.9, 3.12 and sections 5 and 6. The plan is `docs/superpowers/plans/2026-11-04-phase-5b1-certification-sets.md`** · Author: Claude (with Hans)
 
 Starting point: the architecture and phase 1 spec, the phase 2, 3 and 4 specs, and the phase 5a spec (D39–D45; phase 4b
 takes D46–D56, so this spec starts at D57). SII facts come from two public SII documents, "Instrucciones para la
@@ -79,7 +79,7 @@ phase 1.
 ### D61. The SET reference as the field writes it
 
 Every document of a set carries, as its first reference, `TpoDocRef` `SET`, `FolioRef` `1`, `FchRef` the issue date and
-`RazonRef` `CASO <case id>` (for example `CASO 4668070-1`), with no `CodRef`. The SII instructions fix only `SET` and the
+`RazonRef` `CASO <case id>` (for example `CASO 4256-1`), with no `CodRef`. The SII instructions fix only `SET` and the
 `CASO` text and say the other references go from line 2; the 2009 manual's example carries `FolioRef 1`; an envelope
 accepted in 2012 carried the document's own folio. The field form passed the SII review in 2026, so it stays. Notes add
 the document reference on line 2: the referenced document's type, folio and date, the code derived from the set's reason
@@ -95,9 +95,10 @@ books, `FolioRef 1`. They passed; they change only after a real certification pa
 ### D63. Books through phase 3
 
 `createPurchaseSalesBook`, `createGuideBook` and their signers build and sign the books; 5b-1 maps the field rules into
-`BookEntryInput` and `GuideEntryInput`. The period is an input: 5b-2 chooses it against the portal history. If a field a
-rule needs is missing from phase 3 (the plan checks `TpoDocRef`/`FolioDocRef` on purchase entries and the total VAT
-withheld), the plan widens phase 3 the way phase 4 widened phase 2.
+`BookEntryInput` and `GuideEntryInput`. The period is an input: 5b-2 chooses it against the portal history. Phase 3
+needed no change: it already carries `TpoDocRef`/`FolioDocRef` on purchase entries, the total VAT withheld, and
+`Operacion` on a `TOTAL` guide entry when `adjustment` is given. Phase 1 needed one option: `withholdVat` on
+`DocumentInput`, so the notes of the purchase set withhold the VAT as the field does (3.5.4).
 
 ### D64. Root entry; the size cap goes to 64 kB
 
@@ -120,12 +121,12 @@ src/certification/issue-set.ts    issueTestSet; the common rules and the four se
 src/certification/simulation.ts   issueSimulation
 src/certification/books.ts        createCertificationSalesBook, createCertificationPurchaseBook,
                                   createCertificationGuideBook
-src/catalogs/certification.ts     set kinds and labels, the SII's portal names of sets and books,
-                                  CERTIFICATION_COUNTERPARTY
+src/catalogs/certification.ts     TEST_SET_KINDS, TEST_SET_PORTAL_NAMES (the names of sets and books on pe_avance2),
+                                  TEST_SET_REFERENCE_TYPE (`SET`), CERTIFICATION_COUNTERPARTY
 ```
 
 Also touched: `src/index.ts`, `tests/public-api.test.ts`, `tests/types.test.ts`, `.size-limit.json`, `README.md`,
-`CHANGELOG.md`, `llms.txt`, and phase 3 where D63 needs it.
+`CHANGELOG.md`, `llms.txt`, and phase 1 (`src/model/document.ts`, `src/document/create.ts`) for `withholdVat`.
 
 ### 3.2 Parser
 
@@ -148,14 +149,14 @@ export type TestSet = {
   readonly proportionalityFactor: number | null         // FACTOR DE PROPORCIONALIDAD, purchase-book sets
 }
 export type TestCase = {
-  readonly id: string                       // "4668070-1"
-  readonly setId: string                    // "4668070"
+  readonly id: string                       // "4256-1"
+  readonly setId: string                    // "4256"
   readonly number: number                   // 1
   readonly documentText: string             // after DOCUMENTO
   readonly documentType: number | null      // detected from documentText
   readonly items: readonly TestCaseItem[]
   readonly referenceText: string            // after REFERENCIA
-  readonly referencedCase: string | null    // "4668070-1" found in referenceText
+  readonly referencedCase: string | null    // "4256-1" found in referenceText
   readonly reasonText: string               // after RAZON REFERENCIA
   readonly motive: string                   // MOTIVO (guides)
   readonly transferBy: string               // TRASLADO POR (guides)
@@ -338,9 +339,9 @@ as receiver and has total 0. Guides carry the SET reference only.
 
 **3.5.4 Purchase set (46, 61, 56).** The issuer is also the receiver of every document of this set. Every line is priced
 (`unit` `UN` by default) and carries additional tax code 15; phase 1 computes the withholding (`ImptoReten` type 15 at
-the VAT rate) and the total as net plus exempt. Credit note items: the note's own, a missing price taken from the
-original item of the same name, else 0. Debit note: its own items with the same lookup, else the referenced document's
-items.
+the VAT rate) and the total as net plus exempt, on the invoice by default and on the notes through `withholdVat`, the
+option this phase adds to `DocumentInput`. Credit note items: the note's own, a missing price taken from the original
+item of the same name, else 0. Debit note: its own items with the same lookup, else the referenced document's items.
 
 ### 3.6 Simulation
 
@@ -359,7 +360,7 @@ documents the result carries `fewerThanRecommended: true` (the SII asks for at l
 ### 3.7 Books
 
 ```ts
-type BookInput = { readonly period: string; readonly issuerRut: string; readonly senderRut: string; readonly resolution: { readonly number: number; readonly date: string } }
+type BookInput = { readonly period: string; readonly issuerRut: string; readonly senderRut: string; readonly resolution: { readonly number: number; readonly date: string }; readonly certificate: Certificate; readonly now?: () => Date }   // CertificationBookInput
 export const createCertificationSalesBook = (set: IssuedSet, input: BookInput & { readonly receiver: { readonly rut: string; readonly name: string }; readonly creditNoteSign?: 'positive' | 'negative' }): SignedPurchaseSalesBook
 export const createCertificationPurchaseBook = (plan: PurchaseBookPlan, input: BookInput): SignedPurchaseSalesBook
 export const createCertificationGuideBook = (set: IssuedSet, input: BookInput & { readonly receiver: { readonly rut: string; readonly name: string }; readonly notificationFolio?: number; readonly caseFlags?: readonly ('normal' | 'modified' | 'voided')[] }): SignedGuideBook
@@ -406,12 +407,16 @@ Runtime exports added to the root and to `RUNTIME_EXPORTS`:
 - **Folios:** `createFolioAllocator`.
 - **Issuing:** `issueTestSet`, `issueSimulation`.
 - **Books:** `createCertificationSalesBook`, `createCertificationPurchaseBook`, `createCertificationGuideBook`.
-- **Catalog:** `TEST_SET_KINDS`, `CERTIFICATION_COUNTERPARTY`.
+- **Catalog:** `TEST_SET_KINDS`, `TEST_SET_PORTAL_NAMES`, `TEST_SET_REFERENCE_TYPE`, `TEST_SET_ENVELOPE_ID`
+  (`DTE_SetDoc`), `CERTIFICATION_COUNTERPARTY`.
 
 Types: `TestSet`, `TestSetKind`, `TestCase`, `TestCaseItem`, `TestBookDocument`, `CertificationPlan`, `BasicSetPlan`,
 `ExemptSetPlan`, `GuideSetPlan`, `PurchaseSetPlan`, `PurchaseBookPlan`, `PlannedInvoice`, `PlannedNote`, `PlannedGuide`,
-`PlannedItem`, `SetFolios`, `FolioSource`, `IssueSetOptions`, `IssuedCase`, `IssuedSet`, `IssuedSimulation`, and the
-input types of the three book functions.
+`PlannedItem`, `SetFolios`, `FolioSource`, `FolioAllocatorOptions`, `IssueSetOptions`, `IssuableSetPlan`, `IssuedCase`,
+`IssuedSet`, `IssuedSimulation`, `CertificationBookInput`, `CertificationSalesBookInput`, `CertificationGuideBookInput`,
+`BookReceiver`, `GuideBookCaseFlag`. The detectors (`testSetKindOf`, `documentTypeOf`, `referenceCodeOf`,
+`transferReasonOf`, `dispatchTypeOf`, `bookDocumentTypeOf`) and the issuing internals stay module exports, not root
+exports.
 
 ### 3.10 Typical flows
 
@@ -469,7 +474,7 @@ const simulation = await issueSimulation(plan, { ...options, folios: createFolio
 
 ### 3.12 Build, size and docs
 
-- `.size-limit.json`: both limits to 64 kB (D64); the plan records the measured sizes.
+- `.size-limit.json`: both limits to 64 kB (D64). Measured with the plan's code: ESM 56.17 kB, CJS 56.3 kB.
 - No new dependency.
 - `README.md`: a "Certification: test sets, simulation and books" section with the flow of 3.10 and the note that
   sending and declaring belong to the runner; `CHANGELOG.md` entry under `Unreleased`; `llms.txt` paragraph.
@@ -498,7 +503,8 @@ const simulation = await issueSimulation(plan, { ...options, folios: createFolio
 | 2 | 5b-1 only generates; sending, waiting, diagnosing and declaring belong to 5b-2 (D57) | Recommended, accepted by Hans, 2026-11-04 |
 | 3 | No real set text exists (Hans has none, the public sources have none); the grammar is the field one and stays unmeasured until the first download (section 6) | Hans confirmed he has none, 2026-11-04 |
 | 4 | Section 1 (layout, inputs, outputs, phase 1 documents, Chile dates) | Presented in chat; Hans asked to advance on every front, so the rest was written for his review of this file |
-| 5 | The size cap to 64 kB (D64) instead of a subpath entry | Proposed here; Hans decides on the file |
+| 5 | The size cap to 64 kB (D64) instead of a subpath entry | Applied in the plan on the same go-ahead; Hans may still object on the file or on the pull request |
+| 6 | `withholdVat` on `DocumentInput` instead of explicit totals on the purchase notes (D63) | Decided while the plan's code ran; the smallest change that keeps the notes' totals as the field sends them |
 
 ---
 
@@ -522,12 +528,20 @@ const simulation = await issueSimulation(plan, { ...options, folios: createFolio
 receiver rules, the note item resolution, the purchase invoice's withholding, the guide's internal transfer, the
 simulation without SET references, the three books as described.
 
+**Measured on 2026-11-04 with the plan's code:**
+
+- 1 907 tests pass with coverage at 100 % on the four metrics; the bundles measure ESM 56.17 kB and CJS 56.3 kB.
+- Every sales, purchase and guide book of the tests validates against `LibroCV_v10.xsd` and `LibroGuia_v10.xsd`;
+  every issued document and envelope verifies its signature and its TED.
+- Each task of the plan was checked on a throwaway branch: its tests fail on the previous commit and pass with it.
+
 **Not measured:**
 
 - The set text itself: no sample exists in any source found; the grammar is the one that parses the field downloads.
   5b-2 keeps the downloaded text as an artefact so the first real run turns it into a fixture of this phase.
 - The SII's acceptance of envelopes and books built by this phase: it needs the company enrolled and 5b-2.
-- The differential result of 3.11: recorded when the plan's code runs.
+- The private differential harness of 3.11 was not run while the plan's code was written; the rules were checked one
+  by one against the field behaviour this spec describes. It stays the way to confirm them before the first release.
 
 ---
 
