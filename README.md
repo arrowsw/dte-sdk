@@ -231,6 +231,32 @@ and what to do; the composite flows return it as data, so the CAFs already obtai
 refusal pages were measured against the real SII, but the pages of an enrolled company (quota, CAF, folio ranges) have not
 been seen yet: see the phase 4 design.
 
+## Printed samples (Node)
+
+```typescript
+import { parsePrintableDocuments, renderPrintedSample, renderPrintedSamples, writePrintedSamples, findEnvelopeFiles } from 'dte-sdk'
+
+// The signed XML is the input: one document the SDK issued, or any EnvioDTE/EnvioBOLETA
+const [doc] = parsePrintableDocuments(signed.xml)
+const pdf = await renderPrintedSample(doc, { siiOffice: 'S.I.I. - SANTIAGO ORIENTE', resolution: 'Res. Ex. SII N° 80 del 2014' })
+const transferableCopy = await renderPrintedSample(doc, { transferable: true }) // adds the acknowledgement box and CEDIBLE
+
+// Every document of every envelope, in memory, classified into the test and simulation sets
+const result = await renderPrintedSamples({ envelopes: [{ name: 'envio-set-basico.xml', xml: envelope.xml }], transferable: true })
+
+// From the files of a certification run into SET-PRUEBAS and SET-SIMULACION
+const files = await findEnvelopeFiles('./certification/envelopes')
+const written = await writePrintedSamples({ xmlFiles: files, outDir: './certification/samples', logoPath: './logo.png', transferable: true })
+```
+
+The printed sample follows the SII printed-samples manual: one page 21.5 cm wide and as tall as its content between 11
+and 33 cm, the red type box with the RUT, the type name and the folio, issuer, date, receiver, references, detail,
+totals, the acknowledgement box and `CEDIBLE` mark on the transferable copy (33, 34, 43, 46 and sale guides), and the
+PDF417 stamp of the TED with its legends. The stamp encodes the signed bytes exactly (`renderTedBarcode` gives the PNG
+alone). It needs Node: `pdf-lib` and `bwip-js` are loaded on first use, so importing the package still evaluates
+nothing. Failures of a batch come back as data (`failures[].code`), never as thrown errors. Retentions, the commission
+block of settlement invoices and a stamp raster above 300 DPI are not printed yet: see the phase 5a design.
+
 ## Errors
 
 ```typescript

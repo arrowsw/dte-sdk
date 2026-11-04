@@ -5,6 +5,14 @@ import * as sdk from '../src'
  * the CHANGELOG in the same commit.
  */
 const RUNTIME_EXPORTS = [
+  'errorCode',
+  'findEnvelopeFiles',
+  'needsTransferableCopy',
+  'parsePrintableDocuments',
+  'renderPrintedSample',
+  'renderPrintedSamples',
+  'renderTedBarcode',
+  'writePrintedSamples',
   'DEFAULT_PORTAL_RETRY_POLICY',
   'PORTAL_REJECTIONS',
   'annulFolios',

@@ -4,7 +4,7 @@
  * ES: API pública de dte-sdk: documentos, timbres, firmas y sobres, los libros del SII y el cliente de los servicios web
  * del SII (semilla y token, envíos, consultas de estado, aceptación y reclamos). Todo se exporta desde esta única entrada.
  */
-export { DteError, DTE_ERROR_CODES, isDteError } from './errors'
+export { DteError, DTE_ERROR_CODES, errorCode, isDteError } from './errors'
 export type { DteErrorCode, DteErrorDetails } from './errors'
 
 export {
@@ -393,3 +393,28 @@ export type { FolioLedgerStore, FolioRegistry } from './folios/registry'
 export { createDirectoryFolioRegistry } from './folios/node-registry'
 export type { DirectoryFolioRegistryOptions } from './folios/node-registry'
 export type { FolioEntry, FolioLedger, FolioScope, FolioSentRecord, FolioStats } from './folios/ledger'
+
+export { parsePrintableDocuments } from './pdf/parse'
+export type {
+  PrintableAdjustment,
+  PrintableDocument,
+  PrintableIssuer,
+  PrintableItem,
+  PrintableParty,
+  PrintableReference,
+  PrintableTotals,
+} from './pdf/parse'
+export { renderTedBarcode } from './pdf/stamp'
+export { needsTransferableCopy, renderPrintedSample } from './pdf/render'
+export type { PrintedLogo, PrintedSampleOptions, RenderPrintedSampleOptions } from './pdf/render'
+export { renderPrintedSamples } from './pdf/samples'
+export type {
+  PrintedEnvelope,
+  PrintedSample,
+  PrintedSampleFailure,
+  PrintedSampleSet,
+  PrintedSamplesInput,
+  PrintedSamplesResult,
+} from './pdf/samples'
+export { findEnvelopeFiles, writePrintedSamples } from './pdf/node-samples'
+export type { WritePrintedSamplesInput, WritePrintedSamplesResult, WrittenPrintedSample } from './pdf/node-samples'

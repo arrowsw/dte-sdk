@@ -1,4 +1,4 @@
-import { DteError, DTE_ERROR_CODES, errorMessage, isDteError } from '../src/errors'
+import { DteError, DTE_ERROR_CODES, errorCode, errorMessage, isDteError } from '../src/errors'
 
 describe('DteError', () => {
   test('carries a stable code, generic message and details', () => {
@@ -65,4 +65,10 @@ describe('errorMessage', () => {
     expect(errorMessage('plain')).toBe('plain')
     expect(errorMessage(42)).toBe('42')
   })
+})
+
+test('errorCode is the code of a DteError and undefined for anything else', () => {
+  expect(errorCode(new DteError('INVALID_RUT'))).toBe('INVALID_RUT')
+  expect(errorCode(new Error('plain'))).toBeUndefined()
+  expect(errorCode('text')).toBeUndefined()
 })

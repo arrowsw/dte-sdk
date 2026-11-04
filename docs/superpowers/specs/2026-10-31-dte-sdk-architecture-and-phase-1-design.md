@@ -123,6 +123,8 @@ dte-sdk/node      Node adapters: `https` transport with mTLS and the SII legacy 
 dte-sdk/portal    certificate-authenticated portal: session, company data, RCV, MIPYME backup,
                   folios (query/void), CAF request, automated certification.
 dte-sdk/pdf       printed representations (PDF417 + PDF). Optional peer deps at first.
+                  (Superseded by the phase 5a spec: the PDF functions ship from the root entry with
+                  `pdf-lib` and `bwip-js` as regular dependencies loaded on first use, D40 and D41.)
 ```
 
 - What a subpath is: **the same npm package with more than one entry point**, declared in
