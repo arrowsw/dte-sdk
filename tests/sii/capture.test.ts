@@ -30,6 +30,14 @@ const exchange: HttpExchange = {
 }
 
 describe('redactText', () => {
+  test('hides the session token of an RCV envelope, in a request and in an answer', () => {
+    expect(redactText('{"metaData":{"namespace":"x","conversationId":"TOKEN-ABC","page":null},"data":null}')).toBe(
+      '{"metaData":{"namespace":"x","conversationId":"[redacted]","page":null},"data":null}',
+    )
+    expect(redactText('{ "conversationId" : "TOKEN-ABC" }')).toBe('{ "conversationId" : "[redacted]" }')
+    expect(redactText('{"conversationId":null}')).toBe('{"conversationId":null}')
+  })
+
   test.each([
     ['<TOKEN>ABC</TOKEN>', '<TOKEN>[redacted]</TOKEN>'],
     ['<Token>ABC</Token>', '<Token>[redacted]</Token>'],

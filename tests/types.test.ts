@@ -203,6 +203,7 @@ test('public API types compile', () => {
 describe('portal client', () => {
   test('is immutable data', () => {
     expectTypeOf<PortalClient['companyRut']>().toEqualTypeOf<SiiRut | null>()
+    expectTypeOf<PortalClient['randomId']>().toEqualTypeOf<() => string>()
     // @ts-expect-error every field is readonly
     const write = (portal: PortalClient): void => void (portal.timeoutMs = 1)
     expect(typeof write).toBe('function')

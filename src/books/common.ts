@@ -2,12 +2,11 @@ import type { BookSubmission } from '../catalogs/book-codes'
 import { DteError } from '../errors'
 import type { BookCover, BookCoverInput } from '../model/book'
 import { toSiiRut } from '../model/rut'
-import { toIsoDate } from '../time/chile'
+import { isPeriod, toIsoDate } from '../time/chile'
 import { buildXml } from '../xml/build'
 
 const SII_NS = 'http://www.sii.cl/SiiDte'
 const XSI_NS = 'http://www.w3.org/2001/XMLSchema-instance'
-const PERIOD = /^\d{4}-(0[1-9]|1[0-2])$/
 const MIN_BOOK_DATE = '2000-01-01'
 const MAX_BOOK_DATE = '2050-12-31'
 const MAX_RESOLUTION_NUMBER = 999_999
@@ -78,7 +77,7 @@ export const assertResolutionNumber = (value: number): void => {
  * @throws {DteError} EN: `INVALID_RUT`, `INVALID_DATE`, `INVALID_OPTION`, `MISSING_FIELD`. ES: los mismos códigos.
  */
 export const normalizeBookCover = (cover: BookCoverInput): BookCover => {
-  if (!PERIOD.test(cover.period)) throw new DteError('INVALID_DATE', { field: 'cover.period' })
+  if (!isPeriod(cover.period)) throw new DteError('INVALID_DATE', { field: 'cover.period' })
   assertResolutionNumber(cover.resolutionNumber)
   const submission = cover.submission ?? 'total'
   if (submission === 'partial' && cover.segmentNumber === undefined)

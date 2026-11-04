@@ -87,6 +87,8 @@ export type PortalClientOptions = {
   readonly now?: () => Date
   /** EN: Wait between retries and between steps. ES: Espera entre reintentos y entre pasos. */
   readonly sleep?: SleepFn
+  /** EN: Source of the transaction ids of the RCV; `crypto.randomUUID` by default. ES: `transactionId` — Fuente de los identificadores de transacción del RCV; por defecto `crypto.randomUUID`. */
+  readonly randomId?: () => string
 }
 
 /**
@@ -122,6 +124,8 @@ export type PortalClient = {
   readonly now: () => Date
   /** EN: Wait function. ES: Función de espera. */
   readonly sleep: SleepFn
+  /** EN: Source of transaction ids. ES: `transactionId` — Fuente de identificadores de transacción. */
+  readonly randomId: () => string
 }
 
 /**
@@ -158,6 +162,7 @@ export const createPortalClient = (options: PortalClientOptions): PortalClient =
     capture: options.capture ?? null,
     now: options.now ?? (() => new Date()),
     sleep: options.sleep ?? defaultSleep,
+    randomId: options.randomId ?? (() => crypto.randomUUID()),
   })
 }
 
@@ -169,4 +174,14 @@ export const resolvePortalCompany = (portal: PortalClient, companyRut?: string):
   if (companyRut !== undefined) return toSiiRut(companyRut, 'companyRut')
   if (portal.companyRut === null) throw new DteError('MISSING_FIELD', { field: 'companyRut' })
   return portal.companyRut
+}
+
+/**
+ * EN: The SII's code for a value of the caller.
+ * ES: El código del SII para un valor de quien llama.
+ * @throws {DteError} EN: `INVALID_OPTION { field }` when the table has no such value. ES: `INVALID_OPTION { field }` si la tabla no tiene ese valor.
+ */
+export const siiCodeOf = <K extends string, V>(table: Readonly<Record<K, V>>, value: K, field: string): V => {
+  if (!Object.prototype.hasOwnProperty.call(table, value)) throw new DteError('INVALID_OPTION', { field })
+  return table[value]
 }

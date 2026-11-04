@@ -1,4 +1,12 @@
-import { cgiUrl, PORTAL_LOGOUT_URL, PORTAL_REJECTIONS, portalRejectionMessage } from '../src/catalogs/portal'
+import {
+  cgiUrl,
+  MIPYME_BACKUP_BASE_URL,
+  PORTAL_LOGOUT_URL,
+  PORTAL_REJECTIONS,
+  portalRejectionMessage,
+  RCV_SERVICES,
+  rcvAppUrl,
+} from '../src/catalogs/portal'
 
 test('CGI pages live on the host of the environment', () => {
   expect(cgiUrl('certification', 'ad_empresa1')).toBe('https://maullin.sii.cl/cvc_cgi/dte/ad_empresa1')
@@ -14,4 +22,23 @@ test('every rejection tells the operator something in Spanish', () => {
 
 test('the logout URL is the one measured to end a session', () => {
   expect(PORTAL_LOGOUT_URL).toBe('https://zeusr.sii.cl/cgi_AUT2000/autTermino.cgi')
+})
+
+test('RCV apps live on the host of the environment, with their trailing slash', () => {
+  expect(rcvAppUrl('production', 'consdcvinternetui')).toBe('https://www4.sii.cl/consdcvinternetui/')
+  expect(rcvAppUrl('certification', 'consdcvinternetui')).toBe('https://www4c.sii.cl/consdcvinternetui/')
+})
+
+test('the complements are visited through the register app and carry a page', () => {
+  expect(RCV_SERVICES.complements).toMatchObject({
+    entryApp: 'consdcvinternetui',
+    app: 'complementoscvui',
+    paged: true,
+  })
+  expect(RCV_SERVICES.documents.paged).toBe(false)
+  expect(RCV_SERVICES.register.paged).toBe(false)
+})
+
+test('the backup has one host, in production', () => {
+  expect(MIPYME_BACKUP_BASE_URL).toBe('https://www1.sii.cl/cgi-bin/Portal001')
 })

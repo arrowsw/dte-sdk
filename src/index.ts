@@ -74,7 +74,7 @@ export {
 export type { ClaimAction, ClaimActionCode } from './catalogs/claim-codes'
 
 export { PORTAL_REJECTIONS, portalRejectionMessage } from './catalogs/portal'
-export type { PortalRejection } from './catalogs/portal'
+export type { AccountingStatus, DocumentDirection, PortalRejection, RegisterOperation } from './catalogs/portal'
 
 export { toSiiRut, isSiiRut, splitSiiRut } from './model/rut'
 export type { SiiRut } from './model/rut'
@@ -387,6 +387,35 @@ export type {
   RequestCafExactResult,
   RequestCafInBatchesInput,
 } from './portal/flows'
+export {
+  changePurchaseType,
+  fetchPurchaseDocument,
+  fetchRegisterSummary,
+  listPeriodDocuments,
+  listPurchaseTypes,
+  moveVatToCommonUse,
+  moveVatToRecoverable,
+} from './portal/rcv'
+export type {
+  ChangePurchaseTypeInput,
+  ListPeriodDocumentsInput,
+  MoveVatInput,
+  PurchaseDocumentKey,
+  RegisterSummaryInput,
+} from './portal/rcv'
+export type {
+  PeriodDocument,
+  PeriodDocuments,
+  PeriodSummaryRow,
+  PurchaseDocument,
+  PurchaseType,
+  RcvObject,
+  RegisterHeader,
+  RegisterSummary,
+  RegisterSummaryRow,
+} from './portal/pages/rcv'
+export { downloadMipymeBackup } from './portal/backup'
+export type { MipymeBackup, MipymeBackupChunk, MipymeBackupInput, MipymeDownloadedChunk } from './portal/backup'
 
 export { cafFingerprint, createFolioRegistry, createMemoryFolioRegistry } from './folios/registry'
 export type { FolioLedgerStore, FolioRegistry } from './folios/registry'
