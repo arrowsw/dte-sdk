@@ -1,8 +1,12 @@
 /**
- * EN: dte-sdk public API: documents, stamps, signatures and envelopes, the SII books, and the SII web services client
- * (seed and token, uploads, status queries, acceptance and claims). Everything is exported from this single entry.
- * ES: API pública de dte-sdk: documentos, timbres, firmas y sobres, los libros del SII y el cliente de los servicios web
- * del SII (semilla y token, envíos, consultas de estado, aceptación y reclamos). Todo se exporta desde esta única entrada.
+ * EN: dte-sdk root entry: documents, stamps, signatures and envelopes, the SII books, and the SII web services client
+ * (seed and token, uploads, status queries, acceptance and claims). It runs anywhere and never mentions a `node:` module.
+ * The Node adapters, the portal and the printed samples have their own entries: `dte-sdk/node`, `dte-sdk/portal` and
+ * `dte-sdk/pdf`.
+ * ES: Entrada raíz de dte-sdk: documentos, timbres, firmas y sobres, los libros del SII y el cliente de los servicios web
+ * del SII (semilla y token, envíos, consultas de estado, aceptación y reclamos). Corre en cualquier parte y nunca menciona
+ * un módulo `node:`. Los adaptadores de Node, el portal y las muestras impresas tienen sus propias entradas: `dte-sdk/node`,
+ * `dte-sdk/portal` y `dte-sdk/pdf`.
  */
 export { DteError, DTE_ERROR_CODES, errorCode, isDteError } from './errors'
 export type { DteErrorCode, DteErrorDetails } from './errors'
@@ -72,9 +76,6 @@ export {
   transferabilityMessage,
 } from './catalogs/claim-codes'
 export type { ClaimAction, ClaimActionCode } from './catalogs/claim-codes'
-
-export { PORTAL_REJECTIONS, portalRejectionMessage } from './catalogs/portal'
-export type { AccountingStatus, DocumentDirection, PortalRejection, RegisterOperation } from './catalogs/portal'
 
 export { toSiiRut, isSiiRut, splitSiiRut } from './model/rut'
 export type { SiiRut } from './model/rut'
@@ -300,8 +301,6 @@ export { DEFAULT_RETRY_POLICY, isRetryableError } from './sii/retry'
 export type { RetryPolicy, RetryOptions } from './sii/retry'
 export { createFetchTransport } from './sii/transport'
 export type { HttpMethod, HttpRequest, HttpResponse, HttpTransport, BodyEncoding, FetchLike } from './sii/transport'
-export { createNodeHttpsTransport } from './sii/node-transport'
-export type { NodeTlsOptions, NodeHttpsTransportOptions, TlsVersion } from './sii/node-transport'
 export { redactExchange, createMemoryCapture } from './sii/capture'
 export type {
   HttpChannel,
@@ -313,10 +312,6 @@ export type {
 } from './sii/capture'
 export { createMemoryUploadArchive } from './sii/archive'
 export type { UploadKind, UploadRecord, UploadArchive } from './sii/archive'
-export { createDirectoryCapture } from './sii/node-capture'
-export type { DirectoryCaptureOptions } from './sii/node-capture'
-export { createDirectoryUploadArchive } from './sii/node-archive'
-export type { DirectoryUploadArchiveOptions } from './sii/node-archive'
 export { createSiiClient } from './sii/client'
 export type { SiiClient, SiiClientOptions, SiiTimeouts, SiiEndpoints, CallOverrides, SleepFn } from './sii/client'
 export { buildSoapEnvelope, parseSoapResponse } from './sii/soap'
@@ -357,135 +352,3 @@ export type {
   ReceiverStatus,
   ReceiverStatusResult,
 } from './sii/claims'
-
-export { createPortalClient, DEFAULT_PORTAL_RETRY_POLICY, isRetryablePortalError } from './portal/client'
-export type { PortalClient, PortalClientOptions } from './portal/client'
-export { createMemoryPortalLock } from './portal/lock'
-export type { PortalLock } from './portal/lock'
-export { openPortalSession, closePortalSession } from './portal/session'
-export type { PortalSessionInfo } from './portal/session'
-export { fetchCompanyResolution, fetchTaxpayerData, fetchIssuerProfile } from './portal/company'
-export type { IssuerProfile } from './portal/company'
-export type { CompanyResolution, TaxpayerData, TaxpayerActivity, TaxpayerBranch } from './portal/pages/company'
-export { queryCertificationSets } from './portal/certification'
-export type { CertificationSets } from './portal/certification'
-export type { CertificationSet } from './portal/pages/certification'
-export { listStampableTypes, queryFolioQuota, requestCaf } from './portal/stamping'
-export type { CafRequestInput, FolioQuota, ObtainedCaf } from './portal/stamping'
-export type { QuotaFields, StampableType } from './portal/pages/stamping'
-export { listFolioRanges, annulFolios } from './portal/annulment'
-export type { AnnulFoliosInput, AnnulmentResult, FolioRanges, FolioSpan } from './portal/annulment'
-export type { AnnulmentRejectionReason, UnusedFolioRange } from './portal/pages/annulment'
-export { listReobtainableRanges, reobtainCaf } from './portal/reobtain'
-export type { ReobtainableRange } from './portal/reobtain'
-export { requestCafExact, requestCafInBatches, reobtainFolios } from './portal/flows'
-export type {
-  FolioFlowResult,
-  ReobtainFoliosInput,
-  ReobtainResult,
-  RequestCafExactInput,
-  RequestCafExactResult,
-  RequestCafInBatchesInput,
-} from './portal/flows'
-export {
-  changePurchaseType,
-  fetchPurchaseDocument,
-  fetchRegisterSummary,
-  listPeriodDocuments,
-  listPurchaseTypes,
-  moveVatToCommonUse,
-  moveVatToRecoverable,
-} from './portal/rcv'
-export type {
-  ChangePurchaseTypeInput,
-  ListPeriodDocumentsInput,
-  MoveVatInput,
-  PurchaseDocumentKey,
-  RegisterSummaryInput,
-} from './portal/rcv'
-export type {
-  PeriodDocument,
-  PeriodDocuments,
-  PeriodSummaryRow,
-  PurchaseDocument,
-  PurchaseType,
-  RcvObject,
-  RegisterHeader,
-  RegisterSummary,
-  RegisterSummaryRow,
-} from './portal/pages/rcv'
-export { downloadMipymeBackup } from './portal/backup'
-export type { MipymeBackup, MipymeBackupChunk, MipymeBackupInput, MipymeDownloadedChunk } from './portal/backup'
-
-export { cafFingerprint, createFolioRegistry, createMemoryFolioRegistry } from './folios/registry'
-export type { FolioLedgerStore, FolioRegistry } from './folios/registry'
-export { createDirectoryFolioRegistry } from './folios/node-registry'
-export type { DirectoryFolioRegistryOptions } from './folios/node-registry'
-export type { FolioEntry, FolioLedger, FolioScope, FolioSentRecord, FolioStats } from './folios/ledger'
-
-export { parsePrintableDocuments } from './pdf/parse'
-export type {
-  PrintableAdjustment,
-  PrintableDocument,
-  PrintableIssuer,
-  PrintableItem,
-  PrintableParty,
-  PrintableReference,
-  PrintableTotals,
-} from './pdf/parse'
-export { renderTedBarcode } from './pdf/stamp'
-export { needsTransferableCopy, renderPrintedSample } from './pdf/render'
-export type { PrintedLogo, PrintedSampleOptions, RenderPrintedSampleOptions } from './pdf/render'
-export { renderPrintedSamples } from './pdf/samples'
-export type {
-  PrintedEnvelope,
-  PrintedSample,
-  PrintedSampleFailure,
-  PrintedSampleSet,
-  PrintedSamplesInput,
-  PrintedSamplesResult,
-} from './pdf/samples'
-export { findEnvelopeFiles, writePrintedSamples } from './pdf/node-samples'
-export type { WritePrintedSamplesInput, WritePrintedSamplesResult, WrittenPrintedSample } from './pdf/node-samples'
-
-export {
-  TEST_SET_KINDS,
-  TEST_SET_PORTAL_NAMES,
-  TEST_SET_REFERENCE_TYPE,
-  CERTIFICATION_COUNTERPARTY,
-} from './catalogs/certification'
-export type { TestSetKind } from './catalogs/certification'
-export { parseTestSetText } from './certification/set-text'
-export type { TestSet, TestCase, TestCaseItem, TestBookDocument } from './certification/set-text'
-export { planCertificationSets } from './certification/set-plan'
-export type {
-  CertificationPlan,
-  BasicSetPlan,
-  ExemptSetPlan,
-  GuideSetPlan,
-  PurchaseSetPlan,
-  PurchaseBookPlan,
-  PlannedInvoice,
-  PlannedNote,
-  PlannedGuide,
-  PlannedItem,
-  SetFolios,
-} from './certification/set-plan'
-export { createFolioAllocator } from './certification/folios'
-export type { FolioSource, FolioAllocatorOptions } from './certification/folios'
-export { issueTestSet, TEST_SET_ENVELOPE_ID } from './certification/issue-set'
-export type { IssueSetOptions, IssuableSetPlan, IssuedCase, IssuedSet } from './certification/issue-set'
-export { issueSimulation } from './certification/simulation'
-export type { IssuedSimulation } from './certification/simulation'
-export {
-  createCertificationSalesBook,
-  createCertificationPurchaseBook,
-  createCertificationGuideBook,
-} from './certification/books'
-export type {
-  CertificationBookInput,
-  CertificationSalesBookInput,
-  CertificationGuideBookInput,
-  BookReceiver,
-  GuideBookCaseFlag,
-} from './certification/books'

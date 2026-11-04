@@ -58,6 +58,8 @@ enrolled as an issuer, so neither can be verified live today, and splitting them
 
 ### D40. PDF and PDF417 come from `pdf-lib` and `bwip-js`, regular dependencies loaded on first use
 
+> Superseded on 2026-11-04 by `docs/decisions/entry-points.md`: four entries, ES modules only.
+
 Amends D4. `pdf-lib` 1.17.1 and `bwip-js` 4.11.4 enter `dependencies`, pinned exactly like the other four, and stay
 external to the bundle. Both are loaded with `import()` inside the functions that need them, so importing `dte-sdk`
 never evaluates them and the neutral bundle keeps loading everywhere it loads today.
@@ -69,6 +71,8 @@ weekly downloads); its maintained fork `@cantoo/pdf-lib` keeps the same API, so 
 appears. `bwip-js` is maintained (last release 2026-08). Section 6 holds the numbers.
 
 ### D41. Root entry; the size cap goes to 54 kB
+
+> Superseded on 2026-11-04 by `docs/decisions/entry-points.md`: four entries, ES modules only.
 
 Amends the `dte-sdk/pdf` row of D3 and keeps D36 (root entry only). The layout code measures about 8 kB brotli with the
 libraries external; the root bundle stands at 44.45 kB under a 46 kB cap, so the cap goes to 54 kB for both formats.

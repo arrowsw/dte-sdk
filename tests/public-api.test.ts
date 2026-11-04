@@ -1,65 +1,14 @@
-import * as sdk from '../src'
+import * as root from '../src'
+import * as node from '../src/node'
+import * as pdf from '../src/pdf'
+import * as portal from '../src/portal'
 
 /**
- * The runtime surface of the package. Adding or removing an export is a deliberate API change: update this list and
- * the CHANGELOG in the same commit.
+ * The runtime surface of each entry of the package. Adding, moving or removing an export is a deliberate API change:
+ * update these lists and the CHANGELOG in the same commit.
  */
-const RUNTIME_EXPORTS = [
-  'CERTIFICATION_COUNTERPARTY',
-  'TEST_SET_ENVELOPE_ID',
-  'TEST_SET_KINDS',
-  'TEST_SET_PORTAL_NAMES',
-  'TEST_SET_REFERENCE_TYPE',
-  'createCertificationGuideBook',
-  'createCertificationPurchaseBook',
-  'createCertificationSalesBook',
-  'createFolioAllocator',
-  'issueSimulation',
-  'issueTestSet',
-  'parseTestSetText',
-  'planCertificationSets',
+const ROOT_EXPORTS = [
   'errorCode',
-  'findEnvelopeFiles',
-  'needsTransferableCopy',
-  'parsePrintableDocuments',
-  'renderPrintedSample',
-  'renderPrintedSamples',
-  'renderTedBarcode',
-  'writePrintedSamples',
-  'DEFAULT_PORTAL_RETRY_POLICY',
-  'PORTAL_REJECTIONS',
-  'annulFolios',
-  'cafFingerprint',
-  'changePurchaseType',
-  'closePortalSession',
-  'createDirectoryFolioRegistry',
-  'createFolioRegistry',
-  'createMemoryFolioRegistry',
-  'createMemoryPortalLock',
-  'createPortalClient',
-  'downloadMipymeBackup',
-  'fetchCompanyResolution',
-  'fetchIssuerProfile',
-  'fetchPurchaseDocument',
-  'fetchRegisterSummary',
-  'fetchTaxpayerData',
-  'isRetryablePortalError',
-  'listFolioRanges',
-  'listPeriodDocuments',
-  'listPurchaseTypes',
-  'listReobtainableRanges',
-  'listStampableTypes',
-  'moveVatToCommonUse',
-  'moveVatToRecoverable',
-  'openPortalSession',
-  'portalRejectionMessage',
-  'queryCertificationSets',
-  'queryFolioQuota',
-  'reobtainCaf',
-  'reobtainFolios',
-  'requestCaf',
-  'requestCafExact',
-  'requestCafInBatches',
   'BOOK_DOCUMENT_TYPES',
   'BOOK_KINDS',
   'BOOK_OPERATIONS',
@@ -127,8 +76,6 @@ const RUNTIME_EXPORTS = [
   'classifyReceptionStatus',
   'classifyUploadStatus',
   'compactFolioRanges',
-  'createDirectoryCapture',
-  'createDirectoryUploadArchive',
   'createDocument',
   'createEnvelope',
   'createFetchTransport',
@@ -137,7 +84,6 @@ const RUNTIME_EXPORTS = [
   'createMemoryCapture',
   'createMemoryTokenCache',
   'createMemoryUploadArchive',
-  'createNodeHttpsTransport',
   'createPurchaseSalesBook',
   'createSiiClient',
   'daysUntilExpiry',
@@ -239,10 +185,88 @@ const RUNTIME_EXPORTS = [
   'wrapBase64',
 ] as const
 
-test('the public API exports exactly the documented runtime names', () => {
-  expect(Object.keys(sdk).sort()).toEqual([...RUNTIME_EXPORTS].sort())
+const NODE_EXPORTS = [
+  'createDirectoryFolioRegistry',
+  'createDirectoryCapture',
+  'createDirectoryUploadArchive',
+  'createNodeHttpsTransport',
+] as const
+
+const PORTAL_EXPORTS = [
+  'CERTIFICATION_COUNTERPARTY',
+  'TEST_SET_ENVELOPE_ID',
+  'TEST_SET_KINDS',
+  'TEST_SET_PORTAL_NAMES',
+  'TEST_SET_REFERENCE_TYPE',
+  'createCertificationGuideBook',
+  'createCertificationPurchaseBook',
+  'createCertificationSalesBook',
+  'createFolioAllocator',
+  'issueSimulation',
+  'issueTestSet',
+  'parseTestSetText',
+  'planCertificationSets',
+  'DEFAULT_PORTAL_RETRY_POLICY',
+  'PORTAL_REJECTIONS',
+  'annulFolios',
+  'cafFingerprint',
+  'changePurchaseType',
+  'closePortalSession',
+  'createFolioRegistry',
+  'createMemoryFolioRegistry',
+  'createMemoryPortalLock',
+  'createPortalClient',
+  'downloadMipymeBackup',
+  'fetchCompanyResolution',
+  'fetchIssuerProfile',
+  'fetchPurchaseDocument',
+  'fetchRegisterSummary',
+  'fetchTaxpayerData',
+  'isRetryablePortalError',
+  'listFolioRanges',
+  'listPeriodDocuments',
+  'listPurchaseTypes',
+  'listReobtainableRanges',
+  'listStampableTypes',
+  'moveVatToCommonUse',
+  'moveVatToRecoverable',
+  'openPortalSession',
+  'portalRejectionMessage',
+  'queryCertificationSets',
+  'queryFolioQuota',
+  'reobtainCaf',
+  'reobtainFolios',
+  'requestCaf',
+  'requestCafExact',
+  'requestCafInBatches',
+] as const
+
+const PDF_EXPORTS = [
+  'findEnvelopeFiles',
+  'needsTransferableCopy',
+  'parsePrintableDocuments',
+  'renderPrintedSample',
+  'renderPrintedSamples',
+  'renderTedBarcode',
+  'writePrintedSamples',
+] as const
+
+const ENTRIES: ReadonlyArray<readonly [string, Record<string, unknown>, readonly string[]]> = [
+  ['dte-sdk', root, ROOT_EXPORTS],
+  ['dte-sdk/node', node, NODE_EXPORTS],
+  ['dte-sdk/portal', portal, PORTAL_EXPORTS],
+  ['dte-sdk/pdf', pdf, PDF_EXPORTS],
+]
+
+test.each(ENTRIES)('%s exports exactly the documented runtime names', (_name, entry, names) => {
+  expect(Object.keys(entry).sort()).toEqual([...names].sort())
 })
 
-test('every export resolves to a value', () => {
-  for (const name of RUNTIME_EXPORTS) expect(sdk[name]).toBeDefined()
+test.each(ENTRIES)('every export of %s resolves to a value', (_name, entry, names) => {
+  for (const name of names) expect(entry[name]).toBeDefined()
+})
+
+test('no name is exported from two entries', () => {
+  const names = ENTRIES.flatMap(([, , list]) => list)
+  expect(new Set(names).size).toBe(names.length)
 })
