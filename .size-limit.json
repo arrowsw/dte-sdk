@@ -2,6 +2,25 @@
   {
     "name": "dte-sdk (min + brotli)",
     "path": "dist/index.min.js",
-    "limit": "64 kB"
+    "ignore": ["node-forge", "@xmldom/xmldom", "fast-xml-parser", "rut.ts", "pdf-lib", "bwip-js", "node:*"],
+    "limit": "32 kB"
+  },
+  {
+    "name": "dte-sdk/node (min + brotli)",
+    "path": "dist/node.min.js",
+    "ignore": ["node-forge", "@xmldom/xmldom", "fast-xml-parser", "rut.ts", "pdf-lib", "bwip-js", "node:*"],
+    "limit": "6 kB"
+  },
+  {
+    "name": "dte-sdk/portal (min + brotli)",
+    "path": "dist/portal.min.js",
+    "ignore": ["node-forge", "@xmldom/xmldom", "fast-xml-parser", "rut.ts", "pdf-lib", "bwip-js", "node:*"],
+    "limit": "40 kB"
+  },
+  {
+    "name": "dte-sdk/pdf (min + brotli)",
+    "path": "dist/pdf.min.js",
+    "ignore": ["node-forge", "@xmldom/xmldom", "fast-xml-parser", "rut.ts", "pdf-lib", "bwip-js", "node:*"],
+    "limit": "10 kB"
   }
 ]
