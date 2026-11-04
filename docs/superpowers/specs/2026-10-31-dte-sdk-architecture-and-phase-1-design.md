@@ -107,6 +107,8 @@ Two models, one codec between them:
 
 ### D3. One package, one entry point (decided by Hans on 2026-10-31)
 
+> Superseded on 2026-11-04 by `docs/decisions/entry-points.md`: four entries, ES modules only.
+
 ✅ **Everything is exported from the root** (`import { … } from 'dte-sdk'`). Modules stay organized by area
 under `src/` (below), but there is a single entry point, a single ESM/CJS build and a single `.d.ts`. The parts
 that need Node (`node:https`, `node:fs`) import those modules lazily inside the function that uses them, so

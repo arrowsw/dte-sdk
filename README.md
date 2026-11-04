@@ -35,7 +35,26 @@ documentation on every field.
 npm install dte-sdk
 ```
 
-Node ≥ 20, ESM and CommonJS.
+Node ≥ 22.12. The package ships ES modules only, and a CommonJS project loads it with `require()` just the same. Printed
+samples need two more packages, which stay out of the install otherwise:
+
+```bash
+npm install pdf-lib bwip-js
+```
+
+## Entry points
+
+| Import from | What it holds | Runs on |
+|---|---|---|
+| `dte-sdk` | Documents, stamps, signatures, envelopes, books and the SII web services client over `fetch` | Node, Bun, Deno; bundles for the browser with no configuration |
+| `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryFolioRegistry` | Node |
+| `dte-sdk/portal` | SII portal, folios and CAF requests, purchase and sales register, MIPYME backup, certification sets | Node |
+| `dte-sdk/pdf` | Printed samples | Node, with `pdf-lib` and `bwip-js` installed |
+
+`DteError` and `isDteError` come from `dte-sdk` and recognize what every entry throws.
+
+Jest in its default CommonJS mode cannot `require()` an ES module. Run it in ESM mode, or let it transform this package
+with `transformIgnorePatterns`.
 
 ## Quick start
 
@@ -130,7 +149,7 @@ available: `getSeed`/`getToken`, `uploadBook`, `uploadFolioConsumption`, `queryU
 
 Options worth knowing:
 
-- `transport`: `fetch` by default; `createNodeHttpsTransport({ tls })` for a custom CA
+- `transport`: `fetch` by default; `createNodeHttpsTransport({ tls })` from `dte-sdk/node` for a custom CA
   (`tls.ca`, added to the public roots bundled with Node, not in place of them) or, only if
   you must, `rejectUnauthorized: false` / `legacyRenegotiation: true`. TLS verification is on
   by default and the SII hosts verify with the system trust store, so the defaults just work.
@@ -144,7 +163,7 @@ Options worth knowing:
   retry loop around seed, signature and token, so every attempt signs a fresh seed.
   `waitForUploadStatus` polls every `intervalMs` instead of following the retry policy, and its
   `timeoutMs` is a budget: each poll and each sleep is cut to the time that remains.
-- `capture: createDirectoryCapture({ dir })` writes every HTTP exchange, redacted (tokens,
+- `capture: createDirectoryCapture({ dir })` from `dte-sdk/node` writes every HTTP exchange, redacted (tokens,
   seeds, cookies, private keys), for SII support tickets. `archive:
   createDirectoryUploadArchive({ dir })` keeps the exact bytes of every upload the SII answered,
   with its TrackID and the SII's reply (tokens redacted). A duplicate answer is kept as
@@ -192,7 +211,7 @@ receipts certification, and the SII probably no longer requires it in production
 ## SII portal and folios
 
 ```typescript
-import { createPortalClient, fetchIssuerProfile, queryFolioQuota, requestCaf, closePortalSession } from 'dte-sdk'
+import { createPortalClient, fetchIssuerProfile, queryFolioQuota, requestCaf, closePortalSession } from 'dte-sdk/portal'
 
 const portal = createPortalClient({ environment: 'certification', certificate, companyRut: '76543210-3' })
 
@@ -204,7 +223,7 @@ await closePortalSession(portal)
 
 The portal is the certificate-authenticated site of the SII, read as HTML. The certificate must be enabled as a login
 method first, a manual step at sii.cl (*Cambiar Clave y datos de autenticación*, option "Utilizando Clave Tributaria o
-Certificado Digital"); otherwise the login throws `SII_PORTAL_CERT_NOT_ENABLED`. It needs Node ≥ 20: `fetch` cannot
+Certificado Digital"); otherwise the login throws `SII_PORTAL_CERT_NOT_ENABLED`. It needs Node: `fetch` cannot
 present a client certificate.
 
 - **CAF XML is a secret.** `xml` holds the private key of the CAF. Where you keep it is up to you.
@@ -222,7 +241,7 @@ present a client certificate.
   `maxRanges` ranges (50, or 20 in `requestCafExact`), and `exclude` protects a CAF still in use. Pass `knownAnnulled` back
   between runs: the portal keeps listing annulled ranges forever.
 
-`createFolioRegistry`, `createMemoryFolioRegistry` and `createDirectoryFolioRegistry` keep local track of the folios of
+`createFolioRegistry`, `createMemoryFolioRegistry` and, from `dte-sdk/node`, `createDirectoryFolioRegistry` keep local track of the folios of
 each CAF: reserve, mark as sent or annulled, release. A service with its own database implements `FolioRegistry` with
 its own transactions.
 
@@ -244,7 +263,7 @@ import {
   fetchPurchaseDocument,
   moveVatToCommonUse,
   downloadMipymeBackup,
-} from 'dte-sdk'
+} from 'dte-sdk/portal'
 
 const { summary, documents } = await listPeriodDocuments(portal, { period: '2026-10', direction: 'received' })
 const { rows, header } = await fetchRegisterSummary(portal, { period: '2026-10', operation: 'purchase' })
@@ -289,7 +308,7 @@ await downloadMipymeBackup(portal, {
 ## Certification: test sets, simulation and books
 
 ```typescript
-import { parseTestSetText, planCertificationSets, createFolioAllocator, issueTestSet, issueSimulation, createCertificationSalesBook } from 'dte-sdk'
+import { parseTestSetText, planCertificationSets, createFolioAllocator, issueTestSet, issueSimulation, createCertificationSalesBook } from 'dte-sdk/portal'
 
 const plan = planCertificationSets(parseTestSetText(setText)) // the text the SII generated for the applicant
 const options = { issuer, receiver, certificate, folios: createFolioAllocator(cafs), resolution: { number: 0, date: '2026-01-01' } }
@@ -310,7 +329,7 @@ sets the SII delivers in the field, and the first download should be kept as a f
 ## Printed samples (Node)
 
 ```typescript
-import { parsePrintableDocuments, renderPrintedSample, renderPrintedSamples, writePrintedSamples, findEnvelopeFiles } from 'dte-sdk'
+import { parsePrintableDocuments, renderPrintedSample, renderPrintedSamples, writePrintedSamples, findEnvelopeFiles } from 'dte-sdk/pdf'
 
 // The signed XML is the input: one document the SDK issued, or any EnvioDTE/EnvioBOLETA
 const [doc] = parsePrintableDocuments(signed.xml)
@@ -329,8 +348,8 @@ The printed sample follows the SII printed-samples manual: one page 21.5 cm wide
 and 33 cm, the red type box with the RUT, the type name and the folio, issuer, date, receiver, references, detail,
 totals, the acknowledgement box and `CEDIBLE` mark on the transferable copy (33, 34, 43, 46 and sale guides), and the
 PDF417 stamp of the TED with its legends. The stamp encodes the signed bytes exactly (`renderTedBarcode` gives the PNG
-alone). It needs Node: `pdf-lib` and `bwip-js` are loaded on first use, so importing the package still evaluates
-nothing. Failures of a batch come back as data (`failures[].code`), never as thrown errors; a folio that is not a run
+alone). It needs Node and the optional peers `pdf-lib` and `bwip-js`, which are loaded on first use: without them
+the render functions throw `DEPENDENCY_UNAVAILABLE`. Failures of a batch come back as data (`failures[].code`), never as thrown errors; a folio that is not a run
 of digits is an `INVALID_FOLIO` failure, since it would name the file. Retentions, the commission block of settlement
 invoices and a stamp raster above 300 DPI are not printed yet: see the phase 5a design.
 
@@ -369,7 +388,7 @@ registry (`claimResponseMessage`, `transferabilityMessage`, `CLAIM_ACTIONS`).
 npm install          # also builds via `prepare`
 npm test             # unit, property, type-level and dist smoke tests
 npm test -- --coverage
-npm run build        # esbuild (ESM + CJS) + tsc declarations
+npm run build        # esbuild (ES modules, one file per entry plus shared chunks) + tsc declarations
 npm run lint         # ESLint flat config + Prettier
 npm run size         # bundle size guard (.size-limit.json)
 npm run scan         # no real RUTs, local paths or secrets in tracked files

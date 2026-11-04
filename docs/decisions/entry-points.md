@@ -1,12 +1,68 @@
 # Entry points
 
-Status: decided on 2026-11-02, for phases 1 to 4 and 4b. Tracks [issue #5](https://github.com/arrowsw/dte-sdk/issues/5).
+Status: decided by Hans on 2026-11-04, before 0.1.0. Replaces the decision of 2026-11-02 to keep one root entry (D3, D36,
+D40 and D41 of the design specs). Tracks [issue #5](https://github.com/arrowsw/dte-sdk/issues/5).
 
-**Decision: keep one root entry.** Phase 5 reopens this if the PDF dependencies justify a subpath.
+**Decision: four entries, ES modules only.**
 
-## Measurements
+| Entry | Holds | Size | Reaches `node:` |
+|---|---|---|---|
+| `dte-sdk` | Documents, stamps, signatures, envelopes, books, SII web services client over `fetch` | 30.07 kB | No |
+| `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryFolioRegistry` | 4.19 kB | Yes, on first use |
+| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, certification sets | 39.35 kB | Yes, on first use |
+| `dte-sdk/pdf` | Printed samples; `pdf-lib` and `bwip-js` are optional peers | 8.33 kB | Yes, on first use |
 
-Minified and brotli-compressed, whole bundle:
+Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
+it at phase 5b-1. The phase 5b-2 runner goes in `dte-sdk/portal`.
+
+## Why
+
+- **The root entry bundles for the browser with no configuration.** esbuild and webpack failed on the `import('node:…')`
+  of the old root, whatever a consumer imported. Now esbuild, webpack, Vite and rollup all build a consumer of the root.
+- **One `DteError`.** esbuild shares code between entries only in ESM, and a shared chunk keeps one copy of the class, so
+  what any entry throws passes `instanceof` and `isDteError` of the root. Measured on Node, Bun and Deno. Keeping CommonJS
+  would leave two classes in one process: an error of the old CommonJS bundle failed `isDteError` of the old ESM bundle.
+  `isDteError` stays on `instanceof`, since a process now holds one copy per installed version.
+- **The install drops from 44 MB to 6.6 MB.** `pdf-lib` and `bwip-js` were 85 % of it. Only `dte-sdk/pdf` names them, so
+  they can be optional peers without breaking anyone else's bundler.
+- **Each entry states what it needs.** The root no longer offers Node-only functions to a browser project.
+- **It is free only now.** Moving exports and dropping a format break nobody before 0.1.0, and need a major after it.
+
+## What it does not change
+
+A consumer with a bundler gets about the same bytes, because tree-shaking already dropped what it did not import and
+`node-forge` is most of the rest. Only a consumer that prints without signing gains, since it no longer loads `node-forge`.
+
+| Consumer, kB min + brotli | SDK code only: before → after | With dependencies, before → after |
+|---|---|---|
+| Issuing documents | 11.39 → 10.86 | 116.85 → 116.69 |
+| Web services | 14.40 → 13.94 | 120.08 → 119.66 |
+| Portal | 15.15 → 14.84 | 120.62 → 120.73 |
+| Printed samples | 8.05 → 6.96 | 113.73 → 46.13 |
+| Certification sets | 18.54 → 18.29 | 124.25 → 124.28 |
+
+The last column leaves out `pdf-lib` and `bwip-js`, which load on first use and add about 360 kB to whoever prints.
+
+## What it costs
+
+- **No CommonJS build, and Node ≥ 22.12.** `require()` loads every entry from that version on (run on Node 22.19 and 24,
+  and on Bun), and returns the same module an `import` gets. It loads a little slower than the old CommonJS bundle: 39.7 ms
+  against 33.2 ms for the root on top of Node's start.
+- **Jest in its default CommonJS mode cannot `require()` an ES module.** A consumer runs Jest in ESM mode or transforms
+  this package with `transformIgnorePatterns`. Both were run.
+- **Imports move.** 57 runtime names leave the root. No source module moves or is renamed.
+- **Whoever prints installs two more packages.** Without them the render functions throw `DEPENDENCY_UNAVAILABLE`.
+
+## What guards it
+
+`tests/public-api.test.ts` holds one list per entry. `tests/dist.smoke.test.ts` loads each entry, checks that loading
+evaluates no `node:` module, that the root reaches none, that only `dte-sdk/pdf` names the optional peers, that errors
+cross the entries, that the root bundles for the browser, and that consumers on nodenext, bundler and node10 resolution
+get real types. The CI imports every entry on Bun and Deno.
+
+## Whole bundle before this decision
+
+Minified and brotli-compressed:
 
 | After | ESM | CJS |
 |---|---|---|
@@ -16,17 +72,3 @@ Minified and brotli-compressed, whole bundle:
 | Phase 4 | 44.45 kB | 44.64 kB |
 | Phase 4b | 53.61 kB | 53.72 kB |
 | Phase 5b-1 | 59.54 kB | 59.75 kB |
-
-## Why not subpaths now
-
-- **The errors would stop matching.** Each subpath bundle would carry its own copy of `DteError`, so `instanceof` fails
-  between entries. Avoiding that means marking shared modules as external, and those are internal today.
-- **The portal is not a separate layer.** It reuses `send`, `withRetry` and the redaction of the web services client.
-- **The root entry already behaves.** `sideEffects` is `false`, so bundlers drop what a consumer does not import, and
-  importing the root evaluates no `node:` module: the Node adapters load them on first use. A test guards this on both
-  bundles.
-
-## What this leaves open
-
-Adding subpaths later while keeping the symbols on the root breaks nothing. Removing symbols from the root would be a
-breaking change.
