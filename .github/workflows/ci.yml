@@ -17,8 +17,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Test the active LTS lines (24 is LTS since Oct 2025).
-        node: [20, 22, 24]
+        # Test the active LTS lines (24 is LTS since Oct 2025). Below 22.12 `require()` cannot load an ES module.
+        node: [22, 24]
     steps:
       - uses: actions/checkout@v7
 
@@ -33,7 +33,7 @@ jobs:
       - name: Unit tests
         run: npm test
 
-      - name: Build (esbuild ESM + CJS + tsc types)
+      - name: Build (esbuild ESM + tsc types)
         run: npm run build
 
   coverage:
@@ -97,7 +97,7 @@ jobs:
       # Proves the README "runs in Deno" claim against the real ESM build.
       - name: Deno imports the ESM build
         run: |
-          deno eval "const m = await import('./dist/esm/index.min.js'); if (typeof m.createDocument !== 'function' || typeof m.createSiiClient !== 'function' || typeof m.createPortalClient !== 'function') { console.error('Deno smoke FAILED'); Deno.exit(1); } console.log('Deno smoke ok');"
+          deno eval "const m = await import('./dist/index.min.js'); if (typeof m.createDocument !== 'function' || typeof m.createSiiClient !== 'function' || typeof m.createPortalClient !== 'function') { console.error('Deno smoke FAILED'); Deno.exit(1); } console.log('Deno smoke ok');"
 
   smoke-bun:
     name: smoke (Bun)
@@ -120,7 +120,7 @@ jobs:
       # Proves the README "runs in Bun" claim against the real ESM build.
       - name: Bun imports the ESM build
         run: |
-          bun -e "const m = await import('./dist/esm/index.min.js'); if (typeof m.createDocument !== 'function' || typeof m.createSiiClient !== 'function' || typeof m.createPortalClient !== 'function') { console.error('Bun smoke FAILED'); process.exit(1); } console.log('Bun smoke ok');"
+          bun -e "const m = await import('./dist/index.min.js'); if (typeof m.createDocument !== 'function' || typeof m.createSiiClient !== 'function' || typeof m.createPortalClient !== 'function') { console.error('Bun smoke FAILED'); process.exit(1); } console.log('Bun smoke ok');"
 
   lint:
     name: lint

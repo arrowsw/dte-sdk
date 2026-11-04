@@ -1,12 +1,7 @@
 [
   {
-    "name": "ESM (min + brotli)",
-    "path": "dist/esm/index.min.js",
-    "limit": "64 kB"
-  },
-  {
-    "name": "CJS (min + brotli)",
-    "path": "dist/cjs/index.min.js",
+    "name": "dte-sdk (min + brotli)",
+    "path": "dist/index.min.js",
     "limit": "64 kB"
   }
 ]

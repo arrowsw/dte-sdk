@@ -1,18 +1,17 @@
-import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
+import { spawnSync } from 'node:child_process'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 /**
- * Dual-package smoke test for the built `dist/` artefacts: the ESM and CJS bundles, their
- * `package.json` wiring and the CJS marker. Auto-skipped until `npm run build` has run.
+ * Smoke test for the built `dist/` artefacts and their `package.json` wiring. Jest cannot `require()` an ES module, so
+ * every check runs the real Node loader in a fresh process. Auto-skipped until `npm run build` has run.
  */
-const distRoot = join(__dirname, '..', 'dist')
-const cjsEntry = join(distRoot, 'cjs', 'index.min.js')
-const esmEntry = join(distRoot, 'esm', 'index.min.js')
-const cjsPkgJson = join(distRoot, 'cjs', 'package.json')
+const packageRoot = join(__dirname, '..')
+const distRoot = join(packageRoot, 'dist')
+const rootEntry = join(distRoot, 'index.min.js')
+const href = (file: string): string => pathToFileURL(file).href
 
 const EXPECTED_FUNCTIONS = [
   'createDocument',
@@ -67,7 +66,7 @@ const EXPECTED_FUNCTIONS = [
   'renderPrintedSample',
 ] as const
 
-const nodeImportGuard = pathToFileURL(join(__dirname, 'support', 'node-import-guard.mjs')).href
+const nodeImportGuard = href(join(__dirname, 'support', 'node-import-guard.mjs'))
 const fixtures = join(__dirname, 'fixtures')
 
 type ProbeResult = { readonly ok: boolean; readonly output: string }
@@ -77,169 +76,27 @@ const runNode = (args: readonly string[]): ProbeResult => {
   return { ok: result.status === 0, output: `${result.stdout}${result.stderr}` }
 }
 
-/** Loads `entry` as an ES module in a fresh process where the entry itself may not import a `node:` module. */
-const probeEsmLoad = (entry: string): ProbeResult => {
-  const href = pathToFileURL(realpathSync(entry)).href
-  const script = `import { register } from 'node:module'; register(${JSON.stringify(nodeImportGuard)}, { data: { entry: ${JSON.stringify(href)} } }); await import(${JSON.stringify(href)}); console.log('loaded')`
+/** Loads `entry` as an ES module in a fresh process where its directory may not import a `node:` module. */
+const probeLoad = (entry: string): ProbeResult => {
+  const file = realpathSync(entry)
+  const script = `import { register } from 'node:module'; register(${JSON.stringify(nodeImportGuard)}, { data: { scope: ${JSON.stringify(href(dirname(file)))} } }); await import(${JSON.stringify(href(file))}); console.log('loaded')`
   return runNode(['--input-type=module', '-e', script])
 }
 
-/** Loads `entry` with `require` in a fresh process where the entry itself may not require a `node:` module. */
-const probeCjsLoad = (entry: string): ProbeResult => {
-  const file = realpathSync(entry)
-  const script = `const Module = require('node:module'); const load = Module._load; Module._load = function (request, parent, ...rest) { if (request.startsWith('node:') && parent && parent.filename === ${JSON.stringify(file)}) throw new Error('eager require of ' + request); return load.call(this, request, parent, ...rest) }; require(${JSON.stringify(file)}); console.log('loaded')`
-  return runNode(['-e', script])
-}
-
-/**
- * Starts a loopback HTTPS server in a fresh process, loads the bundle and sends one request through
- * `createNodeHttpsTransport`, so the lazy `node:https` import runs for real inside the built artefact.
- */
-const probeNodeTransport = (loadBundle: string): ProbeResult => {
+/** Runs `body`, in a fresh process, with the root entry as `sdk`. */
+const withSdk = (body: string): ProbeResult => {
   const script = `
-const https = require('node:https'), fs = require('node:fs')
-const certificate = fs.readFileSync(${JSON.stringify(join(fixtures, 'tls-localhost.pem'))}, 'utf8')
-const key = fs.readFileSync(${JSON.stringify(join(fixtures, 'tls-localhost.key.pem'))}, 'utf8')
-${loadBundle}.then(async (sdk) => {
-  const server = https.createServer({ key, cert: certificate }, (request, response) => response.end('pong'))
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-  const transport = sdk.createNodeHttpsTransport({ tls: { ca: certificate } })
-  const response = await transport({ method: 'GET', url: 'https://127.0.0.1:' + server.address().port + '/', headers: {}, timeoutMs: 5000 })
-  console.log(response.status + ' ' + Buffer.from(response.body).toString())
-  server.closeAllConnections()
-  server.close()
+const fs = require('node:fs')
+const fixtures = ${JSON.stringify(fixtures)}
+import(${JSON.stringify(href(rootEntry))}).then(async (sdk) => {
+${body}
 }).catch((error) => { console.error(error); process.exit(1) })`
   return runNode(['-e', script])
 }
 
-const distExists = existsSync(cjsEntry) && existsSync(esmEntry)
-const guarded = distExists ? describe : describe.skip
-
-guarded('dist smoke (dual ESM + CJS package)', () => {
-  test('CJS entry loads via require() and exposes the public API', () => {
-    const req = createRequire(__filename)
-    const cjs = req(cjsEntry) as Record<string, unknown>
-    for (const name of EXPECTED_FUNCTIONS) expect(typeof cjs[name]).toBe('function')
-    expect((cjs.DOCUMENT_TYPES as Record<string, number>).invoice).toBe(33)
-  })
-
-  test('ESM entry loads under the real ESM loader', () => {
-    const script = `import * as m from ${JSON.stringify(pathToFileURL(esmEntry).href)}; const missing = ${JSON.stringify(EXPECTED_FUNCTIONS)}.filter((n) => typeof m[n] !== 'function'); if (missing.length) { console.error(missing.join(',')); process.exit(1) } console.log('ok')`
-    expect(execFileSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8' }).trim()).toBe(
-      'ok',
-    )
-  })
-
-  test('neither bundle evaluates a node: module while it loads', () => {
-    const esm = probeEsmLoad(esmEntry)
-    const cjs = probeCjsLoad(cjsEntry)
-    expect(esm).toEqual({ ok: true, output: 'loaded\n' })
-    expect(cjs).toEqual({ ok: true, output: 'loaded\n' })
-  })
-
-  test('the node: probes do catch an entry that imports a node: module eagerly', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'dte-sdk-probe-'))
-    try {
-      const esmFile = join(dir, 'eager.mjs')
-      const cjsFile = join(dir, 'eager.cjs')
-      writeFileSync(esmFile, "import 'node:os'\n")
-      writeFileSync(cjsFile, "require('node:os')\n")
-      expect(probeEsmLoad(esmFile)).toMatchObject({
-        ok: false,
-        output: expect.stringContaining('eager import of node:os'),
-      })
-      expect(probeCjsLoad(cjsFile)).toMatchObject({
-        ok: false,
-        output: expect.stringContaining('eager require of node:os'),
-      })
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-
-  test('the lazy node:https import works inside the minified bundles', () => {
-    const esm = probeNodeTransport(`import(${JSON.stringify(pathToFileURL(esmEntry).href)})`)
-    const cjs = probeNodeTransport(`Promise.resolve(require(${JSON.stringify(cjsEntry)}))`)
-    expect(esm).toEqual({ ok: true, output: '200 pong\n' })
-    expect(cjs).toEqual({ ok: true, output: '200 pong\n' })
-  })
-
-  test('CJS marker is present', () => {
-    const req = createRequire(__filename)
-    expect(req(cjsPkgJson)).toEqual({ type: 'commonjs' })
-  })
-
-  test('the bundles issue and verify a document end to end', () => {
-    const req = createRequire(__filename)
-    const sdk = req(cjsEntry) as typeof import('../src')
-    const { readFileSync } = req('node:fs') as typeof import('node:fs')
-    const caf = sdk.parseCaf(readFileSync(join(fixtures, 'caf-33.xml'), 'utf8'))
-    const certificate = sdk.loadCertificateFromPkcs12(
-      new Uint8Array(readFileSync(join(fixtures, 'cert.pfx'))),
-      'secret',
-    )
-    const signed = sdk.issueDocument({
-      document: {
-        type: 33,
-        folio: 1,
-        issuer: {
-          rut: '76543210-3',
-          businessName: 'Comercial Andina SpA',
-          businessActivity: 'Software',
-          address: 'Av. 1',
-          commune: 'Santiago',
-        },
-        receiver: {
-          rut: '12345678-5',
-          businessName: 'Cliente',
-          businessActivity: 'Comercio',
-          address: 'Calle 2',
-          commune: 'Providencia',
-        },
-        items: [{ name: 'Servicio', unitPrice: 1000 }],
-      },
-      caf,
-      certificate,
-      checkCafExpiry: false,
-    })
-    expect(sdk.verifyDocumentSignature(signed.xml).valid).toBe(true)
-  })
-
-  test('the bundles build a client, sign a seed and obtain a token without touching the network', async () => {
-    const req = createRequire(__filename)
-    const sdk = req(cjsEntry) as typeof import('../src')
-    const { readFileSync } = req('node:fs') as typeof import('node:fs')
-    const reply = (name: string) => ({
-      status: 200,
-      headers: {},
-      body: new Uint8Array(readFileSync(join(fixtures, 'sii', name))),
-    })
-    const requests: string[] = []
-    const transport: import('../src').HttpTransport = async (request) => {
-      requests.push(request.url)
-      return reply(request.url.endsWith('CrSeed.jws') ? 'soap-seed-ok.xml' : 'soap-token-ok.xml')
-    }
-    const certificate = sdk.loadCertificateFromPem({
-      privateKeyPem: readFileSync(join(fixtures, 'cert.key.pem'), 'utf8'),
-      certificatePem: readFileSync(join(fixtures, 'cert.pem'), 'utf8'),
-    })
-    const sii = sdk.createSiiClient({ environment: 'certification', certificate, transport })
-    expect(sii.receiptsChannel).toBe('soap')
-    expect(sdk.signSeed('000000000078', certificate)).toContain('<Reference URI="">')
-    await expect(sdk.getToken(sii, 'soap')).resolves.toBe('ABCDEFGHIJKLM')
-    expect(requests).toEqual([
-      'https://maullin.sii.cl/DTEWS/CrSeed.jws',
-      'https://maullin.sii.cl/DTEWS/GetTokenFromSeed.jws',
-    ])
-  })
-})
-
-/** Issues an invoice with the fixtures and renders its printed sample through a loaded bundle. */
-const renderScript = (loadBundle: string): string => `
-const fs = require('node:fs')
-${loadBundle}.then(async (sdk) => {
-  const caf = sdk.parseCaf(fs.readFileSync(${JSON.stringify(join(fixtures, 'caf-33.xml'))}, 'utf8'))
-  const certificate = sdk.loadCertificateFromPkcs12(new Uint8Array(fs.readFileSync(${JSON.stringify(join(fixtures, 'cert.pfx'))})), 'secret')
+const ISSUE_DOCUMENT = `
+  const caf = sdk.parseCaf(fs.readFileSync(fixtures + '/caf-33.xml', 'utf8'))
+  const certificate = sdk.loadCertificateFromPkcs12(new Uint8Array(fs.readFileSync(fixtures + '/cert.pfx')), 'secret')
   const signed = sdk.issueDocument({
     document: {
       type: 33, folio: 1,
@@ -248,17 +105,104 @@ ${loadBundle}.then(async (sdk) => {
       items: [{ name: 'Servicio', unitPrice: 1000 }],
     },
     caf, certificate, checkCafExpiry: false,
+  })`
+
+const distExists = existsSync(rootEntry)
+const guarded = distExists ? describe : describe.skip
+
+guarded('dist smoke (ES modules)', () => {
+  test('every target of package.json#exports exists', () => {
+    const { exports: targets } = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8')) as {
+      exports: Record<string, string | Record<string, string>>
+    }
+    const files = Object.values(targets).flatMap((target) =>
+      typeof target === 'string' ? [target] : Object.values(target),
+    )
+    expect(files.filter((file) => !existsSync(join(packageRoot, file)))).toEqual([])
   })
+
+  test('the root entry loads under the real ESM loader and exposes the public API', () => {
+    const script = `import * as m from ${JSON.stringify(href(rootEntry))}; const missing = ${JSON.stringify(EXPECTED_FUNCTIONS)}.filter((n) => typeof m[n] !== 'function'); if (missing.length) { console.error(missing.join(',')); process.exit(1) } console.log(m.DOCUMENT_TYPES.invoice)`
+    expect(runNode(['--input-type=module', '-e', script])).toEqual({ ok: true, output: '33\n' })
+  })
+
+  test('a CommonJS consumer gets the same module with require()', () => {
+    const script = `const m = require(${JSON.stringify(rootEntry)}); import(${JSON.stringify(href(rootEntry))}).then((n) => console.log(typeof m.createDocument, m.DteError === n.DteError))`
+    const result = runNode(['-e', script])
+    expect(result.ok).toBe(true)
+    expect(result.output).toContain('function true')
+  })
+
+  test('the entry evaluates no node: module while it loads', () => {
+    expect(probeLoad(rootEntry)).toEqual({ ok: true, output: 'loaded\n' })
+  })
+
+  test('the node: probe does catch an entry that imports a node: module eagerly', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dte-sdk-probe-'))
+    try {
+      const file = join(dir, 'eager.mjs')
+      writeFileSync(file, "import 'node:os'\n")
+      expect(probeLoad(file)).toMatchObject({ ok: false, output: expect.stringContaining('eager import of node:os') })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  // A loopback HTTPS server in a fresh process, so the lazy `node:https` import runs for real inside the built artefact.
+  test('the lazy node:https import works inside the minified bundle', () => {
+    const result = withSdk(`
+  const https = require('node:https')
+  const certificate = fs.readFileSync(fixtures + '/tls-localhost.pem', 'utf8')
+  const key = fs.readFileSync(fixtures + '/tls-localhost.key.pem', 'utf8')
+  const server = https.createServer({ key, cert: certificate }, (request, response) => response.end('pong'))
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const transport = sdk.createNodeHttpsTransport({ tls: { ca: certificate } })
+  const response = await transport({ method: 'GET', url: 'https://127.0.0.1:' + server.address().port + '/', headers: {}, timeoutMs: 5000 })
+  console.log(response.status + ' ' + Buffer.from(response.body).toString())
+  server.closeAllConnections()
+  server.close()`)
+    expect(result).toEqual({ ok: true, output: '200 pong\n' })
+  })
+
+  test('the bundle issues and verifies a document end to end', () => {
+    const result = withSdk(`${ISSUE_DOCUMENT}
+  console.log(sdk.verifyDocumentSignature(signed.xml).valid)`)
+    expect(result).toEqual({ ok: true, output: 'true\n' })
+  })
+
+  test('the bundle builds a client, signs a seed and obtains a token without touching the network', () => {
+    const result = withSdk(`
+  const reply = (name) => ({ status: 200, headers: {}, body: new Uint8Array(fs.readFileSync(fixtures + '/sii/' + name)) })
+  const requests = []
+  const transport = async (request) => {
+    requests.push(request.url)
+    return reply(request.url.endsWith('CrSeed.jws') ? 'soap-seed-ok.xml' : 'soap-token-ok.xml')
+  }
+  const certificate = sdk.loadCertificateFromPem({
+    privateKeyPem: fs.readFileSync(fixtures + '/cert.key.pem', 'utf8'),
+    certificatePem: fs.readFileSync(fixtures + '/cert.pem', 'utf8'),
+  })
+  const sii = sdk.createSiiClient({ environment: 'certification', certificate, transport })
+  console.log(JSON.stringify({
+    channel: sii.receiptsChannel,
+    seed: sdk.signSeed('000000000078', certificate).includes('<Reference URI="">'),
+    token: await sdk.getToken(sii, 'soap'),
+    requests,
+  }))`)
+    expect(result.ok).toBe(true)
+    expect(JSON.parse(result.output)).toEqual({
+      channel: 'soap',
+      seed: true,
+      token: 'ABCDEFGHIJKLM',
+      requests: ['https://maullin.sii.cl/DTEWS/CrSeed.jws', 'https://maullin.sii.cl/DTEWS/GetTokenFromSeed.jws'],
+    })
+  })
+
+  test('the bundle loads pdf-lib and bwip-js on first use and renders a printed sample', () => {
+    const result = withSdk(`${ISSUE_DOCUMENT}
   const [doc] = sdk.parsePrintableDocuments(signed.xml)
   const pdf = await sdk.renderPrintedSample(doc, { transferable: true })
-  console.log(Buffer.from(pdf.subarray(0, 5)).toString() + ' ' + (pdf.length > 10000))
-}).catch((error) => { console.error(error); process.exit(1) })`
-
-guarded('dist smoke: printed samples', () => {
-  test('the bundles load pdf-lib and bwip-js on first use and render a printed sample', () => {
-    const esm = runNode(['-e', renderScript(`import(${JSON.stringify(pathToFileURL(esmEntry).href)})`)])
-    const cjs = runNode(['-e', renderScript(`Promise.resolve(require(${JSON.stringify(cjsEntry)}))`)])
-    expect(esm).toEqual({ ok: true, output: '%PDF- true\n' })
-    expect(cjs).toEqual({ ok: true, output: '%PDF- true\n' })
+  console.log(Buffer.from(pdf.subarray(0, 5)).toString() + ' ' + (pdf.length > 10000))`)
+    expect(result).toEqual({ ok: true, output: '%PDF- true\n' })
   })
 })
