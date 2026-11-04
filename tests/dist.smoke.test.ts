@@ -1,5 +1,14 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -281,4 +290,60 @@ guarded('dist smoke (ES modules)', () => {
   console.log(Buffer.from(sample.subarray(0, 5)).toString() + ' ' + (sample.length > 10000))`)
     expect(result).toEqual({ ok: true, output: '%PDF- true\n' })
   })
+})
+
+// An `any` would let each assignment compile, and the unused `@ts-expect-error` would then be the error.
+const TYPE_CONSUMER = `
+import { createDocument } from 'dte-sdk'
+import { createNodeHttpsTransport } from 'dte-sdk/node'
+import { createPortalClient } from 'dte-sdk/portal'
+import { parsePrintableDocuments } from 'dte-sdk/pdf'
+
+// @ts-expect-error
+export const root: number = createDocument
+// @ts-expect-error
+export const node: number = createNodeHttpsTransport
+// @ts-expect-error
+export const portal: number = createPortalClient
+// @ts-expect-error
+export const pdf: number = parsePrintableDocuments
+`
+
+const TYPE_CONSUMERS: ReadonlyArray<readonly [string, string, Record<string, string>]> = [
+  ['an ES module on nodenext', 'consumer.mts', { module: 'nodenext', moduleResolution: 'nodenext' }],
+  ['a CommonJS module on nodenext', 'consumer.cts', { module: 'nodenext', moduleResolution: 'nodenext' }],
+  ['a project on bundler resolution', 'consumer.ts', { module: 'esnext', moduleResolution: 'bundler' }],
+  ['a project on node10 resolution', 'consumer.ts', { module: 'commonjs', moduleResolution: 'node10' }],
+]
+
+guarded('dist smoke: published types', () => {
+  test.each(TYPE_CONSUMERS)(
+    '%s sees the real types of every entry',
+    (_name, file, options) => {
+      const dir = mkdtempSync(join(tmpdir(), 'dte-sdk-types-'))
+      try {
+        mkdirSync(join(dir, 'node_modules'))
+        symlinkSync(packageRoot, join(dir, 'node_modules', 'dte-sdk'))
+        writeFileSync(join(dir, file), TYPE_CONSUMER)
+        const compilerOptions = {
+          ...options,
+          target: 'es2020',
+          strict: true,
+          noEmit: true,
+          skipLibCheck: false,
+          esModuleInterop: true,
+          types: ['node'],
+          typeRoots: [join(packageRoot, 'node_modules', '@types')],
+        }
+        writeFileSync(join(dir, 'tsconfig.json'), JSON.stringify({ compilerOptions, files: [file] }))
+        const tsc = join(packageRoot, 'node_modules', '.bin', 'tsc')
+        const result = spawnSync(tsc, ['-p', dir], { encoding: 'utf8' })
+        expect(result.stdout).toBe('')
+        expect(result.status).toBe(0)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+    120_000,
+  )
 })

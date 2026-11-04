@@ -49,7 +49,7 @@
     "mutation": "stryker run",
     "prepare": "npm run build",
     "prepublishOnly": "npm run scan && npm run test && npm run prettier && npm run lint",
-    "build:types": "tsc --emitDeclarationOnly --outDir dist",
+    "build:types": "tsc --emitDeclarationOnly --outDir dist && node scripts/add-declaration-extensions.mjs",
     "scan": "node scripts/scan-real-data.mjs",
     "fixtures": "node scripts/make-fixtures.mjs",
     "fixtures:tls": "node scripts/make-tls-fixture.mjs",
