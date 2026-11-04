@@ -3,7 +3,7 @@ import { createPurchaseSalesBook, signPurchaseSalesBook, type SignedPurchaseSale
 import { CERTIFICATION_COUNTERPARTY } from '../catalogs/certification'
 import type { Certificate } from '../certificate/certificate'
 import { DteError } from '../errors'
-import type { BookEntryInput, GuideEntryInput } from '../model/book'
+import type { BookEntryInput, BookTotals, GuideEntryInput } from '../model/book'
 import type { IssuedSet } from './issue-set'
 import type { PurchaseBookPlan } from './set-plan'
 import { bookDocumentTypeOf, type TestBookDocument } from './set-text'
@@ -25,7 +25,68 @@ export type CertificationBookInput = {
   readonly certificate: Certificate
   /** EN: Clock for the book id and signature timestamp. ES: Reloj para el id del libro y la marca de la firma. */
   readonly now?: () => Date
+  /** EN: `total` (default) or `adjustment`, for a period the SII already holds; the guide book is always total. ES: `TipoEnvio` — `total` (por defecto) o `adjustment`, para un período que el SII ya tiene; el libro de guías siempre es total. */
+  readonly submission?: 'total' | 'adjustment'
+  /** EN: Period totals of the earlier submissions, carried forward on an adjustment. ES: Totales del período de los envíos anteriores, arrastrados en un ajuste. */
+  readonly previousTotals?: readonly BookTotals[]
 }
+
+/**
+ * EN: The totals of one issued document, as the books read them.
+ * ES: Los totales de un documento emitido, como los leen los libros.
+ */
+export type BookCaseTotals = {
+  readonly netAmount?: number
+  readonly exemptAmount?: number
+  readonly vatAmount?: number
+  readonly totalAmount: number
+}
+
+/**
+ * EN: One document of the sales book: the issued set's case, or what a run kept of it.
+ * ES: Un documento del libro de ventas: el caso del set emitido, o lo que una corrida guardó de él.
+ */
+export type SalesBookCase = { readonly type: number; readonly folio: number; readonly totals: BookCaseTotals }
+
+/**
+ * EN: One guide of the guide book: the issued set's case, or what a run kept of it.
+ * ES: Una guía del libro de guías: el caso del set emitido, o lo que una corrida guardó de él.
+ */
+export type GuideBookCase = {
+  readonly folio: number
+  readonly issueDate: string
+  readonly transferType?: number
+  readonly totals: BookCaseTotals
+}
+
+/**
+ * EN: A sales-book source that is not the issued set itself: its kind and cases, as a resumed run holds them.
+ * ES: Una fuente de libro de ventas que no es el set emitido: su tipo y sus casos, como los tiene una corrida retomada.
+ */
+export type SalesBookSource = { readonly kind: string; readonly cases: readonly SalesBookCase[] }
+
+/**
+ * EN: A guide-book source that is not the issued set itself.
+ * ES: Una fuente de libro de guías que no es el set emitido.
+ */
+export type GuideBookSource = { readonly kind: string; readonly cases: readonly GuideBookCase[] }
+
+const salesCases = (set: IssuedSet | SalesBookSource): readonly SalesBookCase[] =>
+  'envelope' in set
+    ? set.cases.map((issued) => ({ type: issued.type, folio: issued.folio, totals: issued.document.header.totals }))
+    : set.cases
+
+const guideCases = (set: IssuedSet | GuideBookSource): readonly GuideBookCase[] =>
+  'envelope' in set
+    ? set.cases.map((issued) => ({
+        folio: issued.folio,
+        issueDate: issued.document.header.issueDate,
+        ...(issued.document.header.options.transferType === undefined
+          ? {}
+          : { transferType: issued.document.header.options.transferType }),
+        totals: issued.document.header.totals,
+      }))
+    : set.cases
 
 /**
  * EN: The customer written on the sales and guide books.
@@ -87,12 +148,12 @@ const compact = <T extends object>(value: T): T =>
  * @throws {DteError} EN: `INVALID_OPTION` (field `set`) when the set is not the basic one; the phase 3 codes. ES: `INVALID_OPTION` (campo `set`) si el set no es el básico; los códigos de la fase 3.
  */
 export const createCertificationSalesBook = (
-  set: IssuedSet,
+  set: IssuedSet | SalesBookSource,
   input: CertificationSalesBookInput,
 ): SignedPurchaseSalesBook => {
   if (set.kind !== 'basic') throw new DteError('INVALID_OPTION', { field: 'set', kind: set.kind })
-  const entries: BookEntryInput[] = set.cases.map((issued) => {
-    const totals = issued.document.header.totals
+  const entries: BookEntryInput[] = salesCases(set).map((issued) => {
+    const totals = issued.totals
     const sign = issued.type === 61 && input.creditNoteSign === 'negative' ? -1 : 1
     const amount = (value: number | undefined): number => Math.round((value ?? 0) * sign)
     return {
@@ -117,9 +178,10 @@ export const createCertificationSalesBook = (
       resolutionNumber: input.resolution.number,
       operation: 'sale',
       kind: 'monthly',
-      submission: 'total',
+      submission: input.submission ?? 'total',
     },
     entries,
+    ...(input.previousTotals === undefined ? {} : { previousTotals: input.previousTotals }),
     now: input.now?.(),
   })
   return signPurchaseSalesBook(book, input.certificate)
@@ -260,9 +322,10 @@ export const createCertificationPurchaseBook = (
       resolutionNumber: input.resolution.number,
       operation: 'purchase',
       kind: 'monthly',
-      submission: 'total',
+      submission: input.submission ?? 'total',
     },
     entries,
+    ...(input.previousTotals === undefined ? {} : { previousTotals: input.previousTotals }),
     commonUseVatFactor: plan.proportionalityFactor,
     now: input.now?.(),
   })
@@ -282,15 +345,17 @@ const defaultFlag = (index: number): GuideBookCaseFlag => (index === 1 ? 'modifi
  * notificación 3 por defecto, libro `ESPECIAL`, envío `TOTAL`.
  * @throws {DteError} EN: `INVALID_OPTION` (field `set`) when the set is not the guide one; the phase 3 codes. ES: `INVALID_OPTION` (campo `set`) si el set no es el de guías; los códigos de la fase 3.
  */
-export const createCertificationGuideBook = (set: IssuedSet, input: CertificationGuideBookInput): SignedGuideBook => {
+export const createCertificationGuideBook = (
+  set: IssuedSet | GuideBookSource,
+  input: CertificationGuideBookInput,
+): SignedGuideBook => {
   if (set.kind !== 'guide') throw new DteError('INVALID_OPTION', { field: 'set', kind: set.kind })
-  const entries: GuideEntryInput[] = set.cases.map((issued, index) => {
+  const entries: GuideEntryInput[] = guideCases(set).map((issued, index) => {
     const flag = input.caseFlags?.[index] ?? defaultFlag(index)
-    const header = issued.document.header
-    const transferType = header.options.transferType ?? 1
+    const transferType = issued.transferType ?? 1
     if (flag === 'voided')
-      return { folio: issued.folio, transferType, date: header.issueDate, voided: 'guide', totalAmount: 0 }
-    const net = header.totals.netAmount ?? 0
+      return { folio: issued.folio, transferType, date: issued.issueDate, voided: 'guide', totalAmount: 0 }
+    const net = issued.totals.netAmount ?? 0
     const sale =
       transferType === 1
         ? compact({
@@ -298,16 +363,16 @@ export const createCertificationGuideBook = (set: IssuedSet, input: Certificatio
             receiverName: input.receiver.name,
             netAmount: net > 0 ? net : undefined,
             taxRate: net > 0 ? VAT_RATE : undefined,
-            vatAmount: net > 0 ? header.totals.vatAmount : undefined,
+            vatAmount: net > 0 ? issued.totals.vatAmount : undefined,
           })
         : {}
     return compact({
       folio: issued.folio,
       transferType,
-      date: header.issueDate,
+      date: issued.issueDate,
       adjustment: flag === 'modified' ? ('add' as const) : undefined,
       ...sale,
-      totalAmount: header.totals.totalAmount,
+      totalAmount: issued.totals.totalAmount,
     })
   })
   const book = createGuideBook({
