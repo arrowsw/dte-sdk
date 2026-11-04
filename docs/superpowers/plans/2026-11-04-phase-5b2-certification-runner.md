@@ -16,7 +16,7 @@
 
 This plan was generated from a throwaway branch cut from `canary` at `524eebc` (with phase 5b-1 merged), where the code was written and made to pass, with one commit per task. On that branch each task was checked in order: its tests alone fail on the previous commit, and with the task applied `tsc` compiles and the tests pass. At the tip, on 2026-11-04: Prettier, ESLint, `tsc`, 2 231 tests with coverage at 100 % on the four metrics, build, size (ESM 70.41 kB, CJS 70.67 kB against the 80 kB limit) and scan all pass.
 
-So copy the code as it is. If a test fails, something around it changed since then, such as `canary`: investigate that before changing the code.
+So copy the code as it is. If a test fails, something around it changed since then, such as `canary`: investigate that before changing the code. One change is already known: issue 5 is turning the package ESM-only with subpath entry points, in a pull request of its own; Task 7 says what to do when it lands first.
 
 **Nothing here has met the SII.** Every page shape, wording and wait reproduces field behaviour known to carry a certification from the test sets to the declaration of compliance; none of it has been seen by this SDK, because the company is not enrolled (spec section 6). The first enrolled run must keep every portal answer the store writes as an artefact and turn them into fixtures.
 
@@ -7578,6 +7578,8 @@ MSG
 ## Task 7: Public API, size cap and documentation
 
 The runtime names and the types on the root entry and in `RUNTIME_EXPORTS` (spec 3.9), the type tests, the bundle limit at 80 kB (D74), the README section, `llms.txt` and the changelog (spec 3.12).
+
+**If the subpath entry points of issue 5 land on `canary` first** (ESM-only package, four entries, the portal, folios and certification under `dte-sdk/portal`): put this task's exports in `src/portal/index.ts` instead of `src/index.ts`, add the names to that entry's list in `tests/public-api.test.ts`, raise the `dte-sdk/portal` limit in `.size-limit.json` instead of the whole-bundle limits, and measure that entry; the CJS figures of this plan no longer apply. No module of this plan moves or is renamed, so tasks 1 to 6 hold as they are.
 
 **Files:**
 

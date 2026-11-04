@@ -110,6 +110,13 @@ The root stands at 53.6 kB with phase 4b and about 60 kB with 5b-1; this phase a
 runner, about 15 to 20 kB. The cap goes to 80 kB for both formats. Subpath entry points stay the question of issue 5
 before 0.1.0.
 
+**Pending, from issue 5 (2026-11-04):** the package is going ESM-only with subpath entry points (`dte-sdk`,
+`dte-sdk/node`, `dte-sdk/portal`, `dte-sdk/pdf`), the portal, the folios and the certification leaving the root for
+`dte-sdk/portal`, in a pull request of its own. When that lands first, this phase's exports go in
+`src/portal/index.ts` instead of `src/index.ts` (3.9), the 80 kB cap becomes the raise of the `dte-sdk/portal` limit
+(3.12), and the CJS figures of section 6 no longer apply. No module of this phase moves or is renamed. Whoever lands
+second rebases and measures again.
+
 ### D75. The GWT steps stay in 5c; the runner stops and resumes around them
 
 After the simulation is confirmed the stage is `INTERCAMBIO`. The runner returns with `stopped: 'exchange'`; phase 5c
