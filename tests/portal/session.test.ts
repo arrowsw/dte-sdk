@@ -709,3 +709,33 @@ describe('stale cookies end in the representation page', () => {
     expect(harness.fake.requests.filter((request) => request.url.startsWith(HERCULES))).toHaveLength(1)
   })
 })
+
+describe('raw bodies', () => {
+  test('a raw body goes with its content type, the extra headers and the cookies; the form and JSON paths take extra headers too', async () => {
+    const harness = await signedIn([
+      { url: `${MAULLIN}/raw`, method: 'POST', reply: { body: 'ok' } },
+      { url: `${MAULLIN}/form`, method: 'POST', reply: { body: 'ok' } },
+    ])
+    await withPortalSession(harness.portal, 'raw', undefined, async (context) => {
+      await portalRequest(context, 'raw', 'POST', `${MAULLIN}/raw`, {
+        body: new Uint8Array([1, 2, 3]),
+        contentType: 'text/x-gwt-rpc; charset=UTF-8',
+        referer: `${MAULLIN}/`,
+        headers: { 'X-GWT-Permutation': 'abc' },
+      })
+      await portalRequest(context, 'bytes', 'POST', `${MAULLIN}/raw`, { body: new Uint8Array([4]) })
+      await portalRequest(context, 'form', 'POST', `${MAULLIN}/form`, { form: { a: '1' }, headers: { 'X-Extra': 'y' } })
+    })
+    const [raw, bytes, form] = harness.fake.requests
+    expect(raw.headers['content-type']).toBe('text/x-gwt-rpc; charset=UTF-8')
+    expect(raw.headers['x-gwt-permutation']).toBe('abc')
+    expect(raw.headers.referer).toBe(`${MAULLIN}/`)
+    expect(raw.headers.origin).toBe('https://maullin.sii.cl')
+    expect(raw.headers.cookie).toContain('NETSCAPE_LIVEWIRE.rut=')
+    expect([...raw.body!]).toEqual([1, 2, 3])
+    expect(bytes.headers['content-type']).toBe('application/octet-stream')
+    expect(form.headers['content-type']).toBe('application/x-www-form-urlencoded')
+    expect(form.headers['x-extra']).toBe('y')
+    expect(form.text).toBe('a=1')
+  })
+})

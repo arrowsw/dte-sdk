@@ -161,6 +161,39 @@ const jsonHeaders = (
   ...contextHeaders(url, cookies, referer),
 })
 
+// The headers of a raw post (a multipart body, a GWT-RPC body): the browser's, with the given content type and
+// whatever the caller adds.
+const rawHeaders = (
+  url: string,
+  cookies: CookieJar,
+  referer: string | undefined,
+  contentType: string,
+  extra: Readonly<Record<string, string>>,
+): Readonly<Record<string, string>> => ({
+  'User-Agent': USER_AGENT,
+  Accept: '*/*',
+  'Accept-Language': ACCEPT_LANGUAGE,
+  'Content-Type': contentType,
+  Origin: new URL(url).origin,
+  ...contextHeaders(url, cookies, referer),
+  ...extra,
+})
+
+/**
+ * EN: What a request may carry: a form, a JSON value, or raw bytes with their content type, plus the referer and any
+ * header the page expects.
+ * ES: Lo que puede llevar una petición: un formulario, un valor JSON, o bytes crudos con su tipo de contenido, más el
+ * referer y cualquier cabecera que la página espere.
+ */
+export type PortalRequestOptions = {
+  readonly form?: Readonly<Record<string, string>>
+  readonly json?: unknown
+  readonly body?: Uint8Array
+  readonly contentType?: string
+  readonly referer?: string
+  readonly headers?: Readonly<Record<string, string>>
+}
+
 // A document or a JSON answer may say anything: only a page can be the firewall's.
 const isStructuredBody = (text: string): boolean => /^\s*(?:<\?xml|[{[])/.test(text)
 
@@ -208,16 +241,24 @@ export const portalRequest = async (
   step: string,
   method: HttpMethod,
   url: string,
-  options: {
-    readonly form?: Readonly<Record<string, string>>
-    readonly json?: unknown
-    readonly referer?: string
-  } = {},
+  options: PortalRequestOptions = {},
 ): Promise<PortalPage> => {
   const { portal, overrides, state } = context
   const operation = `${context.operation}.${step}`
   const text = options.json === undefined ? options.form && formEncode(options.form) : JSON.stringify(options.json)
-  const body = text === undefined ? undefined : encodeUtf8(text)
+  const body = options.body ?? (text === undefined ? undefined : encodeUtf8(text))
+  const headersOf = (): Readonly<Record<string, string>> => {
+    if (options.body !== undefined)
+      return rawHeaders(
+        url,
+        state.cookies,
+        options.referer,
+        options.contentType ?? 'application/octet-stream',
+        options.headers ?? {},
+      )
+    if (options.json !== undefined) return { ...jsonHeaders(url, state.cookies, options.referer), ...options.headers }
+    return { ...requestHeaders(url, method, state.cookies, options.referer), ...options.headers }
+  }
   const response = await withRetry(
     mergeRetryPolicy(portal.retry, overrides?.retry),
     async (attempt) => {
@@ -226,10 +267,7 @@ export const portalRequest = async (
         channel: 'portal',
         method,
         url,
-        headers:
-          options.json === undefined
-            ? requestHeaders(url, method, state.cookies, options.referer)
-            : jsonHeaders(url, state.cookies, options.referer),
+        headers: headersOf(),
         body,
         timeoutMs: overrides?.timeoutMs ?? portal.timeoutMs,
         signal: overrides?.signal,
@@ -279,7 +317,7 @@ export const navigate = async (
   step: string,
   method: HttpMethod,
   url: string,
-  options: { readonly form?: Readonly<Record<string, string>>; readonly referer?: string } = {},
+  options: PortalRequestOptions = {},
 ): Promise<PortalPage> => followRedirects(context, step, await portalRequest(context, step, method, url, options))
 
 const sessionLimit = (context: PortalContext): DteError =>
