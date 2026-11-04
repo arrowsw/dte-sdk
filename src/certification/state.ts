@@ -2,6 +2,7 @@ import type { BookKey, CertificationStage, SetKey } from '../catalogs/certificat
 import { DteError } from '../errors'
 import type { BookTotals } from '../model/book'
 import type { DeclarationOutcome } from '../portal/certification'
+import type { SampleDetail } from '../portal/pages/samples'
 import type { CertificationPlan } from './set-plan'
 
 /**
@@ -99,6 +100,48 @@ export type EnvelopeDiagnosis = {
 }
 
 /**
+ * EN: The exchange stage: the set answered and how far the answers got.
+ * ES: La etapa de intercambio: el set respondido y hasta dónde llegaron las respuestas.
+ */
+export type ExchangeState = {
+  /** EN: The set id answered. ES: `EnvioDTEID` — El id del set respondido. */
+  readonly setId: string
+  /** EN: The set's issuer. ES: `RutRecibe` — El emisor del set. */
+  readonly issuerRut: string
+  /** EN: How many documents the set held. ES: Cuántos documentos traía el set. */
+  readonly documents: number
+  /** EN: When the answers were generated, ISO. ES: Cuándo se generaron las respuestas, ISO. */
+  readonly generatedAt: string
+  /** EN: The three answers were uploaded. ES: Las tres respuestas se subieron. */
+  readonly uploaded: boolean
+  /** EN: The three confirmations were accepted. ES: Las tres confirmaciones se aceptaron. */
+  readonly confirmed: boolean
+  /** EN: The state the user validation reported when the company was not in the exchange. ES: El estado que informó la validación del usuario cuando la empresa no estaba en el intercambio. */
+  readonly portalState?: string
+}
+
+/**
+ * EN: The printed samples stage: the review and what was uploaded to it.
+ * ES: La etapa de muestras impresas: la revisión y lo que se subió a ella.
+ */
+export type SamplesState = {
+  /** EN: The review id, or null. ES: El id de la revisión, o null. */
+  readonly revisionId: number | null
+  /** EN: The review's token, or null. ES: El token de la revisión, o null. */
+  readonly revisionToken: string | null
+  /** EN: The review state last read, or null when the portal named none. ES: El último estado leído de la revisión, o null si el portal no nombró ninguno. */
+  readonly state: string | null
+  /** EN: The file names uploaded in this run, in order. ES: Los nombres de archivo subidos en esta corrida, en orden. */
+  readonly uploaded: readonly string[]
+  /** EN: When the review was submitted, when it was. ES: Cuándo se envió la revisión, si se envió. */
+  readonly submittedAt?: string
+  /** EN: How the SII filed each PDF of a rejected review. ES: Cómo clasificó el SII cada PDF de una revisión rechazada. */
+  readonly detail?: readonly SampleDetail[]
+  /** EN: The sentence that sums a rejection up. ES: La frase que resume un rechazo. */
+  readonly summary?: string
+}
+
+/**
  * EN: The whole state of a certification run: what was downloaded, obtained, sent, declared and approved. A plain
  * JSON value the store keeps between runs; the runner resumes from it.
  * ES: Todo el estado de una corrida de certificación: lo descargado, obtenido, enviado, declarado y aprobado. Un valor
@@ -136,6 +179,10 @@ export type CertificationState = {
   }
   /** EN: SOAP diagnoses by track id. ES: Diagnósticos SOAP por track id. */
   readonly diagnosis?: Readonly<Record<string, EnvelopeDiagnosis>>
+  /** EN: The exchange stage. ES: La etapa de intercambio. */
+  readonly exchange?: ExchangeState
+  /** EN: The printed samples stage. ES: La etapa de muestras impresas. */
+  readonly samples?: SamplesState
   /** EN: The sentence that blocked the compliance declaration. ES: La frase que bloqueó la declaración de cumplimiento. */
   readonly blocked?: string
   /** EN: Where the run stands. ES: Dónde está la corrida. */

@@ -1,7 +1,7 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { PNG } from 'pngjs'
-import { findEnvelopeFiles, samplePath, writePrintedSamples } from '../../src/pdf/node-samples'
+import { findEnvelopeFiles, readPrintedSamples, samplePath, writePrintedSamples } from '../../src/pdf/node-samples'
 import { loadNodeFs, type NodeFsModules } from '../../src/sii/node-fs'
 import { FIXED_NOW } from '../support/fixtures'
 import { pdfImages } from '../support/pdf'
@@ -176,5 +176,50 @@ describe('samplePath', () => {
     for (const name of ['../muestra_33_7.pdf', 'muestra_33_../7.pdf', join('nested', 'muestra_33_7.pdf')]) {
       expect(() => samplePath(path, directory, name)).toThrow('Folio must be a positive integer (field=Folio)')
     }
+  })
+})
+
+describe('readPrintedSamples', () => {
+  const samplesDir = async (): Promise<string> => {
+    const dir = await dirs.make('dte-sdk-read-samples-')
+    await mkdir(join(dir, 'SET-SIMULACION'), { recursive: true })
+    await mkdir(join(dir, 'SET-PRUEBAS', 'nested'), { recursive: true })
+    await writeFile(join(dir, 'SET-SIMULACION', 'muestra_61_2.pdf'), '%PDF-sim')
+    await writeFile(join(dir, 'SET-PRUEBAS', 'muestra_33_1.pdf'), '%PDF-test')
+    await writeFile(join(dir, 'SET-PRUEBAS', 'nested', 'muestra_33_9.pdf'), '%PDF-nested')
+    await writeFile(join(dir, 'SET-PRUEBAS', 'OTRA.PDF'), 'upper')
+    await writeFile(join(dir, 'SET-PRUEBAS', 'notes.txt'), 'text')
+    await writeFile(join(dir, 'aaa.pdf'), '%PDF-root')
+    return dir
+  }
+
+  test('every .pdf under the directory, in name order at each level, the test set folder before the simulation', async () => {
+    const dir = await samplesDir()
+    const samples = await readPrintedSamples(dir)
+    expect(samples.map((sample) => [sample.fileName, new TextDecoder().decode(sample.bytes)])).toEqual([
+      ['aaa.pdf', '%PDF-root'],
+      ['muestra_33_1.pdf', '%PDF-test'],
+      ['muestra_33_9.pdf', '%PDF-nested'],
+      ['muestra_61_2.pdf', '%PDF-sim'],
+    ])
+  })
+
+  test('no PDF, or no directory, is a missing field naming the directory', async () => {
+    const empty = await dirs.make('dte-sdk-no-samples-')
+    const none = await failure(readPrintedSamples(empty))
+    expect(none.code).toBe('MISSING_FIELD')
+    expect(none.details).toEqual({ field: 'samples', dir: empty })
+    expect((await failure(readPrintedSamples(join(empty, 'missing')))).code).toBe('MISSING_FIELD')
+  })
+
+  test('an error other than a missing directory propagates, and without node:fs it says so', async () => {
+    const dir = await samplesDir()
+    const denied = withFs({
+      readdir: (async () => {
+        throw Object.assign(new Error('denied'), { code: 'EACCES' })
+      }) as unknown as NodeFsModules['fs']['readdir'],
+    })
+    await expect(readPrintedSamples(dir, denied)).rejects.toThrow('denied')
+    expect((await failure(readPrintedSamples(dir, failingLoad))).code).toBe('TRANSPORT_UNAVAILABLE')
   })
 })

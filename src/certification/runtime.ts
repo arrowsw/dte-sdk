@@ -4,6 +4,7 @@ import type { FolioRegistry } from '../folios/registry'
 import type { IssuerInput, ReceiverInput } from '../model/document'
 import type { PortalClient } from '../portal/client'
 import type { SiiClient } from '../sii/client'
+import type { ExchangeContact } from './exchange'
 import type { CertificationState, CertificationStore } from './state'
 
 /**
@@ -30,6 +31,8 @@ export type CertificationDependencies = {
   readonly sleep?: (ms: number) => Promise<void>
   /** EN: Progress events. ES: Eventos de progreso. */
   readonly onProgress?: (event: CertificationProgressEvent) => void
+  /** EN: The contact the exchange answers name, when any. ES: `NmbContacto`, `MailContacto`, `FonoContacto` — El contacto que nombran las respuestas del intercambio, si hay. */
+  readonly contact?: ExchangeContact
 }
 
 /**
@@ -65,6 +68,11 @@ export type CertificationProgressEvent =
   | { readonly step: 'SIM_OK'; readonly trackId: string }
   | { readonly step: 'SIM_DECLARING' }
   | { readonly step: 'SIM_DONE' }
+  | { readonly step: 'INTERCAMBIO_START' }
+  | { readonly step: 'INTERCAMBIO_DESCARGADO' }
+  | { readonly step: 'INTERCAMBIO_DONE'; readonly uploaded: boolean }
+  | { readonly step: 'MUESTRAS_UPLOADING'; readonly count: number }
+  | { readonly step: 'MUESTRAS_DONE'; readonly success: boolean }
   | { readonly step: 'CERT_DONE' }
   | { readonly step: 'CERT_ERROR'; readonly error: string }
 

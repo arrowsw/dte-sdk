@@ -5,6 +5,7 @@ import {
   renderPrintedSamples,
   type PrintedSample,
   type PrintedSampleFailure,
+  type PrintedSampleFile,
   type PrintedSamplesResult,
 } from './samples'
 
@@ -209,4 +210,47 @@ export const writePrintedSamples = async (
     tests: samples.filter((sample) => sample.set === 'tests').length,
     simulation: samples.filter((sample) => sample.set === 'simulation').length,
   }
+}
+
+const isPdfFileName = (name: string): boolean => name.endsWith('.pdf')
+
+/**
+ * EN: Every `.pdf` under a directory, recursively, in name order at every level, so the test set's folder
+ * (`SET-PRUEBAS`) comes before the simulation's (`SET-SIMULACION`) as `writePrintedSamples` lays them out; each with
+ * its base name and its bytes, ready for the printed samples step. A directory that does not exist holds none.
+ * ES: Todo `.pdf` bajo un directorio, recursivo, en orden de nombre en cada nivel, así la carpeta del set de pruebas
+ * (`SET-PRUEBAS`) va antes que la de la simulación (`SET-SIMULACION`) como las deja `writePrintedSamples`; cada uno con
+ * su nombre base y sus bytes, listos para el paso de muestras impresas. Un directorio que no existe no tiene ninguno.
+ * @param dir EN: the directory. ES: el directorio.
+ * @param load EN: loader of `node:fs`, for tests. ES: cargador de `node:fs`, para tests.
+ * @throws {DteError} EN: `MISSING_FIELD { field: 'samples', dir }` when there is no PDF; `TRANSPORT_UNAVAILABLE` when `node:fs` cannot be loaded. ES: `MISSING_FIELD { field: 'samples', dir }` si no hay ningún PDF; `TRANSPORT_UNAVAILABLE` si `node:fs` no se puede cargar.
+ */
+export const readPrintedSamples = async (
+  dir: string,
+  load: () => Promise<NodeFsModules> = loadNodeFs,
+): Promise<readonly PrintedSampleFile[]> => {
+  const { fs, path } = await modulesOrThrow(load)
+  type Entry = { readonly name: string; readonly isDirectory: () => boolean }
+  const entriesOf = async (directory: string): Promise<readonly Entry[]> => {
+    try {
+      return (await fs.readdir(directory, { withFileTypes: true })) as readonly Entry[]
+    } catch (error) {
+      if (isMissingFile(error)) return []
+      throw error
+    }
+  }
+  const scan = async (directory: string): Promise<readonly PrintedSampleFile[]> => {
+    const entries = [...(await entriesOf(directory))].sort((a, b) => a.name.localeCompare(b.name))
+    const found: PrintedSampleFile[] = []
+    for (const entry of entries) {
+      const full = path.join(directory, entry.name)
+      if (entry.isDirectory()) found.push(...(await scan(full)))
+      else if (isPdfFileName(entry.name))
+        found.push({ fileName: entry.name, bytes: new Uint8Array(await fs.readFile(full)) })
+    }
+    return found
+  }
+  const samples = await scan(path.resolve(dir))
+  if (samples.length === 0) throw new DteError('MISSING_FIELD', { field: 'samples', dir })
+  return samples
 }
