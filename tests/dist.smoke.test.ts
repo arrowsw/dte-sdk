@@ -60,6 +60,8 @@ const EXPECTED_FUNCTIONS = [
   'createFolioConsumption',
   'signFolioConsumption',
   'DteError',
+  'parsePrintableDocuments',
+  'renderPrintedSample',
 ] as const
 
 const nodeImportGuard = pathToFileURL(join(__dirname, 'support', 'node-import-guard.mjs')).href
@@ -226,5 +228,34 @@ guarded('dist smoke (dual ESM + CJS package)', () => {
       'https://maullin.sii.cl/DTEWS/CrSeed.jws',
       'https://maullin.sii.cl/DTEWS/GetTokenFromSeed.jws',
     ])
+  })
+})
+
+/** Issues an invoice with the fixtures and renders its printed sample through a loaded bundle. */
+const renderScript = (loadBundle: string): string => `
+const fs = require('node:fs')
+${loadBundle}.then(async (sdk) => {
+  const caf = sdk.parseCaf(fs.readFileSync(${JSON.stringify(join(fixtures, 'caf-33.xml'))}, 'utf8'))
+  const certificate = sdk.loadCertificateFromPkcs12(new Uint8Array(fs.readFileSync(${JSON.stringify(join(fixtures, 'cert.pfx'))})), 'secret')
+  const signed = sdk.issueDocument({
+    document: {
+      type: 33, folio: 1,
+      issuer: { rut: '76543210-3', businessName: 'Comercial Andina SpA', businessActivity: 'Software', address: 'Av. 1', commune: 'Santiago' },
+      receiver: { rut: '12345678-5', businessName: 'Cliente', businessActivity: 'Comercio', address: 'Calle 2', commune: 'Providencia' },
+      items: [{ name: 'Servicio', unitPrice: 1000 }],
+    },
+    caf, certificate, checkCafExpiry: false,
+  })
+  const [doc] = sdk.parsePrintableDocuments(signed.xml)
+  const pdf = await sdk.renderPrintedSample(doc, { transferable: true })
+  console.log(Buffer.from(pdf.subarray(0, 5)).toString() + ' ' + (pdf.length > 10000))
+}).catch((error) => { console.error(error); process.exit(1) })`
+
+guarded('dist smoke: printed samples', () => {
+  test('the bundles load pdf-lib and bwip-js on first use and render a printed sample', () => {
+    const esm = runNode(['-e', renderScript(`import(${JSON.stringify(pathToFileURL(esmEntry).href)})`)])
+    const cjs = runNode(['-e', renderScript(`Promise.resolve(require(${JSON.stringify(cjsEntry)}))`)])
+    expect(esm).toEqual({ ok: true, output: '%PDF- true\n' })
+    expect(cjs).toEqual({ ok: true, output: '%PDF- true\n' })
   })
 })

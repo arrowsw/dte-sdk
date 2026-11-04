@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `toSiiDocument`/`fromSiiDocument` codec.
 - Certificates from PKCS#12 and PEM, CAF parsing and validity, Chile-local timestamps,
   text sanitization and ISO-8859-1 encoding, SII status code classification.
-- Dependencies: `node-forge`, `@xmldom/xmldom`, `fast-xml-parser`, `rut.ts`.
+- Dependencies: `node-forge`, `@xmldom/xmldom`, `fast-xml-parser`, `rut.ts`, `pdf-lib`, `bwip-js`.
 - SII web services client: `createSiiClient` (plain data, no methods) and free functions
   for seed/token on the DTEWS SOAP and receipts REST channels (`getSeed`, `getToken`),
   uploads (`uploadEnvelope`, `uploadBook`, `uploadFolioConsumption`) with duplicate
@@ -69,6 +69,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reobtainFolios`), with `SII_PORTAL_*` error codes, `PORTAL_REJECTIONS` and redaction of session cookies. Measured
   against the real SII up to the login, the logout and the refusal pages; the pages of an enrolled company are not.
 - Local folio registry: `createFolioRegistry`, `createMemoryFolioRegistry`, `createDirectoryFolioRegistry`, `cafFingerprint`.
+- Printed samples (Node): `parsePrintableDocuments` (any `EnvioDTE`, `EnvioBOLETA`, `SetDTE` or `DTE` XML, with each
+  `TED` verbatim), `renderPrintedSample` (one single-page PDF per the SII printed-samples manual, with the transferable
+  copy and acknowledgement box), `renderTedBarcode` (the PDF417 stamp as PNG with the signed bytes), `needsTransferableCopy`,
+  `renderPrintedSamples` (in-memory batch classified into the test and simulation sets, failures as data) and the Node
+  adapter `writePrintedSamples`/`findEnvelopeFiles` (`SET-PRUEBAS` and `SET-SIMULACION` on disk). Dependencies `pdf-lib`
+  and `bwip-js`, loaded on first use. Error codes `DEPENDENCY_UNAVAILABLE` and `PDF_RENDER_FAILED`, and `errorCode`.
 
 ### Removed
 

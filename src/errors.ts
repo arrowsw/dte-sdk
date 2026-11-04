@@ -46,6 +46,8 @@ export const DTE_ERROR_CODES = {
   SII_PORTAL_BLOCKED: 'SII_PORTAL_BLOCKED',
   SII_PORTAL_REJECTED: 'SII_PORTAL_REJECTED',
   SII_PORTAL_UNEXPECTED_PAGE: 'SII_PORTAL_UNEXPECTED_PAGE',
+  DEPENDENCY_UNAVAILABLE: 'DEPENDENCY_UNAVAILABLE',
+  PDF_RENDER_FAILED: 'PDF_RENDER_FAILED',
 } as const
 
 /**
@@ -104,6 +106,8 @@ const MESSAGES: Readonly<Record<DteErrorCode, string>> = {
   SII_PORTAL_BLOCKED: 'SII firewall or captcha blocked the request',
   SII_PORTAL_REJECTED: 'SII portal refused the request',
   SII_PORTAL_UNEXPECTED_PAGE: 'SII portal answered a page that could not be interpreted',
+  DEPENDENCY_UNAVAILABLE: 'A library this function needs could not be loaded',
+  PDF_RENDER_FAILED: 'The PDF library failed while drawing the printed sample',
 }
 
 // Only these detail keys are safe to show: field names, codes and numbers, never user text, URLs or bodies.
@@ -128,6 +132,7 @@ const SAFE_DETAIL_KEYS = [
   'actual',
   'rejection',
   'step',
+  'module',
 ] as const
 
 const formatMessage = (code: DteErrorCode, details: DteErrorDetails): string => {
@@ -164,6 +169,12 @@ export class DteError extends Error {
  * @returns EN: true when `value` is a `DteError`. ES: true cuando `value` es un `DteError`.
  */
 export const isDteError = (value: unknown): value is DteError => value instanceof DteError
+
+/**
+ * EN: The code of a thrown value when it is a `DteError`, else undefined. For results that report failures as data.
+ * ES: El código de un valor lanzado cuando es un `DteError`, si no undefined. Para resultados que reportan fallas como datos.
+ */
+export const errorCode = (error: unknown): DteErrorCode | undefined => (isDteError(error) ? error.code : undefined)
 
 /**
  * EN: Message of an unknown thrown value: `Error.message`, or its string form for anything else. Fills
