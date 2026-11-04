@@ -133,6 +133,9 @@ const SAFE_DETAIL_KEYS = [
   'rejection',
   'step',
   'module',
+  'day',
+  'listed',
+  'covered',
 ] as const
 
 const formatMessage = (code: DteErrorCode, details: DteErrorDetails): string => {

@@ -1,4 +1,4 @@
-import { chileDate, chileTimestamp, chileDateTimeParts, toIsoDate, isIsoDate } from '../src/time/chile'
+import { chileDate, chileTimestamp, chileDateTimeParts, toIsoDate, isIsoDate, isPeriod } from '../src/time/chile'
 import { DteError } from '../src/errors'
 
 describe('Chile time', () => {
@@ -63,5 +63,14 @@ describe('toIsoDate', () => {
     expect(isIsoDate('2026-02-29')).toBe(false)
     expect(isIsoDate('2024-02-29')).toBe(true)
     expect(isIsoDate('2026-2-2')).toBe(false)
+  })
+
+  test('isPeriod', () => {
+    expect(isPeriod('2026-10')).toBe(true)
+    expect(isPeriod('2026-12')).toBe(true)
+    expect(isPeriod('2026-00')).toBe(false)
+    expect(isPeriod('2026-13')).toBe(false)
+    expect(isPeriod('202610')).toBe(false)
+    expect(isPeriod('2026-10-01')).toBe(false)
   })
 })

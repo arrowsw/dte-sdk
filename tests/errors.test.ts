@@ -34,6 +34,20 @@ describe('DteError', () => {
     expect(new DteError('WAIT_TIMEOUT').message).toBe('Timed out waiting for the SII status')
   })
 
+  test('the figures of a day the backup cannot download appear in the message; what the portal said never does', () => {
+    const error = new DteError('SII_PORTAL_REJECTED', {
+      rejection: 'backupDayUnknownTypes',
+      day: '2026-10-05',
+      listed: 30,
+      covered: 25,
+      portalMessage: 'texto del portal',
+    })
+    expect(error.message).toContain('day=2026-10-05')
+    expect(error.message).toContain('listed=30')
+    expect(error.message).toContain('covered=25')
+    expect(error.message).not.toContain('texto del portal')
+  })
+
   test('phase 2 safe keys appear in the message; url and body never do', () => {
     const err = new DteError('SII_HTTP_ERROR', {
       httpStatus: 503,
