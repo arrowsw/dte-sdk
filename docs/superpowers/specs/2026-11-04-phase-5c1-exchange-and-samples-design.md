@@ -1,6 +1,6 @@
 # dte-sdk — Phase 5c-1 design (certification: the exchange and the printed samples)
 
-Date: 2026-11-04 · Status: **written on Hans's go-ahead after the five design sections were approved in chat; the split (D76), the certification-only exchange documents (D77) and the samples handed in by the caller (D78) were his decisions** · Author: Claude (with Hans)
+Date: 2026-11-04 · Status: **written on Hans's go-ahead after the five design sections were approved in chat; the split (D76), the certification-only exchange documents (D77) and the samples handed in by the caller (D78) were his decisions; amended the same day by what the plan's code settled (sections 3, 5 row 5, 6 and the appendix)** · Author: Claude (with Hans)
 
 Starting point: the phase 5b-2 spec (D65–D75), the phase 4 spec (the portal session) and the phase 5a spec (the printed
 samples). Decisions continue at D76. SII facts come from the public "Manual para empresas usuarias, ambiente de
@@ -91,7 +91,8 @@ The three answers are single-line XML without an XML declaration, encoded as UTF
 through the enveloped transform only, `KeyValue` and `X509Data` in `KeyInfo`, the signature as the next sibling of
 the signed element. That is what passed the SII's exchange review; the rest of the SDK's documents open with an
 ISO-8859-1 declaration, but this upload does not go through `uploadEnvelope`, and the content is Latin-1 safe either
-way.
+way. The signatures wrap their base64 at 76 columns, as every signature of the SDK does; the document around them is
+one line.
 
 ### D82. Chile dates and times
 
@@ -115,7 +116,8 @@ long-id range that differs between code paths.
 
 The entry stands at 39.35 kB with phase 5b-1 and grows with the 5b-2 runner; this phase adds the codec, two page
 modules, two operation modules, the generator and two steps. The limit is set from the measurement at the plan's tip,
-and `dte-sdk/pdf` grows by the reader only.
+and `dte-sdk/pdf` grows by the reader only. Measured: `dte-sdk/portal` 62.47 kB, so the limit goes to 64 kB (the next
+2 kB); `dte-sdk/pdf` 8.45 kB, the 10 kB limit unchanged.
 
 ### D86. Entries
 
@@ -190,6 +192,13 @@ exchange portal permutation `E487C7488217509D4EDCE9D341782C20` and policy `4EB23
 portal permutation `D86ACF99AE5C17F0B0F673A9872EF6CB` and policy `5459B93B9D030A67564300FBD346270F` (both captured in
 June 2026). An operation takes `gwt?: { permutation, policy }` to skip the discovery.
 
+**Settled by the code.** The two portals are described by `GwtPortal` in `src/catalogs/certification.ts`
+(`EXCHANGE_PORTAL`, `SAMPLES_PORTAL`: base, service path, interface, module name, known hashes), next to
+`EXCHANGE_ANSWER_FILES` and `EXCHANGE_ANSWER_KEYS`. `src/portal/gwt.ts` also holds the parameter helpers (`gwtString`,
+`gwtInteger`, `gwtLong`, `gwtBoolean`, `GWT_NULL`), `warmUpGwtPortal` (the warm-up of 3.3), `gwtHashesOf` (the caller's
+pair, else the discovery from the portal's known pair), `postGwt` (one call posted to a portal's service, with the page
+and the answer) and `portalBoundary`. `firstGwtLongIn` and `gwtLongToken` stay internal to the pages.
+
 ### 3.3 Raw requests on the session
 
 `portalRequest` and `navigate` of phase 4 gain `body: Uint8Array` and `contentType` next to `form`: the cookies, the
@@ -198,6 +207,11 @@ retry policy, the block detection and the Latin-1 decoding stay. Multipart bodie
 with the session, one redirect followed, every `Set-Cookie` merged into the jar; a warm-up that fails is logged and
 ignored. The posts that change the portal (the three uploads, the confirmation, the review creation, the submission,
 each PDF upload) are never retried by the transport; the samples uploads have their own retry (3.7).
+
+**Settled by the code.** The GWT portals never ask for a login: before the warm-up, `ensureSession` logs in through the
+portal landing when the jar holds no session (the phase 4 operations log in on demand instead). The samples upload
+sends the file part first, so the phase 2 helper gained `buildMultipartParts`, which keeps the parts in the given order
+and refuses a CR, LF or quote in a part's name, file name or content type; `buildMultipartBody` now delegates to it.
 
 ### 3.4 Exchange pages (`src/portal/pages/exchange.ts`)
 
@@ -242,11 +256,19 @@ portal answer "No hay usuario a validar").
 
 No retries and no waits in any of these; every answer goes to the artefacts through the step.
 
+**Settled by the code.** Every operation takes `companyRut?` (the client's by default) and holds the session on its own.
+`downloadExchangeSet` redacts the page it keeps in `details.page` as every capture; `validateExchangeUser` returns the
+`ExchangeUserState` plus the `hashes` used and the raw `body`, so the step keeps the answer and hands the hashes to
+`confirmExchange`; `uploadExchangeAnswers` returns the three pages (`answers[].fileName`, `body`); `confirmExchange`
+returns the validation answer and the three confirmations (`id`, `body`); a certificate without a holder RUT is
+`MISSING_FIELD { field: 'certificate.rut' }` before any request.
+
 ### 3.6 Samples pages (`src/portal/pages/samples.ts`)
 
 - `reviewState(body)`: the first of `APROBADO`, `POR REVISAR`, `EN REVISION` (with or without the accent),
   `RECHAZADO`, `INGRESO`, `ENVIADO AL SII` found between double quotes in the raw body, upper-cased, or null.
-- `reviewBlock(answer)`: `gwtAnswer(body).message` when no state is found; the wordings seen: "El estado de la
+- The sentence that blocks (`readSamplesReview` sets `blocked` to `gwtAnswer(body).message` when no state is found;
+  there is no `reviewBlock` function); the wordings seen: "El estado de la
   postulacion NO es: 'DOCUMENTOS IMPRESOS'" (both before the stage and after it) and "El contribuyente <rut> no ha
   solicitado Set de pruebas.".
 - `reviewId(answer, range)`: the first decoded Long of the answer within the range; the range is 10 000 to 9 999 999
@@ -282,6 +304,12 @@ The headers of this portal's calls add `Cache-Control: no-cache` and `Pragma: no
   rejects: the state is read again afterwards.
 - `readSamplesDetail(portal, { revisionToken, gwt? })`: `muestraMail` with one Long: wire `1|2|3|4|1|5|5|<token>|`;
   result the rows of `sampleDetails`; a failure is a warning and an empty detail.
+
+**Settled by the code.** A `leeImpreso` answer with neither a state nor a sentence is no review yet: the step creates
+the first one. `uploadSample` validates the file name against `[\w.-]+\.pdf` before any request
+(`INVALID_OPTION { field: 'fileName' }`), treats a status other than 200, 4xx or 5xx as `SII_PORTAL_UNEXPECTED_PAGE`,
+and returns the `attempts` made with the body. The read results carry the `hashes` used and the raw `body`, as the
+exchange ones do.
 
 ### 3.8 The exchange generator (`src/certification/exchange.ts`)
 
@@ -325,6 +353,15 @@ servicio(s) prestado(s) ha(n) sido recibido(s).", `TmstFirmaRecibo`.
 `EnvioRecibos`, and `Resultado` inside `RespuestaDTE` for the two responses; rsa-sha1, sha1, the enveloped transform
 only, `KeyValue` plus `X509Data`, the `Signature` after the signed element. `verifyEnveloped` checks them in the tests.
 
+**Settled by the code.** `ExchangeSet.issuerRut` is required (`MISSING_FIELD { field: 'RutEmisor' }`); `senderRut` and
+`receiverRut` are null when the cover lacks them; a document without a receiver and no cover receiver is
+`MISSING_FIELD { field: 'RUTRecep' }`; a type, folio or total that is not a run of digits is
+`XML_PARSE_FAILED { field, reason: 'not a number' }`; `Documento`, `Exportaciones` or `Liquidacion` is the document
+element; a set without an envelope root is `XML_PARSE_FAILED { field: 'SetDTE' }`. Each receipt is signed on its own with
+`xmlns` and `xmlns:xsi` declared on its `Recibo`, so its digest is the one a verifier computes inside the envelope, and
+the declarations then leave the start tag; `RutFirma` is the certificate's `rut`, or the company when it has none; the
+contact's name, mail and phone all go through the SII text sanitizer, and the two responses never carry the phone.
+
 ### 3.9 State and artefacts
 
 `CertificationState` gains:
@@ -336,9 +373,9 @@ readonly exchange?: {
   readonly portalState?: string         // the state the user validation reported when not in the exchange
 }
 readonly samples?: {
-  readonly revisionId: string | null; readonly revisionToken: string | null
+  readonly revisionId: number | null; readonly revisionToken: string | null
   readonly state: string | null; readonly uploaded: readonly string[]
-  readonly submittedAt?: string; readonly detail?: readonly SampleDetail[]
+  readonly submittedAt?: string; readonly detail?: readonly SampleDetail[]; readonly summary?: string
 }
 ```
 
@@ -374,6 +411,16 @@ Progress events (the field's names): `INTERCAMBIO_START`, `INTERCAMBIO_DESCARGAD
   rows and the summary into the state, `rejected` with the summary; else `submitted` with the state, `submittedAt`,
   stage `compliance`; `MUESTRAS_DONE { success }`.
 
+**Settled by the code.** `runExchange` answers `alreadyDone` (detail `confirmed`) before any request when the state says
+the exchange is confirmed; `notInExchange` and the portal's `alreadyDone` carry the portal's sentence as the detail and
+`portalState` only when the sentence names a state; a download that fails for any reason other than an unexpected page
+propagates; the set given through the option is kept as the artefact too. `uploadPrintedSamples` is `blocked` only on a
+sentence; no state and no sentence creates the first review; `MUESTRAS_DONE` is emitted on every end, `success` false on
+`blocked` and `rejected`; a rejection whose detail cannot be read sums up as "The SII rejected the printed samples; the
+detail is in the portal."; `samples.uploaded` restarts on every run that uploads. `readPrintedSamples` throws
+`MISSING_FIELD { field: 'samples', dir }` and treats a directory that does not exist as empty. The exchange set artefact
+name is exported as `EXCHANGE_SET_ARTEFACT`.
+
 ### 3.11 Runner
 
 `CertificationDependencies` gains `contact?: { name?, mail?, phone? }` (the exchange answers' contact).
@@ -385,7 +432,8 @@ At `exchange`: `runExchange`; `done` or `alreadyDone` go on; `setUnavailable` an
 `uploadPrintedSamples`: `submitted` or `alreadySubmitted` go on to `compliance`; `blocked` → `stopped: 'blocked'`;
 `rejected` → `stopped: 'rejected'` with the summary. At `compliance`, as in 5b-2: `stopped: 'compliance'` unless
 `declareCompliance: true`. The portal's own stage is no longer read at `exchange` (the exchange step tells); the
-`until` option keeps working after every stage.
+`until` option keeps working after every stage. A confirmed exchange in a state still at `exchange` (a hand-edited
+state) moves on to `printedSamples` without the portal.
 
 ### 3.12 Errors
 
@@ -406,11 +454,21 @@ At `exchange`: `runExchange`; `done` or `alreadyDone` go on; `setUnavailable` an
 `uploadSample`, `submitSamplesReview`, `readSamplesDetail`; `createExchangeAnswers`, `parseExchangeSet`; `runExchange`,
 `uploadPrintedSamples`; the catalog `EXCHANGE_PORTAL`, `SAMPLES_PORTAL` (bases, services, modules, known hashes). Types:
 `GwtCall`, `GwtParameter`, `GwtAnswer`, `GwtHashes`, `ExchangeUserState`, `ExchangeAnswers`, `ExchangeSet`,
-`ExchangeDocument`, `SamplesReview`, `SampleDetail`, `PrintedSample`, `ExchangeState`, `SamplesState`, and the step
+`ExchangeDocument`, `SamplesReview`, `SampleDetail`, `PrintedSampleFile`, `ExchangeState`, `SamplesState`, and the step
 outcomes.
 
 `dte-sdk/pdf`: `readPrintedSamples(dir)` → `readonly PrintedSample[]`, every `.pdf` under `dir` recursively, the test
 set's folder before the simulation's, each with its base name and bytes; none → `MISSING_FIELD { field: 'samples' }`.
+
+**Settled by the code.** The sample file type is `PrintedSampleFile { fileName, bytes }`, declared in `dte-sdk/pdf` and
+re-exported by `dte-sdk/portal` (`PrintedSample` is phase 5a's rendered sample). Also exported: `GwtPortal`,
+`GwtDiscoveryInput`, the input and result types of every operation (`ExchangeCompanyInput`, `ExchangeGwtInput`,
+`ExchangeSetDownload`, `ExchangeUserValidation`, `UploadExchangeAnswersInput`, `ExchangeUploadAnswer`,
+`ExchangeUploadResult`, `ExchangeConfirmationAnswer`, `ExchangeConfirmation`, `SamplesCompanyInput`,
+`SamplesReviewInput`, `SamplesReviewCreated`, `UploadSampleInput`, `SampleUploaded`, `SamplesDetail`, `ReviewState`),
+`ExchangeContact`, `CreateExchangeAnswersInput`, `ExchangeAnswer`, `RunExchangeInput`, `ExchangeOutcome`,
+`UploadPrintedSamplesInput`, `SamplesOutcome`, and the constants `EXCHANGE_ANSWER_FILES`, `EXCHANGE_ANSWER_KEYS`,
+`EXCHANGE_SET_ARTEFACT`.
 
 ### 3.14 Typical flows
 
@@ -443,7 +501,7 @@ await runCertification(deps, { exchangeSetXml: await readFile('set-intercambio.x
 - **Generator:** a synthetic set of three documents (one with another receiver); each answer parsed and checked field
   by field, the signatures verified with `verifyEnveloped`, the file names, the contact fields, the empty set. The
   public SII schemas `RespuestaEnvioDTE_v10.xsd` and `EnvioRecibos_v10.xsd` are added to the fixtures and the answers
-  validated with `xmllint-wasm` when the plan can fetch them; otherwise the structure checks stand (section 6).
+  validated with `xmllint-wasm` (the plan fetched them: appendix).
 - **Steps and runner** with the 5b-2 harness: the set from the option, the artefact and the portal; `P06`, `P90` and
   another state; a resumed exchange; the samples absent and present, as a list and as a function; `readPrintedSamples`
   on a temporary directory; every stop reason.
@@ -451,7 +509,7 @@ await runCertification(deps, { exchangeSetXml: await readFile('set-intercambio.x
 
 ### 3.16 Build and docs
 
-- `.size-limit.json`: the `dte-sdk/portal` and `dte-sdk/pdf` limits set from the measurement at the plan's tip (D85).
+- `.size-limit.json`: `dte-sdk/portal` to 64 kB (62.47 kB measured); `dte-sdk/pdf` unchanged at 10 kB (8.45 kB measured) (D85).
 - No new dependency.
 - `README.md`: a "Certification: the exchange and the printed samples" section with the flows of 3.14 and the manual
   download of the set; `CHANGELOG.md` entry; `llms.txt` paragraph.
@@ -480,7 +538,7 @@ await runCertification(deps, { exchangeSetXml: await readFile('set-intercambio.x
 | 2 | The exchange documents only for the certification (D77) | Hans's, 2026-11-04 |
 | 3 | The samples handed in by the caller (D78) | Hans's, 2026-11-04 |
 | 4 | Sections 1 to 5 of the design (codec, session, protocol, generator, state, runner, tests) | Approved in chat, 2026-11-04 |
-| 5 | Sections 3.2 to 3.16 as written | Written on his go-ahead; pending his review of this file |
+| 5 | Sections 3.2 to 3.16 as written | Written on his go-ahead; amended by the plan's code the same day; pending his review of this file |
 
 ---
 
@@ -495,8 +553,11 @@ wire format, the hashes, the wordings, the rules of the three answers, the revie
 
 **Not measured, and not measurable until the company is enrolled and past the simulation:** every call of this phase.
 Nothing of the two GWT portals has been seen by this SDK; the success pages of the uploads are not recorded even in the
-field. The first run must keep every answer the store writes and turn them into fixtures. The SII schemas for the
-answers are not in the fixtures yet: the plan says whether they could be fetched.
+field. The first run must keep every answer the store writes and turn them into fixtures.
+
+**Measured at the plan's tip (2026-11-04):** 2 342 tests, coverage 100 % on the four metrics; `dte-sdk/portal`
+62.47 kB (limit 64 kB), `dte-sdk/pdf` 8.45 kB (10 kB), `dte-sdk` 30.16 kB (32 kB), `dte-sdk/node` 4.19 kB (6 kB). The
+official SII schemas of the three answers are in the fixtures and the answers validate against them (appendix).
 
 ---
 
@@ -520,3 +581,36 @@ Field defects not reproduced (D84):
 5. Two different ranges for the review id depending on the code path; here one.
 6. Instructions printed for the user when the set cannot be downloaded or the upload is refused; here data, and the
    README says what to do by hand.
+
+---
+
+## Appendix: official sources of the exchange answers
+
+The SII publishes the formats on its page "Formato XML de documentos electrónicos"
+(`https://www.sii.cl/servicios_online/3532-formato_xml-3811.html`, files under
+`https://www.sii.cl/factura_electronica/factura_mercado/`):
+
+- `schema_ic.zip` → `RespuestaEnvioDTE_v10.xsd` (the reception response and the commercial approval; includes
+  `SiiTypes_v10.xsd`, imports `xmldsignature_v10.xsd`), last updated 10-03-05.
+- `schema19983.zip` → `EnvioRecibos_v10.xsd` (includes `Recibos_v10.xsd`, which includes `SiiTypes_v10.xsd`), the
+  receipts of the law 19.983.
+- `formato_ic.pdf`, "Formato de Intercambio de Información entre Contribuyentes", the prose of the same formats.
+
+What the schemas fix, and the code follows:
+
+- `RespuestaDTE/Resultado/Caratula`: `RutResponde`, `RutRecibe`, `IdRespuesta`, `NroDetalles`, `NmbContacto?`,
+  `FonoContacto?`, `MailContacto?`, `TmstFirmaResp`; then a choice of `RecepcionEnvio*` or `ResultadoDTE*`.
+- `RecepcionEnvio`: `NmbEnvio`, `FchRecep`, `CodEnvio`, `EnvioDTEID`, `Digest?`, `RutEmisor?`, `RutReceptor?`,
+  `EstadoRecepEnv` (0 received conforming, 1 schema, 2 signature, 3 RUT receiver, 90 envelope repeated, 91 incomplete,
+  99 other), `RecepEnvGlosa`, `NroDTE?`, `RecepcionDTE*` (`TipoDTE`, `Folio`, `FchEmis`, `RUTEmisor`, `RUTRecep`,
+  `MntTotal`, `EstadoRecepDTE` 0 received, 1 signature, 2 RUT issuer, 3 RUT receiver, 4 repeated, 99 other,
+  `RecepDTEGlosa`).
+- `ResultadoDTE`: `TipoDTE`, `Folio`, `FchEmis`, `RUTEmisor`, `RUTRecep`, `MntTotal`, `CodEnvio`, `EstadoDTE` (0
+  accepted, 1 accepted with discrepancies, 2 rejected), `EstadoDTEGlosa`, `CodRchDsc?`.
+- `EnvioRecibos/SetRecibos/Caratula`: `RutResponde`, `RutRecibe`, `NmbContacto?`, `FonoContacto?`, `MailContacto?`,
+  `TmstFirmaEnv`; then `Recibo+`, each `DocumentoRecibo` with `TipoDoc`, `Folio`, `FchEmis`, `RUTEmisor`, `RUTRecep`,
+  `MntTotal`, `Recinto` (at most 80 characters), `RutFirma`, `Declaracion` (fixed by the schema to the sentence of 3.8,
+  at most 256 characters), `TmstFirmaRecibo`.
+
+The `SiiTypes_v10.xsd` of these zips is the 2005 edition; the one already in the fixtures (used by `ConsumoFolio`) is the
+2026 edition, a superset, and validates the answers as well, so the fixtures keep one copy.
