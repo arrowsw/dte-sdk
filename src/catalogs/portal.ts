@@ -168,6 +168,9 @@ export type PortalRejection =
   | 'reobtainFormMissing'
   | 'reobtainDownloadMissing'
   | 'reobtainCafMissing'
+  | 'notEnrolled'
+  | 'advanceRefused'
+  | 'declarationDeclined'
   | 'backupCaptcha'
   | 'backupIndeterminate'
   | 'backupNoData'
@@ -227,6 +230,12 @@ export const PORTAL_REJECTIONS: Readonly<Record<PortalRejection, string>> = {
     'Un solo día supera los 20 documentos por descarga y tiene documentos de tipos que no se saben separar: no se pudo cubrir completo, y por eso no se descargó nada.',
   purchaseChangeNotConfirmed:
     'El SII no confirmó el cambio en el registro de compras, pero pudo haberse aplicado: hay que releer el documento antes de reintentar.',
+  notEnrolled:
+    'La empresa no está inscrita en la Postulación a Factura Electrónica: el representante legal debe inscribirla en el ambiente de certificación antes de descargar el set de pruebas.',
+  advanceRefused:
+    'El portal no avanzó la postulación al paso siguiente: revisa el estado de los sets y libros en "Ver Avance de la Postulación".',
+  declarationDeclined:
+    'El portal no ofreció el formulario de declaración de avance: la fila pedida no existe en esta etapa, o la página muestra envíos con errores o reparos.',
 }
 
 /**

@@ -11,6 +11,8 @@ import {
   selectOptions,
   stripTags,
   visibleText,
+  bodyText,
+  hiddenInputs,
 } from '../../src/portal/html'
 
 test('entities: named, decimal, hex and unknown', () => {
@@ -81,4 +83,19 @@ alert('');
 </script>`
   expect(alertMessages(html)).toEqual(["It's first á", 'second'])
   expect(alertMessages('nothing')).toEqual([])
+})
+
+test('bodyText drops the title and keeps the whole body', () => {
+  expect(bodyText('<html><head><title>SII</title></head><body><p>Hola</p><script>x</script> mundo</body></html>')).toBe(
+    'Hola mundo',
+  )
+})
+
+test('hiddenInputs keeps only the hidden fields that have a name', () => {
+  expect(
+    hiddenInputs(
+      '<input type=hidden name=A value=1><input type=HIDDEN value=2><input type=text name=B value=3><input type="hidden" name="C">',
+    ),
+  ).toEqual({ A: '1', C: '' })
+  expect(hiddenInputs('<p>no inputs</p>')).toEqual({})
 })

@@ -56,6 +56,15 @@ export const visibleText = (html: string, max = 400): string =>
   stripTags(html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ')).slice(0, max)
 
 /**
+ * EN: The whole readable text of a page, title excluded: what the certification pages are classified on, because the
+ * title is the same on every one of them and its words would leak into the sentences read.
+ * ES: Todo el texto legible de una página, sin el título: sobre esto se clasifican las páginas de certificación, porque
+ * el título es el mismo en todas y sus palabras se colarían en las frases leídas.
+ */
+export const bodyText = (html: string): string =>
+  visibleText(html.replace(/<title[\s\S]*?<\/title>/gi, ' '), Number.MAX_SAFE_INTEGER)
+
+/**
  * EN: Value of an attribute inside a tag, with double, single or no quotes. It needs a separator before the name, so
  * `this.value=` inside a handler is not taken for it.
  * ES: Valor de un atributo dentro de una etiqueta, con comillas dobles, simples o sin ellas. Exige un separador antes del
@@ -98,6 +107,20 @@ export const inputTags = (html: string): readonly InputTag[] =>
  */
 export const inputValues = (html: string): Readonly<Record<string, string>> =>
   Object.fromEntries(inputTags(html).map((tag) => [tag.name, tag.value]))
+
+/**
+ * EN: The hidden fields of a fragment, as a map: what a page carries forward to its next post.
+ * ES: Los campos ocultos de un fragmento, como mapa: lo que una página arrastra a su siguiente envío.
+ */
+export const hiddenInputs = (html: string): Readonly<Record<string, string>> =>
+  Object.fromEntries(
+    (html.match(/<input\b[^>]*>/gi) ?? [])
+      .filter((tag) => attribute(tag, 'type')?.toLowerCase() === 'hidden')
+      .flatMap((tag) => {
+        const name = attribute(tag, 'name')
+        return name === null ? [] : [[name, attribute(tag, 'value') ?? '']]
+      }),
+  )
 
 /**
  * EN: Every `<form>…</form>` block of a page, in order.
