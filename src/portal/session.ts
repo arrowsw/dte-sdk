@@ -549,6 +549,19 @@ const cachedSessionAlive = async (context: PortalContext): Promise<boolean> => {
 }
 
 /**
+ * EN: Makes sure the jar holds a session, logging in through the portal landing when it does not. The GWT portals
+ * never ask for a login themselves: a visitor without a session gets their pages all the same.
+ * ES: Se asegura de que la bolsa tenga una sesión, iniciándola por la portada del portal cuando no la tiene. Los
+ * portales GWT nunca piden iniciar sesión por sí mismos: un visitante sin sesión recibe sus páginas igual.
+ * @throws {DteError} EN: `SII_PORTAL_CERT_NOT_ENABLED`, `SII_PORTAL_SESSION_LIMIT`, `SII_PORTAL_LOGIN_FAILED`, `SII_PORTAL_BLOCKED`, transport codes. ES: los mismos códigos.
+ */
+export const ensureSession = async (context: PortalContext): Promise<void> => {
+  if (hasSessionCookie(context.state.cookies)) return
+  await portalRequest(context, 'entry', 'GET', `${CERTIFICATE_ENTRY_URL}?${PORTAL_LANDING_URL}`)
+  await login(context, PORTAL_LANDING_URL)
+}
+
+/**
  * EN: Opens a session explicitly, reusing a cached one that is still alive. The other operations do not need this: they
  * log in on demand.
  * ES: Abre una sesión de forma explícita, reutilizando una en caché que siga viva. Las demás operaciones no lo necesitan:
@@ -562,8 +575,7 @@ export const openPortalSession = (portal: PortalClient, overrides?: CallOverride
   withPortalSession(portal, 'openPortalSession', overrides, async (context) => {
     if (await cachedSessionAlive(context)) return { userRut: sessionRut(context.state.cookies), reused: true }
     forgetSession(context)
-    await portalRequest(context, 'entry', 'GET', `${CERTIFICATE_ENTRY_URL}?${PORTAL_LANDING_URL}`)
-    await login(context, PORTAL_LANDING_URL)
+    await ensureSession(context)
     return { userRut: sessionRut(context.state.cookies), reused: false }
   })
 

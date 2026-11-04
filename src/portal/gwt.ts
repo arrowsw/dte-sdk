@@ -1,5 +1,7 @@
+import type { GwtPortal } from '../catalogs/certification'
 import { errorMessage } from '../errors'
-import { portalRequest, type PortalContext } from './session'
+import { encodeUtf8 } from '../sii/transport'
+import { portalRequest, type PortalContext, type PortalPage } from './session'
 
 /**
  * EN: One parameter of a GWT-RPC call, as the SII's portals serialize it: a string (interned in the table, `0` when
@@ -304,3 +306,83 @@ export const discoverGwtHashes = async (context: PortalContext, input: GwtDiscov
     return warn(errorMessage(error))
   }
 }
+
+/** EN: A String parameter. ES: Un parámetro String. */
+export const gwtString = (value: string | null): GwtParameter => ({ kind: 'string', value })
+/** EN: A boxed Integer parameter. ES: Un parámetro Integer encajonado. */
+export const gwtInteger = (value: number): GwtParameter => ({ kind: 'integer', value })
+/** EN: A boxed Long parameter: a number, or a token as the portal wrote it. ES: Un parámetro Long encajonado: un número, o un token como lo escribió el portal. */
+export const gwtLong = (value: number | string): GwtParameter => ({ kind: 'long', value })
+/** EN: A primitive boolean parameter. ES: Un parámetro booleano primitivo. */
+export const gwtBoolean = (value: boolean): GwtParameter => ({ kind: 'boolean', value })
+/** EN: A null parameter or field. ES: Un parámetro o campo nulo. */
+export const GWT_NULL: GwtParameter = { kind: 'null' }
+
+const REDIRECT_STATUS: ReadonlySet<number> = new Set([301, 302, 303, 307, 308])
+
+/**
+ * EN: The warm-up of a GWT portal: `GET` of its base with the session and one redirect followed, so the server opens
+ * the portal's context as it would for a browser; every cookie it sets joins the jar. A failure is logged and ignored.
+ * ES: El calentamiento de un portal GWT: `GET` de su base con la sesión y una redirección seguida, para que el servidor
+ * abra el contexto del portal como lo haría para un navegador; cada cookie que fija entra a la bolsa. Una falla se
+ * registra y se ignora.
+ */
+export const warmUpGwtPortal = async (context: PortalContext, portal: GwtPortal): Promise<void> => {
+  try {
+    const first = await portalRequest(context, 'warm-up', 'GET', portal.base)
+    const location = first.headers['location']
+    if (location !== undefined && REDIRECT_STATUS.has(first.status))
+      await portalRequest(context, 'warm-up', 'GET', new URL(location, portal.base).toString(), {
+        referer: portal.base,
+      })
+  } catch (error) {
+    context.portal.logger.warn('gwt portal warm-up failed', { module: portal.moduleName, reason: errorMessage(error) })
+  }
+}
+
+/**
+ * EN: The hashes of a portal for one operation: the caller's pair, else the discovery from the portal's known pair.
+ * ES: Los hashes de un portal para una operación: el par del llamador, si no el descubrimiento desde el par conocido del portal.
+ */
+export const gwtHashesOf = (context: PortalContext, portal: GwtPortal, override?: GwtHashes): Promise<GwtHashes> =>
+  discoverGwtHashes(context, {
+    moduleBase: portal.base,
+    moduleName: portal.moduleName,
+    known: portal.known,
+    ...(override === undefined ? {} : { override }),
+  })
+
+/**
+ * EN: One GWT-RPC call posted to a portal's service: the page and the answer read from it.
+ * ES: Una llamada GWT-RPC enviada al servicio de un portal: la página y la respuesta leída de ella.
+ */
+export const postGwt = async (
+  context: PortalContext,
+  step: string,
+  portal: GwtPortal,
+  hashes: GwtHashes,
+  method: string,
+  parameters: readonly GwtParameter[],
+  headers: Readonly<Record<string, string>> = {},
+): Promise<{ readonly page: PortalPage; readonly answer: GwtAnswer }> => {
+  const body = gwtBody({
+    moduleBase: portal.base,
+    policy: hashes.policy,
+    service: portal.serviceInterface,
+    method,
+    parameters,
+  })
+  const page = await portalRequest(context, step, 'POST', `${portal.base}${portal.service}`, {
+    body: encodeUtf8(body),
+    contentType: GWT_CONTENT_TYPE,
+    referer: portal.base,
+    headers: { ...gwtHeaders(portal.base, hashes.permutation), ...headers },
+  })
+  return { page, answer: gwtAnswer(page.html) }
+}
+
+/**
+ * EN: The multipart boundary of the portals' uploads: the browser's prefix and the clock in hexadecimal.
+ * ES: El límite multipart de las subidas de los portales: el prefijo del navegador y el reloj en hexadecimal.
+ */
+export const portalBoundary = (now: Date): string => `----WebKitFormBoundary${now.getTime().toString(16)}`
