@@ -6,6 +6,8 @@ const STATE = /^P\d+$/
 const EMPTY_LIST = /^\/\/OK\[0,\[\]/
 const MIN_SET_LENGTH = 10
 const NO_TOKEN = '0'
+// A Long as GWT writes it in an answer: a single-quoted token of its base-64 alphabet.
+const LONG_TOKEN = /'([A-Za-z0-9$_]+)'/
 
 /**
  * EN: The digits of a representative in the portal's list: the last string of the table made of 7 or 8 digits, or
@@ -29,13 +31,15 @@ export type ReceiptsPostulation = {
 
 /**
  * EN: Reads the application record: the first string of the table shaped as a date, and the first single-quoted token
- * of the body.
+ * of the body that is a Long. Quoted text that is no Long is not one: the token goes into the declaration body as it
+ * is, so it can never carry a separator.
  * ES: Lee el registro de la postulación: el primer string de la tabla con forma de fecha, y el primer token entre
- * comillas simples del cuerpo.
+ * comillas simples del cuerpo que es un Long. Un texto entre comillas que no es un Long no lo es: el token va al cuerpo
+ * de la declaración tal cual, así que nunca puede llevar un separador.
  */
 export const postulationOf = (answer: GwtAnswer): ReceiptsPostulation => ({
   authorizationDate: answer.table.find((item) => AUTHORIZATION_DATE.test(item)) ?? '',
-  token: /'([^']+)'/.exec(answer.body)?.[1] ?? NO_TOKEN,
+  token: LONG_TOKEN.exec(answer.body)?.[1] ?? NO_TOKEN,
 })
 
 /**

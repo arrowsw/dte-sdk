@@ -304,6 +304,16 @@ describe('declareReceiptsCompliance', () => {
     expect(methods(busy).filter((method) => method === 'autorizarEmpresaBolProd')).toHaveLength(1)
   })
 
+  test('an application record that is not an //OK answer stops the declaration before it is sent', async () => {
+    for (const body of [EXCEPTION, "<html>sin postulacion 'a|b' vigente</html>"]) {
+      const broken = await signedIn([ready({ obtenerPostulacionSeg: { body } })])
+      const error = await failure(declareReceiptsCompliance(broken.portal, input))
+      expect(error.code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
+      expect(error.details).toMatchObject({ step: 'obtenerPostulacionSeg' })
+      expect(methods(broken)).toEqual([LIST, 'obtenerEstadoAutorizaEmp', 'obtenerPostulacionSeg'])
+    }
+  })
+
   test('the provider and the business name are mandatory, checked before any request', async () => {
     const quiet = await signedIn([])
     const fieldOf = async (bad: unknown): Promise<unknown> =>

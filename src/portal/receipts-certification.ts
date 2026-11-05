@@ -384,7 +384,7 @@ const declarationDate = (now: Date): string => {
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: the provider, the business name, the link, the company, the hashes. ES: el proveedor, la razón social, el link, la empresa, los hashes.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
- * @throws {DteError} EN: `MISSING_FIELD` (`provider`, `provider.rut`, `provider.name`, `provider.mail`, `businessName`, `representative`), `INVALID_RUT`; `SII_PORTAL_REJECTED` with `receiptsNotEnrolled` or `receiptsComplianceRefused`; session, block and transport codes. ES: los mismos códigos.
+ * @throws {DteError} EN: `MISSING_FIELD` (`provider`, `provider.rut`, `provider.name`, `provider.mail`, `businessName`, `representative`), `INVALID_RUT`; `SII_PORTAL_REJECTED` with `receiptsNotEnrolled` or `receiptsComplianceRefused`; `SII_PORTAL_UNEXPECTED_PAGE` when the application record is not an `//OK` answer, before anything is sent; session, block and transport codes. ES: los mismos códigos.
  */
 export const declareReceiptsCompliance = (
   portal: PortalClient,
@@ -405,9 +405,10 @@ export const declareReceiptsCompliance = (
     if (status.declared) return { outcome: 'alreadyDeclared', state: status.state }
     if (!status.readyToDeclare) return { outcome: 'notReady', state: status.state }
     const representative = partyOf(representativeOf(context, list))
-    const record = postulationOf(
-      (await read(context, hashes, POSTULATION_METHOD, postulationParameters(company))).answer,
-    )
+    // The declaration cannot be undone: an application record that is not an `//OK` answer is not one to declare from.
+    const application = await read(context, hashes, POSTULATION_METHOD, postulationParameters(company))
+    if (!application.answer.ok) throw unexpectedPage(context, POSTULATION_METHOD, application.page.html)
+    const record = postulationOf(application.answer)
     const body = receiptsComplianceBody({
       moduleBase: RECEIPTS_PORTAL.base,
       policy: hashes.policy,

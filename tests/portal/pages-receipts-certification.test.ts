@@ -27,6 +27,9 @@ describe('the receipts portal answers', () => {
     const answer = gwtAnswer('//OK[3,\'BAqo\',2,1,["cl.sii.x/1","15/11/2026","otro"],0,7]')
     expect(postulationOf(answer)).toEqual({ authorizationDate: '15/11/2026', token: 'BAqo' })
     expect(postulationOf(gwtAnswer(EMPTY_OK))).toEqual({ authorizationDate: '', token: '0' })
+    // The Long is a token of the GWT alphabet: quoted text that is no Long, a separator inside it included, is none.
+    const quoted = gwtAnswer('//OK[3,\'x|9|8\',2,1,["cl.sii.x/1","Comercial \'La Esquina\' SpA"],0,7]')
+    expect(postulationOf(quoted)).toEqual({ authorizationDate: '', token: '0' })
   })
 
   test('the states are the table strings that are exactly a P code, and only of an //OK answer', () => {
