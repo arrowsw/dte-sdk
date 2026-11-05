@@ -552,6 +552,63 @@ pair known to work as the fallback; `gwt: { permutation, policy }` overrides the
 - **The exchange answers are regenerated and uploaded on every run that reaches the portal;** only the set is kept.
 - **A review left in `INGRESO`** (a run cut off while uploading) is resumed, every PDF uploaded again.
 
+## Certification: receipts
+
+```typescript
+import { createSiiClient } from 'dte-sdk'
+import {
+  createPortalClient,
+  createFolioAllocator,
+  downloadReceiptsTestSet,
+  parseReceiptsTestSet,
+  issueReceiptsSet,
+  sendReceiptsSet,
+  declareReceiptsTrackId,
+  readReceiptsStatus,
+  declareReceiptsCompliance,
+  verifyReceiptsAuthorization,
+} from 'dte-sdk/portal'
+
+// The receipts application is its own: its portal, its test set, its declaration. The pieces, in the order to chain them
+const { text } = await downloadReceiptsTestSet(portal, { providerMail })
+const issued = await issueReceiptsSet(parseReceiptsTestSet(text), {
+  issuer,
+  certificate,
+  folios: createFolioAllocator([caf39]),
+  resolution,
+})
+const sent = await sendReceiptsSet(sii, issued) // the envelope, 20 s, its status, then the folio consumption report
+await declareReceiptsTrackId(portal, { trackId: sent.envelopeTrackId })
+
+// The SII validates the set on its own and answers by mail. Later:
+const status = await readReceiptsStatus(portal) // readyToDeclare once the set is approved (P90); declared after (P91)
+if (status.readyToDeclare) await declareReceiptsCompliance(portal, { provider: { rut, name, mail }, businessName })
+const check = await verifyReceiptsAuthorization({ production: productionPortal, certification: portal })
+// check.production.authorized: type 39 can be stamped in production
+```
+
+The receipts test set is a plain text of cases; each case is one receipt of type 39 to the final consumer, with prices
+that include VAT and a reference `SET` / `CASO-<n>`. `sendReceiptsSet` uploads the `EnvioBOLETA`, waits 20 s and reads
+its status, then sends the folio consumption report (RCOF) built from the envelope, starting at sequence number 100 and
+trying the next one after a rejection, up to ten times; three duplicates in a row mean today's report was already
+accepted (the certification environment takes one per company per day). The SII's objections to the report are
+expected in certification and block nothing, so the outcome is `sent` as long as the envelope was not rejected. The
+XMLs come back in the result. There is no runner here: the SII's validation of the set takes its own time, and the
+caller reads the status again later.
+
+- **The declaration cannot be undone.** `declareReceiptsCompliance` authorises the company to issue receipts in
+  production. It reads the status first: `alreadyDeclared` and `notReady` are outcomes, and nothing is sent.
+- **The software provider is mandatory** (`provider`): the SII answered some companies with a bare HTTP 500 when they
+  were declared as their own provider by default. A company that is its own provider passes itself.
+- **The representative is the owner of the session**, the person whose certificate logged in; the portal's list is
+  only the fallback. With two people enrolled for a company, any other choice is refused.
+- **A receipt has its own reference.** The receipts schema gives `Referencia` no date and a free-text code, so a
+  receipt takes `receiptReferences` (`{ code, reason, documentType?, folio? }`) and refuses `references`.
+- **`verifyReceiptsAuthorization` never throws.** A stamping form the portal does not serve is `queryFailed`, not "not
+  authorised".
+- **Nothing here has been run against the receipts portal yet.** Every wire comes from field behaviour, and the tests
+  use a synthetic set text; the receipts envelope and the report do validate against the official schemas.
+
 ## Printed samples (Node)
 
 ```typescript

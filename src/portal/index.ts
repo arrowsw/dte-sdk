@@ -245,3 +245,38 @@ export type { UploadPrintedSamplesInput, SamplesOutcome } from '../certification
 export type { PrintedSampleFile } from '../pdf/samples'
 export { runCertification } from '../certification/runner'
 export type { RunCertificationOptions, RunCertificationResult, RunStop } from '../certification/runner'
+
+// Phase 5c-2: the certification of receipts (the receipts portal).
+export { RECEIPTS_PORTAL } from '../catalogs/certification'
+export { parseReceiptsTestSet } from '../certification/receipts-set'
+export type { ReceiptsTestCase, ReceiptsTestItem } from '../certification/receipts-set'
+export { issueReceiptsSet } from '../certification/receipts'
+export type { IssueReceiptsSetOptions, IssuedReceipt, IssuedReceiptsSet } from '../certification/receipts'
+export { sendReceiptsSet, resendReceiptsConsumption } from '../certification/receipts-send'
+export type {
+  ReceiptsProgressEvent,
+  SendReceiptsSetOptions,
+  ReceiptsConsumptionAttempt,
+  ReceiptsSendResult,
+  ResendReceiptsConsumptionInput,
+} from '../certification/receipts-send'
+export {
+  downloadReceiptsTestSet,
+  declareReceiptsTrackId,
+  readReceiptsStatus,
+  declareReceiptsCompliance,
+  verifyReceiptsAuthorization,
+} from './receipts-certification'
+export type {
+  ReceiptsPortalInput,
+  DownloadReceiptsTestSetInput,
+  ReceiptsTestSetDownload,
+  ReceiptsStatus,
+  ReceiptsProvider,
+  DeclareReceiptsComplianceInput,
+  ReceiptsComplianceResult,
+  VerifyReceiptsAuthorizationInput,
+  ReceiptsAuthorizationCheck,
+  ReceiptsAuthorization,
+} from './receipts-certification'
+export type { ReceiptsProgress } from './pages/certification-progress'

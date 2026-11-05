@@ -49,6 +49,11 @@ import {
   gwtBody,
   gwtAnswer,
   readSamplesReview,
+  parseReceiptsTestSet,
+  issueReceiptsSet,
+  sendReceiptsSet,
+  readReceiptsStatus,
+  declareReceiptsCompliance,
 } from '../src/portal'
 import {
   parsePrintableDocuments,
@@ -123,6 +128,11 @@ import type {
   RunStop,
   CertificationState,
   ExchangeState,
+  ReceiptsTestCase,
+  IssuedReceiptsSet,
+  ReceiptsSendResult,
+  ReceiptsStatus,
+  ReceiptsComplianceResult,
   DeclarationResult,
   CertificationStore,
   CertificationProgressEvent,
@@ -134,6 +144,7 @@ import type {
   IssuedSimulation,
 } from '../src/portal'
 import type { PrintableDocument, PrintedSampleFile, PrintedSamplesResult, WritePrintedSamplesResult } from '../src/pdf'
+import type { ReceiptReference } from '../src'
 
 // Every type the SII web services design names is exported: a missing one fails the import above, and this tuple
 // keeps each import in use.
@@ -254,6 +265,12 @@ const _typecheck = () => {
     'done' | 'exchange' | 'printedSamples' | 'compliance' | 'until' | 'blocked' | 'rejected' | 'timedOut' | 'incomplete'
   >()
   expectTypeOf<CertificationState['exchange']>().toEqualTypeOf<ExchangeState | undefined>()
+  expectTypeOf(parseReceiptsTestSet).returns.toEqualTypeOf<readonly ReceiptsTestCase[]>()
+  expectTypeOf(issueReceiptsSet).returns.resolves.toEqualTypeOf<IssuedReceiptsSet>()
+  expectTypeOf(sendReceiptsSet).returns.resolves.toEqualTypeOf<ReceiptsSendResult>()
+  expectTypeOf(readReceiptsStatus).returns.resolves.toEqualTypeOf<ReceiptsStatus>()
+  expectTypeOf(declareReceiptsCompliance).returns.resolves.toEqualTypeOf<ReceiptsComplianceResult>()
+  expectTypeOf<Document['receiptReferences']>().toEqualTypeOf<readonly ReceiptReference[]>()
 
   // The client is frozen data: its fields cannot be assigned.
   const sii = createSiiClient({} as SiiClientOptions)
