@@ -198,5 +198,50 @@ export { prepareFolios, setFolioNeeds, simulationFolioNeeds } from '../certifica
 export type { PrepareFoliosOptions, PrepareFoliosResult } from '../certification/folios-step'
 export { runBooks, previousPeriod, nextFreePeriod } from '../certification/books-step'
 export type { BooksOutcome } from '../certification/books-step'
+
+// Phase 5c-1: the exchange and the printed samples (the two GWT portals).
+export { EXCHANGE_PORTAL, SAMPLES_PORTAL, EXCHANGE_ANSWER_FILES, EXCHANGE_ANSWER_KEYS } from '../catalogs/certification'
+export type { GwtPortal, ExchangeAnswerKey } from '../catalogs/certification'
+export { gwtBody, gwtAnswer, encodeGwtLong, decodeGwtLong, discoverGwtHashes } from './gwt'
+export type { GwtCall, GwtParameter, GwtAnswer, GwtHashes, GwtDiscoveryInput } from './gwt'
+export { downloadExchangeSet, validateExchangeUser, uploadExchangeAnswers, confirmExchange } from './exchange'
+export type {
+  ExchangeCompanyInput,
+  ExchangeGwtInput,
+  ExchangeSetDownload,
+  ExchangeUserValidation,
+  UploadExchangeAnswersInput,
+  ExchangeUploadAnswer,
+  ExchangeUploadResult,
+  ExchangeConfirmationAnswer,
+  ExchangeConfirmation,
+} from './exchange'
+export type { ExchangeUserState } from './pages/exchange'
+export { readSamplesReview, createSamplesReview, uploadSample, submitSamplesReview, readSamplesDetail } from './samples'
+export type {
+  SamplesCompanyInput,
+  SamplesReviewInput,
+  SamplesReview,
+  SamplesReviewCreated,
+  UploadSampleInput,
+  SampleUploaded,
+  SamplesDetail,
+} from './samples'
+export type { ReviewState, SampleDetail } from './pages/samples'
+export { createExchangeAnswers, parseExchangeSet } from '../certification/exchange'
+export type {
+  ExchangeDocument,
+  ExchangeSet,
+  ExchangeContact,
+  CreateExchangeAnswersInput,
+  ExchangeAnswer,
+  ExchangeAnswers,
+} from '../certification/exchange'
+export type { ExchangeState, SamplesState } from '../certification/state'
+export { runExchange, EXCHANGE_SET_ARTEFACT } from '../certification/exchange-step'
+export type { RunExchangeInput, ExchangeOutcome } from '../certification/exchange-step'
+export { uploadPrintedSamples } from '../certification/samples-step'
+export type { UploadPrintedSamplesInput, SamplesOutcome } from '../certification/samples-step'
+export type { PrintedSampleFile } from '../pdf/samples'
 export { runCertification } from '../certification/runner'
 export type { RunCertificationOptions, RunCertificationResult, RunStop } from '../certification/runner'

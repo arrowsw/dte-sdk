@@ -43,6 +43,12 @@ import {
   declareProgress,
   createMemoryCertificationStore,
   createDirectoryCertificationStore,
+  runExchange,
+  uploadPrintedSamples,
+  createExchangeAnswers,
+  gwtBody,
+  gwtAnswer,
+  readSamplesReview,
 } from '../src/portal'
 import {
   parsePrintableDocuments,
@@ -50,6 +56,7 @@ import {
   renderTedBarcode,
   renderPrintedSamples,
   writePrintedSamples,
+  readPrintedSamples,
   needsTransferableCopy,
 } from '../src/pdf'
 import type {
@@ -108,6 +115,14 @@ import type {
   RunCertificationResult,
   BooksOutcome,
   StepResult,
+  ExchangeOutcome,
+  SamplesOutcome,
+  ExchangeAnswers,
+  GwtAnswer,
+  SamplesReview,
+  RunStop,
+  CertificationState,
+  ExchangeState,
   DeclarationResult,
   CertificationStore,
   CertificationProgressEvent,
@@ -118,7 +133,7 @@ import type {
   IssuedSet,
   IssuedSimulation,
 } from '../src/portal'
-import type { PrintableDocument, PrintedSamplesResult, WritePrintedSamplesResult } from '../src/pdf'
+import type { PrintableDocument, PrintedSampleFile, PrintedSamplesResult, WritePrintedSamplesResult } from '../src/pdf'
 
 // Every type the SII web services design names is exported: a missing one fails the import above, and this tuple
 // keeps each import in use.
@@ -228,6 +243,17 @@ const _typecheck = () => {
   expectTypeOf(createMemoryCertificationStore).returns.toEqualTypeOf<CertificationStore>()
   expectTypeOf(createDirectoryCertificationStore).returns.toEqualTypeOf<CertificationStore>()
   expectTypeOf<CertificationProgressEvent['step']>().toEqualTypeOf<CertificationStep>()
+  expectTypeOf(runExchange).returns.resolves.toEqualTypeOf<StepResult<ExchangeOutcome>>()
+  expectTypeOf(uploadPrintedSamples).returns.resolves.toEqualTypeOf<StepResult<SamplesOutcome>>()
+  expectTypeOf(createExchangeAnswers).returns.toEqualTypeOf<ExchangeAnswers>()
+  expectTypeOf(gwtBody).returns.toEqualTypeOf<string>()
+  expectTypeOf(gwtAnswer).returns.toEqualTypeOf<GwtAnswer>()
+  expectTypeOf(readSamplesReview).returns.resolves.toEqualTypeOf<SamplesReview>()
+  expectTypeOf(readPrintedSamples).returns.resolves.toEqualTypeOf<readonly PrintedSampleFile[]>()
+  expectTypeOf<RunStop>().toEqualTypeOf<
+    'done' | 'exchange' | 'printedSamples' | 'compliance' | 'until' | 'blocked' | 'rejected' | 'timedOut' | 'incomplete'
+  >()
+  expectTypeOf<CertificationState['exchange']>().toEqualTypeOf<ExchangeState | undefined>()
 
   // The client is frozen data: its fields cannot be assigned.
   const sii = createSiiClient({} as SiiClientOptions)

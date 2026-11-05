@@ -32,6 +32,16 @@ import {
   setGenerationForm,
   STANDARD_ROWS,
 } from '../support/certification-pages'
+import {
+  CREATED_REVIEW,
+  exchangeRoutes,
+  exchangeSetXml,
+  NOT_IN_EXCHANGE,
+  reviewAnswer,
+  SAMPLES_BLOCKED,
+  samplesRoutes,
+} from '../support/exchange-fixtures'
+import { detailAnswer, EMPTY_OK } from '../support/gwt-answers'
 import { failure } from '../support/portal'
 import { page } from '../support/portal-pages'
 import { ISSUER_RUT } from '../support/fixtures'
@@ -132,7 +142,7 @@ test('a fresh run: the set, the folios, four sets sent, declared and approved, t
   })
 })
 
-test('resumed at the books: approved books, the advance, the simulation sent, declared and confirmed, then the exchange is phase 5c’s', async () => {
+test('resumed at the books: approved books, the advance, the simulation sent, declared and confirmed, then the exchange stops when the portal says the company is not in it', async () => {
   const harness = await seeded(
     [
       ...history(),
@@ -144,25 +154,31 @@ test('resumed at the books: approved books, the advance, the simulation sent, de
       ...stampingRoutes(),
       uploadRoute(reception('777')),
       post('pe_avance3', DECLARATION_ANSWERS.success),
+      ...exchangeRoutes({ facade: { validarUsuario: { body: NOT_IN_EXCHANGE } } }),
     ],
     stateWith({ plan, sets: allSets, setsApproved: true, stage: 'books', cafs: certificationCafXmls() }),
   )
   const result = await runCertification(harness.deps)
   expect(result.stopped).toBe('exchange')
-  expect(result.state).toMatchObject({ stage: 'exchange', simulation: { trackId: '777', confirmed: true } })
+  expect(result.detail).toContain('estado: P05')
+  expect(result.state).toMatchObject({
+    stage: 'exchange',
+    simulation: { trackId: '777', confirmed: true },
+    exchange: { portalState: 'P05', uploaded: false },
+  })
   expect(result.state.books.results.guideBook?.approved).toBe(true)
   const steps = harness.steps()
   expect(steps).toContain('BOOKS_DONE')
   expect(steps).toContain('ADVANCE_DONE')
-  expect(steps.slice(-3)).toEqual(['POLLING', 'POLLING', 'SIM_DONE'])
+  expect(steps.slice(-5)).toEqual(['POLLING', 'POLLING', 'SIM_DONE', 'INTERCAMBIO_START', 'INTERCAMBIO_DESCARGADO'])
   expect(harness.urls().filter((url) => url.endsWith('DTEUpload'))).toHaveLength(1)
 })
 
-test('past the exchange the portal decides: compliance blocked, or declared', async () => {
+test('at the compliance the portal decides: blocked, or declared; the exchange stops when the company is not in it', async () => {
   const beyond = stateWith({
     plan,
     sets: allSets,
-    stage: 'exchange',
+    stage: 'compliance',
     simulation: { trackId: '777', date: TODAY, sentAt: 'x', confirmed: true },
   })
   const blocked = await seeded(
@@ -188,13 +204,16 @@ test('past the exchange the portal decides: compliance blocked, or declared', as
       avance6([], () => AT_SAMPLES),
       ...compliance(COMPLIANCE_FORM, COMPLIANCE_DECLARED),
     ],
-    { ...beyond, stage: 'printedSamples' },
+    beyond,
   )
   const second = await runCertification(declared.deps, { declareCompliance: true })
   expect(second.stopped).toBe('done')
   expect(second.state.stage).toBe('done')
   expect(declared.steps().slice(-1)).toEqual(['CERT_DONE'])
-  const still = await seeded([entry, avance2([]), avance5, avance6([], () => AT_EXCHANGE)], beyond)
+  const still = await seeded(exchangeRoutes({ facade: { validarUsuario: { body: NOT_IN_EXCHANGE } } }), {
+    ...beyond,
+    stage: 'exchange',
+  })
   await expect(runCertification(still.deps)).resolves.toMatchObject({ stopped: 'exchange' })
   // The declaration cannot be undone: without the explicit go the runner stops in front of it.
   const waiting = await seeded([entry, avance2([]), avance5, avance6([], () => AT_SAMPLES)], beyond)
@@ -270,7 +289,7 @@ test('the simulation: a refused declaration, a rejected wait, a confirmed one sk
     simulated,
   )
   await expect(runCertification(rejected.deps)).resolves.toMatchObject({ stopped: 'rejected', detail: 'RECHAZADO' })
-  const confirmed = await seeded([entry, avance2([]), avance5, avance6([], () => AT_EXCHANGE)], {
+  const confirmed = await seeded(exchangeRoutes({ facade: { validarUsuario: { body: NOT_IN_EXCHANGE } } }), {
     ...simulated,
     simulation: { ...simulated.simulation!, confirmed: true },
   })
@@ -352,4 +371,75 @@ test('a refusal without a sentence stops with the outcome itself; a run already 
   const finished = await runCertification(atCompliance.deps, { declareCompliance: true })
   expect(finished.stopped).toBe('done')
   expect(finished.state.blocked).toBeUndefined()
+})
+
+test('the exchange answered and confirmed, then the samples: none stops the run, a list or a function submits them, a block or a rejection stops', async () => {
+  const confirmedSimulation = stateWith({
+    plan,
+    sets: allSets,
+    stage: 'exchange',
+    simulation: { trackId: '777', date: TODAY, sentAt: 'x', confirmed: true },
+  })
+  const review = (first: string, second: string) => ({
+    leeImpreso: (call: number) => ({ body: call === 1 ? first : second }),
+    creaLista: { body: CREATED_REVIEW },
+  })
+  const none = await seeded(exchangeRoutes(), confirmedSimulation)
+  const atSamples = await runCertification(none.deps)
+  expect(atSamples).toMatchObject({
+    stopped: 'printedSamples',
+    state: { stage: 'printedSamples', exchange: { confirmed: true, documents: 2 } },
+  })
+  expect(none.steps().slice(-1)).toEqual(['INTERCAMBIO_DONE'])
+  const pdf = { fileName: 'muestra_33_1.pdf', bytes: new Uint8Array([0x25]) }
+  const listed = await seeded(
+    samplesRoutes({ service: review(EMPTY_OK, reviewAnswer('ENVIADO AL SII')) }),
+    atSamples.state,
+  )
+  await expect(runCertification(listed.deps, { samples: [pdf] })).resolves.toMatchObject({
+    stopped: 'compliance',
+    state: { stage: 'compliance', samples: { state: 'ENVIADO AL SII', uploaded: ['muestra_33_1.pdf'] } },
+  })
+  const byFunction = await seeded(
+    samplesRoutes({ service: review(reviewAnswer('INGRESO'), reviewAnswer('POR REVISAR')) }),
+    atSamples.state,
+  )
+  await expect(
+    runCertification(byFunction.deps, { samples: async () => [pdf], until: 'printedSamples' }),
+  ).resolves.toMatchObject({ stopped: 'until', state: { stage: 'compliance' } })
+  const blocked = await seeded(samplesRoutes({ service: { leeImpreso: { body: SAMPLES_BLOCKED } } }), atSamples.state)
+  await expect(runCertification(blocked.deps, { samples: [pdf] })).resolves.toMatchObject({
+    stopped: 'blocked',
+    detail: expect.stringContaining('DOCUMENTOS IMPRESOS'),
+  })
+  const rejected = await seeded(
+    samplesRoutes({
+      service: {
+        ...review(reviewAnswer('RECHAZADO'), reviewAnswer('RECHAZADO')),
+        muestraMail: { body: detailAnswer([]) },
+      },
+    }),
+    atSamples.state,
+  )
+  await expect(runCertification(rejected.deps, { samples: [pdf] })).resolves.toMatchObject({
+    stopped: 'rejected',
+    detail: expect.stringContaining('rejected the printed samples'),
+  })
+  // The set given by hand skips the download; a set that cannot be downloaded names the artefact to fill.
+  const given = await seeded(exchangeRoutes({ download: new Error('never') }), confirmedSimulation)
+  await expect(
+    runCertification(given.deps, { exchangeSetXml: exchangeSetXml(), until: 'exchange' }),
+  ).resolves.toMatchObject({ stopped: 'until', state: { stage: 'printedSamples' } })
+  const unavailable = await seeded(exchangeRoutes({ download: { body: '<html>ERROR</html>' } }), confirmedSimulation)
+  await expect(runCertification(unavailable.deps)).resolves.toMatchObject({
+    stopped: 'exchange',
+    detail: 'intercambio/set-intercambio.xml',
+  })
+  // An exchange confirmed in a state still at the exchange moves on without the portal.
+  const edited = await seeded([], { ...confirmedSimulation, exchange: atSamples.state.exchange })
+  await expect(runCertification(edited.deps)).resolves.toMatchObject({
+    stopped: 'printedSamples',
+    state: { stage: 'printedSamples' },
+  })
+  expect(edited.urls()).toEqual([])
 })

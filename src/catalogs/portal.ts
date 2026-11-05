@@ -179,6 +179,9 @@ export type PortalRejection =
   | 'backupDayOverLimit'
   | 'backupDayUnknownTypes'
   | 'purchaseChangeNotConfirmed'
+  | 'exchangeUploadRefused'
+  | 'samplesReviewRefused'
+  | 'sampleUploadRefused'
 
 /**
  * EN: What each rejection means and what to do about it, in Spanish, for the operator.
@@ -236,6 +239,12 @@ export const PORTAL_REJECTIONS: Readonly<Record<PortalRejection, string>> = {
     'El portal no avanzó la postulación al paso siguiente: revisa el estado de los sets y libros en "Ver Avance de la Postulación".',
   declarationDeclined:
     'El portal no ofreció el formulario de declaración de avance: la fila pedida no existe en esta etapa, o la página muestra envíos con errores o reparos.',
+  exchangeUploadRefused:
+    'El portal de intercambio rechazó la subida de una respuesta: el archivo va en `details.file` y lo que dijo la página en `details.portalMessage`.',
+  samplesReviewRefused:
+    'El portal de muestras impresas no creó la revisión: el motivo es la frase del SII, en `details.portalMessage`.',
+  sampleUploadRefused:
+    'El portal de muestras impresas rechazó un PDF con un estado 4xx: el archivo va en `details.file` y el estado en `details.httpStatus`.',
 }
 
 /**

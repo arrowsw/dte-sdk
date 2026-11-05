@@ -24,9 +24,10 @@ export type {
   PrintedEnvelope,
   PrintedSample,
   PrintedSampleFailure,
+  PrintedSampleFile,
   PrintedSampleSet,
   PrintedSamplesInput,
   PrintedSamplesResult,
 } from './samples'
-export { findEnvelopeFiles, writePrintedSamples } from './node-samples'
+export { findEnvelopeFiles, readPrintedSamples, writePrintedSamples } from './node-samples'
 export type { WritePrintedSamplesInput, WritePrintedSamplesResult, WrittenPrintedSample } from './node-samples'

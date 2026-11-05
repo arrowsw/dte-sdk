@@ -1,4 +1,9 @@
-import { buildMultipartBody, generateBoundary, multipartContentType } from '../../src/sii/multipart'
+import {
+  buildMultipartBody,
+  buildMultipartParts,
+  generateBoundary,
+  multipartContentType,
+} from '../../src/sii/multipart'
 import { DteError } from '../../src/errors'
 import { decodeLatin1, encodeLatin1 } from '../../src/text/latin1'
 
@@ -146,5 +151,62 @@ describe('buildMultipartBody', () => {
     expect(() =>
       buildMultipartBody({ boundary, fields: [{ name: 'rutSender', value: '1' }], file: file('<a/>') }),
     ).not.toThrow()
+  })
+})
+
+describe('buildMultipartParts', () => {
+  test('keeps the parts in the given order, a file first when asked, and frames every part the same way', () => {
+    const body = buildMultipartParts({
+      boundary: 'B',
+      parts: [
+        {
+          name: 'Filedata',
+          fileName: 'muestra.pdf',
+          contentType: 'application/octet-stream',
+          bytes: encodeLatin1('%PDF'),
+        },
+        { name: 'id', value: '264872' },
+        { name: 'ambiente', value: 'false' },
+      ],
+    })
+    expect(decodeLatin1(body)).toBe(
+      [
+        '--B',
+        'Content-Disposition: form-data; name="Filedata"; filename="muestra.pdf"',
+        'Content-Type: application/octet-stream',
+        '',
+        '%PDF',
+        '--B',
+        'Content-Disposition: form-data; name="id"',
+        '',
+        '264872',
+        '--B',
+        'Content-Disposition: form-data; name="ambiente"',
+        '',
+        'false',
+        '--B--',
+        '',
+      ].join('\r\n'),
+    )
+  })
+
+  test('a CR, LF or quote in a name, file name or content type is refused: it would break the part header', () => {
+    const bytes = encodeLatin1('x')
+    const build = (part: Parameters<typeof buildMultipartParts>[0]['parts'][number]) => () =>
+      buildMultipartParts({ boundary: 'B', parts: [part] })
+    expect(build({ name: 'f', fileName: 'a"; name="b', contentType: 'text/plain', bytes })).toThrow(DteError)
+    expect(build({ name: 'f', fileName: 'a.pdf', contentType: 'text/plain\r\nX: y', bytes })).toThrow(DteError)
+    expect(build({ name: 'id\n', value: '1' })).toThrow(DteError)
+    expect(build({ name: 'f', fileName: 'B', contentType: 'text/plain', bytes })).toThrow(DteError)
+  })
+
+  test('no parts gives the closing line alone, and a boundary inside a part is refused', () => {
+    expect(decodeLatin1(buildMultipartParts({ boundary: 'B', parts: [] }))).toBe('--B--\r\n')
+    expect(() =>
+      buildMultipartParts({
+        boundary: 'B',
+        parts: [{ name: 'f', fileName: 'x', contentType: 'text/plain', bytes: encodeLatin1('--B--') }],
+      }),
+    ).toThrow(DteError)
   })
 })
