@@ -601,7 +601,8 @@ result. There is no runner here: the SII's validation of the set takes its own t
 again later.
 
 - **The declaration cannot be undone.** `declareReceiptsCompliance` authorises the company to issue receipts in
-  production. It reads the status first: `alreadyDeclared` and `notReady` are outcomes, and nothing is sent.
+  production. It reads the status first: `alreadyDeclared` and `notReady` are outcomes, and nothing is sent. Nor is it
+  sent from defaults: an application record without its date and its Long is `SII_PORTAL_UNEXPECTED_PAGE`.
 - **The software provider is mandatory** (`provider`): the SII answered some companies with a bare HTTP 500 when they
   were declared as their own provider by default. A company that is its own provider passes itself.
 - **The representative is the owner of the session**, the person whose certificate logged in; the portal's list is

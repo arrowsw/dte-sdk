@@ -304,8 +304,15 @@ describe('declareReceiptsCompliance', () => {
     expect(methods(busy).filter((method) => method === 'autorizarEmpresaBolProd')).toHaveLength(1)
   })
 
-  test('an application record that is not an //OK answer stops the declaration before it is sent', async () => {
-    for (const body of [EXCEPTION, "<html>sin postulacion 'a|b' vigente</html>"]) {
+  test('an application record that is no //OK answer, or lacks its date or its Long, stops the declaration before it is sent', async () => {
+    const unusable = [
+      EXCEPTION,
+      "<html>sin postulacion 'a|b' vigente</html>",
+      EMPTY_OK,
+      '//OK[3,\'BAqo\',2,1,["cl.sii.x/1"],0,7]',
+      '//OK[3,2,1,["cl.sii.x/1","10/11/2026"],0,7]',
+    ]
+    for (const body of unusable) {
       const broken = await signedIn([ready({ obtenerPostulacionSeg: { body } })])
       const error = await failure(declareReceiptsCompliance(broken.portal, input))
       expect(error.code).toBe('SII_PORTAL_UNEXPECTED_PAGE')

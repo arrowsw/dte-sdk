@@ -5,7 +5,6 @@ const AUTHORIZATION_DATE = /^\d{2}\/\d{2}\/\d{4}$/
 const STATE = /^P\d+$/
 const EMPTY_LIST = /^\/\/OK\[0,\[\]/
 const MIN_SET_LENGTH = 10
-const NO_TOKEN = '0'
 // A Long as GWT writes it in an answer: a single-quoted token of its base-64 alphabet.
 const LONG_TOKEN = /'([A-Za-z0-9$_]+)'/
 
@@ -23,24 +22,27 @@ export const representativeDigitsOf = (answer: GwtAnswer): string | null =>
  * ES: Lo que la declaración necesita del registro de la postulación.
  */
 export type ReceiptsPostulation = {
-  /** EN: The authorisation date, `dd/mm/yyyy`, or empty. ES: La fecha de autorización, `dd/mm/aaaa`, o vacía. */
+  /** EN: The authorisation date, `dd/mm/yyyy`. ES: La fecha de autorización, `dd/mm/aaaa`. */
   readonly authorizationDate: string
-  /** EN: The application's Long as the portal wrote it, or `0`. ES: El Long de la postulación como lo escribió el portal, o `0`. */
+  /** EN: The application's Long as the portal wrote it. ES: El Long de la postulación como lo escribió el portal. */
   readonly token: string
 }
 
 /**
  * EN: Reads the application record: the first string of the table shaped as a date, and the first single-quoted token
- * of the body that is a Long. Quoted text that is no Long is not one: the token goes into the declaration body as it
- * is, so it can never carry a separator.
+ * of the body that is a Long. Null when the answer is not `//OK` or lacks either one: the declaration cannot be undone,
+ * so no default stands in for them. Quoted text that is no Long is not one: the token goes into the declaration body
+ * as it is, so it can never carry a separator.
  * ES: Lee el registro de la postulación: el primer string de la tabla con forma de fecha, y el primer token entre
- * comillas simples del cuerpo que es un Long. Un texto entre comillas que no es un Long no lo es: el token va al cuerpo
- * de la declaración tal cual, así que nunca puede llevar un separador.
+ * comillas simples del cuerpo que es un Long. Null cuando la respuesta no es `//OK` o le falta alguno de los dos: la
+ * declaración no se puede deshacer, así que ningún valor por defecto los reemplaza. Un texto entre comillas que no es
+ * un Long no lo es: el token va al cuerpo de la declaración tal cual, así que nunca puede llevar un separador.
  */
-export const postulationOf = (answer: GwtAnswer): ReceiptsPostulation => ({
-  authorizationDate: answer.table.find((item) => AUTHORIZATION_DATE.test(item)) ?? '',
-  token: LONG_TOKEN.exec(answer.body)?.[1] ?? NO_TOKEN,
-})
+export const postulationOf = (answer: GwtAnswer): ReceiptsPostulation | null => {
+  const authorizationDate = answer.table.find((item) => AUTHORIZATION_DATE.test(item))
+  const token = LONG_TOKEN.exec(answer.body)?.[1]
+  return answer.ok && authorizationDate !== undefined && token !== undefined ? { authorizationDate, token } : null
+}
 
 /**
  * EN: The states a status answer names: the strings of its table that are exactly `P<digits>`, in order. An answer
