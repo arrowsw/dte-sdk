@@ -1,5 +1,6 @@
 import { SAMPLES_PORTAL } from '../catalogs/certification'
 import { DteError, errorMessage, isDteError } from '../errors'
+import { splitSiiRut } from '../model/rut'
 import type { CallOverrides } from '../sii/client'
 import { redactText } from '../sii/capture'
 import { buildMultipartParts, multipartContentType } from '../sii/multipart'
@@ -211,7 +212,7 @@ export const createSamplesReview = (
   overrides?: CallOverrides,
 ): Promise<SamplesReviewCreated> =>
   withPortalSession(portal, 'createSamplesReview', overrides, async (context) => {
-    const [digits, verifier] = resolvePortalCompany(portal, input.companyRut).split('-')
+    const { body: digits, verifier } = splitSiiRut(resolvePortalCompany(portal, input.companyRut))
     await enter(context)
     const hashes = await gwtHashesOf(context, SAMPLES_PORTAL, input.gwt)
     const { page, answer } = await call(once(context), 'creaLista', hashes, [
