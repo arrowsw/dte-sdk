@@ -571,6 +571,9 @@ import {
   verifyReceiptsAuthorization,
 } from 'dte-sdk/portal'
 
+const portal = createPortalClient({ environment: 'certification', certificate, companyRut })
+const sii = createSiiClient({ environment: 'certification', certificate, companyRut })
+
 // The receipts application is its own: its portal, its test set, its declaration. The pieces, in the order to chain them
 const { text } = await downloadReceiptsTestSet(portal, { providerMail })
 const issued = await issueReceiptsSet(parseReceiptsTestSet(text), {
@@ -586,7 +589,7 @@ await declareReceiptsTrackId(portal, { trackId: sent.envelopeTrackId })
 const status = await readReceiptsStatus(portal) // readyToDeclare once the set is approved (P90); declared after (P91)
 if (status.readyToDeclare) await declareReceiptsCompliance(portal, { provider: { rut, name, mail }, businessName })
 const check = await verifyReceiptsAuthorization({ production: productionPortal, certification: portal })
-// check.production.authorized: type 39 can be stamped in production
+// check.production?.authorized: type 39 can be stamped in production
 ```
 
 The receipts test set is a plain text of cases; each case is one receipt of type 39 to the final consumer, with prices
