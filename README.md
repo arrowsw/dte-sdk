@@ -594,9 +594,11 @@ that include VAT and a reference `SET` / `CASO-<n>`. `sendReceiptsSet` uploads t
 its status, then sends the folio consumption report (RCOF) built from the envelope, starting at sequence number 100 and
 trying the next one after a rejection, up to ten times; three duplicates in a row mean today's report was already
 accepted (the certification environment takes one per company per day). The SII's objections to the report are
-expected in certification and block nothing, so the outcome is `sent` as long as the envelope was not rejected. The
-XMLs come back in the result. There is no runner here: the SII's validation of the set takes its own time, and the
-caller reads the status again later.
+expected in certification and block nothing: ten attempts without an accepted report still end in `sent`. The other
+outcomes are `envelopeRejected`, and `consumptionFailed` when the report could not be uploaded or was refused for lack
+of authorisation (`notAuthorized`); the envelope's track id is in the result either way. The XMLs come back in the
+result. There is no runner here: the SII's validation of the set takes its own time, and the caller reads the status
+again later.
 
 - **The declaration cannot be undone.** `declareReceiptsCompliance` authorises the company to issue receipts in
   production. It reads the status first: `alreadyDeclared` and `notReady` are outcomes, and nothing is sent.

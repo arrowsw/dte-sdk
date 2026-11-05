@@ -51,10 +51,12 @@ export type ReceiptsConsumptionAttempt = {
 }
 
 /**
- * EN: What `sendReceiptsSet` did. `sent` is the envelope uploaded and not rejected, whatever became of the report:
- * the SII's objections to the report are expected in certification and block nothing.
- * ES: Lo que hizo `sendReceiptsSet`. `sent` es el sobre subido y no rechazado, sea cual sea la suerte del reporte: los
- * reparos del SII al reporte son esperables en certificación y no bloquean nada.
+ * EN: What `sendReceiptsSet` did. `sent` is the envelope uploaded and not rejected, with its report accepted, already
+ * sent today or objected to: the SII's objections to the report are expected in certification and block nothing.
+ * `consumptionFailed` is a report that could not be uploaded, or one refused for lack of authorisation.
+ * ES: Lo que hizo `sendReceiptsSet`. `sent` es el sobre subido y no rechazado, con su reporte aceptado, ya enviado hoy
+ * o con reparos: los reparos del SII al reporte son esperables en certificación y no bloquean nada.
+ * `consumptionFailed` es un reporte que no se pudo subir, o uno rechazado por falta de autorización.
  */
 export type ReceiptsSendResult = {
   /** EN: How it ended. ES: Cómo terminó. */
