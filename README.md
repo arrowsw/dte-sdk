@@ -7,10 +7,18 @@
 
 </div>
 
+> **⚠️ Not ready for production.** `dte-sdk` is under active development, and its use is not recommended until it
+> reaches version **1.0.0**, the release that will mark the library as mature enough to run in production. Until then
+> the API can change in any release, and much of what this README describes has not met the real SII yet: see
+> [Status](#status).
+
 `dte-sdk` builds, stamps and signs Chilean **DTE** (Documento Tributario
 Electrónico) the way the SII expects them, sends them through the SII web
-services and tracks them, with a readable English API and bilingual (EN/ES)
-documentation on every field.
+services and tracks them. It also covers what surrounds issuing: the SII books,
+the certificate-authenticated SII portal (folios, the purchase and sales
+register, the MIPYME backup), the certification process and the printed
+samples. The API is readable English, with bilingual (EN/ES) documentation on
+every field.
 
 - 🧾 **Document types** 33, 34, 39, 41, 43, 46, 52, 56 and 61.
 - 🧮 **Totals done right** — per-line rounding, exempt and non-billable lines,
@@ -23,16 +31,84 @@ documentation on every field.
 - 📡 **SII web services** — seed/token, `DTEUpload` and the receipts REST API, envelope and
   document status, polling, acceptance/claims; injectable transport, retries, HTTP capture
   with redaction and an upload archive. TLS verification stays on.
+- 📚 **SII books** — the purchase and sales book, the dispatch guide book and the folio
+  consumption report, with their summaries computed from the lines.
+- 🏛️ **SII portal and folios** — certificate login with reused sessions, company data, folio
+  quota, CAF requests, annulment and re-obtaining, and a local folio registry.
+- 🗂️ **Purchase and sales register and MIPYME backup** — the documents and official summaries of
+  a period, purchase reclassification, and the XML of issued and received documents.
+- 🎓 **Certification** — the SII test sets parsed and issued, their books, the simulation, the
+  exchange answers, and a resumable runner over the certification portals.
+- 🖨️ **Printed samples** — one PDF per document following the SII manual, with its PDF417 stamp.
 - 🧠 **Fully typed** — a domain model in English (`totalAmount`, `issuer.businessName`)
   that maps to the official SII tags (`MntTotal`, `RznSoc`) through a codec.
 - 🇨🇱 **Identity by [rut.ts](https://github.com/arrowsw/rut.ts)** — every RUT is
   validated and normalized by rut.ts; nothing is reimplemented here.
 - 🛡️ **Typed errors** with stable codes and no personal data in messages.
 
+## Contents
+
+- [Status](#status)
+- [Installation](#installation)
+- [Entry points](#entry-points)
+- [Quick start](#quick-start)
+- [Step by step](#step-by-step)
+- [SII web services](#sii-web-services)
+- [SII books](#sii-books)
+- [SII portal and folios](#sii-portal-and-folios)
+- [Purchase and sales register and MIPYME backup](#purchase-and-sales-register-and-mipyme-backup)
+- Certification: [test sets, simulation and books](#certification-test-sets-simulation-and-books),
+  [the runner](#certification-the-runner),
+  [the exchange and the printed samples](#certification-the-exchange-and-the-printed-samples)
+- [Printed samples (Node)](#printed-samples-node)
+- [Errors](#errors) and [status codes](#status-codes)
+- [Development](#development)
+
+## Status
+
+The version on npm (0.0.2) is a placeholder with no API. Everything in this README lives on the
+[`canary`](https://github.com/arrowsw/dte-sdk/tree/canary) branch and ships in 0.1.0, the first release with a public
+API. Version 1.0.0 will be the first one recommended for production.
+
+Every area is tested against synthetic SII answers, with a 100 % coverage gate in CI. Those tests cannot show how the
+real SII answers, so this table says what has met it so far:
+
+| Area                                                           | Entry            | Against the real SII                                                                                 |
+| -------------------------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------- |
+| Documents, stamps, signatures and envelopes                    | `dte-sdk`        | Not sent yet                                                                                         |
+| SII web services client                                        | `dte-sdk`        | Not run yet ([issue 8](https://github.com/arrowsw/dte-sdk/issues/8))                                 |
+| SII books                                                      | `dte-sdk`        | Not sent yet; they validate against the official schemas in the tests                                |
+| Portal session and company data                                | `dte-sdk/portal` | Login, logout, taxpayer data and the refusal pages, for a company not enrolled as an issuer          |
+| Folios and CAF requests                                        | `dte-sdk/portal` | Not seen yet: they need an enrolled company                                                          |
+| Purchase and sales register, MIPYME backup                     | `dte-sdk/portal` | Read-only requests answered for a company with no documents; rows, downloads and writes not seen yet |
+| Certification sets, runner, exchange and upload of the samples | `dte-sdk/portal` | Not run yet; the exchange answers validate against the official schemas in the tests                 |
+| Printed samples                                                | `dte-sdk/pdf`    | Not reviewed by the SII yet                                                                          |
+
+Still to come before 0.1.0: the certification of receipts (boletas), and the live runs tracked in
+[issue 8](https://github.com/arrowsw/dte-sdk/issues/8). Out of scope: export documents (110, 111 and 112), fee
+receipts (boletas de honorarios), the assignment of invoices (AEC), forms F29 and F22, the exchange e-mail and full
+XSD validation.
+
 ## Installation
 
 ```bash
 npm install dte-sdk
+```
+
+Until 0.1.0 is published, that command installs the 0.0.2 placeholder. To try the API described here, build the
+package from `canary`:
+
+```bash
+git clone https://github.com/arrowsw/dte-sdk.git
+cd dte-sdk
+npm install
+npm pack   # builds and writes dte-sdk-0.0.2.tgz
+```
+
+and install that file in your project:
+
+```bash
+npm install ../dte-sdk/dte-sdk-0.0.2.tgz
 ```
 
 Node ≥ 22.12. The package ships ES modules only, and a CommonJS project loads it with `require()` just the same. Printed
@@ -44,12 +120,12 @@ npm install pdf-lib bwip-js
 
 ## Entry points
 
-| Import from      | What it holds                                                                                                        | Runs on                                                        |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `dte-sdk`        | Documents, stamps, signatures, envelopes, books and the SII web services client over `fetch`                         | Node, Bun, Deno; bundles for the browser with no configuration |
-| `dte-sdk/node`   | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryFolioRegistry` | Node                                                           |
-| `dte-sdk/portal` | SII portal, folios and CAF requests, purchase and sales register, MIPYME backup, certification sets and runner       | Node                                                           |
-| `dte-sdk/pdf`    | Printed samples                                                                                                      | Node, with `pdf-lib` and `bwip-js` installed                   |
+| Import from      | What it holds                                                                                                                                                            | Runs on                                                        |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| `dte-sdk`        | Documents, stamps, signatures, envelopes, books and the SII web services client over `fetch`                                                                             | Node, Bun, Deno; bundles for the browser with no configuration |
+| `dte-sdk/node`   | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryFolioRegistry`                                                     | Node                                                           |
+| `dte-sdk/portal` | SII portal, folios and CAF requests, the folio registry, purchase and sales register, MIPYME backup, and certification: sets, runner, exchange and upload of the samples | Node                                                           |
+| `dte-sdk/pdf`    | Printed samples                                                                                                                                                          | Node, with `pdf-lib` and `bwip-js` installed                   |
 
 `DteError` and `isDteError` come from `dte-sdk` and recognize what every entry throws.
 
@@ -155,7 +231,7 @@ if (!claim.ok) console.log(claimResponseMessage(claim.code)) // business answers
 ```
 
 Uploads send the XML as ISO-8859-1 bytes, so it must open with an XML declaration naming
-ISO-8859-1 (the phase 1 envelopes do); anything else is refused with
+ISO-8859-1 (the envelopes and books this SDK builds do); anything else is refused with
 `INVALID_OPTION { field: 'xml' }` before anything is sent, and whitespace before the declaration
 is dropped.
 
@@ -266,7 +342,7 @@ its own transactions.
 A refusal of the SII is `SII_PORTAL_REJECTED`, with `details.rejection` and `portalRejectionMessage` saying what it means
 and what to do; the composite flows return it as data, so the CAFs already obtained are not lost. Login, logout and the
 refusal pages were measured against the real SII, but the pages of an enrolled company (quota, CAF, folio ranges) have not
-been seen yet: see the phase 4 design.
+been seen yet: see the [portal and folios design](./docs/superpowers/specs/2026-11-02-phase-4-portal-folios-design.md).
 
 ## Purchase and sales register and MIPYME backup
 
@@ -356,7 +432,7 @@ const simulation = await issueSimulation(plan, { ...options, folios: createFolio
 ```
 
 The SII test set is parsed line by line into cases; `planCertificationSets` turns them into what each set issues and the
-folios each type needs; `issueTestSet` issues the basic, exempt, guide and purchase sets through the phase 1 functions
+folios each type needs; `issueTestSet` issues the basic, exempt, guide and purchase sets through `issueDocument`
 with the `SET` reference (`CASO <id>`) and the rules the SII review expects (returned goods at the original price,
 cancellations taking the cancelled document's items, the issuer as receiver of purchase invoices and internal
 transfers); `issueSimulation` re-issues every case in one envelope; the three `createCertification*Book` functions
@@ -521,7 +597,8 @@ PDF417 stamp of the TED with its legends. The stamp encodes the signed bytes exa
 alone). It needs Node and the optional peers `pdf-lib` and `bwip-js`, which are loaded on first use: without them
 the render functions throw `DEPENDENCY_UNAVAILABLE`. Failures of a batch come back as data (`failures[].code`), never as thrown errors; a folio that is not a run
 of digits is an `INVALID_FOLIO` failure, since it would name the file. Retentions, the commission block of settlement
-invoices and a stamp raster above 300 DPI are not printed yet: see the phase 5a design.
+invoices and a stamp raster above 300 DPI are not printed yet: see the
+[printed samples design](./docs/superpowers/specs/2026-11-04-phase-5a-printed-samples-design.md).
 
 ## Errors
 
@@ -566,7 +643,9 @@ SII_LIVE=1 SII_CERT_PFX=… SII_CERT_PASSWORD=… npx jest tests/live   # opt-in
 ```
 
 Releases are tag-triggered and published from CI with npm provenance — see
-[RELEASING.md](./RELEASING.md).
+[RELEASING.md](./RELEASING.md). The design of each area and the decisions behind it are under
+[docs/superpowers/specs](./docs/superpowers/specs), and [docs/decisions/entry-points.md](./docs/decisions/entry-points.md)
+explains the four entries.
 
 ## Contributing
 
@@ -575,4 +654,4 @@ requests, or submit a pull request.
 
 ## License
 
-[MIT](./LICENSE) © dte-sdk contributors
+[MIT](./LICENSE) © Arrow Software
