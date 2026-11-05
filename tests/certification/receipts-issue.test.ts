@@ -77,4 +77,12 @@ describe('issueReceiptsSet', () => {
     const short = { ...options(), folios: createFolioAllocator([cafFor(39, { from: 1, to: 2 })]) }
     expect((await failure(issueReceiptsSet(cases, short))).code).toBe('FOLIO_OUT_OF_RANGE')
   })
+
+  test('the unit is the last word after the word "en", never after a word that ends in it', async () => {
+    const noted = parseReceiptsTestSet(
+      'CASO-1\nItem\tCantidad\tPrecio\nPan\t1\t100\nOBSERVACION: Los items con unidad de medida se deben informar.',
+    )
+    const issued = await issueReceiptsSet(noted, options())
+    expect(issued.receipts[0].document.items[0].unit).toBeUndefined()
+  })
 })

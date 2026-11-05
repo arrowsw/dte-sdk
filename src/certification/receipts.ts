@@ -12,7 +12,7 @@ import type { ReceiptsTestCase } from './receipts-set'
 
 const RECEIPT_TYPE = 39
 const UNIT_OBSERVATION = /unidad de medida/i
-const UNIT_WORD = /en\s+(\w+)\.?$/i
+const UNIT_WORD = /\ben\s+(\w+)\.?$/i
 
 /**
  * EN: What issuing the receipts set needs.
