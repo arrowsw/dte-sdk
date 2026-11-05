@@ -261,3 +261,17 @@ export const EXCHANGE_ANSWER_FILES: Readonly<Record<ExchangeAnswerKey, string>> 
   receipts: 'envio-recibos.xml',
   approval: 'respuesta-aprobacion-comercial.xml',
 }
+
+/**
+ * EN: The receipts portal (`certBolElectDteInternet`), where the certification of electronic receipts runs. Its
+ * hashes are not discovered: `moduleName` is what its interface suggests, not a recorded fact.
+ * ES: El portal de boletas (`certBolElectDteInternet`), donde corre la certificación de boletas electrónicas. Sus
+ * hashes no se descubren: `moduleName` es lo que sugiere su interfaz, no un dato registrado.
+ */
+export const RECEIPTS_PORTAL: GwtPortal = {
+  base: 'https://www4.sii.cl/certBolElectDteInternet/',
+  service: 'facade',
+  serviceInterface: 'cl.sii.sdi.diii.certBolElectDte.web.client.service.Facade',
+  moduleName: 'certBolElectDte',
+  known: { permutation: '0FC3D987613537E6E13E9BB93A406F13', policy: '082D0AC4BC4D75A5DF38F116C53877D4' },
+}

@@ -8,6 +8,7 @@ import {
   gwtHeaders,
   gwtLongToken,
   gwtMessage,
+  gwtNull,
   GWT_INTEGER,
   GWT_LONG,
   GWT_STRING,
@@ -254,5 +255,60 @@ describe('discoverGwtHashes', () => {
     const { hashes, harness } = await discover([], fresh)
     expect(hashes).toEqual(fresh)
     expect(harness.urls()).toEqual([])
+  })
+})
+
+describe('a null that names its declared type', () => {
+  const RECEIPTS = 'https://www4.sii.cl/certBolElectDteInternet/'
+  const RECEIPTS_FACADE = 'cl.sii.sdi.diii.certBolElectDte.web.client.service.Facade'
+
+  test('ingresarTrackId: seven parameters, the fifth a null Integer', () => {
+    const body = gwtBody(
+      call(RECEIPTS, RECEIPTS_FACADE, 'ingresarTrackId', [
+        integer(76543210),
+        string('3'),
+        string(null),
+        string('90'),
+        gwtNull(GWT_INTEGER),
+        string(null),
+        string('9876543210'),
+      ]),
+    )
+    expect(body).toBe(
+      `7|0|9|${RECEIPTS}|${POLICY}|${RECEIPTS_FACADE}|ingresarTrackId|${GWT_INTEGER}|${GWT_STRING}|3|90|9876543210|1|2|3|4|7|5|6|6|6|5|6|6|5|76543210|7|0|8|0|0|9|`,
+    )
+  })
+
+  test('obtenerEstadoAutorizaEmp and obtenerPostulacionSeg, as the receipts portal takes them', () => {
+    expect(
+      gwtBody(
+        call(RECEIPTS, RECEIPTS_FACADE, 'obtenerEstadoAutorizaEmp', [
+          integer(76543210),
+          string('3'),
+          integer(90),
+          string(null),
+        ]),
+      ),
+    ).toBe(
+      `7|0|7|${RECEIPTS}|${POLICY}|${RECEIPTS_FACADE}|obtenerEstadoAutorizaEmp|${GWT_INTEGER}|${GWT_STRING}|3|1|2|3|4|4|5|6|5|6|5|76543210|7|5|90|0|`,
+    )
+    expect(
+      gwtBody(
+        call(RECEIPTS, RECEIPTS_FACADE, 'obtenerPostulacionSeg', [
+          integer(76543210),
+          string('3'),
+          string('90'),
+          string('P90'),
+        ]),
+      ),
+    ).toBe(
+      `7|0|9|${RECEIPTS}|${POLICY}|${RECEIPTS_FACADE}|obtenerPostulacionSeg|${GWT_INTEGER}|${GWT_STRING}|3|90|P90|1|2|3|4|4|5|6|6|6|5|76543210|7|8|9|`,
+    )
+  })
+
+  test('a plain null stays a String', () => {
+    expect(gwtBody(call(RECEIPTS, RECEIPTS_FACADE, 'x', [nothing]))).toBe(
+      `7|0|5|${RECEIPTS}|${POLICY}|${RECEIPTS_FACADE}|x|${GWT_STRING}|1|2|3|4|1|5|0|`,
+    )
   })
 })

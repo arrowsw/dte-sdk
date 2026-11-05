@@ -1,4 +1,4 @@
-import { toSiiRut, isSiiRut, splitSiiRut } from '../src/model/rut'
+import { toSiiRut, isSiiRut, siiRutOfBody, splitSiiRut } from '../src/model/rut'
 import { DteError } from '../src/errors'
 
 describe('toSiiRut', () => {
@@ -43,5 +43,24 @@ describe('isSiiRut', () => {
 describe('splitSiiRut', () => {
   test('splits body and verifier', () => {
     expect(splitSiiRut(toSiiRut('14625621-K'))).toEqual({ body: '14625621', verifier: 'K' })
+  })
+})
+
+describe('siiRutOfBody', () => {
+  test('computes the verifier of a body of 7 or 8 digits', () => {
+    expect(siiRutOfBody('76543210')).toBe('76543210-3')
+    expect(siiRutOfBody('12345678')).toBe('12345678-5')
+    expect(siiRutOfBody('14625621')).toBe('14625621-K')
+  })
+
+  test('anything else is an invalid RUT, named by its field', () => {
+    for (const body of ['', '123', 'abcdefgh', '123456789']) {
+      expect(() => siiRutOfBody(body, 'representative')).toThrow(DteError)
+    }
+    try {
+      siiRutOfBody('x', 'representative')
+    } catch (error) {
+      expect((error as DteError).details).toEqual({ field: 'representative' })
+    }
   })
 })
