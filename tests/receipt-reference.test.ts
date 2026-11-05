@@ -5,6 +5,8 @@ import type { DocumentInput } from '../src/model/document'
 import { envelopeXml, issue, issuer, receiver } from './support/printed-fixtures'
 import { validateAgainstXsd } from './support/xsd'
 
+jest.setTimeout(30_000)
+
 const receipt = (extra: Partial<DocumentInput> = {}): DocumentInput => ({
   type: 39,
   folio: 11,

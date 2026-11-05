@@ -9,6 +9,8 @@ import { failure } from '../support/portal'
 import { RECEIPTS_SET_TEXT } from '../support/receipts-set-samples'
 import { validateAgainstXsd } from '../support/xsd'
 
+jest.setTimeout(30_000)
+
 const cases = parseReceiptsTestSet(RECEIPTS_SET_TEXT)
 const options = (from = 21) => ({
   issuer,

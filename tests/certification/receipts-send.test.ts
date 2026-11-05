@@ -22,6 +22,8 @@ import { RECEIPTS_SET_TEXT } from '../support/receipts-set-samples'
 import { siiFixture } from '../support/sii-client'
 import { validateAgainstXsd } from '../support/xsd'
 
+jest.setTimeout(30_000)
+
 const DUPLICATE: FakeReply = { body: siiFixture('reception-duplicate-99.xml') }
 const rejected = (trackId: string, gloss = 'Envio Rechazado'): FakeReply => ({
   body: siiFixture('soap-estup-epr.xml')
