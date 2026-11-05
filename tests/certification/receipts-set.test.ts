@@ -46,4 +46,21 @@ describe('parseReceiptsTestSet', () => {
       { number: 1, items: [{ name: 'Pan', quantity: 2, unitPrice: 1500, exempt: false }], observations: [] },
     ])
   })
+
+  test('an observation keeps a quote inside its text, and a price drops every comma', () => {
+    const text = [
+      'CASO-1',
+      'Item\tCantidad\tPrecio',
+      'Viga\t1\t1,234,567',
+      'OBSERVACION: "Clavo de 3/4" con unidad de medida en Kg."',
+      'OBSERVACION: Tubo de 1/2" sin comillas',
+    ].join('\n')
+    expect(parseReceiptsTestSet(text)).toEqual([
+      {
+        number: 1,
+        items: [{ name: 'Viga', quantity: 1, unitPrice: 1234567, exempt: false }],
+        observations: ['Clavo de 3/4" con unidad de medida en Kg.', 'Tubo de 1/2" sin comillas'],
+      },
+    ])
+  })
 })

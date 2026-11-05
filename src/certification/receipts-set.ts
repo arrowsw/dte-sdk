@@ -28,7 +28,7 @@ export type ReceiptsTestCase = {
 
 const CASE = /^CASO-?(\d+)/i
 const OBSERVATION_LINE = /^OBSERVACION/i
-const OBSERVATION = /OBSERVACION[ES]*:\s*"?([^"]+)"?/i
+const OBSERVATION = /OBSERVACION[ES]*:\s*([\s\S]*)/i
 const COLUMNS = /\t+|\s{2,}/
 const RULE = '='
 
@@ -40,7 +40,7 @@ const itemOf = (line: string): ReceiptsTestItem | null => {
   const parts = line.split(COLUMNS)
   if (parts.length < 3) return null
   const quantity = Number.parseFloat(parts[1].replace(',', '.'))
-  const unitPrice = Number.parseInt(parts[2].replace(/\./g, '').replace(',', ''), 10)
+  const unitPrice = Number.parseInt(parts[2].replace(/[.,]/g, ''), 10)
   if (Number.isNaN(quantity) || Number.isNaN(unitPrice)) return null
   return { name: parts[0], quantity, unitPrice, exempt: parts[0].toLowerCase().includes('exento') }
 }
@@ -58,7 +58,8 @@ const readLine = (reading: Reading, line: string): Reading => {
     return { cases: [...reading.cases, { number: Number(opening[1]), items: [], observations: [] }], inItems: false }
   if (isItemHeader(line)) return { ...reading, inItems: true }
   if (OBSERVATION_LINE.test(line)) {
-    const observation = OBSERVATION.exec(line)?.[1].trim()
+    // The quotes around the text are dropped; one inside it, as in `3/4"`, is part of the text.
+    const observation = OBSERVATION.exec(line)?.[1].replace(/^"/, '').replace(/"$/, '').trim()
     return observation === undefined || observation === ''
       ? reading
       : withLast(reading, (last) => ({ ...last, observations: [...last.observations, observation] }))
