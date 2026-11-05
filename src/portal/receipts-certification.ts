@@ -1,0 +1,485 @@
+import { RECEIPTS_PORTAL } from '../catalogs/certification'
+import { DteError, errorCode, errorMessage } from '../errors'
+import { siiRutOfBody, splitSiiRut, toSiiRut, type SiiRut } from '../model/rut'
+import type { CallOverrides } from '../sii/client'
+import { bodyExcerpt } from '../sii/operation'
+import { encodeUtf8 } from '../sii/transport'
+import { chileDate } from '../time/chile'
+import { readProgress } from './certification'
+import { resolvePortalCompany, type PortalClient } from './client'
+import { sessionRut } from './cookies'
+import {
+  GWT_CONTENT_TYPE,
+  GWT_INTEGER,
+  gwtHeaders,
+  gwtInteger,
+  gwtNull,
+  gwtString,
+  postGwt,
+  type GwtAnswer,
+  type GwtHashes,
+  type GwtParameter,
+} from './gwt'
+import {
+  isEmptyList,
+  isReceiptsSet,
+  postulationOf,
+  receiptsComplianceBody,
+  receiptsStatesOf,
+  representativeDigitsOf,
+} from './pages/receipts-certification'
+import {
+  ensureSession,
+  portalRequest,
+  rejected,
+  unexpectedPage,
+  withPortalSession,
+  type PortalContext,
+} from './session'
+import { listStampableTypes } from './stamping'
+
+const RECEIPT_TYPE = 39
+const READY_STATE = 90
+const DECLARED_STATE = 91
+const READY = 'P90'
+const DECLARED = 'P91'
+const DEFAULT_LINK = 'www.sii.cl'
+const SERVICE_URL = `${RECEIPTS_PORTAL.base}${RECEIPTS_PORTAL.service}`
+
+type Party = { readonly digits: string; readonly verifier: string }
+
+const partyOf = (rut: SiiRut): Party => {
+  const { body, verifier } = splitSiiRut(rut)
+  return { digits: body, verifier }
+}
+
+// The posts that change the application (the track id, the declaration) are sent once: a retry could repeat them.
+const once = (context: PortalContext): PortalContext => ({
+  ...context,
+  overrides: { ...context.overrides, retry: false },
+})
+
+const call = (
+  context: PortalContext,
+  hashes: GwtHashes,
+  method: string,
+  parameters: readonly GwtParameter[],
+): ReturnType<typeof postGwt> => postGwt(context, method, RECEIPTS_PORTAL, hashes, method, parameters)
+
+const companyParameters = (company: Party): readonly GwtParameter[] => [
+  gwtInteger(Number(company.digits)),
+  gwtString(company.verifier),
+]
+
+// A read whose answer is judged: a status other than 200 is not an answer.
+const read = async (
+  context: PortalContext,
+  hashes: GwtHashes,
+  method: string,
+  parameters: readonly GwtParameter[],
+): ReturnType<typeof postGwt> => {
+  const result = await call(context, hashes, method, parameters)
+  if (result.page.status !== 200) throw unexpectedPage(context, method, result.page.html)
+  return result
+}
+
+const REPRESENTATIVES_METHOD = 'recuperarRepresentantesVigentesUsuariosAutorizados'
+const POSTULATION_METHOD = 'obtenerPostulacionSeg'
+
+const postulationParameters = (company: Party): readonly GwtParameter[] => [
+  ...companyParameters(company),
+  gwtString(String(READY_STATE)),
+  gwtString(READY),
+]
+
+// The representative is the owner of the session: with two people enrolled for a company, any other choice makes the
+// SII answer the declaration with a bare HTTP 500. The portal's list is only the fallback.
+const representativeOf = (context: PortalContext, list: GwtAnswer): SiiRut => {
+  const owner = sessionRut(context.state.cookies)
+  if (owner !== null) return owner
+  const digits = representativeDigitsOf(list)
+  if (digits === null) throw new DteError('MISSING_FIELD', { field: 'representative' })
+  return siiRutOfBody(digits, 'representative')
+}
+
+/**
+ * EN: What every operation of the receipts portal takes.
+ * ES: Lo que recibe cada operación del portal de boletas.
+ */
+export type ReceiptsPortalInput = {
+  /** EN: Company RUT; the client's by default. ES: RUT de la empresa; por defecto el del cliente. */
+  readonly companyRut?: string
+  /** EN: The portal's hashes, when the pair known to work has gone stale. ES: Los hashes del portal, cuando el par que se sabe que funciona quedó obsoleto. */
+  readonly gwt?: GwtHashes
+}
+
+/**
+ * EN: Input of `downloadReceiptsTestSet`.
+ * ES: Entrada de `downloadReceiptsTestSet`.
+ */
+export type DownloadReceiptsTestSetInput = ReceiptsPortalInput & {
+  /** EN: The software provider's mail the portal asks for with the set. ES: `mailProvSw` — El correo del proveedor de software que el portal pide con el set. */
+  readonly providerMail?: string
+}
+
+/**
+ * EN: What `downloadReceiptsTestSet` read.
+ * ES: Lo que leyó `downloadReceiptsTestSet`.
+ */
+export type ReceiptsTestSetDownload = {
+  /** EN: The set text, for `parseReceiptsTestSet`. ES: El texto del set, para `parseReceiptsTestSet`. */
+  readonly text: string
+  /** EN: The representative the download named. ES: `rutRepre` + `dvRepre` — El representante que nombró la descarga. */
+  readonly representativeRut: SiiRut
+}
+
+/**
+ * EN: The state of the receipts application.
+ * ES: El estado de la postulación de boletas.
+ */
+export type ReceiptsStatus = {
+  /** EN: The company has valid representatives on the receipts portal. ES: La empresa tiene representantes vigentes en el portal de boletas. */
+  readonly enrolled: boolean
+  /** EN: The SII approved the set: the declaration can be made (`P90`). ES: El SII aprobó el set: se puede declarar (`P90`). */
+  readonly readyToDeclare: boolean
+  /** EN: The declaration was already made (`P91`). ES: La declaración ya se hizo (`P91`). */
+  readonly declared: boolean
+  /** EN: The state the portal named, or null. ES: El estado que nombró el portal, o null. */
+  readonly state: string | null
+}
+
+/**
+ * EN: The software provider the declaration names.
+ * ES: El proveedor de software que nombra la declaración.
+ */
+export type ReceiptsProvider = {
+  /** EN: The provider's RUT. ES: RUT del proveedor. */
+  readonly rut: string
+  /** EN: The provider's name. ES: Nombre del proveedor. */
+  readonly name: string
+  /** EN: The provider's mail. ES: Correo del proveedor. */
+  readonly mail: string
+}
+
+/**
+ * EN: Input of `declareReceiptsCompliance`.
+ * ES: Entrada de `declareReceiptsCompliance`.
+ */
+export type DeclareReceiptsComplianceInput = ReceiptsPortalInput & {
+  /** EN: The software provider; a company that is its own provider passes itself. ES: El proveedor de software; una empresa que es su propio proveedor se pasa a sí misma. */
+  readonly provider: ReceiptsProvider
+  /** EN: The company's business name. ES: La razón social de la empresa. */
+  readonly businessName: string
+  /** EN: The query link; `www.sii.cl` by default. ES: El link de consulta; por defecto `www.sii.cl`. */
+  readonly link?: string
+}
+
+/**
+ * EN: How `declareReceiptsCompliance` ended.
+ * ES: Cómo terminó `declareReceiptsCompliance`.
+ */
+export type ReceiptsComplianceResult = {
+  /** EN: `declared` now, `alreadyDeclared` earlier, or `notReady`: the SII has not approved the set yet and nothing was sent. ES: `declared` ahora, `alreadyDeclared` antes, o `notReady`: el SII aún no aprueba el set y no se envió nada. */
+  readonly outcome: 'declared' | 'alreadyDeclared' | 'notReady'
+  /** EN: The state of the application. ES: El estado de la postulación. */
+  readonly state: string | null
+}
+
+/**
+ * EN: Input of `verifyReceiptsAuthorization`.
+ * ES: Entrada de `verifyReceiptsAuthorization`.
+ */
+export type VerifyReceiptsAuthorizationInput = {
+  /** EN: A client on production, to read the stamping types. ES: Un cliente en producción, para leer los tipos timbrables. */
+  readonly production?: PortalClient
+  /** EN: A client on certification, to read the progress page. ES: Un cliente en certificación, para leer la página de avance. */
+  readonly certification?: PortalClient
+  /** EN: Company RUT; each client's by default. ES: RUT de la empresa; por defecto el de cada cliente. */
+  readonly companyRut?: string
+}
+
+/**
+ * EN: One side of `verifyReceiptsAuthorization`. `queryFailed` means the portal did not answer the question: it is
+ * never "not authorised".
+ * ES: Un lado de `verifyReceiptsAuthorization`. `queryFailed` significa que el portal no respondió la pregunta: nunca
+ * es "no autorizada".
+ */
+export type ReceiptsAuthorizationCheck = {
+  /** EN: The company may issue receipts there. ES: La empresa puede emitir boletas ahí. */
+  readonly authorized: boolean
+  /** EN: The query could not be answered. ES: La consulta no se pudo responder. */
+  readonly queryFailed: boolean
+  /** EN: The error code, when the query failed. ES: El código del error, si la consulta falló. */
+  readonly errorCode?: string
+  /** EN: The error message, when the query failed. ES: El mensaje del error, si la consulta falló. */
+  readonly error?: string
+}
+
+/**
+ * EN: What `verifyReceiptsAuthorization` read; a side is null when its client was not given.
+ * ES: Lo que leyó `verifyReceiptsAuthorization`; un lado es null cuando no se entregó su cliente.
+ */
+export type ReceiptsAuthorization = {
+  /** EN: Production: authorised when type 39 can be stamped. ES: Producción: autorizada cuando el tipo 39 se puede timbrar. */
+  readonly production: (ReceiptsAuthorizationCheck & { readonly types: readonly number[] }) | null
+  /** EN: Certification: the receipts row of the progress page. ES: Certificación: la fila de boletas de la página de avance. */
+  readonly certification: (ReceiptsAuthorizationCheck & { readonly state: string | null }) | null
+}
+
+/**
+ * EN: Downloads the receipts test set. The representatives list and the application record are read first (the portal
+ * wants them before the download; their answers are not judged), then `DownloadFileServlet` with the company, the
+ * representative and the provider's mail.
+ * ES: Descarga el set de pruebas de boletas. Primero se leen la lista de representantes y el registro de la
+ * postulación (el portal los quiere antes de la descarga; sus respuestas no se juzgan), y luego `DownloadFileServlet`
+ * con la empresa, el representante y el correo del proveedor.
+ * @param portal EN: the client. ES: el cliente.
+ * @param input EN: the company, the provider's mail, the hashes. ES: la empresa, el correo del proveedor, los hashes.
+ * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
+ * @returns EN: the set text and the representative named. ES: el texto del set y el representante nombrado.
+ * @throws {DteError} EN: `SII_PORTAL_UNEXPECTED_PAGE` when the download is no set; `MISSING_FIELD { field: 'representative' }` when neither the session nor the portal names one; session, block and transport codes. ES: los mismos códigos.
+ */
+export const downloadReceiptsTestSet = (
+  portal: PortalClient,
+  input: DownloadReceiptsTestSetInput = {},
+  overrides?: CallOverrides,
+): Promise<ReceiptsTestSetDownload> =>
+  withPortalSession(portal, 'downloadReceiptsTestSet', overrides, async (context) => {
+    const company = partyOf(resolvePortalCompany(portal, input.companyRut))
+    const hashes = input.gwt ?? RECEIPTS_PORTAL.known
+    await ensureSession(context)
+    // The portal wants both calls before the download; their answers are not judged.
+    const list = await call(context, hashes, REPRESENTATIVES_METHOD, companyParameters(company))
+    const representativeRut = representativeOf(context, list.answer)
+    const representative = partyOf(representativeRut)
+    await call(context, hashes, POSTULATION_METHOD, postulationParameters(company))
+    const query = `rutEmpresa=${company.digits}&dvEmpresa=${company.verifier}&rutRepre=${representative.digits}&dvRepre=${representative.verifier}&mailProvSw=${encodeURIComponent(input.providerMail ?? '')}`
+    const page = await portalRequest(
+      context,
+      'DownloadFileServlet',
+      'GET',
+      `${RECEIPTS_PORTAL.base}DownloadFileServlet?${query}`,
+      { referer: `${RECEIPTS_PORTAL.base}?SET=1`, headers: { Accept: 'text/plain,text/html,*/*' } },
+    )
+    if (!isReceiptsSet(page.status, page.html)) throw unexpectedPage(context, 'DownloadFileServlet', page.html)
+    return { text: page.html, representativeRut }
+  })
+
+/**
+ * EN: Declares the track id of the receipts envelope, so the SII validates the set (`ingresarTrackId`). Sent once. The
+ * SII validates on its own and reports by mail; `readReceiptsStatus` tells when the declaration can be made.
+ * ES: Declara el track id del sobre de boletas, para que el SII valide el set (`ingresarTrackId`). Se envía una vez. El
+ * SII valida por su cuenta y avisa por correo; `readReceiptsStatus` dice cuándo se puede declarar.
+ * @param portal EN: the client. ES: el cliente.
+ * @param input EN: the track id, the company, the hashes. ES: el track id, la empresa, los hashes.
+ * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
+ * @returns EN: the raw answer. ES: la respuesta cruda.
+ * @throws {DteError} EN: `MISSING_FIELD { field: 'trackId' }`; `SII_PORTAL_REJECTED { rejection: 'receiptsTrackIdRefused' }` when the answer is not `//OK`; session, block and transport codes. ES: los mismos códigos.
+ */
+export const declareReceiptsTrackId = (
+  portal: PortalClient,
+  input: ReceiptsPortalInput & { readonly trackId: string },
+  overrides?: CallOverrides,
+): Promise<{ readonly body: string }> =>
+  withPortalSession(portal, 'declareReceiptsTrackId', overrides, async (context) => {
+    if (input.trackId.trim() === '') throw new DteError('MISSING_FIELD', { field: 'trackId' })
+    const company = partyOf(resolvePortalCompany(portal, input.companyRut))
+    await ensureSession(context)
+    const { page, answer } = await call(once(context), input.gwt ?? RECEIPTS_PORTAL.known, 'ingresarTrackId', [
+      ...companyParameters(company),
+      gwtString(null),
+      gwtString(String(READY_STATE)),
+      gwtNull(GWT_INTEGER),
+      gwtString(null),
+      gwtString(input.trackId.trim()),
+    ])
+    if (page.status !== 200 || !answer.ok)
+      throw rejected(context, 'receiptsTrackIdRefused', {
+        httpStatus: page.status,
+        portalMessage: bodyExcerpt(page.html),
+      })
+    return { body: page.html }
+  })
+
+const NOT_ENROLLED: ReceiptsStatus = { enrolled: false, readyToDeclare: false, declared: false, state: null }
+
+const statusIn = async (
+  context: PortalContext,
+  hashes: GwtHashes,
+  company: Party,
+): Promise<{ readonly status: ReceiptsStatus; readonly list: GwtAnswer }> => {
+  const { answer: list } = await read(context, hashes, REPRESENTATIVES_METHOD, companyParameters(company))
+  if (representativeDigitsOf(list) === null) return { status: NOT_ENROLLED, list }
+  const statesOf = async (state: number): Promise<{ readonly states: readonly string[]; readonly empty: boolean }> => {
+    const { page, answer } = await read(context, hashes, 'obtenerEstadoAutorizaEmp', [
+      ...companyParameters(company),
+      gwtInteger(state),
+      gwtString(null),
+    ])
+    return { states: receiptsStatesOf(answer), empty: isEmptyList(page.html) }
+  }
+  const asked = await statesOf(READY_STATE)
+  const readyToDeclare = asked.states.includes(READY)
+  const state = readyToDeclare ? READY : (asked.states[0] ?? null)
+  if (state !== null || !asked.empty)
+    return { status: { enrolled: true, readyToDeclare, declared: false, state }, list }
+  // An empty list for 90 is "not approved yet" or "already declared": the state 91 tells them apart.
+  const declared = await statesOf(DECLARED_STATE).then(
+    (answer) => answer.states.includes(DECLARED),
+    (error: unknown) => {
+      context.portal.logger.warn('receipts declared state unavailable', { reason: errorMessage(error) })
+      return false
+    },
+  )
+  return { status: { enrolled: true, readyToDeclare: false, declared, state: declared ? DECLARED : null }, list }
+}
+
+/**
+ * EN: Reads the state of the receipts application: whether the company is enrolled (it has valid representatives),
+ * whether the SII approved the set (`P90`, ready to declare) and whether the declaration was made (`P91`). The portal
+ * answers an empty list for the state 90 both before the approval and after the declaration, so the state 91 is asked
+ * for too.
+ * ES: Lee el estado de la postulación de boletas: si la empresa está inscrita (tiene representantes vigentes), si el
+ * SII aprobó el set (`P90`, lista para declarar) y si la declaración ya se hizo (`P91`). El portal responde una lista
+ * vacía para el estado 90 tanto antes de la aprobación como después de la declaración, así que también se consulta el
+ * estado 91.
+ * @param portal EN: the client. ES: el cliente.
+ * @param input EN: the company, the hashes. ES: la empresa, los hashes.
+ * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
+ * @throws {DteError} EN: session, block and transport codes. ES: códigos de sesión, bloqueo y transporte.
+ */
+export const readReceiptsStatus = (
+  portal: PortalClient,
+  input: ReceiptsPortalInput = {},
+  overrides?: CallOverrides,
+): Promise<ReceiptsStatus> =>
+  withPortalSession(portal, 'readReceiptsStatus', overrides, async (context) => {
+    const company = partyOf(resolvePortalCompany(portal, input.companyRut))
+    await ensureSession(context)
+    return (await statusIn(context, input.gwt ?? RECEIPTS_PORTAL.known, company)).status
+  })
+
+const requiredText = (value: string | undefined, field: string): string => {
+  const text = (value ?? '').trim()
+  if (text === '') throw new DteError('MISSING_FIELD', { field })
+  return text
+}
+
+const declarationDate = (now: Date): string => {
+  const [year, month, day] = chileDate(now).split('-')
+  return `${day}-${month}-${year}`
+}
+
+/**
+ * EN: Makes the declaration of compliance of the receipts application, which authorises the company to issue receipts
+ * in production (`autorizarEmpresaBolProd`). It cannot be undone. The status is read first: a declaration already made
+ * and an application the SII has not approved yet are outcomes, and nothing is sent. The representative is the owner
+ * of the session; the software provider is mandatory, because the SII refused some companies that declared
+ * themselves as their own provider by default. Sent once.
+ * ES: Hace la declaración de cumplimiento de la postulación de boletas, que autoriza a la empresa a emitir boletas en
+ * producción (`autorizarEmpresaBolProd`). No se puede deshacer. Primero se lee el estado: una declaración ya hecha y
+ * una postulación que el SII aún no aprueba son resultados, y no se envía nada. El representante es el dueño de la
+ * sesión; el proveedor de software es obligatorio, porque el SII rechazó a algunas empresas que se declararon por
+ * defecto como su propio proveedor. Se envía una vez.
+ * @param portal EN: the client. ES: el cliente.
+ * @param input EN: the provider, the business name, the link, the company, the hashes. ES: el proveedor, la razón social, el link, la empresa, los hashes.
+ * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
+ * @throws {DteError} EN: `MISSING_FIELD` (`provider`, `provider.rut`, `provider.name`, `provider.mail`, `businessName`, `representative`), `INVALID_RUT`; `SII_PORTAL_REJECTED` with `receiptsNotEnrolled` or `receiptsComplianceRefused`; session, block and transport codes. ES: los mismos códigos.
+ */
+export const declareReceiptsCompliance = (
+  portal: PortalClient,
+  input: DeclareReceiptsComplianceInput,
+  overrides?: CallOverrides,
+): Promise<ReceiptsComplianceResult> =>
+  withPortalSession(portal, 'declareReceiptsCompliance', overrides, async (context) => {
+    if (input.provider === undefined) throw new DteError('MISSING_FIELD', { field: 'provider' })
+    const provider = partyOf(toSiiRut(requiredText(input.provider.rut, 'provider.rut'), 'provider.rut'))
+    const providerName = requiredText(input.provider.name, 'provider.name')
+    const providerMail = requiredText(input.provider.mail, 'provider.mail')
+    const businessName = requiredText(input.businessName, 'businessName')
+    const company = partyOf(resolvePortalCompany(portal, input.companyRut))
+    const hashes = input.gwt ?? RECEIPTS_PORTAL.known
+    await ensureSession(context)
+    const { status, list } = await statusIn(context, hashes, company)
+    if (!status.enrolled) throw rejected(context, 'receiptsNotEnrolled', {})
+    if (status.declared) return { outcome: 'alreadyDeclared', state: status.state }
+    if (!status.readyToDeclare) return { outcome: 'notReady', state: status.state }
+    const representative = partyOf(representativeOf(context, list))
+    const record = postulationOf(
+      (await read(context, hashes, POSTULATION_METHOD, postulationParameters(company))).answer,
+    )
+    const body = receiptsComplianceBody({
+      moduleBase: RECEIPTS_PORTAL.base,
+      policy: hashes.policy,
+      serviceInterface: RECEIPTS_PORTAL.serviceInterface,
+      company,
+      provider,
+      representative,
+      date: declarationDate(portal.now()),
+      providerMail,
+      providerName,
+      link: input.link ?? DEFAULT_LINK,
+      authorizationDate: record.authorizationDate,
+      token: record.token,
+      businessName,
+    })
+    const page = await portalRequest(once(context), 'autorizarEmpresaBolProd', 'POST', SERVICE_URL, {
+      body: encodeUtf8(body),
+      contentType: GWT_CONTENT_TYPE,
+      referer: RECEIPTS_PORTAL.base,
+      headers: gwtHeaders(RECEIPTS_PORTAL.base, hashes.permutation),
+    })
+    if (page.status !== 200 || !page.html.startsWith('//OK'))
+      throw rejected(context, 'receiptsComplianceRefused', {
+        httpStatus: page.status,
+        portalMessage: bodyExcerpt(page.html),
+      })
+    return { outcome: 'declared', state: DECLARED }
+  })
+
+const failed = (error: unknown): ReceiptsAuthorizationCheck => ({
+  authorized: false,
+  queryFailed: true,
+  errorCode: errorCode(error),
+  error: errorMessage(error),
+})
+
+/**
+ * EN: Reads whether the company may issue receipts: in production, whether type 39 is among the types it can stamp
+ * (the stamping operation of phase 4 on a production client); in certification, the receipts row of the progress page.
+ * A query the portal does not answer is `queryFailed`, never "not authorised": a missing stamping form was once read
+ * as a refusal. Neither side throws.
+ * ES: Lee si la empresa puede emitir boletas: en producción, si el tipo 39 está entre los tipos que puede timbrar (la
+ * operación de timbraje de la fase 4 sobre un cliente de producción); en certificación, la fila de boletas de la
+ * página de avance. Una consulta que el portal no responde es `queryFailed`, nunca "no autorizada": un formulario de
+ * timbraje ausente se leyó una vez como rechazo. Ningún lado lanza.
+ * @param input EN: the two clients and the company. ES: los dos clientes y la empresa.
+ */
+export const verifyReceiptsAuthorization = async (
+  input: VerifyReceiptsAuthorizationInput,
+): Promise<ReceiptsAuthorization> => {
+  const company = input.companyRut === undefined ? {} : { companyRut: input.companyRut }
+  const production =
+    input.production === undefined
+      ? null
+      : await listStampableTypes(input.production, company).then(
+          (types) => ({
+            authorized: types.some((entry) => entry.type === RECEIPT_TYPE),
+            queryFailed: false,
+            types: types.map((entry) => entry.type),
+          }),
+          (error: unknown) => ({ ...failed(error), types: [] }),
+        )
+  const certification =
+    input.certification === undefined
+      ? null
+      : await readProgress(input.certification, company).then(
+          (report) => ({
+            authorized: report.receipts?.authorized ?? false,
+            queryFailed: false,
+            state: report.receipts?.text ?? null,
+          }),
+          (error: unknown) => ({ ...failed(error), state: null }),
+        )
+  return { production, certification }
+}
