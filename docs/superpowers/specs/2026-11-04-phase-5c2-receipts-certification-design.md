@@ -1,6 +1,6 @@
 # dte-sdk — Phase 5c-2 design (certification: the receipts track)
 
-Date: 2026-11-04 · Status: **written on Hans's go-ahead after the three design sections were approved in chat; the shape of the phase (D87) and the mandatory software provider (D88) were his decisions** · Author: Claude (with Hans)
+Date: 2026-11-04 · Status: **written on Hans's go-ahead after the three design sections were approved in chat; the shape of the phase (D87) and the mandatory software provider (D88) were his decisions; amended the same day by what the plan's code settled (sections 3, 5, 6 and 7)** · Author: Claude (with Hans)
 
 Starting point: the phase 5c-1 spec (D76–D86: the GWT-RPC codec, the raw requests on the portal session), the phase 5b-1
 spec (the test sets issued through phase 1), the phase 2 spec (uploads and status queries) and the phase 3 spec (the
@@ -87,7 +87,7 @@ different clocks, a default verifier, two functions nobody calls.
 ### D95. Size: the `dte-sdk/portal` limit by the D36 rule
 
 The entry stands at 62.53 kB against 64 kB with phase 5c-1. The limit is set from the measurement at the plan's tip,
-rounded up to the next 2 kB.
+rounded up to the next 2 kB. Measured: 66.68 kB, so the limit goes to 68 kB.
 
 ### D96. Entries
 
@@ -107,10 +107,13 @@ src/document/create.ts                            (modify) receiptReferences nor
 src/portal/gwt.ts                                 (modify) a null with a declared type
 src/catalogs/certification.ts                     (modify) RECEIPTS_PORTAL
 src/catalogs/portal.ts                            (modify) rejections receiptsNotEnrolled, receiptsTrackIdRefused, receiptsComplianceRefused
+src/model/rut.ts                                  (modify) siiRutOfBody: a RUT from its body, the verifier computed by rut.ts
 src/certification/receipts-set.ts                 parseReceiptsTestSet
-src/certification/receipts.ts                     issueReceiptsSet, sendReceiptsSet, resendReceiptsConsumption
+src/certification/receipts.ts                     issueReceiptsSet
+src/certification/receipts-send.ts                sendReceiptsSet, resendReceiptsConsumption
 src/portal/pages/receipts-certification.ts        the receipts portal's answers
 src/portal/pages/certification-progress.ts        (modify) the receipts row of the progress page
+src/portal/certification.ts                       (modify) ProgressReport.receipts
 src/portal/receipts-certification.ts              the five operations
 ```
 
@@ -128,6 +131,9 @@ Also touched: `src/index.ts`, `src/portal/index.ts`, `tests/public-api.test.ts`,
 - `toSiiDocument` writes `Referencia` from `receiptReferences` on receipts, in schema order (`NroLinRef`, `TpoDocRef`,
   `FolioRef`, `CodRef`, `RazonRef`); `fromSiiDocument` reads it back. `SiiReferenciaBoleta` is the SII shape.
 
+**Settled by the code.** `FIELD_LIMITS` gains `CodRef` 18, `TpoDocRef` 3 and `FolioRef` 18; a type or folio given as a
+number is written as text; `SiiDocumento.Referencia` is the invoice shape or the receipts shape, by document type.
+
 ### 3.3 The receipts test set (`src/certification/receipts-set.ts`)
 
 `parseReceiptsTestSet(text)` → `readonly ReceiptsTestCase[]`, each `{ number, items: [{ name, quantity, unitPrice,
@@ -141,6 +147,9 @@ exempt }], observations: string[] }`. Line by line, trimmed:
   commas dropped); kept when both are numbers. An item whose name holds `exento` is exempt.
 
 Nothing before the first case is kept. A text without cases gives an empty list.
+
+**Settled by the code.** The header line is matched in any case (`ITEM`, `CANTIDAD`, `PRECIO` too); an observation
+without text after its colon is dropped; Windows line ends are handled by the trim.
 
 ### 3.4 Issuing the set (`issueReceiptsSet`)
 
@@ -180,21 +189,34 @@ none), the SII as receiver and the resolution, signed with phase 1. No cases →
 4. `outcome: 'sent'` with the envelope track id, the report's track id and sequence, and every report tried (its
    sequence, XML and what happened).
 
-`resendReceiptsConsumption(sii, { envelopeXml, certificate, sequence })` builds the report again from a sent envelope
-and uploads it once.
+`resendReceiptsConsumption(sii, { envelopeXml, sequence })` builds the report again from a sent envelope and uploads it
+once, signed with the client's certificate.
+
+**Settled by the code** (`src/certification/receipts-send.ts`). The report is always built from the envelope as it was
+signed: its cover (`RutEmisor`, `RutEnvia`, `FchResol`, `NroResol`; one missing is `MISSING_FIELD`) and, per receipt,
+the type, folio, date and totals the document holds; an envelope without receipts is `ENVELOPE_EMPTY`, before any
+upload. Only a status of the rejected class counts as a rejection; anything else, a query error included, counts as
+accepted. Any failure of a report's upload ends in `consumptionFailed` with the envelope's track id kept in the result.
+The result: `outcome`, `notAuthorized`, `envelopeTrackId`, `envelopeDuplicate`, `consumptionTrackId`,
+`consumptionSequence`, `consumptionAlreadySent`, `consumptions[]` (`sequence`, `xml`, `trackId`, `outcome` accepted,
+duplicate, rejected or failed, `detail`) and `detail` when it did not end in `sent`. The waits default to the client's
+`sleep`.
 
 ### 3.6 The receipts portal's answers (`src/portal/pages/receipts-certification.ts`)
 
-- `representativeOf(answer)`: the last string of the table made of 7 or 8 digits, or null. An empty table is a company
-  that is not enrolled.
+- `representativeDigitsOf(answer)`: the last string of the table made of 7 or 8 digits, or null. An empty table is a
+  company that is not enrolled.
 - `postulationOf(answer)`: the authorisation date, the first table string shaped `dd/mm/yyyy` (empty when none), and
   the application's Long, the first single-quoted token of the body (`0` when none).
-- `receiptsStateOf(body)`: `P90` when the body holds it; else the first quoted `P<digits>`; else null. `isEmptyList`
-  when the body opens with `//OK[0,[]`.
+- `receiptsStatesOf(answer)`: the strings of the table that are exactly `P<digits>`, and only of an answer that is
+  `//OK`; the raw body is never searched, so a state quoted inside a sentence or an exception does not count (the
+  automated security review asked for this). `isEmptyList` when the body opens with `//OK[0,[]`.
 - `isReceiptsSet(status, text)`: HTTP 200 and at least 10 characters once trimmed.
 - The receipts row of the progress page (`pe_avance6`), added to the phase 5b-2 progress page: the bold text after the
-  cell that names `BOLETA`; authorised when it holds `conform`, `aprobad` or `autoriz`, or when the page says
-  "autorizada" next to "boleta".
+  cell that names `BOLETA`; authorised only when it holds `CONFORME`, `APROBADO/A` or `AUTORIZADO/A` as a whole word and
+  no word that denies it (`NO`, `SIN`, `RECHAZ…`, `REPARO`, `PENDIENTE`): "NO AUTORIZADO" and "DESAUTORIZADA" are not
+  authorisations, and anything unknown is not one. A page without the row gives null (also from the security review).
+- `receiptsComplianceBody(values)`: the declaration body of 3.8.
 
 ### 3.7 The receipts portal operations (`src/portal/receipts-certification.ts`)
 
@@ -244,6 +266,14 @@ answer the declaration with a bare HTTP 500.
   is among them; a form the portal does not serve is `queryFailed` with the error, never "not authorised".
   Certification: the receipts row of the progress page. Neither check throws.
 
+**Settled by the code.** The judged reads (the representatives list of the status, the two state queries, the
+application record of the declaration) require HTTP 200, else `SII_PORTAL_UNEXPECTED_PAGE`; the two calls before the
+download are not judged. `ReceiptsStatus.state` is `P90`, else the first state the table names, else `P91` after the
+tie-break, else null. `declareReceiptsTrackId` trims the track id. The declaration validates its input before any
+request, in the order `provider`, `provider.rut`, `provider.name`, `provider.mail`, `businessName`. Each side of
+`verifyReceiptsAuthorization` is `{ authorized, queryFailed, errorCode?, error? }` plus `types` (production) or `state`
+(certification).
+
 ### 3.8 The declaration body
 
 The table, 24 strings, each escaped (`\` as `\\`, `|` as `\!`):
@@ -289,7 +319,8 @@ types 39 and 41; `-11` refers back to the Long each time it appears. What `19` a
 `dte-sdk/portal`: `RECEIPTS_PORTAL`; `parseReceiptsTestSet`; `issueReceiptsSet`, `sendReceiptsSet`,
 `resendReceiptsConsumption`; `downloadReceiptsTestSet`, `declareReceiptsTrackId`, `readReceiptsStatus`,
 `declareReceiptsCompliance`, `verifyReceiptsAuthorization`; their input, result and event types. `ProgressReport` gains
-`receipts`. `dte-sdk`: `ReceiptReferenceInput`, `ReceiptReference`, `SiiReferenciaBoleta`.
+`receipts`. `dte-sdk`: `ReceiptReferenceInput`, `ReceiptReference`, `SiiReferenciaBoleta`. `siiRutOfBody` and the codec's
+`gwtNull` stay internal.
 
 ### 3.11 The order, as the caller chains it
 
@@ -356,6 +387,7 @@ await verifyReceiptsAuthorization({ production: productionPortal, certification:
 | 3 | The official receipts schema fetched from the SII for the tests | Hans's go-ahead, 2026-11-04 |
 | 4 | Sections 1 to 3 of the design (scope, protocol and rules, errors and tests) | Approved in chat, 2026-11-04 |
 | 5 | The receipt reference in phase 1 (D91) | Found while writing; reported to Hans before the spec; pending his review of this file |
+| 6 | Two readings made strict after the automated security review of the plan's code (the receipts row, the states of a status answer) | Applied; pending his review of this file |
 
 ---
 
@@ -371,6 +403,10 @@ case, the waits and the retries of the report, the five wires, the states, the r
 **Not measured, and not measurable until a company is enrolled in the receipts application:** every call of the
 receipts portal. The field's own notes say the names of the declaration's fields are inferred from their positions.
 No real set text has been seen by this SDK: the tests use a synthetic one in the field's format.
+
+**Measured at the plan's tip (2026-11-04):** 2 394 tests, coverage 100 % on the four metrics; `dte-sdk/portal`
+66.68 kB (limit 68 kB), `dte-sdk` 30.31 kB (32 kB), `dte-sdk/pdf` 8.45 kB (10 kB), `dte-sdk/node` 4.19 kB (6 kB). The
+receipts envelope of the set and the folio consumption report validate against the official schemas in the fixtures.
 
 ---
 
@@ -394,3 +430,6 @@ Field defects not reproduced (D94):
 6. The issue date from a UTC clock and the declaration date from the local one; here Chile dates (D92).
 7. Two form-based functions nobody calls, and event names that are declared and never emitted; not ported.
 8. The company declared as its own provider when none is given (D88).
+9. A receipts row read as authorised on any text that holds "autoriz", "aprobad" or "conform", a denial included, and
+   a page-wide search for "autorizada" near "boleta"; here whole words without a denial, and no page-wide search.
+10. `P90` and `P91` searched anywhere in the raw answer; here exact entries of the table of an `//OK` answer.
