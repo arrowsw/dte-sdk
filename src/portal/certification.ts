@@ -25,6 +25,7 @@ import {
   type AdvanceAnswer,
   type DeclarationAnswer,
   type ItemState,
+  type ReceiptsProgress,
   type VerificationState,
 } from './pages/certification-progress'
 import {
@@ -204,6 +205,8 @@ export type ProgressReport = {
   readonly simulationAwaitsConfirmation: boolean
   /** EN: The rows of `pe_avance2`, read on the way. ES: Las filas de `pe_avance2`, leídas de paso. */
   readonly rows: readonly CertificationSet[]
+  /** EN: The receipts row of the page, or null. ES: La fila de boletas de la página, o null. */
+  readonly receipts: ReceiptsProgress | null
 }
 
 /**
@@ -549,6 +552,7 @@ export const readProgress = (
       states: progress.states,
       simulationAwaitsConfirmation: progress.simulationAwaitsConfirmation || onForm,
       rows: parseCertificationSets(formPage.html),
+      receipts: progress.receipts,
     }
   })
 

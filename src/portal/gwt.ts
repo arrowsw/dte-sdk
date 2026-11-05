@@ -6,17 +6,19 @@ import { portalRequest, type PortalContext, type PortalPage } from './session'
 /**
  * EN: One parameter of a GWT-RPC call, as the SII's portals serialize it: a string (interned in the table, `0` when
  * null), a boxed `java.lang.Integer`, a boxed `java.lang.Long` (a number, or a token already in the GWT base-64
- * alphabet), a primitive boolean (`Z`), null, or an object with its fields in serialization order.
+ * alphabet), a primitive boolean (`Z`), null (a String unless it names its declared type), or an object with its fields
+ * in serialization order.
  * ES: Un parámetro de una llamada GWT-RPC, como lo serializan los portales del SII: un string (en la tabla, `0` si es
  * null), un `java.lang.Integer` encajonado, un `java.lang.Long` encajonado (un número, o un token ya en el alfabeto
- * base 64 de GWT), un booleano primitivo (`Z`), null, o un objeto con sus campos en orden de serialización.
+ * base 64 de GWT), un booleano primitivo (`Z`), null (un String salvo que nombre su tipo declarado), o un objeto con
+ * sus campos en orden de serialización.
  */
 export type GwtParameter =
   | { readonly kind: 'string'; readonly value: string | null }
   | { readonly kind: 'integer'; readonly value: number }
   | { readonly kind: 'long'; readonly value: number | string }
   | { readonly kind: 'boolean'; readonly value: boolean }
-  | { readonly kind: 'null' }
+  | { readonly kind: 'null'; readonly type?: string }
   | { readonly kind: 'object'; readonly type: string; readonly fields: readonly GwtParameter[] }
 
 /**
@@ -126,8 +128,9 @@ const serialize = (call: GwtCall): { readonly table: string[]; readonly body: st
   const typeOf = (parameter: GwtParameter): string => {
     switch (parameter.kind) {
       case 'string':
-      case 'null':
         return GWT_STRING
+      case 'null':
+        return parameter.type ?? GWT_STRING
       case 'integer':
         return GWT_INTEGER
       case 'long':
@@ -317,6 +320,8 @@ export const gwtLong = (value: number | string): GwtParameter => ({ kind: 'long'
 export const gwtBoolean = (value: boolean): GwtParameter => ({ kind: 'boolean', value })
 /** EN: A null parameter or field. ES: Un parámetro o campo nulo. */
 export const GWT_NULL: GwtParameter = { kind: 'null' }
+/** EN: A null parameter declared with a type other than String. ES: Un parámetro nulo declarado con un tipo distinto de String. */
+export const gwtNull = (type: string): GwtParameter => ({ kind: 'null', type })
 
 const REDIRECT_STATUS: ReadonlySet<number> = new Set([301, 302, 303, 307, 308])
 

@@ -182,6 +182,9 @@ export type PortalRejection =
   | 'exchangeUploadRefused'
   | 'samplesReviewRefused'
   | 'sampleUploadRefused'
+  | 'receiptsNotEnrolled'
+  | 'receiptsTrackIdRefused'
+  | 'receiptsComplianceRefused'
 
 /**
  * EN: What each rejection means and what to do about it, in Spanish, for the operator.
@@ -245,6 +248,12 @@ export const PORTAL_REJECTIONS: Readonly<Record<PortalRejection, string>> = {
     'El portal de muestras impresas no creó la revisión: el motivo es la frase del SII, en `details.portalMessage`.',
   sampleUploadRefused:
     'El portal de muestras impresas rechazó un PDF con un estado 4xx: el archivo va en `details.file` y el estado en `details.httpStatus`.',
+  receiptsNotEnrolled:
+    'La empresa no tiene representantes vigentes en el portal de boletas: debe inscribirse en la postulación a boleta electrónica antes de declarar.',
+  receiptsTrackIdRefused:
+    'El portal de boletas no aceptó el track id del set: lo que respondió va en `details.portalMessage`.',
+  receiptsComplianceRefused:
+    'El portal de boletas no aceptó la declaración de cumplimiento: revisa que el representante sea el dueño de la sesión y que el proveedor sea el real; lo que respondió va en `details.portalMessage`.',
 }
 
 /**
