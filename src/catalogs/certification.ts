@@ -189,9 +189,75 @@ export const CERTIFICATION_STEPS = [
   'SIM_OK',
   'SIM_DECLARING',
   'SIM_DONE',
+  'INTERCAMBIO_START',
+  'INTERCAMBIO_DESCARGADO',
+  'INTERCAMBIO_DONE',
+  'MUESTRAS_UPLOADING',
+  'MUESTRAS_DONE',
   'CERT_DONE',
   'CERT_ERROR',
 ] as const
 
 /** EN: Union of the progress event names. ES: Unión de los nombres de evento de progreso. */
 export type CertificationStep = (typeof CERTIFICATION_STEPS)[number]
+
+/**
+ * EN: A GWT portal of the SII: its module base, its RPC service path and interface, its module name and the hash pair
+ * known to work (captured in June 2026; the SII changes both when it redeploys the portal).
+ * ES: Un portal GWT del SII: la base de su módulo, la ruta e interfaz de su servicio RPC, el nombre de su módulo y el
+ * par de hashes que se sabe que funciona (capturado en junio de 2026; el SII cambia ambos al redesplegar el portal).
+ */
+export type GwtPortal = {
+  /** EN: The module base URL, with its trailing slash. ES: La URL base del módulo, con su barra final. */
+  readonly base: string
+  /** EN: The RPC service path under the base. ES: La ruta del servicio RPC bajo la base. */
+  readonly service: string
+  /** EN: The service interface name, the third string of every call. ES: El nombre de la interfaz del servicio, el tercer string de cada llamada. */
+  readonly serviceInterface: string
+  /** EN: The module name (`<name>.nocache.js`). ES: El nombre del módulo (`<name>.nocache.js`). */
+  readonly moduleName: string
+  /** EN: The permutation and policy hashes known to work. ES: Los hashes de permutación y política que se sabe que funcionan. */
+  readonly known: { readonly permutation: string; readonly policy: string }
+}
+
+/**
+ * EN: The exchange portal (`pfeInternet`): the certification's exchange set is downloaded there and its answers uploaded.
+ * ES: El portal de intercambio (`pfeInternet`): ahí se descarga el set de intercambio de la certificación y se suben sus respuestas.
+ */
+export const EXCHANGE_PORTAL: GwtPortal = {
+  base: 'https://www4.sii.cl/pfeInternet/',
+  service: 'facade',
+  serviceInterface: 'cl.sii.sdi.dim.pfe.web.client.service.Facade',
+  moduleName: 'pfe',
+  known: { permutation: 'E487C7488217509D4EDCE9D341782C20', policy: '4EB230A83E74980F353E4FCC209543CB' },
+}
+
+/**
+ * EN: The printed samples portal (`pdfdteInternet`), the SII's automatic validator of the printed documents.
+ * ES: El portal de muestras impresas (`pdfdteInternet`), el validador automático del SII de los documentos impresos.
+ */
+export const SAMPLES_PORTAL: GwtPortal = {
+  base: 'https://www4.sii.cl/pdfdteInternet/',
+  service: 'ServicePdfDte',
+  serviceInterface: 'cl.sii.sdi.dim.validaPdfDte.web.client.service.ServicePdfDte',
+  moduleName: 'pdfdte',
+  known: { permutation: 'D86ACF99AE5C17F0B0F673A9872EF6CB', policy: '5459B93B9D030A67564300FBD346270F' },
+}
+
+/** EN: The keys of the three exchange answers. ES: Las claves de las tres respuestas del intercambio. */
+export type ExchangeAnswerKey = 'reception' | 'receipts' | 'approval'
+
+/** EN: The exchange answers in upload order. ES: Las respuestas del intercambio en orden de subida. */
+export const EXCHANGE_ANSWER_KEYS: readonly ExchangeAnswerKey[] = ['reception', 'receipts', 'approval']
+
+/**
+ * EN: The file names of the exchange answers, as the portal's uploads name them: the reception response, the receipts
+ * and the commercial approval.
+ * ES: Los nombres de archivo de las respuestas del intercambio, como los nombran las subidas del portal: la respuesta
+ * de recepción, los recibos y la aprobación comercial.
+ */
+export const EXCHANGE_ANSWER_FILES: Readonly<Record<ExchangeAnswerKey, string>> = {
+  reception: 'respuesta-recepcion-envio.xml',
+  receipts: 'envio-recibos.xml',
+  approval: 'respuesta-aprobacion-comercial.xml',
+}

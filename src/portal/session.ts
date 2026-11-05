@@ -161,6 +161,39 @@ const jsonHeaders = (
   ...contextHeaders(url, cookies, referer),
 })
 
+// The headers of a raw post (a multipart body, a GWT-RPC body): the browser's, with the given content type and
+// whatever the caller adds.
+const rawHeaders = (
+  url: string,
+  cookies: CookieJar,
+  referer: string | undefined,
+  contentType: string,
+  extra: Readonly<Record<string, string>>,
+): Readonly<Record<string, string>> => ({
+  'User-Agent': USER_AGENT,
+  Accept: '*/*',
+  'Accept-Language': ACCEPT_LANGUAGE,
+  'Content-Type': contentType,
+  Origin: new URL(url).origin,
+  ...contextHeaders(url, cookies, referer),
+  ...extra,
+})
+
+/**
+ * EN: What a request may carry: a form, a JSON value, or raw bytes with their content type, plus the referer and any
+ * header the page expects.
+ * ES: Lo que puede llevar una petición: un formulario, un valor JSON, o bytes crudos con su tipo de contenido, más el
+ * referer y cualquier cabecera que la página espere.
+ */
+export type PortalRequestOptions = {
+  readonly form?: Readonly<Record<string, string>>
+  readonly json?: unknown
+  readonly body?: Uint8Array
+  readonly contentType?: string
+  readonly referer?: string
+  readonly headers?: Readonly<Record<string, string>>
+}
+
 // A document or a JSON answer may say anything: only a page can be the firewall's.
 const isStructuredBody = (text: string): boolean => /^\s*(?:<\?xml|[{[])/.test(text)
 
@@ -208,16 +241,24 @@ export const portalRequest = async (
   step: string,
   method: HttpMethod,
   url: string,
-  options: {
-    readonly form?: Readonly<Record<string, string>>
-    readonly json?: unknown
-    readonly referer?: string
-  } = {},
+  options: PortalRequestOptions = {},
 ): Promise<PortalPage> => {
   const { portal, overrides, state } = context
   const operation = `${context.operation}.${step}`
   const text = options.json === undefined ? options.form && formEncode(options.form) : JSON.stringify(options.json)
-  const body = text === undefined ? undefined : encodeUtf8(text)
+  const body = options.body ?? (text === undefined ? undefined : encodeUtf8(text))
+  const headersOf = (): Readonly<Record<string, string>> => {
+    if (options.body !== undefined)
+      return rawHeaders(
+        url,
+        state.cookies,
+        options.referer,
+        options.contentType ?? 'application/octet-stream',
+        options.headers ?? {},
+      )
+    if (options.json !== undefined) return { ...jsonHeaders(url, state.cookies, options.referer), ...options.headers }
+    return { ...requestHeaders(url, method, state.cookies, options.referer), ...options.headers }
+  }
   const response = await withRetry(
     mergeRetryPolicy(portal.retry, overrides?.retry),
     async (attempt) => {
@@ -226,10 +267,7 @@ export const portalRequest = async (
         channel: 'portal',
         method,
         url,
-        headers:
-          options.json === undefined
-            ? requestHeaders(url, method, state.cookies, options.referer)
-            : jsonHeaders(url, state.cookies, options.referer),
+        headers: headersOf(),
         body,
         timeoutMs: overrides?.timeoutMs ?? portal.timeoutMs,
         signal: overrides?.signal,
@@ -279,7 +317,7 @@ export const navigate = async (
   step: string,
   method: HttpMethod,
   url: string,
-  options: { readonly form?: Readonly<Record<string, string>>; readonly referer?: string } = {},
+  options: PortalRequestOptions = {},
 ): Promise<PortalPage> => followRedirects(context, step, await portalRequest(context, step, method, url, options))
 
 const sessionLimit = (context: PortalContext): DteError =>
@@ -511,6 +549,19 @@ const cachedSessionAlive = async (context: PortalContext): Promise<boolean> => {
 }
 
 /**
+ * EN: Makes sure the jar holds a session, logging in through the portal landing when it does not. The GWT portals
+ * never ask for a login themselves: a visitor without a session gets their pages all the same.
+ * ES: Se asegura de que la bolsa tenga una sesión, iniciándola por la portada del portal cuando no la tiene. Los
+ * portales GWT nunca piden iniciar sesión por sí mismos: un visitante sin sesión recibe sus páginas igual.
+ * @throws {DteError} EN: `SII_PORTAL_CERT_NOT_ENABLED`, `SII_PORTAL_SESSION_LIMIT`, `SII_PORTAL_LOGIN_FAILED`, `SII_PORTAL_BLOCKED`, transport codes. ES: los mismos códigos.
+ */
+export const ensureSession = async (context: PortalContext): Promise<void> => {
+  if (hasSessionCookie(context.state.cookies)) return
+  await portalRequest(context, 'entry', 'GET', `${CERTIFICATE_ENTRY_URL}?${PORTAL_LANDING_URL}`)
+  await login(context, PORTAL_LANDING_URL)
+}
+
+/**
  * EN: Opens a session explicitly, reusing a cached one that is still alive. The other operations do not need this: they
  * log in on demand.
  * ES: Abre una sesión de forma explícita, reutilizando una en caché que siga viva. Las demás operaciones no lo necesitan:
@@ -524,8 +575,7 @@ export const openPortalSession = (portal: PortalClient, overrides?: CallOverride
   withPortalSession(portal, 'openPortalSession', overrides, async (context) => {
     if (await cachedSessionAlive(context)) return { userRut: sessionRut(context.state.cookies), reused: true }
     forgetSession(context)
-    await portalRequest(context, 'entry', 'GET', `${CERTIFICATE_ENTRY_URL}?${PORTAL_LANDING_URL}`)
-    await login(context, PORTAL_LANDING_URL)
+    await ensureSession(context)
     return { userRut: sessionRut(context.state.cookies), reused: false }
   })
 

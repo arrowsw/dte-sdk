@@ -54,6 +54,17 @@ export type PrintedSample = {
 }
 
 /**
+ * EN: A sample file as the certification uploads it: its base name and its bytes.
+ * ES: Un archivo de muestra como lo sube la certificación: su nombre base y sus bytes.
+ */
+export type PrintedSampleFile = {
+  /** EN: The file name, `[A-Za-z0-9_.-]+.pdf`. ES: El nombre de archivo, `[A-Za-z0-9_.-]+.pdf`. */
+  readonly fileName: string
+  /** EN: The PDF bytes. ES: Los bytes del PDF. */
+  readonly bytes: Uint8Array
+}
+
+/**
  * EN: One envelope or document that could not be rendered.
  * ES: Un envío o documento que no se pudo generar.
  */

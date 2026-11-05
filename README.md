@@ -44,12 +44,12 @@ npm install pdf-lib bwip-js
 
 ## Entry points
 
-| Import from | What it holds | Runs on |
-|---|---|---|
-| `dte-sdk` | Documents, stamps, signatures, envelopes, books and the SII web services client over `fetch` | Node, Bun, Deno; bundles for the browser with no configuration |
-| `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryFolioRegistry` | Node |
-| `dte-sdk/portal` | SII portal, folios and CAF requests, purchase and sales register, MIPYME backup, certification sets and runner | Node |
-| `dte-sdk/pdf` | Printed samples | Node, with `pdf-lib` and `bwip-js` installed |
+| Import from      | What it holds                                                                                                        | Runs on                                                        |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `dte-sdk`        | Documents, stamps, signatures, envelopes, books and the SII web services client over `fetch`                         | Node, Bun, Deno; bundles for the browser with no configuration |
+| `dte-sdk/node`   | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryFolioRegistry` | Node                                                           |
+| `dte-sdk/portal` | SII portal, folios and CAF requests, purchase and sales register, MIPYME backup, certification sets and runner       | Node                                                           |
+| `dte-sdk/pdf`    | Printed samples                                                                                                      | Node, with `pdf-lib` and `bwip-js` installed                   |
 
 `DteError` and `isDteError` come from `dte-sdk` and recognize what every entry throws.
 
@@ -69,8 +69,21 @@ const invoice = issueDocument({
   document: {
     type: 33,
     folio: 1,
-    issuer: { rut: '76543210-3', businessName: 'Comercial Andina SpA', businessActivity: 'Software', address: 'Av. Los Aromos 1540', commune: 'Santiago', activityCode: 620200 },
-    receiver: { rut: '12345678-5', businessName: 'Comercializadora Rapel Ltda', businessActivity: 'Comercio', address: 'Pasaje Los Olmos 88', commune: 'Providencia' },
+    issuer: {
+      rut: '76543210-3',
+      businessName: 'Comercial Andina SpA',
+      businessActivity: 'Software',
+      address: 'Av. Los Aromos 1540',
+      commune: 'Santiago',
+      activityCode: 620200,
+    },
+    receiver: {
+      rut: '12345678-5',
+      businessName: 'Comercializadora Rapel Ltda',
+      businessActivity: 'Comercio',
+      address: 'Pasaje Los Olmos 88',
+      commune: 'Providencia',
+    },
     items: [{ name: 'Plan anual', quantity: 1, unitPrice: 100000 }],
   },
   caf,
@@ -84,7 +97,12 @@ const envelope = signEnvelope(
   createEnvelope({
     kind: 'dte',
     documents: [invoice],
-    cover: { issuerRut: '76543210-3', senderRut: certificate.rut!, resolutionDate: '2024-01-15', resolutionNumber: 123 },
+    cover: {
+      issuerRut: '76543210-3',
+      senderRut: certificate.rut!,
+      resolutionDate: '2024-01-15',
+      resolutionNumber: 123,
+    },
   }),
   certificate,
 )
@@ -165,7 +183,7 @@ Options worth knowing:
   `timeoutMs` is a budget: each poll and each sleep is cut to the time that remains.
 - `capture: createDirectoryCapture({ dir })` from `dte-sdk/node` writes every HTTP exchange, redacted (tokens,
   seeds, cookies, private keys), for SII support tickets. `archive:
-  createDirectoryUploadArchive({ dir })` keeps the exact bytes of every upload the SII answered,
+createDirectoryUploadArchive({ dir })` keeps the exact bytes of every upload the SII answered,
   with its TrackID and the SII's reply (tokens redacted). A duplicate answer is kept as
   `<trackId>-<kind>-duplicate-<yyyymmddHHMMSS>` and never replaces the record of the original.
 - `logger`: silent by default; pass `console` or your own. Messages never carry tokens, RUTs
@@ -222,7 +240,7 @@ await closePortalSession(portal)
 ```
 
 The portal is the certificate-authenticated site of the SII, read as HTML. The certificate must be enabled as a login
-method first, a manual step at sii.cl (*Cambiar Clave y datos de autenticación*, option "Utilizando Clave Tributaria o
+method first, a manual step at sii.cl (_Cambiar Clave y datos de autenticación_, option "Utilizando Clave Tributaria o
 Certificado Digital"); otherwise the login throws `SII_PORTAL_CERT_NOT_ENABLED`. It needs Node: `fetch` cannot
 present a client certificate.
 
@@ -282,12 +300,12 @@ await downloadMipymeBackup(portal, {
 })
 ```
 
-| I need | Function | SII service |
-|---|---|---|
-| Each document of a period (folio, date, amounts), with no receipts and no XML | `listPeriodDocuments` | `consemitidosinternetui` |
-| Official totals per document type and accounting status, with receipts aggregated | `fetchRegisterSummary` | `consdcvinternetui` |
-| How a purchase is classified, and changing it | `fetchPurchaseDocument` and the writes | `complementoscvui` |
-| The full XML of a document | `downloadMipymeBackup` | MIPYME backup |
+| I need                                                                            | Function                               | SII service              |
+| --------------------------------------------------------------------------------- | -------------------------------------- | ------------------------ |
+| Each document of a period (folio, date, amounts), with no receipts and no XML     | `listPeriodDocuments`                  | `consemitidosinternetui` |
+| Official totals per document type and accounting status, with receipts aggregated | `fetchRegisterSummary`                 | `consdcvinternetui`      |
+| How a purchase is classified, and changing it                                     | `fetchPurchaseDocument` and the writes | `complementoscvui`       |
+| The full XML of a document                                                        | `downloadMipymeBackup`                 | MIPYME backup            |
 
 - **A refused month reads as empty.** Response codes are not looked at, so `listPeriodDocuments` and
   `fetchRegisterSummary` cannot tell a month the SII refuses to show from one with no movement. `raw` holds each row as the
@@ -308,12 +326,32 @@ await downloadMipymeBackup(portal, {
 ## Certification: test sets, simulation and books
 
 ```typescript
-import { parseTestSetText, planCertificationSets, createFolioAllocator, issueTestSet, issueSimulation, createCertificationSalesBook } from 'dte-sdk/portal'
+import {
+  parseTestSetText,
+  planCertificationSets,
+  createFolioAllocator,
+  issueTestSet,
+  issueSimulation,
+  createCertificationSalesBook,
+} from 'dte-sdk/portal'
 
 const plan = planCertificationSets(parseTestSetText(setText)) // the text the SII generated for the applicant
-const options = { issuer, receiver, certificate, folios: createFolioAllocator(cafs), resolution: { number: 0, date: '2026-01-01' } }
+const options = {
+  issuer,
+  receiver,
+  certificate,
+  folios: createFolioAllocator(cafs),
+  resolution: { number: 0, date: '2026-01-01' },
+}
 const basic = await issueTestSet(plan.basic!, options) // documents and the signed envelope, with the SET references
-const sales = createCertificationSalesBook(basic, { period: '2026-11', issuerRut, senderRut, resolution, certificate, receiver: { rut, name } })
+const sales = createCertificationSalesBook(basic, {
+  period: '2026-11',
+  issuerRut,
+  senderRut,
+  resolution,
+  certificate,
+  receiver: { rut, name },
+})
 const simulation = await issueSimulation(plan, { ...options, folios: createFolioAllocator(freshCafs) })
 ```
 
@@ -351,10 +389,13 @@ const deps = {
   onProgress: (event) => console.log(event.step),
 }
 
-// The whole HTML side, resumable: run it again after a fix, or after phase 5c did the exchange and the samples
-const first = await runCertification(deps) // stops with `exchange` once the simulation is confirmed
-// Once the portal stands past the printed samples, the sworn statement needs an explicit go
-const second = await runCertification(deps, { declareCompliance: true })
+// The whole HTML side, resumable: run it again after a fix
+const first = await runCertification(deps) // answers the exchange set, then stops with `printedSamples` until the samples are given
+// The samples uploaded and submitted, it stops at `compliance`: the sworn statement needs an explicit go
+const second = await runCertification(deps, {
+  samples: () => readPrintedSamples('./certification/samples'),
+  declareCompliance: true,
+})
 
 // One step alone, after the SII rejected a set with observations
 let state = (await deps.store.load())!
@@ -368,16 +409,17 @@ quota, re-obtaining and annulling only as a last resort), sends each set and kee
 artefacts for the printed samples, declares the track ids on `pe_avance2` with every field in form order and reads
 the page again to verify, waits for the approval, runs the books (the history of books the SII holds marks the
 occupied periods; a closed book is resent as an adjustment or in the next free month, at most 24 times), advances the
-stage, sends and declares the simulation and confirms it, and stops at the exchange, which is phase 5c's. Once the
-portal stands past the printed samples it stops again, at `compliance`: the declaration of compliance is the sworn
-statement of the legal representative, it cannot be undone, and the runner makes it only with
-`declareCompliance: true`.
+stage, sends and declares the simulation and confirms it, answers the exchange set and confirms the exchange, uploads
+the printed samples when the `samples` option gives them (without them it stops at `printedSamples`), and stops at
+`compliance`: the declaration of compliance is the sworn statement of the legal representative, it cannot be undone,
+and the runner makes it only with `declareCompliance: true`.
 
 - **Everything is a step.** `obtainTestSet`, `prepareFolios`, `sendTestSet`, `declareTestSets`,
   `waitForTestSetsApproval`, `runBooks`, `advanceToNextStage`, `sendSimulation`, `declareSimulation`,
-  `waitForSimulationApproval` and `declareComplianceFinal` take the dependencies and the state and return the saved
-  state with an outcome; the portal operations beneath them (`downloadTestSet`, `declareProgress`, `readProgress`,
-  `advanceStage`, `listBookHistory`, `declareCompliance`) are exported too.
+  `waitForSimulationApproval`, `runExchange`, `uploadPrintedSamples` and `declareComplianceFinal` take the dependencies
+  and the state and return the saved state with an outcome; the portal operations beneath them (`downloadTestSet`,
+  `declareProgress`, `readProgress`, `advanceStage`, `listBookHistory`, `declareCompliance`, and those of the next
+  section) are exported too.
 - **The state is a secret.** It holds the CAF files, each with a private key; the directory store writes them readable
   by the user only. A service may implement `CertificationStore` over its own storage.
 - **Dates are Chile dates.** The declaration date and the base book period come from the clock in `America/Santiago`;
@@ -387,22 +429,89 @@ statement of the legal representative, it cannot be undone, and the runner makes
 - **Nothing here has been run against the portal yet.** Every page shape comes from field behaviour; the first
   enrolled run should keep the artefacts the store writes (every portal answer is there) as fixtures.
 
+## Certification: the exchange and the printed samples
+
+```typescript
+import { runCertification, createExchangeAnswers } from 'dte-sdk/portal'
+import { readPrintedSamples, writePrintedSamples, findEnvelopeFiles } from 'dte-sdk/pdf'
+
+// After the simulation: the exchange set is downloaded from the exchange portal, answered and confirmed; then the
+// samples are rendered from the envelopes the store kept and uploaded to the samples portal
+const samplesDir = './certification/samples'
+await writePrintedSamples({
+  xmlFiles: await findEnvelopeFiles('./certification'),
+  outDir: samplesDir,
+  transferable: true,
+})
+const run = await runCertification(deps, { samples: () => readPrintedSamples(samplesDir) })
+// run.stopped: `compliance` once the samples are submitted; `rejected` with the SII's reasons in `run.detail`
+
+// The set could not be downloaded (run.stopped `exchange`, run.detail names `intercambio/set-intercambio.xml`):
+// save it by hand from the exchange portal into that artefact of the store, or pass it
+await runCertification(deps, { exchangeSetXml: await readFile('set-intercambio.xml', 'utf8') })
+
+// The answers alone, for a set in hand
+const answers = createExchangeAnswers(setXml, {
+  companyRut,
+  certificate,
+  contact: { name: 'Contacto', mail: 'contacto@example.test' },
+})
+```
+
+The exchange is the SII's set of documents addressed to the company; the answers are the reception response
+(`respuesta-recepcion-envio.xml`), the receipts of Ley 19.983 (`envio-recibos.xml`) and the commercial approval
+(`respuesta-aprobacion-comercial.xml`), each signed, and valid against the official schemas in the tests. The runner
+downloads the set once (it stays as an artefact), validates the user on the exchange portal, uploads the three answers
+and confirms the exchange, which moves the application to the printed samples. The printed samples are the PDFs of
+every document the sets and the simulation issued, as `writePrintedSamples` lays them out: the runner creates a review
+on the samples portal (or resumes one left in `INGRESO`), uploads every PDF, submits the review and reads its state
+again; a review the SII rejects at once comes back as `rejected` with a summary of how the SII filed each PDF. The
+portal operations beneath (`downloadExchangeSet`, `validateExchangeUser`, `uploadExchangeAnswers`, `confirmExchange`;
+`readSamplesReview`, `createSamplesReview`, `uploadSample`, `submitSamplesReview`, `readSamplesDetail`) and the
+GWT-RPC codec (`gwtBody`, `gwtAnswer`) are exported too. The portals' hashes are discovered on the way in, with the
+pair known to work as the fallback; `gwt: { permutation, policy }` overrides them.
+
+- **Nothing here has been run against the two portals yet.** Every wire and wording comes from field behaviour; the
+  first enrolled run should keep every artefact the store writes under `intercambio/` and `muestras/` as fixtures.
+- **The exchange answers are regenerated and uploaded on every run that reaches the portal;** only the set is kept.
+- **A review left in `INGRESO`** (a run cut off while uploading) is resumed, every PDF uploaded again.
+
 ## Printed samples (Node)
 
 ```typescript
-import { parsePrintableDocuments, renderPrintedSample, renderPrintedSamples, writePrintedSamples, findEnvelopeFiles } from 'dte-sdk/pdf'
+import {
+  parsePrintableDocuments,
+  renderPrintedSample,
+  renderPrintedSamples,
+  writePrintedSamples,
+  findEnvelopeFiles,
+  readPrintedSamples,
+} from 'dte-sdk/pdf'
 
 // The signed XML is the input: one document the SDK issued, or any EnvioDTE/EnvioBOLETA
 const [doc] = parsePrintableDocuments(signed.xml)
-const pdf = await renderPrintedSample(doc, { siiOffice: 'S.I.I. - SANTIAGO ORIENTE', resolution: 'Res. Ex. SII N° 80 del 2014' })
+const pdf = await renderPrintedSample(doc, {
+  siiOffice: 'S.I.I. - SANTIAGO ORIENTE',
+  resolution: 'Res. Ex. SII N° 80 del 2014',
+})
 const transferableCopy = await renderPrintedSample(doc, { transferable: true }) // adds the acknowledgement box and CEDIBLE
 
 // Every document of every envelope, in memory, classified into the test and simulation sets
-const result = await renderPrintedSamples({ envelopes: [{ name: 'envio-set-basico.xml', xml: envelope.xml }], transferable: true })
+const result = await renderPrintedSamples({
+  envelopes: [{ name: 'envio-set-basico.xml', xml: envelope.xml }],
+  transferable: true,
+})
 
 // From the files of a certification run into SET-PRUEBAS and SET-SIMULACION
 const files = await findEnvelopeFiles('./certification/envelopes')
-const written = await writePrintedSamples({ xmlFiles: files, outDir: './certification/samples', logoPath: './logo.png', transferable: true })
+const written = await writePrintedSamples({
+  xmlFiles: files,
+  outDir: './certification/samples',
+  logoPath: './logo.png',
+  transferable: true,
+})
+// Back from disk, for the certification runner: every .pdf under the directory, the test set folder first
+const samples = await readPrintedSamples('./certification/samples')
 ```
 
 The printed sample follows the SII printed-samples manual: one page 21.5 cm wide and as tall as its content between 11
