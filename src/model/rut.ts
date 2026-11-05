@@ -1,4 +1,4 @@
-import { decompose, format } from 'rut.ts'
+import { calculateVerifier, decompose, format } from 'rut.ts'
 import { DteError } from '../errors'
 
 declare const SII_RUT_BRAND: unique symbol
@@ -44,4 +44,17 @@ export const isSiiRut = (value: unknown): value is SiiRut => typeof value === 's
 export const splitSiiRut = (rut: SiiRut): { readonly body: string; readonly verifier: string } => {
   const { body, verifier } = decompose(rut)
   return { body, verifier }
+}
+
+/**
+ * EN: A SII RUT from its body alone: rut.ts computes the verifier (Modulo 11).
+ * ES: Un RUT SII a partir de solo su cuerpo: rut.ts calcula el dígito verificador (módulo 11).
+ * @param body EN: the 7 or 8 digits. ES: los 7 u 8 dígitos.
+ * @param field EN: field name for the error details (default `rut`). ES: nombre del campo para los detalles del error (por defecto `rut`).
+ * @throws {DteError} EN: `INVALID_RUT` when the body is not 7 or 8 digits. ES: `INVALID_RUT` si el cuerpo no son 7 u 8 dígitos.
+ */
+export const siiRutOfBody = (body: string, field = 'rut'): SiiRut => {
+  const verifier = calculateVerifier(body, { throwOnError: false })
+  if (verifier === null) throw new DteError('INVALID_RUT', { field })
+  return toSiiRut(`${body}-${verifier}`, field)
 }

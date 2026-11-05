@@ -117,6 +117,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `INTERCAMBIO_DONE`, `MUESTRAS_UPLOADING`, `MUESTRAS_DONE`; the portal session takes raw bodies; catalog
   `EXCHANGE_PORTAL`, `SAMPLES_PORTAL`, `EXCHANGE_ANSWER_FILES`; portal rejections `exchangeUploadRefused`,
   `samplesReviewRefused`, `sampleUploadRefused`. `dte-sdk/portal` limit to 64 kB.
+- Certification of receipts (`dte-sdk/portal`), as pieces to chain: `parseReceiptsTestSet` (the plain-text set of the
+  receipts portal), `issueReceiptsSet` (one receipt of type 39 per case, the `SET` reference, the signed `EnvioBOLETA`),
+  `sendReceiptsSet` (the envelope, 20 s, its status, then the folio consumption report with the sequence number 100
+  plus the attempt, up to ten attempts) and `resendReceiptsConsumption`; the receipts portal operations
+  `downloadReceiptsTestSet`, `declareReceiptsTrackId`, `readReceiptsStatus` (`P90` ready to declare, `P91` declared),
+  `declareReceiptsCompliance` (irreversible; the software provider is mandatory; the representative is the owner of
+  the session) and `verifyReceiptsAuthorization` (production and certification, never throws). `readProgress` gives
+  the receipts row of the progress page. Catalog `RECEIPTS_PORTAL`; portal rejections `receiptsNotEnrolled`,
+  `receiptsTrackIdRefused`, `receiptsComplianceRefused`. `dte-sdk/portal` limit to 68 kB.
+- `receiptReferences` on `DocumentInput` and `Document`, with `ReceiptReferenceInput`, `ReceiptReference` and
+  `SiiReferenciaBoleta`: the reference of a receipt (39, 41) as the receipts schema defines it.
 
 ### Changed
 
@@ -133,6 +144,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A receipt (39, 41) with a reference was written with the invoice shape of `Referencia` (`FchRef`), which the receipts
+  schema does not allow. Receipts now take `receiptReferences`, and `references` on a receipt is refused with
+  `INVALID_OPTION`, as is `receiptReferences` on any other type. The official `EnvioBOLETA_v11.xsd` is in the test
+  fixtures and the receipts envelope validates against it.
 - ES module consumers on `moduleResolution: nodenext` get the real types. The declarations lacked extensions in their
   relative imports, which was 165 errors, or every type silently `any` under `skipLibCheck`.
 

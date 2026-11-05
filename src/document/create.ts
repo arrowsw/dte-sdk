@@ -15,6 +15,8 @@ import type {
   LineItemInput,
   Receiver,
   ReceiverInput,
+  ReceiptReference,
+  ReceiptReferenceInput,
   Reference,
   ReferenceInput,
   Transport,
@@ -54,6 +56,9 @@ export const FIELD_LIMITS = {
   UnmdRef: 4,
   TpoDocLiq: 3,
   RazonRef: 90,
+  CodRef: 18,
+  TpoDocRef: 3,
+  FolioRef: 18,
   GlosaDR: 45,
   Glosa: 60,
   GlosaSTI: 40,
@@ -194,6 +199,17 @@ const normalizeReference = (input: ReferenceInput, index: number): Reference =>
     reason: text(input.reason, 'RazonRef'),
   })
 
+// The receipts schema gives `Referencia` its own shape: a type and a folio that are optional texts, a free-text code
+// and the reason; no date.
+const normalizeReceiptReference = (input: ReceiptReferenceInput, index: number): ReceiptReference =>
+  compact({
+    lineNumber: index + 1,
+    documentType: input.documentType === undefined ? undefined : text(String(input.documentType), 'TpoDocRef'),
+    folio: input.folio === undefined ? undefined : text(String(input.folio), 'FolioRef'),
+    code: text(input.code, 'CodRef'),
+    reason: text(input.reason, 'RazonRef'),
+  })
+
 const normalizeAdjustment = (input: GlobalAdjustmentInput, index: number): GlobalAdjustment =>
   compact({
     lineNumber: index + 1,
@@ -242,7 +258,7 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
  * sanitiza textos y exige los largos del esquema (falla temprano en vez de dejar que el SII rechace el sobre entero),
  * numera líneas, calcula montos y totales, aplica los defaults de boleta (consumidor final, `IndServicio=3`) y fija
  * `MntBruto=1` cuando los precios incluyen IVA. Pura: misma entrada, misma salida.
- * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `MISSING_FIELD`, `FIELD_TOO_LONG`, `INVALID_AMOUNT`. ES: los mismos códigos.
+ * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `MISSING_FIELD`, `FIELD_TOO_LONG`, `INVALID_AMOUNT`; `INVALID_OPTION` for `references` on a receipt or `receiptReferences` on any other type. ES: los mismos códigos; `INVALID_OPTION` por `references` en una boleta o `receiptReferences` en cualquier otro tipo.
  */
 export const createDocument = (input: DocumentInput, options: CreateDocumentOptions = {}): Document => {
   if (!isDocumentType(input.type)) throw new DteError('INVALID_DOCUMENT_TYPE', { type: input.type })
@@ -254,7 +270,12 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
   const receiver = normalizeReceiver(input.receiver, receipt)
   if (input.items.length === 0) throw new DteError('MISSING_FIELD', { field: 'items' })
   const items = input.items.map((item, index) => normalizeItem(item, index, type))
+  // A receipt's `Referencia` has no date: the invoice shape would fail the receipts schema, and the other way round.
+  if (receipt && (input.references ?? []).length > 0) throw new DteError('INVALID_OPTION', { field: 'references' })
+  if (!receipt && (input.receiptReferences ?? []).length > 0)
+    throw new DteError('INVALID_OPTION', { field: 'receiptReferences' })
   const references = (input.references ?? []).map(normalizeReference)
+  const receiptReferences = (input.receiptReferences ?? []).map(normalizeReceiptReference)
   const globalAdjustments = (input.globalAdjustments ?? []).map(normalizeAdjustment)
   const commissions = (input.commissions ?? []).map(normalizeCommission)
   const transport = normalizeTransport(input.transport)
@@ -291,6 +312,7 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
     subtotals: input.subtotals ?? [],
     globalAdjustments,
     references,
+    receiptReferences,
     commissions,
   }
 }

@@ -216,6 +216,7 @@ describe('parseProgressPage', () => {
       stageKey: 'testSets',
       states: {},
       simulationAwaitsConfirmation: false,
+      receipts: null,
     })
   })
 })
@@ -227,4 +228,47 @@ test('portalStageOf and classifyItemState on the wordings of the field', () => {
   expect(classifyItemState('revisado conforme')).toBe('approved')
   expect(classifyItemState('FECHA INV&Aacute;LIDA')).toBe('unknown')
   expect(classifyItemState('FECHA INVALIDA')).toBe('inconsistent')
+})
+
+describe('the receipts row of the progress page', () => {
+  test('gives the bold text after the receipts cell and whether it says authorised', () => {
+    expect(
+      parseProgressPage(progressPage('DOCUMENTOS IMPRESOS', { 'BOLETA ELECTRONICA': 'REVISADO CONFORME' })).receipts,
+    ).toEqual({
+      text: 'REVISADO CONFORME',
+      authorized: true,
+    })
+    expect(parseProgressPage(progressPage('LIBROS', { 'SET BOLETA': 'EN REVISION' })).receipts).toEqual({
+      text: 'EN REVISION',
+      authorized: false,
+    })
+    expect(parseProgressPage(progressPage('LIBROS', { Boleta: ' Autorizado ' })).receipts).toEqual({
+      text: 'Autorizado',
+      authorized: true,
+    })
+  })
+
+  test('a wording that denies, or that is unknown, is not an authorisation', () => {
+    const authorized = (text: string): boolean | undefined =>
+      parseProgressPage(progressPage('LIBROS', { 'BOLETA ELECTRONICA': text })).receipts?.authorized
+    for (const text of ['AUTORIZADA', 'Aprobado', 'REVISADO CONFORME']) expect(authorized(text)).toBe(true)
+    for (const text of [
+      'NO AUTORIZADO',
+      'DESAUTORIZADA',
+      'NO CONFORME',
+      'INCONFORME',
+      'SIN AUTORIZACION',
+      'AUTORIZADO CON REPAROS',
+      'AUTORIZACION PENDIENTE',
+      'RECHAZADO',
+      'OTRO ESTADO',
+    ])
+      expect(authorized(text)).toBe(false)
+  })
+
+  test('a page without a receipts row gives null, whatever its text says about receipts', () => {
+    const sentence = `${progressPage('LIBROS', {})}<p>Empresa autorizada para emitir boleta electrónica</p>`
+    expect(parseProgressPage(sentence).receipts).toBeNull()
+    expect(parseProgressPage(progressPage('LIBROS', { 'SET BASICO': 'REVISADO CONFORME' })).receipts).toBeNull()
+  })
 })

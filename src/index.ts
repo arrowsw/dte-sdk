@@ -90,6 +90,8 @@ export type {
   Withholding,
   CommissionTotals,
   Totals,
+  ReceiptReference,
+  ReceiptReferenceInput,
   Reference,
   ReferenceInput,
   GlobalAdjustment,
@@ -122,6 +124,7 @@ export type {
   SiiSubTotInfo,
   SiiDscRcgGlobal,
   SiiReferencia,
+  SiiReferenciaBoleta,
   SiiComisiones,
 } from './model/sii'
 export { toSiiDocument, fromSiiDocument } from './model/codec'

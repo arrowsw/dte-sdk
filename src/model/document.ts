@@ -280,6 +280,40 @@ export type Reference = {
 }
 
 /**
+ * EN: Reference on a receipt (39, 41) as the caller provides it. The receipts schema gives `Referencia` its own
+ * shape: no date, and a code that is the company's own text.
+ * ES: `Referencia` de una boleta (39, 41) tal como la entrega el llamador. El esquema de boletas le da a `Referencia`
+ * su propia forma: sin fecha, y con un código que es texto propio de la empresa.
+ */
+export type ReceiptReferenceInput = {
+  /** EN: The company's own reference code (max 18); `SET` in the certification test set. ES: `CodRef` — Código interno del tipo de referencia, máximo 18; `SET` en el set de pruebas de certificación. */
+  readonly code?: string
+  /** EN: Reason (max 90). ES: `RazonRef` — Razón de la referencia, máximo 90. */
+  readonly reason?: string
+  /** EN: Referenced document type (max 3). ES: `TpoDocRef` — Tipo del documento referenciado, máximo 3. */
+  readonly documentType?: number | string
+  /** EN: Referenced folio (max 18). ES: `FolioRef` — Folio del documento referenciado, máximo 18. */
+  readonly folio?: number | string
+}
+
+/**
+ * EN: Normalized reference of a receipt.
+ * ES: `Referencia` de una boleta, normalizada.
+ */
+export type ReceiptReference = {
+  /** EN: 1-based line number. ES: `NroLinRef` — Número de línea, desde 1. */
+  readonly lineNumber: number
+  /** EN: Referenced document type. ES: `TpoDocRef` — Tipo del documento referenciado. */
+  readonly documentType?: string
+  /** EN: Referenced folio. ES: `FolioRef` — Folio referenciado. */
+  readonly folio?: string
+  /** EN: The company's own reference code. ES: `CodRef` — Código interno del tipo de referencia. */
+  readonly code?: string
+  /** EN: Reason. ES: `RazonRef` — Razón. */
+  readonly reason?: string
+}
+
+/**
  * EN: Global discount or surcharge as the caller provides it (`DscRcgGlobal`).
  * ES: `DscRcgGlobal` — Descuento o recargo global tal como lo entrega el llamador.
  */
@@ -489,6 +523,8 @@ export type Document = {
   readonly subtotals: readonly SubtotalInfo[]
   readonly globalAdjustments: readonly GlobalAdjustment[]
   readonly references: readonly Reference[]
+  /** EN: References of a receipt (39, 41), which has its own shape; empty on every other type. ES: `Referencia` — Referencias de una boleta (39, 41), que tiene forma propia; vacío en los demás tipos. */
+  readonly receiptReferences: readonly ReceiptReference[]
   /** EN: Commission lines (settlement invoices only). ES: `Comisiones` — Líneas de comisión (solo 43). */
   readonly commissions: readonly CommissionLine[]
 }
@@ -509,6 +545,8 @@ export type DocumentInput = {
   readonly receiver?: ReceiverInput
   readonly items: readonly LineItemInput[]
   readonly references?: readonly ReferenceInput[]
+  /** EN: References of a receipt (39, 41); `references` is for every other type. ES: `Referencia` — Referencias de una boleta (39, 41); `references` es para los demás tipos. */
+  readonly receiptReferences?: readonly ReceiptReferenceInput[]
   readonly globalAdjustments?: readonly GlobalAdjustmentInput[]
   readonly subtotals?: readonly SubtotalInfo[]
   readonly commissions?: readonly CommissionLineInput[]

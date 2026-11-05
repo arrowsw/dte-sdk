@@ -96,6 +96,19 @@ export type ProgressPage = {
   readonly states: Readonly<Partial<Record<DeclarationKey, { readonly text: string; readonly state: ItemState }>>>
   /** EN: The page offers to confirm the review of an approved simulation. ES: La página ofrece confirmar la revisión de una simulación aprobada. */
   readonly simulationAwaitsConfirmation: boolean
+  /** EN: The receipts row: its bold text and whether it says the company is authorised; null when the page has none. ES: La fila de boletas: su texto en negrita y si dice que la empresa está autorizada; null si la página no la trae. */
+  readonly receipts: ReceiptsProgress | null
+}
+
+/**
+ * EN: The receipts row of the progress page.
+ * ES: La fila de boletas de la página de avance.
+ */
+export type ReceiptsProgress = {
+  /** EN: The bold text of the row. ES: El texto en negrita de la fila. */
+  readonly text: string
+  /** EN: The text says conforming, approved or authorised, as a whole word and without a word that denies it. ES: El texto dice conforme, aprobado o autorizado, como palabra completa y sin una palabra que lo niegue. */
+  readonly authorized: boolean
 }
 
 const DEFAULT_TOTAL_ROWS = 10
@@ -313,6 +326,19 @@ export const portalStageOf = (stage: string | null): CertificationStage => {
   return PORTAL_STAGE_WORDS.find((entry) => entry.words.some((word) => upper.includes(word)))?.stage ?? 'testSets'
 }
 
+const RECEIPTS_ROW = /BOLETA[^<]*<\/[^>]+>\s*<[^>]+><b>([^<]+)<\/b>/i
+const RECEIPTS_AUTHORIZED = /\b(?:CONFORME|APROBAD[OA]|AUTORIZAD[OA])\b/i
+const RECEIPTS_REFUSED = /\bNO\b|\bSIN\b|RECHAZ|REPARO|PENDIENTE/i
+
+// The bold text after the cell that names the receipts. It reads as authorised only on a whole word that says so and
+// no word that denies it: "NO AUTORIZADO" and "DESAUTORIZADA" are not authorisations, and anything unknown is not one.
+const receiptsProgressOf = (html: string): ReceiptsProgress | null => {
+  const row = RECEIPTS_ROW.exec(html)
+  if (row === null) return null
+  const text = row[1].trim()
+  return { text, authorized: RECEIPTS_AUTHORIZED.test(text) && !RECEIPTS_REFUSED.test(text) }
+}
+
 /**
  * EN: Reads the progress page: the stage from the first pattern that matches, and per set or book the first bold text
  * after its label, row by row (a page-wide search once took the next row's state), plus whether an approved
@@ -341,5 +367,6 @@ export const parseProgressPage = (html: string): ProgressPage => {
     states,
     simulationAwaitsConfirmation:
       html.includes('pe_avance3') && /SET DE SIMULACION/i.test(html) && /Confirmar Revisi/i.test(decodeEntities(html)),
+    receipts: receiptsProgressOf(html),
   }
 }

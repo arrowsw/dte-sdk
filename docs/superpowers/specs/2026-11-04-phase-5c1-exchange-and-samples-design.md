@@ -217,7 +217,7 @@ and refuses a CR, LF or quote in a part's name, file name or content type; `buil
 - `isExchangeSet(html)`: HTTP 200 and the body holds `<EnvioDTE`, `<SetDTE` or `<?xml`.
 - `exchangeUserState(answer)`: from the parsed table, the first string longer than 5 characters that does not start
   with `cl.` or `java.`; when it matches `no esta en estado|error` the company is not in the exchange, and the state is
-  the word after `estado:` (`desconocido` when none); `P90` means the exchange was already completed.
+  the word after `estado:` (null when none); `P90` means the exchange was already completed.
 - `isUploadRefused(html)`: the lower-cased body holds `no vienen los parametros`, `<title>error` or `rechaz`, or the
   status is 400 or more. The portal answers HTTP 200 with "no vienen los parametros necesarios" when the query lacks
   `re` and `dve`.

@@ -91,6 +91,9 @@ const EXPECTED_FUNCTIONS: Record<string, readonly string[]> = {
     'createExchangeAnswers',
     'runExchange',
     'uploadPrintedSamples',
+    'issueReceiptsSet',
+    'sendReceiptsSet',
+    'declareReceiptsCompliance',
   ],
   pdf: [
     'parsePrintableDocuments',
