@@ -304,13 +304,45 @@ describe('declareReceiptsCompliance', () => {
     expect(methods(busy).filter((method) => method === 'autorizarEmpresaBolProd')).toHaveLength(1)
   })
 
-  test('an application record that is no //OK answer, or lacks its date or its Long, stops the declaration before it is sent', async () => {
+  test('an application record without an authorisation date is declared with the date left empty', async () => {
+    const undated = await signedIn([
+      ready({ obtenerPostulacionSeg: { body: '//OK[3,\'BAqo\',2,1,["cl.sii.x/1"],0,7]' } }),
+    ])
+    await expect(declareReceiptsCompliance(undated.portal, input)).resolves.toEqual({
+      outcome: 'declared',
+      state: 'P91',
+    })
+    const declaration = posts(undated)[3]
+    expect(gwtMethodOf(declaration)).toBe('autorizarEmpresaBolProd')
+    expect(declaration.text).toBe(
+      receiptsComplianceBody({
+        moduleBase: BASE,
+        policy: KNOWN.policy,
+        serviceInterface: SERVICE,
+        company: { digits: '76543210', verifier: '3' },
+        provider: { digits: '10000004', verifier: '0' },
+        representative: { digits: '12345678', verifier: '5' },
+        date: '15-11-2026',
+        providerMail: 'soporte@example.test',
+        providerName: 'Proveedor de Software SpA',
+        link: 'www.sii.cl',
+        authorizationDate: '',
+        token: 'BAqo',
+        businessName,
+      }),
+    )
+    // The 22nd string of the table, the authorisation date, is empty; the Long is the record's own.
+    expect(declaration.text).toContain('DocumentoAutorizadoTo/493967287||java.lang.Long/4227064769|')
+    expect(declaration.text).toContain('|23|BAqo|-11|')
+  })
+
+  test('an application record that is no //OK answer, or lacks its Long, stops the declaration before it is sent', async () => {
     const unusable = [
       EXCEPTION,
       "<html>sin postulacion 'a|b' vigente</html>",
       EMPTY_OK,
-      '//OK[3,\'BAqo\',2,1,["cl.sii.x/1"],0,7]',
       '//OK[3,2,1,["cl.sii.x/1","10/11/2026"],0,7]',
+      '//OK[3,\'x|9|8\',2,1,["cl.sii.x/1","10/11/2026"],0,7]',
     ]
     for (const body of unusable) {
       const broken = await signedIn([ready({ obtenerPostulacionSeg: { body } })])

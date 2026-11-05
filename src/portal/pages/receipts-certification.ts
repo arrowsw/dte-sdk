@@ -22,26 +22,27 @@ export const representativeDigitsOf = (answer: GwtAnswer): string | null =>
  * ES: Lo que la declaración necesita del registro de la postulación.
  */
 export type ReceiptsPostulation = {
-  /** EN: The authorisation date, `dd/mm/yyyy`. ES: La fecha de autorización, `dd/mm/aaaa`. */
+  /** EN: The authorisation date, `dd/mm/yyyy`, or empty when the record has none. ES: La fecha de autorización, `dd/mm/aaaa`, o vacía cuando el registro no la trae. */
   readonly authorizationDate: string
   /** EN: The application's Long as the portal wrote it. ES: El Long de la postulación como lo escribió el portal. */
   readonly token: string
 }
 
 /**
- * EN: Reads the application record: the first string of the table shaped as a date, and the first single-quoted token
- * of the body that is a Long. Null when the answer is not `//OK` or lacks either one: the declaration cannot be undone,
- * so no default stands in for them. Quoted text that is no Long is not one: the token goes into the declaration body
- * as it is, so it can never carry a separator.
- * ES: Lee el registro de la postulación: el primer string de la tabla con forma de fecha, y el primer token entre
- * comillas simples del cuerpo que es un Long. Null cuando la respuesta no es `//OK` o le falta alguno de los dos: la
- * declaración no se puede deshacer, así que ningún valor por defecto los reemplaza. Un texto entre comillas que no es
- * un Long no lo es: el token va al cuerpo de la declaración tal cual, así que nunca puede llevar un separador.
+ * EN: Reads the application record: the first string of the table shaped as a date (empty when there is none, as the
+ * field declares it), and the first single-quoted token of the body that is a Long. Null when the answer is not `//OK`
+ * or has no Long: the declaration cannot be undone, so no default stands in for the Long. Quoted text that is no Long
+ * is not one: the token goes into the declaration body as it is, so it can never carry a separator.
+ * ES: Lee el registro de la postulación: el primer string de la tabla con forma de fecha (vacía cuando no hay ninguna,
+ * como la declara el campo), y el primer token entre comillas simples del cuerpo que es un Long. Null cuando la
+ * respuesta no es `//OK` o no trae un Long: la declaración no se puede deshacer, así que ningún valor por defecto
+ * reemplaza al Long. Un texto entre comillas que no es un Long no lo es: el token va al cuerpo de la declaración tal
+ * cual, así que nunca puede llevar un separador.
  */
 export const postulationOf = (answer: GwtAnswer): ReceiptsPostulation | null => {
-  const authorizationDate = answer.table.find((item) => AUTHORIZATION_DATE.test(item))
   const token = LONG_TOKEN.exec(answer.body)?.[1]
-  return answer.ok && authorizationDate !== undefined && token !== undefined ? { authorizationDate, token } : null
+  if (!answer.ok || token === undefined) return null
+  return { authorizationDate: answer.table.find((item) => AUTHORIZATION_DATE.test(item)) ?? '', token }
 }
 
 /**
@@ -93,7 +94,7 @@ export type ReceiptsComplianceValues = {
   readonly providerName: string
   /** EN: The query link. ES: El link de consulta. */
   readonly link: string
-  /** EN: The authorisation date of the application. ES: La fecha de autorización de la postulación. */
+  /** EN: The authorisation date of the application, or empty. ES: La fecha de autorización de la postulación, o vacía. */
   readonly authorizationDate: string
   /** EN: The application's Long, as the portal wrote it. ES: El Long de la postulación, como lo escribió el portal. */
   readonly token: string

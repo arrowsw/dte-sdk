@@ -23,12 +23,16 @@ describe('the receipts portal answers', () => {
     expect(representativeDigitsOf(gwtAnswer(okAnswer([1], ['123456', '123456789'])))).toBeNull()
   })
 
-  test('the application record gives the authorisation date and the Long as written, or nothing', () => {
+  test('the application record gives the authorisation date and the Long as written; without a Long it is no record', () => {
     const answer = gwtAnswer('//OK[3,\'BAqo\',2,1,["cl.sii.x/1","15/11/2026","otro"],0,7]')
     expect(postulationOf(answer)).toEqual({ authorizationDate: '15/11/2026', token: 'BAqo' })
-    // No default stands in for the date or the Long: a record without either one is no record.
+    // A record without a date keeps the date empty, as the field declares it.
+    expect(postulationOf(gwtAnswer('//OK[3,\'BAqo\',2,1,["cl.sii.x/1","otro"],0,7]'))).toEqual({
+      authorizationDate: '',
+      token: 'BAqo',
+    })
+    // No default stands in for the Long: a record without one is no record.
     expect(postulationOf(gwtAnswer(EMPTY_OK))).toBeNull()
-    expect(postulationOf(gwtAnswer('//OK[3,\'BAqo\',2,1,["cl.sii.x/1","otro"],0,7]'))).toBeNull()
     expect(postulationOf(gwtAnswer('//OK[3,2,1,["cl.sii.x/1","15/11/2026"],0,7]'))).toBeNull()
     expect(postulationOf(gwtAnswer('//EX[3,\'BAqo\',2,1,["cl.sii.x/1","15/11/2026"],0,7]'))).toBeNull()
     // The Long is a token of the GWT alphabet: quoted text that is no Long, a separator inside it included, is none.
