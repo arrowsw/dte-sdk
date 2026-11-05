@@ -38,7 +38,8 @@ every field.
 - 🗂️ **Purchase and sales register and MIPYME backup** — the documents and official summaries of
   a period, purchase reclassification, and the XML of issued and received documents.
 - 🎓 **Certification** — the SII test sets parsed and issued, their books, the simulation, the
-  exchange answers, and a resumable runner over the certification portals.
+  exchange answers, and a resumable runner over the certification portals; and the certification
+  of receipts (boletas), an application of its own, as pieces to chain.
 - 🖨️ **Printed samples** — one PDF per document following the SII manual, with its PDF417 stamp.
 - 🧠 **Fully typed** — a domain model in English (`totalAmount`, `issuer.businessName`)
   that maps to the official SII tags (`MntTotal`, `RznSoc`) through a codec.
@@ -59,7 +60,8 @@ every field.
 - [Purchase and sales register and MIPYME backup](#purchase-and-sales-register-and-mipyme-backup)
 - Certification: [test sets, simulation and books](#certification-test-sets-simulation-and-books),
   [the runner](#certification-the-runner),
-  [the exchange and the printed samples](#certification-the-exchange-and-the-printed-samples)
+  [the exchange and the printed samples](#certification-the-exchange-and-the-printed-samples),
+  [receipts](#certification-receipts)
 - [Printed samples (Node)](#printed-samples-node)
 - [Errors](#errors) and [status codes](#status-codes)
 - [Development](#development)
@@ -73,21 +75,21 @@ API. Version 1.0.0 will be the first one recommended for production.
 Every area is tested against synthetic SII answers, with a 100 % coverage gate in CI. Those tests cannot show how the
 real SII answers, so this table says what has met it so far:
 
-| Area                                                           | Entry            | Against the real SII                                                                                 |
-| -------------------------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------- |
-| Documents, stamps, signatures and envelopes                    | `dte-sdk`        | Not sent yet                                                                                         |
-| SII web services client                                        | `dte-sdk`        | Not run yet ([issue 8](https://github.com/arrowsw/dte-sdk/issues/8))                                 |
-| SII books                                                      | `dte-sdk`        | Not sent yet; they validate against the official schemas in the tests                                |
-| Portal session and company data                                | `dte-sdk/portal` | Login, logout, taxpayer data and the refusal pages, for a company not enrolled as an issuer          |
-| Folios and CAF requests                                        | `dte-sdk/portal` | Not seen yet: they need an enrolled company                                                          |
-| Purchase and sales register, MIPYME backup                     | `dte-sdk/portal` | Read-only requests answered for a company with no documents; rows, downloads and writes not seen yet |
-| Certification sets, runner, exchange and upload of the samples | `dte-sdk/portal` | Not run yet; the exchange answers validate against the official schemas in the tests                 |
-| Printed samples                                                | `dte-sdk/pdf`    | Not reviewed by the SII yet                                                                          |
+| Area                                                           | Entry            | Against the real SII                                                                                                                                                            |
+| -------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Documents, stamps, signatures and envelopes                    | `dte-sdk`        | Not sent yet                                                                                                                                                                    |
+| SII web services client                                        | `dte-sdk`        | Not run yet ([issue 8](https://github.com/arrowsw/dte-sdk/issues/8))                                                                                                            |
+| SII books                                                      | `dte-sdk`        | Not sent yet; they validate against the official schemas in the tests                                                                                                           |
+| Portal session and company data                                | `dte-sdk/portal` | Login, logout, taxpayer data and the refusal pages, for a company not enrolled as an issuer                                                                                     |
+| Folios and CAF requests                                        | `dte-sdk/portal` | Not seen yet: they need an enrolled company                                                                                                                                     |
+| Purchase and sales register, MIPYME backup                     | `dte-sdk/portal` | Read-only requests answered for a company with no documents; rows, downloads and writes not seen yet                                                                            |
+| Certification sets, runner, exchange and upload of the samples | `dte-sdk/portal` | Not run yet; the exchange answers validate against the official schemas in the tests                                                                                            |
+| Certification of receipts (boletas)                            | `dte-sdk/portal` | Not run yet: it needs a company enrolled in the receipts application; the receipts envelope and the folio consumption report validate against the official schemas in the tests |
+| Printed samples                                                | `dte-sdk/pdf`    | Not reviewed by the SII yet                                                                                                                                                     |
 
-Still to come before 0.1.0: the certification of receipts (boletas), and the live runs tracked in
-[issue 8](https://github.com/arrowsw/dte-sdk/issues/8). Out of scope: export documents (110, 111 and 112), fee
-receipts (boletas de honorarios), the assignment of invoices (AEC), forms F29 and F22, the exchange e-mail and full
-XSD validation.
+Still to come before 0.1.0: the live runs tracked in [issue 8](https://github.com/arrowsw/dte-sdk/issues/8). Out of
+scope: export documents (110, 111 and 112), fee receipts (boletas de honorarios), the assignment of invoices (AEC),
+forms F29 and F22, the exchange e-mail and full XSD validation.
 
 ## Installation
 
@@ -120,12 +122,12 @@ npm install pdf-lib bwip-js
 
 ## Entry points
 
-| Import from      | What it holds                                                                                                                                                            | Runs on                                                        |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
-| `dte-sdk`        | Documents, stamps, signatures, envelopes, books and the SII web services client over `fetch`                                                                             | Node, Bun, Deno; bundles for the browser with no configuration |
-| `dte-sdk/node`   | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryFolioRegistry`                                                     | Node                                                           |
-| `dte-sdk/portal` | SII portal, folios and CAF requests, the folio registry, purchase and sales register, MIPYME backup, and certification: sets, runner, exchange and upload of the samples | Node                                                           |
-| `dte-sdk/pdf`    | Printed samples                                                                                                                                                          | Node, with `pdf-lib` and `bwip-js` installed                   |
+| Import from      | What it holds                                                                                                                                                                                      | Runs on                                                        |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `dte-sdk`        | Documents, stamps, signatures, envelopes, books and the SII web services client over `fetch`                                                                                                       | Node, Bun, Deno; bundles for the browser with no configuration |
+| `dte-sdk/node`   | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryFolioRegistry`                                                                               | Node                                                           |
+| `dte-sdk/portal` | SII portal, folios and CAF requests, the folio registry, purchase and sales register, MIPYME backup, and certification: sets, runner, exchange, upload of the samples and the receipts application | Node                                                           |
+| `dte-sdk/pdf`    | Printed samples                                                                                                                                                                                    | Node, with `pdf-lib` and `bwip-js` installed                   |
 
 `DteError` and `isDteError` come from `dte-sdk` and recognize what every entry throws.
 
