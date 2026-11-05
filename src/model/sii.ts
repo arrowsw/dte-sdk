@@ -329,6 +329,20 @@ export type SiiReferencia = {
   readonly RazonRef?: string
 }
 
+/** EN: `Referencia` of a receipt (39, 41), SII shape: the receipts schema has no date and a free-text code. ES: `Referencia` de una boleta (39, 41) en forma SII: el esquema de boletas no trae fecha y su código es texto libre. */
+export type SiiReferenciaBoleta = {
+  /** EN: Line number. ES: `NroLinRef` — Número de línea de referencia. */
+  readonly NroLinRef: number
+  /** EN: Referenced document type. ES: `TpoDocRef` — Tipo de documento de referencia. */
+  readonly TpoDocRef?: string
+  /** EN: Referenced folio. ES: `FolioRef` — Folio de referencia. */
+  readonly FolioRef?: string
+  /** EN: The company's own reference code. ES: `CodRef` — Código interno del tipo de referencia. */
+  readonly CodRef?: string
+  /** EN: Reason. ES: `RazonRef` — Razón de la referencia. */
+  readonly RazonRef?: string
+}
+
 /** EN: `Comisiones` line (43), SII shape. ES: Línea de `Comisiones` (43) en forma SII. */
 export type SiiComisiones = {
   /** EN: Line number. ES: `NroLinCom` — Número de línea de comisión. */
@@ -360,8 +374,8 @@ export type SiiDocumento = {
   readonly SubTotInfo?: readonly SiiSubTotInfo[]
   /** EN: Global discounts and surcharges. ES: `DscRcgGlobal` — Descuentos y recargos globales. */
   readonly DscRcgGlobal?: readonly SiiDscRcgGlobal[]
-  /** EN: References to other documents. ES: `Referencia` — Referencias a otros documentos. */
-  readonly Referencia?: readonly SiiReferencia[]
+  /** EN: References to other documents; receipts (39, 41) carry their own shape. ES: `Referencia` — Referencias a otros documentos; las boletas (39, 41) llevan su propia forma. */
+  readonly Referencia?: readonly SiiReferencia[] | readonly SiiReferenciaBoleta[]
   /** EN: Commission lines (settlement invoices). ES: `Comisiones` — Líneas de comisiones (liquidación factura). */
   readonly Comisiones?: readonly SiiComisiones[]
 }

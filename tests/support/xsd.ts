@@ -12,6 +12,7 @@ const SCHEMAS = {
   LibroGuia: { main: 'LibroGuia_v10.xsd', imports: ['xmldsignature_v10.xsd'] },
   ConsumoFolio: { main: 'ConsumoFolio_v10.xsd', imports: ['SiiTypes_v10.xsd', 'xmldsignature_v10.xsd'] },
   RespuestaEnvioDTE: { main: 'RespuestaEnvioDTE_v10.xsd', imports: ['SiiTypes_v10.xsd', 'xmldsignature_v10.xsd'] },
+  EnvioBOLETA: { main: 'EnvioBOLETA_v11.xsd', imports: ['xmldsignature_v10.xsd'] },
   EnvioRecibos: {
     main: 'EnvioRecibos_v10.xsd',
     imports: ['Recibos_v10.xsd', 'SiiTypes_v10.xsd', 'xmldsignature_v10.xsd'],

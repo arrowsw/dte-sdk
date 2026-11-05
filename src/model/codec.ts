@@ -16,6 +16,7 @@ import type {
   Issuer,
   LineItem,
   Receiver,
+  ReceiptReference,
   Reference,
   SubtotalInfo,
   Totals,
@@ -31,6 +32,7 @@ import type {
   SiiIdDoc,
   SiiReceptor,
   SiiReferencia,
+  SiiReferenciaBoleta,
   SiiSubTotInfo,
   SiiTotales,
   SiiTransporte,
@@ -228,6 +230,16 @@ const toSiiReferencia = (reference: Reference): SiiReferencia =>
     RazonRef: reference.reason,
   })
 
+// A receipt's `Referencia`, in the order of the receipts schema: no date, no global flag, no other issuer.
+const toSiiReferenciaBoleta = (reference: ReceiptReference): SiiReferenciaBoleta =>
+  compact({
+    NroLinRef: reference.lineNumber,
+    TpoDocRef: reference.documentType,
+    FolioRef: reference.folio,
+    CodRef: reference.code,
+    RazonRef: reference.reason,
+  })
+
 const toSiiComisiones = (line: CommissionLine): SiiComisiones =>
   compact({
     NroLinCom: line.lineNumber,
@@ -260,7 +272,9 @@ export const toSiiDocument = (doc: Document): SiiDocumento => {
     Detalle: doc.items.map(toSiiDetalle),
     SubTotInfo: nonEmpty(doc.subtotals.map(toSiiSubTotInfo)),
     DscRcgGlobal: nonEmpty(doc.globalAdjustments.map(toSiiDscRcgGlobal)),
-    Referencia: nonEmpty(doc.references.map(toSiiReferencia)),
+    Referencia: receipt
+      ? nonEmpty(doc.receiptReferences.map(toSiiReferenciaBoleta))
+      : nonEmpty(doc.references.map(toSiiReferencia)),
     Comisiones: nonEmpty(doc.commissions.map(toSiiComisiones)),
   })
 }
@@ -439,6 +453,15 @@ const fromSiiComisiones = (line: SiiComisiones): CommissionLine =>
     vatValue: line.ValComIVA,
   })
 
+const fromSiiReferenciaBoleta = (reference: SiiReferenciaBoleta): ReceiptReference =>
+  compact({
+    lineNumber: reference.NroLinRef,
+    documentType: reference.TpoDocRef === undefined ? undefined : String(reference.TpoDocRef),
+    folio: reference.FolioRef === undefined ? undefined : String(reference.FolioRef),
+    code: reference.CodRef === undefined ? undefined : String(reference.CodRef),
+    reason: reference.RazonRef,
+  })
+
 /**
  * EN: Maps a SII-shaped document back to the domain model (for received DTEs and interop). RUTs are validated with
  * rut.ts on the way in.
@@ -449,6 +472,8 @@ const fromSiiComisiones = (line: SiiComisiones): CommissionLine =>
 export const fromSiiDocument = (sii: SiiDocumento): Document => {
   const idDoc = sii.Encabezado.IdDoc
   const type = idDoc.TipoDTE as DocumentType
+  const receipt = isReceipt(type)
+  const referencia = sii.Referencia ?? []
   return {
     id: `DTE_T${type}F${idDoc.Folio}`,
     header: compact({
@@ -464,7 +489,8 @@ export const fromSiiDocument = (sii: SiiDocumento): Document => {
     items: sii.Detalle.map(fromSiiDetalle),
     subtotals: (sii.SubTotInfo ?? []).map(fromSiiSubTotInfo),
     globalAdjustments: (sii.DscRcgGlobal ?? []).map(fromSiiDscRcgGlobal),
-    references: (sii.Referencia ?? []).map(fromSiiReferencia),
+    references: receipt ? [] : (referencia as readonly SiiReferencia[]).map(fromSiiReferencia),
+    receiptReferences: receipt ? (referencia as readonly SiiReferenciaBoleta[]).map(fromSiiReferenciaBoleta) : [],
     commissions: (sii.Comisiones ?? []).map(fromSiiComisiones),
   }
 }
