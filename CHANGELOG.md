@@ -218,6 +218,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keeps a range obtained again only through the folios the SII showed free, saves every CAF as it is obtained, and
   remembers the annulled ranges in the new `CertificationState.annulledRanges`. `dte-sdk/portal` limit to 72 kB.
 
+- **The certification run keeps to the reference: the exchange and the printed samples.** The exchange portal is
+  called with the known pair of hashes, without the discovery request, and its user validation writes the fixed table
+  of strings. Each portal is entered once per stage of work: one warm-up for the download of the set, one for the
+  validation, the uploads and the confirmation, one for the whole of the samples; the saved session is checked once
+  per stage, the cookies of a warm-up stay in its stage, and when the warm-up of the samples fails the known hashes
+  stand. The calls of both portals are sent once, with no time-out of their own, the headers the reference sends and
+  their answers read as UTF-8 (`withExchangeStage`, `withSamplesStage` and `GwtStage` are new; the operations take
+  `stage`). Any failure of the set download is `setUnavailable`; the download uses its own multipart limit. The
+  exchange set is read loosely (unreadable numbers are 0, missing dates and RUTs empty, only the document shapes the
+  reference reads) and the contact of the answers travels as given. A sample keeps its file name as given, written as
+  UTF-8 in the part header (`buildMultipartParts` takes `utf8Headers`), and a re-read that fails after submitting the
+  review leaves the stage as submitted. `dte-sdk/portal` limit to 72 kB.
+
 ### Fixed
 
 - A receipt (39, 41) with a reference was written with the invoice shape of `Referencia` (`FchRef`), which the receipts

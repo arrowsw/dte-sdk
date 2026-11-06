@@ -600,8 +600,20 @@ on the samples portal (or resumes one left in `INGRESO`), uploads every PDF, sub
 again; a review the SII rejects at once comes back as `rejected` with a summary of how the SII filed each PDF. The
 portal operations beneath (`downloadExchangeSet`, `validateExchangeUser`, `uploadExchangeAnswers`, `confirmExchange`;
 `readSamplesReview`, `createSamplesReview`, `uploadSample`, `submitSamplesReview`, `readSamplesDetail`) and the
-GWT-RPC codec (`gwtBody`, `gwtAnswer`) are exported too. The portals' hashes are discovered on the way in, with the
-pair known to work as the fallback; `gwt: { permutation, policy }` overrides them.
+GWT-RPC codec (`gwtBody`, `gwtAnswer`) are exported too. The exchange portal is called with the pair of hashes known
+to work; the samples portal's are discovered once on the way in, with the known pair as the fallback;
+`gwt: { permutation, policy }` overrides either.
+
+- **One stage, one warm-up.** The run enters each portal once per stage of work: once for the download of the exchange
+  set, once for the validation, the three uploads and the confirmation, and once for the whole of the printed samples.
+  The cookies the warm-up sets live only for that stage. `withExchangeStage` and `withSamplesStage` open a stage for a
+  caller that chains the operations by hand (`stage` in their input); alone, each operation opens its own.
+- **These calls are sent once and wait as long as it takes:** no retry (but for a PDF upload the portal answers with
+  a 5xx) and no time-out of their own, with the headers the reference sends to each portal and the answers read as
+  UTF-8. Pass `timeoutMs` to bound them.
+- **A set that cannot be downloaded, for any reason, stops the run with `exchange`** and asks for the set by hand.
+- **The exchange set is read loosely:** a number that does not parse is 0, a missing date or RUT is empty, and only a
+  set without documents fails. The names of the PDFs travel as given.
 
 - **Nothing here has been run against the two portals yet.** Every wire and wording comes from field behaviour; the
   first enrolled run should keep every artefact the store writes under `intercambio/` and `muestras/` as fixtures.
