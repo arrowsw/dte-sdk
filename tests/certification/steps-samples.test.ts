@@ -169,7 +169,32 @@ describe('uploadPrintedSamples', () => {
   })
 
   test('a state that cannot be read again after the submission is warned about, and the stage ends submitted with the state unknown', async () => {
-    for (const second of [new Error('socket hang up'), { status: 500, body: 'busy' }]) {
+    const harness = await certificationHarness(
+      samplesRoutes({
+        service: {
+          leeImpreso: (call) => (call === 1 ? { body: EMPTY_OK } : new Error('socket hang up')),
+          creaLista: { body: CREATED_REVIEW },
+        },
+      }),
+    )
+    const result = await uploadPrintedSamples(harness.deps, atSamples(), { samples: samples.slice(0, 1) })
+    expect(result).toMatchObject({ outcome: 'submitted', detail: 'submitted' })
+    expect(result.state.stage).toBe('compliance')
+    expect(result.state.samples).toEqual({
+      revisionId: REVIEW_ID,
+      revisionToken: REVIEW_TOKEN,
+      state: null,
+      uploaded: ['muestra_33_1.pdf'],
+      submittedAt: '2026-11-15T18:30:00.000Z',
+    })
+    expect(harness.warnings()).toContain('sii samples state unreadable after the submission')
+    expect(await harness.store.readArtefact('muestras/pdfte-estado-post-envio.html')).toBeNull()
+    expect(await harness.store.readArtefact('muestras/pdfte-enviar-sii.html')).toBe(EMPTY_OK)
+    expect(harness.events[1]).toEqual({ step: 'MUESTRAS_DONE', success: true })
+  })
+
+  test('the re-reading after the submission is read for its state whatever its status, and kept', async () => {
+    const reread = async (second: { status: number; body: string }) => {
       const harness = await certificationHarness(
         samplesRoutes({
           service: {
@@ -179,20 +204,16 @@ describe('uploadPrintedSamples', () => {
         }),
       )
       const result = await uploadPrintedSamples(harness.deps, atSamples(), { samples: samples.slice(0, 1) })
-      expect(result).toMatchObject({ outcome: 'submitted', detail: 'submitted' })
-      expect(result.state.stage).toBe('compliance')
-      expect(result.state.samples).toEqual({
-        revisionId: REVIEW_ID,
-        revisionToken: REVIEW_TOKEN,
-        state: null,
-        uploaded: ['muestra_33_1.pdf'],
-        submittedAt: '2026-11-15T18:30:00.000Z',
-      })
-      expect(harness.warnings()).toContain('sii samples state unreadable after the submission')
-      expect(await harness.store.readArtefact('muestras/pdfte-estado-post-envio.html')).toBeNull()
-      expect(await harness.store.readArtefact('muestras/pdfte-enviar-sii.html')).toBe(EMPTY_OK)
-      expect(harness.events[1]).toEqual({ step: 'MUESTRAS_DONE', success: true })
+      return { harness, result }
     }
+    const busy = await reread({ status: 500, body: 'busy' })
+    expect(busy.result).toMatchObject({ outcome: 'submitted', detail: 'submitted' })
+    expect(busy.result.state.samples).toMatchObject({ state: null })
+    expect(busy.harness.warnings()).not.toContain('sii samples state unreadable after the submission')
+    expect(await busy.harness.store.readArtefact('muestras/pdfte-estado-post-envio.html')).toBe('busy')
+    const rejected = await reread({ status: 500, body: reviewAnswer('RECHAZADO') })
+    expect(rejected.result.outcome).toBe('rejected')
+    expect(methods(rejected.harness)).toContain('muestraMail')
   })
 
   test('blocked: the sentence of the portal, nothing uploaded, the stage kept', async () => {

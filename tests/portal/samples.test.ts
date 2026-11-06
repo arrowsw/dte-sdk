@@ -170,6 +170,15 @@ describe('readSamplesReview', () => {
     expect(error.code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
     expect(error.details['step']).toBe('leeImpreso')
   })
+
+  test('with anyStatus the answer is read for its state whatever its status', async () => {
+    const harness = await signedIn([alive, warmUp, service({ status: 500, body: reviewAnswer('RECHAZADO') })])
+    await expect(readSamplesReview(harness.portal, { gwt: KNOWN, anyStatus: true })).resolves.toMatchObject({
+      state: 'RECHAZADO',
+      revisionId: REVIEW_ID,
+      body: reviewAnswer('RECHAZADO'),
+    })
+  })
 })
 
 describe('createSamplesReview', () => {

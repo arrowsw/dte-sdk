@@ -234,6 +234,7 @@ export {
 } from './samples'
 export type {
   SamplesCompanyInput,
+  ReadSamplesReviewInput,
   SamplesReviewInput,
   SamplesReview,
   SamplesReviewCreated,

@@ -61,14 +61,15 @@ const finish = <Outcome extends SamplesOutcome>(
   return { state, outcome, detail }
 }
 
-// The review was sent: not being able to read its state again does not undo that, so the state is left unknown.
+// The review was sent: not being able to read its state again does not undo that, so the state is left unknown. The
+// answer is read for its state whatever its status, as in field behaviour.
 const readStateAfterSubmission = async (
   rt: Runtime,
   companyRut: string,
   stage: GwtStage,
 ): Promise<SamplesReview | null> => {
   try {
-    return await readSamplesReview(rt.portal, { companyRut, stage })
+    return await readSamplesReview(rt.portal, { companyRut, stage, anyStatus: true })
   } catch (error) {
     rt.portal.logger.warn('sii samples state unreadable after the submission', { reason: errorMessage(error) })
     return null

@@ -92,6 +92,15 @@ export type SamplesCompanyInput = {
 }
 
 /**
+ * EN: Input of `readSamplesReview`.
+ * ES: Entrada de `readSamplesReview`.
+ */
+export type ReadSamplesReviewInput = SamplesCompanyInput & {
+  /** EN: True to read the answer whatever its HTTP status, as the field reads the state again after a submission; by default any status but 200 is unexpected. ES: True para leer la respuesta sea cual sea su estado HTTP, como el campo relee el estado tras un envío; por defecto cualquier estado distinto de 200 es inesperado. */
+  readonly anyStatus?: boolean
+}
+
+/**
  * EN: Input of the samples operations that name a review by its token.
  * ES: Entrada de las operaciones de muestras que nombran una revisión por su token.
  */
@@ -186,20 +195,20 @@ export type SamplesDetail = {
  * HTTP 200 con un estado, o con una frase cuando la postulación no está en la etapa de muestras impresas (antes de
  * ella, y también después).
  * @param portal EN: the client. ES: el cliente.
- * @param input EN: the company and the hashes. ES: la empresa y los hashes.
+ * @param input EN: the company and the hashes; `anyStatus` to read the answer whatever its status. ES: la empresa y los hashes; `anyStatus` para leer la respuesta sea cual sea su estado.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: the state, the blocking sentence, the review id and token, the date, the hashes and the raw answer. ES: el estado, la frase que bloquea, el id y token de la revisión, la fecha, los hashes y la respuesta cruda.
- * @throws {DteError} EN: `SII_PORTAL_UNEXPECTED_PAGE` when the status is not 200; `MISSING_FIELD`; session, block and transport codes. ES: los mismos códigos.
+ * @throws {DteError} EN: `SII_PORTAL_UNEXPECTED_PAGE` when the status is not 200 (never with `anyStatus`); `MISSING_FIELD`; session, block and transport codes. ES: los mismos códigos.
  */
 export const readSamplesReview = async (
   portal: PortalClient,
-  input: SamplesCompanyInput = {},
+  input: ReadSamplesReviewInput = {},
   overrides?: CallOverrides,
 ): Promise<SamplesReview> => {
   const company = resolvePortalCompany(portal, input.companyRut)
   return inGwtStage(portal, 'readSamplesReview', overrides, SAMPLES_STAGE, input, async ({ context, hashes }) => {
     const { page, answer } = await call(context, 'leeImpreso', hashes, [gwtString(company)])
-    if (page.status !== 200) throw unexpectedPage(context, 'leeImpreso', page.html)
+    if (input.anyStatus !== true && page.status !== 200) throw unexpectedPage(context, 'leeImpreso', page.html)
     const state = reviewState(page.html)
     const review = reviewId(answer)
     return {
