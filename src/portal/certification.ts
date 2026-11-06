@@ -24,10 +24,8 @@ import {
   parseProgressPage,
   verifyDeclaration,
   type AdvanceAnswer,
-  type DeclarationAnswer,
   type ItemState,
   type ReceiptsProgress,
-  type VerificationState,
 } from './pages/certification-progress'
 import {
   attentionNumberOf,
@@ -58,7 +56,7 @@ const REQUIRED_SETS = ['SET BASICO', 'SET GUIA DE DESPACHO', 'SET FACTURA EXENTA
 const REQUIRED_BOOKS = ['LIBRO DE VENTAS', 'LIBRO DE COMPRAS', 'LIBRO DE GUIAS']
 const BASIC_SET_FIELD = 'SET01'
 const COMPANY_CODE = '8'
-const DEFAULT_TOTAL_ROWS = '10'
+const DEFAULT_TOTAL_ROWS = 10
 const DEFAULT_STEP = 'P01'
 const MIN_YEAR = 1990
 const MAX_YEAR = 2100
@@ -153,16 +151,18 @@ export type DeclareProgressInput = {
 }
 
 /**
- * EN: How a declaration ended. `accepted` and `inReview` are good; `notProcessed` and `notSaved` ask for another try
- * later; `contentErrors`, `allRejected` and `inconsistent` are the SII's verdicts; `declined` and `failed` are the
- * portal's.
- * ES: Cómo terminó una declaración. `accepted` e `inReview` están bien; `notProcessed` y `notSaved` piden otro intento
- * después; `contentErrors`, `allRejected` e `inconsistent` son veredictos del SII; `declined` y `failed`, del portal.
+ * EN: How a declaration ended, in a word. `accepted` and `inReview` are good; `contentErrors` names envelopes the SII
+ * finds errors in (the declaration itself may still stand, see `success`); `allRejected` is every declared row back
+ * empty; `notSaved` is some of them; `inconsistent` is a date or number the SII says does not match; `declined` is no
+ * form to post; `failed` is a post the portal did not take.
+ * ES: Cómo terminó una declaración, en una palabra. `accepted` e `inReview` están bien; `contentErrors` nombra envíos
+ * en los que el SII encuentra errores (la declaración misma puede seguir en pie, ver `success`); `allRejected` es toda
+ * fila declarada de vuelta vacía; `notSaved`, algunas; `inconsistent` es una fecha o número que el SII dice que no
+ * corresponde; `declined`, que no hay formulario que enviar; `failed`, un envío que el portal no aceptó.
  */
 export type DeclarationOutcome =
   | 'accepted'
   | 'inReview'
-  | 'notProcessed'
   | 'contentErrors'
   | 'allRejected'
   | 'notSaved'
@@ -171,26 +171,35 @@ export type DeclarationOutcome =
   | 'failed'
 
 /**
- * EN: What `declareProgress` did and what the portal answered.
- * ES: Lo que hizo `declareProgress` y lo que respondió el portal.
+ * EN: What `declareProgress` did and what the portal answered, with the facts the declaration loop decides on.
+ * ES: Lo que hizo `declareProgress` y lo que respondió el portal, con los hechos sobre los que decide el ciclo de
+ * declaración.
  */
 export type DeclarationResult = {
-  /** EN: The outcome. ES: El resultado. */
+  /** EN: The declaration stands: the post was taken and the re-read form kept it or shows it in review. ES: La declaración quedó en pie: el envío fue aceptado y el formulario releído la conservó o la muestra en revisión. */
+  readonly success: boolean
+  /** EN: The outcome, in a word. ES: El resultado, en una palabra. */
   readonly outcome: DeclarationOutcome
-  /** EN: The rows actually declared: those with an input on the form. ES: Las filas efectivamente declaradas: las que tenían campo en el formulario. */
+  /** EN: The rows actually declared: those with a field on the form. ES: Las filas efectivamente declaradas: las que tenían campo en el formulario. */
   readonly declared: readonly DeclarationKey[]
+  /** EN: The re-read form kept the declaration; null when no re-read was made. ES: El formulario releído conservó la declaración; null si no hubo relectura. */
+  readonly verified: boolean | null
+  /** EN: Some declared row shows "EN REVISION". ES: Alguna fila declarada muestra "EN REVISION". */
+  readonly inReview: boolean
+  /** EN: Declared rows whose field came back empty. ES: Filas declaradas cuyo campo volvió vacío. */
+  readonly emptyFields: readonly DeclarationKey[]
   /** EN: Rows the answer named with "ENVIO CON ERRORES O REPAROS". ES: Filas que la respuesta nombró con "ENVIO CON ERRORES O REPAROS". */
   readonly contentErrors: readonly DeclarationKey[]
-  /** EN: What the re-read form said of each declared row; empty without a re-read. ES: Lo que dijo el formulario releído de cada fila declarada; vacío sin relectura. */
-  readonly verification: Readonly<Partial<Record<DeclarationKey, VerificationState>>>
+  /** EN: Every declared row came back empty: the SII took none of them. ES: Toda fila declarada volvió vacía: el SII no tomó ninguna. */
+  readonly allRejected: boolean
   /** EN: Why, in a word or a sentence, or null. ES: Por qué, en una palabra o una frase, o null. */
   readonly detail: string | null
-  /** EN: The classified answer, or null when no post was made. ES: La respuesta clasificada, o null si no se envió nada. */
-  readonly answer: DeclarationAnswer | null
-  /** EN: The answer page, for the artefacts. ES: La página de respuesta, para los artefactos. */
+  /** EN: The answer page, for the artefacts; empty when nothing was posted. ES: La página de respuesta, para los artefactos; vacía si no se envió nada. */
   readonly answerHtml: string
   /** EN: The form page, for the artefacts. ES: La página del formulario, para los artefactos. */
   readonly formHtml: string
+  /** EN: The page a "not processed yet" wording is looked for on: the answer, or the form when nothing was posted. ES: La página en la que se busca un "aún no procesado": la respuesta, o el formulario si no se envió nada. */
+  readonly judgedHtml: string
 }
 
 /**
@@ -421,52 +430,49 @@ const portalTrackId = (trackId: string): string => {
   return String(Number.parseInt(trackId, 10))
 }
 
-const declined = (detail: string, formHtml: string, declared: readonly DeclarationKey[] = []): DeclarationResult => ({
-  outcome: 'declined',
-  declared,
+const unsuccessful = (
+  outcome: DeclarationOutcome,
+  detail: string | null,
+  pages: { readonly formHtml: string; readonly answerHtml: string },
+): DeclarationResult => ({
+  success: false,
+  outcome,
+  declared: [],
+  verified: null,
+  inReview: false,
+  emptyFields: [],
   contentErrors: [],
-  verification: {},
+  allRejected: false,
   detail,
-  answer: null,
-  answerHtml: '',
-  formHtml,
+  ...pages,
+  judgedHtml: pages.answerHtml === '' ? pages.formHtml : pages.answerHtml,
 })
 
-// The order of the field: a reviewed answer first, then "not processed yet", then every declared row empty (the
-// wrong period: waiting does not fix it), then some rows empty (the declaration was not saved: try again).
-const outcomeOf = (
-  answer: DeclarationAnswer,
-  declared: readonly DeclarationKey[],
-  verification: Readonly<Partial<Record<DeclarationKey, VerificationState>>>,
-): DeclarationOutcome => {
-  const states = declared.map((key) => verification[key])
-  const inReview = states.includes('inReview')
-  const empties = states.filter((state) => state === 'empty').length
-  if (answer.contentErrors.length > 0) return 'contentErrors'
-  if (states.some((state) => state === 'missing' || state === 'mismatch')) return 'notSaved'
-  if ((empties === 0 || inReview) && !answer.notProcessed) return inReview ? 'inReview' : 'accepted'
-  if (answer.notProcessed) return 'notProcessed'
-  if (!inReview && empties >= declared.length) return 'allRejected'
-  return 'notSaved'
-}
-
 /**
- * EN: Declares the track id and date of envelopes on `pe_avance2`, posted to `pe_avance3`: the row of each entry is
- * found by its label (the indexes move as sets are approved), every `NUM_ENV`, `FEC_ENV`, `SET` and `EST` field is sent
- * in form order with the values already on the page, the track id without leading zeros and the date as
- * `dd-mm-yyyy`; then the form is read again to verify. A row that has no input (approved or in review) is left out;
- * a simulation row that is missing declines, as does a status page. A session the portal says is gone throws.
- * ES: Declara el track id y la fecha de envíos en `pe_avance2`, enviado a `pe_avance3`: la fila de cada entrada se
- * busca por su etiqueta (los índices se mueven al aprobarse sets), se envían todos los campos `NUM_ENV`, `FEC_ENV`,
- * `SET` y `EST` en el orden del formulario con los valores que ya trae la página, el track id sin ceros a la
- * izquierda y la fecha como `dd-mm-aaaa`; luego se relee el formulario para verificar. Una fila sin campo (aprobada o
- * en revisión) se omite; una fila de simulación ausente declina, igual que una página de estado. Una sesión que el
- * portal da por perdida lanza.
+ * EN: Declares the track id and date of envelopes on `pe_avance2`, posted to `pe_avance3`, as the reference does. The
+ * form is read for its hidden fields and for the index of each row's field, found by the row's label (the indexes
+ * move as sets are approved). A page without hidden fields has no form: nothing is posted. Otherwise every `NUM_ENV`,
+ * `FEC_ENV`, `SET` and `EST` field up to `TOTREG` is posted in form order with the values already on the page, the
+ * track id without leading zeros and the date as `dd-mm-yyyy`, then the company, `TOTREG` and the button; a row that
+ * has no field (approved or in review) simply adds nothing, and the form is posted all the same. The answer is read
+ * as it came: inconsistent data ends at once, a post the portal did not take is a failure. Then `pe_avance2` is
+ * posted once more, without visiting `pe_avance1` again, to verify: the declaration stands when no declared field
+ * came back empty or some row shows "EN REVISION". A failure of that re-read leaves the declaration as verified.
+ * ES: Declara el track id y la fecha de envíos en `pe_avance2`, enviado a `pe_avance3`, como lo hace la referencia. Del
+ * formulario se leen los campos ocultos y el índice del campo de cada fila, buscada por su etiqueta (los índices se
+ * mueven al aprobarse sets). Una página sin campos ocultos no tiene formulario: no se envía nada. Si lo tiene, se
+ * envían todos los campos `NUM_ENV`, `FEC_ENV`, `SET` y `EST` hasta `TOTREG` en el orden del formulario con los
+ * valores que ya trae la página, el track id sin ceros a la izquierda y la fecha como `dd-mm-aaaa`, luego la empresa,
+ * `TOTREG` y el botón; una fila sin campo (aprobada o en revisión) simplemente no agrega nada, y el formulario se
+ * envía igual. La respuesta se lee tal como llegó: un dato inconsistente termina de inmediato, un envío que el portal
+ * no aceptó es una falla. Luego se envía `pe_avance2` una vez más, sin volver a visitar `pe_avance1`, para verificar:
+ * la declaración queda en pie si ningún campo declarado volvió vacío o alguna fila muestra "EN REVISION". Un fallo de
+ * esa relectura deja la declaración como verificada.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: the entries and the company. ES: las entradas y la empresa.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
- * @returns EN: the outcome, the rows declared, the verification and the pages. ES: el resultado, las filas declaradas, la verificación y las páginas.
- * @throws {DteError} EN: `INVALID_OPTION { field: 'entries' | 'trackId' }`, `INVALID_DATE`, `SII_PORTAL_SESSION_EXPIRED`, `SII_PORTAL_REJECTED`, transport codes. ES: los mismos códigos.
+ * @returns EN: whether the declaration stands, and the facts and pages behind it. ES: si la declaración quedó en pie, y los hechos y páginas que lo respaldan.
+ * @throws {DteError} EN: `INVALID_OPTION { field: 'entries' | 'trackId' }`, `INVALID_DATE`, session and transport codes. ES: los mismos códigos.
  */
 export const declareProgress = (
   portal: PortalClient,
@@ -482,23 +488,24 @@ export const declareProgress = (
     const values = entries.map(([key, entry]) => [key, portalTrackId(entry.trackId), portalDate(entry.date)] as const)
     const company = companyFields(resolvePortalCompany(portal, input.companyRut))
     const formPage = await enter(context, company)
-    const form = parseDeclarationForm(formPage.html)
-    if (form.isStatusPage) return declined(form.hasErrorStates ? 'errorStates' : 'noForm', formPage.html)
+    const formHtml = formPage.html
+    const form = parseDeclarationForm(formHtml)
+    if (!form.hasForm)
+      return unsuccessful('declined', form.hasErrorStates ? 'errorStates' : 'noForm', { formHtml, answerHtml: '' })
+    if (values.some(([key]) => key === 'simulation') && form.indexes.simulation === undefined)
+      return unsuccessful('declined', 'simulationUnavailable', { formHtml, answerHtml: '' })
     const mapped = values.flatMap(([key, trackId, date]) => {
-      const row = form.rows.find((candidate) => candidate.key === key && candidate.index !== null)
-      return row === undefined ? [] : [{ key, index: row.index as number, trackId, date }]
+      const index = form.indexes[key]
+      return index === undefined ? [] : [{ key, index, trackId, date }]
     })
-    if (values.some(([key]) => key === 'simulation') && !mapped.some((row) => row.key === 'simulation'))
-      return declined('simulationUnavailable', formPage.html)
-    if (mapped.length === 0) return declined('noRows', formPage.html)
-    const declared = mapped.map((row) => row.key)
     const fields: Record<string, string> = {}
-    for (let index = 1; index <= form.totalRows; index += 1) {
+    const totalRows = Number.parseInt(form.hiddenFields.TOTREG ?? '', 10) || DEFAULT_TOTAL_ROWS
+    for (let index = 1; index <= totalRows; index += 1) {
       const row = mapped.find((candidate) => candidate.index === index)
-      fields[`NUM_ENV${index}`] = row?.trackId ?? form.currentValues[`NUM_ENV${index}`] ?? ''
-      fields[`FEC_ENV${index}`] = row?.date ?? form.currentValues[`FEC_ENV${index}`] ?? ''
-      fields[`SET${index}`] = form.hiddenFields[`SET${index}`] ?? ''
-      fields[`EST${index}`] = form.hiddenFields[`EST${index}`] ?? ''
+      fields[`NUM_ENV${index}`] = row?.trackId || form.currentValues[`NUM_ENV${index}`] || ''
+      fields[`FEC_ENV${index}`] = row?.date || form.currentValues[`FEC_ENV${index}`] || ''
+      fields[`SET${index}`] = form.hiddenFields[`SET${index}`] || ''
+      fields[`EST${index}`] = form.hiddenFields[`EST${index}`] || ''
     }
     const answerPage = await submitForm(
       context,
@@ -508,42 +515,64 @@ export const declareProgress = (
       {
         ...fields,
         ...company,
-        TOTREG: form.hiddenFields.TOTREG ?? DEFAULT_TOTAL_ROWS,
+        TOTREG: form.hiddenFields.TOTREG || String(DEFAULT_TOTAL_ROWS),
         ACEPTAR: 'Confirmar Revisión',
       },
-      formPage.url,
+      at('pe_avance2'),
     )
-    const answer = classifyDeclarationAnswer(answerPage.html)
-    const result = { declared, answer, answerHtml: answerPage.html, formHtml: formPage.html }
-    if (answer.sessionExpired) {
-      forgetSession(context)
-      throw new DteError('SII_PORTAL_SESSION_EXPIRED', { operation: context.operation, step: 'pe_avance3' })
-    }
-    if (answer.inconsistentData !== null)
-      return {
-        ...result,
-        outcome: 'inconsistent',
-        contentErrors: [],
-        verification: {},
-        detail: answer.inconsistentData,
-      }
-    if (!answer.accepted)
-      return {
-        ...result,
-        outcome: 'failed',
-        contentErrors: [],
-        verification: {},
-        detail: answer.contentMismatch ? 'contentMismatch' : portalMessageOf(answerPage.html),
-      }
-    const reread = await enter(context, company)
-    if (parseDeclarationForm(reread.html).isStatusPage) throw unexpectedPage(context, 'pe_avance2.verify', reread.html)
-    const verification = verifyDeclaration(reread.html, Object.fromEntries(mapped.map((row) => [row.key, row.trackId])))
+    const answerHtml = answerPage.html
+    const pages = { formHtml, answerHtml }
+    const answer = classifyDeclarationAnswer(answerHtml)
+    if (answer.inconsistentData !== null) return unsuccessful('inconsistent', answer.inconsistentData, pages)
+    if (!answer.taken) return unsuccessful('failed', answer.error, pages)
+    const declared = mapped.map((row) => row.key)
+    const reread = await submitForm(
+      context,
+      'pe_avance2.verify',
+      at('pe_avance2'),
+      formPage.url,
+      { ...company, ACEPTAR: 'Continuar' },
+      at('pe_avance1'),
+    ).catch((error: unknown) => {
+      context.portal.logger.warn('certification declaration could not be verified', { reason: errorMessage(error) })
+      return null
+    })
+    const verification =
+      reread === null
+        ? { inReview: [], empty: [] }
+        : verifyDeclaration(
+            reread.html,
+            mapped.map((row) => [row.key, row.index] as const),
+          )
+    const inReview = verification.inReview.length > 0
+    const verified = verification.empty.length === 0 || inReview
+    const hasContentErrors = answer.contentErrors.length > 0
+    const allRejected =
+      !inReview && !hasContentErrors && verification.empty.length > 0 && verification.empty.length >= declared.length
     return {
-      ...result,
-      outcome: outcomeOf(answer, declared, verification),
+      success: verified,
+      outcome: hasContentErrors
+        ? 'contentErrors'
+        : allRejected
+          ? 'allRejected'
+          : !verified
+            ? 'notSaved'
+            : inReview
+              ? 'inReview'
+              : 'accepted',
+      declared,
+      verified,
+      inReview,
+      emptyFields: verification.empty,
       contentErrors: answer.contentErrors,
-      verification,
-      detail: null,
+      allRejected,
+      detail: hasContentErrors
+        ? `ENVIO CON ERRORES O REPAROS: ${answer.contentErrors.join(', ')}`
+        : verified
+          ? null
+          : `notSaved: ${verification.empty.join(', ')}`,
+      ...pages,
+      judgedHtml: answerHtml,
     }
   })
 

@@ -41,22 +41,25 @@ export type DeclarationRowSpec = {
   readonly est?: string
 }
 
-/** The `pe_avance2` form: rows with an input carry `NUM_ENV{index}`, rows without one show only their state. */
+/**
+ * The `pe_avance2` form, written the way the portal writes it: upper-case tags with quoted attributes. Rows with a
+ * field carry `NUM_ENV{index}`, rows without one show only their state in bold.
+ */
 export const declarationFormPage = (
   rows: readonly DeclarationRowSpec[],
   options: { readonly totreg?: number; readonly paso?: string } = {},
 ): string =>
-  page(`<form name=form1 action="/cvc_cgi/dte/pe_avance3" method=post>
-<input type=hidden name=TOTREG value=${options.totreg ?? rows.length}><input type=hidden name=PASO value=${options.paso ?? 'P01'}>
+  page(`<FORM NAME="form1" ACTION="/cvc_cgi/dte/pe_avance3" METHOD="POST">
+<INPUT TYPE="HIDDEN" NAME="TOTREG" VALUE="${options.totreg ?? rows.length}"><INPUT TYPE="HIDDEN" NAME="PASO" VALUE="${options.paso ?? 'P01'}">
 <table>
 ${rows
   .map((row) =>
     row.index === undefined
-      ? `<tr><td><font>${row.label}</font></td><td><b>${row.state ?? 'REVISADO CONFORME'}</b></td></tr>`
-      : `<tr><td><font>${row.label}</font></td><td><input type=text name=NUM_ENV${row.index} value="${row.value ?? ''}"><input type="text" name="FEC_ENV${row.index}" value='${row.date ?? ''}'><input type=hidden name=SET${row.index} value=S0${row.index}><input type=hidden name=EST${row.index} value=${row.est ?? 'S01'}>${row.state === undefined ? '' : `<b>${row.state}</b>`}</td></tr>`,
+      ? `<tr><td><font>${row.label}</font></td><td><font><b>${row.state ?? 'REVISADO CONFORME'}</b></font></td></tr>`
+      : `<tr><td><font>${row.label}</font></td><td><INPUT TYPE="text" NAME="NUM_ENV${row.index}" VALUE="${row.value ?? ''}"><INPUT TYPE="text" NAME="FEC_ENV${row.index}" VALUE="${row.date ?? ''}"><INPUT TYPE="HIDDEN" NAME="SET${row.index}" VALUE="S0${row.index}"><INPUT TYPE="HIDDEN" NAME="EST${row.index}" VALUE="${row.est ?? 'S01'}">${row.state === undefined ? '' : `<b>${row.state}</b>`}</td></tr>`,
   )
   .join('\n')}
-</table><input type=submit name=ACEPTAR value="Confirmar Revisi&oacute;n"></form>`)
+</table><INPUT TYPE="SUBMIT" NAME="ACEPTAR" VALUE="Confirmar Revisi&oacute;n"></FORM>`)
 
 export const STANDARD_ROWS: readonly DeclarationRowSpec[] = [
   { label: 'SET BASICO', index: 1 },
@@ -69,15 +72,15 @@ export const STANDARD_ROWS: readonly DeclarationRowSpec[] = [
 ]
 
 export const STATUS_PAGE = page(
-  '<table><tr><td><font>SET BASICO</font></td><td><b>ENVIO CON ERRORES O REPAROS</b></td></tr></table><input type=submit value=Volver>',
+  '<table><tr><td><font>SET BASICO</font></td><td><font><b>ENVIO CON ERRORES O REPAROS</b></font></td></tr></table><input type=submit value=Volver>',
 )
 
 export const DECLARATION_ANSWERS = {
   success: page('<p>Avance declarado exitosamente.</p><script>var error = 1;</script>'),
   updated: page('<p>Registro actualizado. Se produjo un error menor.</p>'),
-  notProcessed: page('<p>El env&iacute;o no ha sido procesado a&uacute;n. Intente m&aacute;s tarde.</p>'),
+  notProcessed: page('<p>El envío no ha sido procesado aún. Intente más tarde.</p>'),
   inconsistent: page('<p>Hubo un problema. LA FECHA DE ENVIO NO CORRESPONDE AL ENVIO 123. Verifique los datos.</p>'),
-  sessionExpired: page('<p>Error de Sesi&oacute;n: usted no se encuentra autenticado.</p>'),
+  sessionExpired: page('<p>Error de Sesión: usted no se encuentra autenticado.</p>'),
   contentMismatch: page('<p>El contenido no corresponde al set asignado.</p>'),
   contentErrors: page(
     '<table><tr><td>SET BASICO</td><td>ENVIO CON ERRORES O REPAROS</td></tr><tr><td>LIBRO DE COMPRAS PARA EXENTOS</td><td>ENVIO CON ERRORES O REPAROS</td></tr><tr><td>LIBRO DE COMPRAS</td><td>EN REVISION</td></tr></table>',

@@ -135,8 +135,7 @@ export const runCertification = async (
       }
       const declared = await declareTestSets(deps, state)
       state = declared.state
-      if (declared.outcome !== 'accepted' && declared.outcome !== 'inReview')
-        return stop('rejected', declared.detail ?? declared.outcome)
+      if (!declared.success) return stop('rejected', declared.detail)
       const approval = await waitForTestSetsApproval(deps, state)
       state = approval.state
       if (approval.outcome !== 'approved') return stop(approval.outcome, approval.detail)
@@ -156,8 +155,7 @@ export const runCertification = async (
       if (state.simulation!.confirmed !== true) {
         const declared = await declareSimulation(deps, state)
         state = declared.state
-        if (declared.outcome !== 'skipped' && declared.outcome !== 'accepted' && declared.outcome !== 'inReview')
-          return stop('rejected', declared.detail ?? declared.outcome)
+        if (!declared.success) return stop('rejected', declared.detail)
         const approval = await waitForSimulationApproval(deps, state)
         state = approval.state
         if (approval.outcome === 'rejected' || approval.outcome === 'timedOut')

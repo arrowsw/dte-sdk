@@ -9,6 +9,7 @@ import {
   sendTestSet,
   waitForTestSetsApproval,
 } from '../../src/certification/steps'
+import { DteError } from '../../src/errors'
 import { cafFingerprint } from '../../src/folios/registry'
 import { fullPlan } from '../support/certification-fixtures'
 import {
@@ -16,6 +17,7 @@ import {
   certificationCafXmls,
   certificationHarness,
   EST_DTE,
+  EST_UP,
   estDteRoute,
   estUp,
   estUpRoute,
@@ -39,6 +41,7 @@ import {
   setGenerationForm,
   STANDARD_ROWS,
 } from '../support/certification-pages'
+import type { FakeReply } from '../support/fake-sii'
 import { fixturePath } from '../support/fixtures'
 import { siiFixture } from '../support/sii-client'
 import { failure } from '../support/portal'
@@ -414,18 +417,20 @@ describe('sendTestSet', () => {
 })
 
 describe('declareTestSets', () => {
-  const sent = { basic: { trackId: '1234', date: TODAY, sentAt: 'x', cases: [] } }
+  // Sent days ago: the declaration still carries today's date.
+  const sent = { basic: { trackId: '1234', date: '2026-11-10', sentAt: 'x', cases: [] } }
   const form = declarationFormPage(STANDARD_ROWS)
   const kept = declarationFormPage([{ label: 'SET BASICO', index: 1, value: '1234' }, ...STANDARD_ROWS.slice(1)])
 
-  test('ten seconds, one declaration, the pages as artefacts, the outcome in the state', async () => {
+  test('ten seconds, one declaration with today as its date, the pages as artefacts, the outcome in the state', async () => {
     const harness = await certificationHarness([
       entry,
       post('pe_avance2', form, kept),
       post('pe_avance3', DECLARATION_ANSWERS.success),
     ])
     const result = await declareTestSets(harness.deps, stateWith({ sets: sent }))
-    expect(result.outcome).toBe('accepted')
+    expect(result).toMatchObject({ outcome: 'accepted', success: true })
+    expect(result.detail).toBeUndefined()
     expect(harness.sleeps).toEqual([10000])
     expect(harness.steps()).toEqual(['SETS_DECLARING', 'POLLING', 'SETS_DECLARED'])
     expect(harness.events[1]).toEqual({ step: 'POLLING', attempt: 1, max: 10, label: 'declaration' })
@@ -442,7 +447,7 @@ describe('declareTestSets', () => {
     expect(harness.posted('pe_avance3')[0]).toMatchObject({ NUM_ENV1: '1234', FEC_ENV1: '15-11-2026' })
   })
 
-  test('"not processed" and "not saved" are retried five seconds apart', async () => {
+  test('"not processed yet" and a declaration that was not saved are asked again five seconds apart', async () => {
     const partial = declarationFormPage([
       STANDARD_ROWS[0],
       { ...STANDARD_ROWS[1], value: '5' },
@@ -460,39 +465,101 @@ describe('declareTestSets', () => {
     ])
     const two = { basic: sent.basic, guide: { trackId: '5', date: TODAY, sentAt: 'x', cases: [] } }
     const result = await declareTestSets(harness.deps, stateWith({ sets: two }))
-    expect(result.outcome).toBe('inReview')
+    expect(result).toMatchObject({ outcome: 'inReview', success: true })
     expect(harness.sleeps).toEqual([10000, 5000, 5000])
   })
 
-  test('content errors with the fields present are diagnosed through the SOAP status', async () => {
+  test('a declaration that stands is asked again while its answer says "not processed yet"', async () => {
+    const harness = await certificationHarness([
+      entry,
+      post('pe_avance2', form, kept, form, kept),
+      post('pe_avance3', DECLARATION_ANSWERS.notProcessed, DECLARATION_ANSWERS.success),
+    ])
+    const result = await declareTestSets(harness.deps, stateWith({ sets: sent }))
+    expect(result).toMatchObject({ outcome: 'accepted', success: true })
+    expect(harness.sleeps).toEqual([10000, 5000])
+    expect(harness.posted('pe_avance3')).toHaveLength(2)
+  })
+
+  test('a lost session reads as "not yet": the next attempt declares again', async () => {
+    const harness = await certificationHarness([
+      entry,
+      post('pe_avance2', form, form, kept),
+      post('pe_avance3', DECLARATION_ANSWERS.sessionExpired, DECLARATION_ANSWERS.success),
+    ])
+    const result = await declareTestSets(harness.deps, stateWith({ sets: sent }))
+    expect(result).toMatchObject({ outcome: 'accepted', success: true })
+    expect(harness.sleeps).toEqual([10000, 5000])
+  })
+
+  test('content errors with the fields in place stand: no diagnosis, and the run goes on to the wait', async () => {
     const harness = await certificationHarness([
       entry,
       post('pe_avance2', form, kept),
       post('pe_avance3', DECLARATION_ANSWERS.contentErrors),
+    ])
+    const result = await declareTestSets(harness.deps, stateWith({ sets: sent }))
+    expect(result).toMatchObject({
+      outcome: 'contentErrors',
+      success: true,
+      detail: 'ENVIO CON ERRORES O REPAROS: exemptPurchaseBook, purchaseBook, basic',
+    })
+    expect(result.state.diagnosis).toEqual({})
+    expect(harness.steps()).toEqual(['SETS_DECLARING', 'POLLING', 'SETS_DECLARED'])
+    expect(harness.sleeps).toEqual([10000])
+  })
+
+  test('content errors with empty fields are asked again; after the last attempt the SOAP status is the diagnosis', async () => {
+    const harness = await certificationHarness([
+      entry,
+      post('pe_avance2', ...repeat(form, 20)),
+      post('pe_avance3', ...repeat(DECLARATION_ANSWERS.contentErrors, 10)),
       estUpRoute(estUp('RPR', '1234')),
     ])
     const result = await declareTestSets(harness.deps, stateWith({ sets: sent }))
-    expect(result.outcome).toBe('contentErrors')
-    expect(result.state.diagnosis?.['1234']).toMatchObject({ code: 'RPR', status: 'acceptedWithObjections' })
+    expect(result).toMatchObject({ outcome: 'contentErrors', success: false })
+    expect(harness.sleeps).toEqual([10000, ...repeat(5000, 9)])
+    expect(result.state.diagnosis?.['1234']).toEqual({ code: 'RPR', status: 'accepted', message: 'Envio Procesado' })
     expect(await harness.store.readArtefact('declaracion-sets-estado-basic-1234.xml')).toContain('RPR')
-    expect(harness.steps()).toEqual(['SETS_DECLARING', 'POLLING'])
+    expect(harness.steps().filter((step) => step === 'SETS_DECLARED')).toEqual([])
+    expect(harness.fake.requests.filter((request) => request.url === EST_UP)).toHaveLength(1)
   })
 
-  test('content errors with empty fields are retried; a failed diagnosis only warns', async () => {
+  test.each([
+    ['rejected', estUp('RCT', '1234'), { code: 'RCT', status: 'rejected' }],
+    ['pending', estUp('SOK', '1234'), { code: 'SOK', status: 'pending' }],
+    ['unknown', estUp('XYZ', '1234'), { code: 'XYZ', status: 'unknown' }],
+    ['query-service error', estUp('-11', '1234'), { code: '-11', status: 'pending', message: '' }],
+  ] as const)('the diagnosis keeps a %s state', async (_, reply, expected) => {
     const harness = await certificationHarness([
       entry,
-      post('pe_avance2', form, form, form, kept),
-      post('pe_avance3', DECLARATION_ANSWERS.contentErrors, DECLARATION_ANSWERS.contentErrors),
-      estUpRoute({ status: 500, body: 'down' }),
+      post('pe_avance2', ...repeat(form, 20)),
+      post('pe_avance3', ...repeat(DECLARATION_ANSWERS.contentErrors, 10)),
+      estUpRoute(reply),
     ])
     const result = await declareTestSets(harness.deps, stateWith({ sets: sent }))
-    expect(result.outcome).toBe('contentErrors')
-    expect(harness.sleeps).toEqual([10000, 5000])
-    expect(result.state.diagnosis).toEqual({})
-    expect(harness.warnings()).toContain('certification diagnosis failed')
+    expect(result.state.diagnosis?.['1234']).toMatchObject(expected)
   })
 
-  test('every row empty stops at once; inconsistent data too', async () => {
+  test('a diagnosis the SII does not answer keeps nothing; one that never got through only warns', async () => {
+    const routes = (reply: FakeReply) => [
+      entry,
+      post('pe_avance2', ...repeat(form, 20)),
+      post('pe_avance3', ...repeat(DECLARATION_ANSWERS.contentErrors, 10)),
+      estUpRoute(reply),
+    ]
+    const unanswered = await certificationHarness(routes({ status: 500, body: 'down' }))
+    const first = await declareTestSets(unanswered.deps, stateWith({ sets: sent }))
+    expect(first.state.diagnosis).toEqual({})
+    expect(unanswered.warnings()).not.toContain('certification diagnosis failed')
+    expect(await unanswered.store.readArtefact('declaracion-sets-estado-basic-1234.xml')).toBeNull()
+    const offline = await certificationHarness(routes(new DteError('TRANSPORT_FAILED', { reason: 'socket hang up' })))
+    const second = await declareTestSets(offline.deps, stateWith({ sets: sent }))
+    expect(second.state.diagnosis).toEqual({})
+    expect(offline.warnings()).toContain('certification diagnosis failed')
+  })
+
+  test('every row empty ends at once; inconsistent data and a post the portal did not take too', async () => {
     const rejected = await certificationHarness([
       entry,
       post('pe_avance2', form, form),
@@ -500,6 +567,7 @@ describe('declareTestSets', () => {
     ])
     await expect(declareTestSets(rejected.deps, stateWith({ sets: sent }))).resolves.toMatchObject({
       outcome: 'allRejected',
+      success: false,
     })
     expect(rejected.sleeps).toEqual([10000])
     const inconsistent = await certificationHarness([
@@ -508,23 +576,67 @@ describe('declareTestSets', () => {
       post('pe_avance3', DECLARATION_ANSWERS.inconsistent),
     ])
     const result = await declareTestSets(inconsistent.deps, stateWith({ sets: sent }))
-    expect(result).toMatchObject({ outcome: 'inconsistent', detail: 'LA FECHA DE ENVIO NO CORRESPONDE AL ENVIO 123' })
-    expect(result.state.lastDeclaration?.detail).toBe('LA FECHA DE ENVIO NO CORRESPONDE AL ENVIO 123')
+    expect(result).toMatchObject({
+      outcome: 'inconsistent',
+      success: false,
+      detail: 'FECHA DE ENVIO NO CORRESPONDE AL ENVIO 123',
+    })
+    expect(result.state.lastDeclaration?.detail).toBe('FECHA DE ENVIO NO CORRESPONDE AL ENVIO 123')
+    expect(inconsistent.sleeps).toEqual([10000])
+    const failed = await certificationHarness([
+      entry,
+      post('pe_avance2', form),
+      post('pe_avance3', DECLARATION_ANSWERS.contentMismatch),
+    ])
+    await expect(declareTestSets(failed.deps, stateWith({ sets: sent }))).resolves.toMatchObject({
+      outcome: 'failed',
+      success: false,
+      detail: 'contentMismatch',
+    })
+    expect(failed.sleeps).toEqual([10000])
   })
 
-  test('ten attempts at most', async () => {
+  test('ten attempts at most, and the last one returns what it got', async () => {
     const harness = await certificationHarness([
       entry,
       post('pe_avance2', ...repeat(form, 20)),
       post('pe_avance3', ...repeat(DECLARATION_ANSWERS.notProcessed, 10)),
     ])
     const result = await declareTestSets(harness.deps, stateWith({ sets: sent }))
-    expect(result.outcome).toBe('notProcessed')
+    expect(result).toMatchObject({ outcome: 'allRejected', success: false })
     expect(harness.sleeps).toHaveLength(10)
     expect(harness.posted('pe_avance3')).toHaveLength(10)
+    // A declaration that stands on the last attempt is returned as standing, whatever its answer still says.
+    const standing = await certificationHarness([
+      entry,
+      post('pe_avance2', ...repeat([form, kept], 10).flat()),
+      post('pe_avance3', ...repeat(DECLARATION_ANSWERS.notProcessed, 10)),
+    ])
+    await expect(declareTestSets(standing.deps, stateWith({ sets: sent }))).resolves.toMatchObject({
+      outcome: 'accepted',
+      success: true,
+    })
+    expect(standing.posted('pe_avance3')).toHaveLength(10)
+    // A declaration still not saved on the last attempt ends as not saved.
+    const partial = declarationFormPage([
+      STANDARD_ROWS[0],
+      { ...STANDARD_ROWS[1], value: '5' },
+      ...STANDARD_ROWS.slice(2),
+    ])
+    const unsaved = await certificationHarness([
+      entry,
+      post('pe_avance2', ...repeat([form, partial], 10).flat()),
+      post('pe_avance3', ...repeat(DECLARATION_ANSWERS.success, 10)),
+    ])
+    const two = { basic: sent.basic, guide: { trackId: '5', date: TODAY, sentAt: 'x', cases: [] } }
+    await expect(declareTestSets(unsaved.deps, stateWith({ sets: two }))).resolves.toMatchObject({
+      outcome: 'notSaved',
+      success: false,
+    })
+    expect(unsaved.posted('pe_avance3')).toHaveLength(10)
   })
 
-  test('the simulation flag retries "every row empty"', async () => {
+  test('the simulation flag asks again on "every row empty", up to the last attempt', async () => {
     const rows = [{ label: 'SET DE SIMULACION', index: 1 }, ...STANDARD_ROWS.slice(1)]
     const empty = declarationFormPage(rows)
     const done = declarationFormPage([{ label: 'SET DE SIMULACION', index: 1, value: '77' }, ...STANDARD_ROWS.slice(1)])
@@ -541,6 +653,30 @@ describe('declareTestSets', () => {
     expect(loop.result.outcome).toBe('accepted')
     expect(loop.attempts).toBe(2)
     expect(harness.sleeps).toEqual([10000, 5000])
+    const never = await certificationHarness([
+      entry,
+      post('pe_avance2', ...repeat(empty, 20)),
+      post('pe_avance3', ...repeat(DECLARATION_ANSWERS.success, 10)),
+    ])
+    const exhausted = await declareWithRetries(
+      runtime(never.deps),
+      { simulation: { trackId: '77', date: TODAY } },
+      { label: 'simulation', prefix: 'x', retryOnAllRejected: true },
+    )
+    expect(exhausted).toMatchObject({ attempts: 10, result: { outcome: 'allRejected', success: false } })
+  })
+
+  test('sets with no field left on the form are declared all the same, and the declaration stands', async () => {
+    const reviewed = declarationFormPage([{ label: 'SET BASICO', state: 'EN REVISION' }, ...STANDARD_ROWS.slice(1)])
+    const harness = await certificationHarness([
+      entry,
+      post('pe_avance2', reviewed, reviewed),
+      post('pe_avance3', DECLARATION_ANSWERS.success),
+    ])
+    const result = await declareTestSets(harness.deps, stateWith({ sets: sent }))
+    expect(result).toMatchObject({ outcome: 'accepted', success: true })
+    expect(harness.posted('pe_avance3')).toHaveLength(1)
+    expect(harness.steps()).toEqual(['SETS_DECLARING', 'POLLING', 'SETS_DECLARED'])
   })
 
   test('nothing sent, nothing to declare', async () => {

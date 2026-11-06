@@ -211,6 +211,8 @@ describe('declareProgress', () => {
   const declaring = (form: string, answer: string, reread: string = form) =>
     signedIn([entry, post('pe_avance2', form, reread), post('pe_avance3', answer)])
   const basic = { basic: { trackId: '0001234', date: '2026-11-04' } }
+  const requests = (harness: PortalHarness, name: string) =>
+    harness.fake.requests.filter((request) => request.url.endsWith(`/${name}`))
 
   test('posts every field in form order with the current values, the track id without zeros, the date reversed', async () => {
     const rows: DeclarationRowSpec[] = [
@@ -228,8 +230,18 @@ describe('declareProgress', () => {
         guideBook: undefined,
       },
     })
-    expect(result.outcome).toBe('accepted')
-    expect(result.declared).toEqual(['exempt'])
+    expect(result).toMatchObject({
+      success: true,
+      outcome: 'accepted',
+      declared: ['exempt'],
+      verified: true,
+      inReview: false,
+      emptyFields: [],
+      contentErrors: [],
+      allRejected: false,
+      detail: null,
+    })
+    expect(result.judgedHtml).toBe(DECLARATION_ANSWERS.success)
     const [posted] = harness.posted('pe_avance3')
     expect(Object.keys(posted)).toEqual([
       'NUM_ENV1',
@@ -275,51 +287,91 @@ describe('declareProgress', () => {
       TOTREG: '4',
       ACEPTAR: 'Confirmar Revisión',
     })
-    expect(result.verification).toEqual({ exempt: 'kept' })
+    // The entry is visited once: the re-read posts the company again without it.
+    expect(harness.urls().map((url) => url.split('/').pop())).toEqual([
+      'pe_avance1',
+      'pe_avance2',
+      'pe_avance3',
+      'pe_avance2',
+    ])
+    expect(requests(harness, 'pe_avance2').map((request) => request.headers.referer)).toEqual([
+      `${MAULLIN}/pe_avance1`,
+      `${MAULLIN}/pe_avance1`,
+    ])
+    expect(requests(harness, 'pe_avance3')[0].headers.referer).toBe(`${MAULLIN}/pe_avance2`)
+    expect(harness.posted('pe_avance2')[1]).toEqual({ ...COMPANY, ACEPTAR: 'Continuar' })
   })
 
-  test('TOTREG falls back to 10 without the hidden field', async () => {
-    const form = page(
-      '<input type=hidden name=PASO value=P01><tr><td>SET BASICO</td><td><input name=NUM_ENV1></td></tr>',
-    )
-    const harness = await declaring(form, DECLARATION_ANSWERS.success)
+  test('TOTREG falls back to 10 without the hidden field, or when it is not a number', async () => {
+    const form = (totreg: string) =>
+      page(
+        `<input type="hidden" name="PASO" value="P01">${totreg}<table><tr><td>SET BASICO</td><td><input type="text" NAME="NUM_ENV1" value=""></td></tr></table>`,
+      )
+    const harness = await declaring(form(''), DECLARATION_ANSWERS.success)
     await declareProgress(harness.portal, { entries: basic })
     const [posted] = harness.posted('pe_avance3')
     expect(posted.TOTREG).toBe('10')
     expect(Object.keys(posted)).toHaveLength(44)
+    const odd = await declaring(form('<input type="hidden" name="TOTREG" value="x">'), DECLARATION_ANSWERS.success)
+    await declareProgress(odd.portal, { entries: basic })
+    // The loop runs to 10, and the field goes as the page had it.
+    expect(odd.posted('pe_avance3')[0]).toMatchObject({ TOTREG: 'x', NUM_ENV10: '' })
   })
 
   test.each([
-    ['contentErrors', DECLARATION_ANSWERS.contentErrors, STANDARD_ROWS, ['exemptPurchaseBook', 'basic']],
-    ['notProcessed', DECLARATION_ANSWERS.notProcessed, STANDARD_ROWS, []],
-    ['allRejected', DECLARATION_ANSWERS.success, STANDARD_ROWS, []],
+    ['allRejected', false, DECLARATION_ANSWERS.success, STANDARD_ROWS, []],
+    ['allRejected', false, DECLARATION_ANSWERS.notProcessed, STANDARD_ROWS, []],
+    [
+      'contentErrors',
+      false,
+      DECLARATION_ANSWERS.contentErrors,
+      STANDARD_ROWS,
+      ['exemptPurchaseBook', 'purchaseBook', 'basic'],
+    ],
+    [
+      'contentErrors',
+      true,
+      DECLARATION_ANSWERS.contentErrors,
+      [{ label: 'SET BASICO', index: 1, value: '1234' }, ...STANDARD_ROWS.slice(1)],
+      ['exemptPurchaseBook', 'purchaseBook', 'basic'],
+    ],
     [
       'inReview',
+      true,
       DECLARATION_ANSWERS.success,
       [{ label: 'SET BASICO', state: 'EN REVISION' }, ...STANDARD_ROWS.slice(1)],
       [],
     ],
     [
       'accepted',
+      true,
       DECLARATION_ANSWERS.success,
       [{ label: 'SET BASICO', index: 1, value: '1234' }, ...STANDARD_ROWS.slice(1)],
       [],
     ],
-  ] as const)('outcome %s from the answer and the re-read', async (outcome, answer, reread, contentErrors) => {
-    const harness = await declaring(declarationFormPage(STANDARD_ROWS), answer, declarationFormPage(reread))
-    const result = await declareProgress(harness.portal, { entries: basic })
-    expect(result.outcome).toBe(outcome)
-    expect(result.contentErrors).toEqual(contentErrors)
-    expect(result.answerHtml).toBe(answer)
-    expect(harness.posted('pe_avance2')).toHaveLength(2)
-  })
+  ] as const)(
+    'outcome %s, standing %s, from the answer and the re-read',
+    async (outcome, success, answer, reread, contentErrors) => {
+      const harness = await declaring(declarationFormPage(STANDARD_ROWS), answer, declarationFormPage(reread))
+      const result = await declareProgress(harness.portal, { entries: basic })
+      expect(result).toMatchObject({ outcome, success, contentErrors })
+      expect(result.answerHtml).toBe(answer)
+      expect(result.judgedHtml).toBe(answer)
+      expect(harness.posted('pe_avance2')).toHaveLength(2)
+    },
+  )
 
   test('allRejected when every declared row came back empty; notSaved when only some did', async () => {
     const two = { basic: { trackId: '1', date: '2026-11-04' }, guide: { trackId: '2', date: '2026-11-04' } }
     const all = await declaring(declarationFormPage(STANDARD_ROWS), DECLARATION_ANSWERS.success)
-    const rejected = await declareProgress(all.portal, { entries: two })
-    expect(rejected.outcome).toBe('allRejected')
-    expect(rejected.verification).toEqual({ basic: 'empty', guide: 'empty' })
+    await expect(declareProgress(all.portal, { entries: two })).resolves.toMatchObject({
+      outcome: 'allRejected',
+      success: false,
+      verified: false,
+      allRejected: true,
+      emptyFields: ['basic', 'guide'],
+      detail: 'notSaved: basic, guide',
+    })
     const some = await declaring(
       declarationFormPage(STANDARD_ROWS),
       DECLARATION_ANSWERS.success,
@@ -327,63 +379,113 @@ describe('declareProgress', () => {
     )
     await expect(declareProgress(some.portal, { entries: two })).resolves.toMatchObject({
       outcome: 'notSaved',
-      verification: { basic: 'empty', guide: 'kept' },
+      success: false,
+      allRejected: false,
+      emptyFields: ['basic'],
+    })
+    // One row in review carries the declaration even with another field empty.
+    const mixed = await declaring(
+      declarationFormPage(STANDARD_ROWS),
+      DECLARATION_ANSWERS.success,
+      declarationFormPage([
+        STANDARD_ROWS[0],
+        { label: 'SET GUIA DE DESPACHO', state: 'EN REVISION' },
+        ...STANDARD_ROWS.slice(2),
+      ]),
+    )
+    await expect(declareProgress(mixed.portal, { entries: two })).resolves.toMatchObject({
+      outcome: 'inReview',
+      success: true,
+      verified: true,
+      emptyFields: ['basic'],
     })
   })
 
-  test('inconsistent data and failures stop before the re-read', async () => {
+  test('inconsistent data and a post the portal did not take end before the re-read', async () => {
     const inconsistent = await declaring(declarationFormPage(STANDARD_ROWS), DECLARATION_ANSWERS.inconsistent)
     await expect(declareProgress(inconsistent.portal, { entries: basic })).resolves.toMatchObject({
       outcome: 'inconsistent',
-      detail: 'LA FECHA DE ENVIO NO CORRESPONDE AL ENVIO 123',
+      success: false,
+      verified: null,
+      detail: 'FECHA DE ENVIO NO CORRESPONDE AL ENVIO 123',
     })
     expect(inconsistent.posted('pe_avance2')).toHaveLength(1)
     const mismatch = await declaring(declarationFormPage(STANDARD_ROWS), DECLARATION_ANSWERS.contentMismatch)
     await expect(declareProgress(mismatch.portal, { entries: basic })).resolves.toMatchObject({
       outcome: 'failed',
+      success: false,
       detail: 'contentMismatch',
     })
     const error = await declaring(declarationFormPage(STANDARD_ROWS), DECLARATION_ANSWERS.plainError)
     await expect(declareProgress(error.portal, { entries: basic })).resolves.toMatchObject({
       outcome: 'failed',
-      detail: 'SII Se produjo un error al registrar el avance.',
+      detail: 'invalidAnswer',
     })
+    expect(error.posted('pe_avance2')).toHaveLength(1)
   })
 
-  test('a re-read that holds another track id, lacks the row, or is no form at all', async () => {
+  test('a session the portal says is gone is a failed post whose page reads as "not yet"', async () => {
+    const harness = await declaring(declarationFormPage(STANDARD_ROWS), DECLARATION_ANSWERS.sessionExpired)
+    const result = await declareProgress(harness.portal, { entries: basic })
+    expect(result).toMatchObject({ outcome: 'failed', success: false, detail: 'sessionExpired' })
+    expect(result.judgedHtml).toContain('no se encuentra')
+  })
+
+  test('the re-read only looks for an empty field or a row in review', async () => {
     const other = await declaring(
       declarationFormPage(STANDARD_ROWS),
       DECLARATION_ANSWERS.success,
       declarationFormPage([{ label: 'SET BASICO', index: 1, value: '999' }, ...STANDARD_ROWS.slice(1)]),
     )
-    await expect(declareProgress(other.portal, { entries: basic })).resolves.toMatchObject({
-      outcome: 'notSaved',
-      verification: { basic: 'mismatch' },
-    })
+    await expect(declareProgress(other.portal, { entries: basic })).resolves.toMatchObject({ outcome: 'accepted' })
     const gone = await declaring(
       declarationFormPage(STANDARD_ROWS),
       DECLARATION_ANSWERS.success,
       declarationFormPage(STANDARD_ROWS.slice(1)),
     )
-    await expect(declareProgress(gone.portal, { entries: basic })).resolves.toMatchObject({
-      outcome: 'notSaved',
-      verification: { basic: 'missing' },
-    })
+    await expect(declareProgress(gone.portal, { entries: basic })).resolves.toMatchObject({ outcome: 'accepted' })
     const status = await declaring(declarationFormPage(STANDARD_ROWS), DECLARATION_ANSWERS.success, page('<p>nada</p>'))
-    expect((await failure(declareProgress(status.portal, { entries: basic }))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
-  })
-
-  test('an expired session is thrown and forgotten', async () => {
-    const harness = await declaring(declarationFormPage(STANDARD_ROWS), DECLARATION_ANSWERS.sessionExpired)
-    expect((await failure(declareProgress(harness.portal, { entries: basic }))).code).toBe('SII_PORTAL_SESSION_EXPIRED')
-  })
-
-  test('declined: a status page, error states, a missing simulation row, no row at all', async () => {
-    const status = await declaring(page('<p>nada</p>'), '')
     await expect(declareProgress(status.portal, { entries: basic })).resolves.toMatchObject({
-      outcome: 'declined',
-      detail: 'noForm',
+      outcome: 'accepted',
+      success: true,
+      verified: true,
     })
+  })
+
+  test('a re-read that fails leaves the declaration as verified', async () => {
+    const warnings: string[] = []
+    const logger = {
+      debug: () => undefined,
+      info: () => undefined,
+      warn: (m: string) => void warnings.push(m),
+      error: () => undefined,
+    }
+    const harness = await signedIn(
+      [
+        entry,
+        {
+          url: `${MAULLIN}/pe_avance2`,
+          method: 'POST' as const,
+          reply: [{ body: declarationFormPage(STANDARD_ROWS) }, new Error('socket hang up')],
+        },
+        post('pe_avance3', DECLARATION_ANSWERS.success),
+      ],
+      { logger },
+    )
+    await expect(declareProgress(harness.portal, { entries: basic })).resolves.toMatchObject({
+      outcome: 'accepted',
+      success: true,
+      verified: true,
+      emptyFields: [],
+    })
+    expect(warnings).toEqual(['certification declaration could not be verified'])
+  })
+
+  test('nothing is posted without a form, or without the simulation row when the simulation is declared', async () => {
+    const status = await declaring(page('<p>nada</p>'), '')
+    const none = await declareProgress(status.portal, { entries: basic })
+    expect(none).toMatchObject({ outcome: 'declined', success: false, detail: 'noForm', answerHtml: '' })
+    expect(none.judgedHtml).toBe(none.formHtml)
     const errors = await declaring(STATUS_PAGE, '')
     await expect(declareProgress(errors.portal, { entries: basic })).resolves.toMatchObject({
       outcome: 'declined',
@@ -395,12 +497,36 @@ describe('declareProgress', () => {
         entries: { simulation: { trackId: '1', date: '2026-11-04' }, basic: basic.basic },
       }),
     ).resolves.toMatchObject({ outcome: 'declined', detail: 'simulationUnavailable' })
-    const approved = await declaring(declarationFormPage([{ label: 'SET BASICO', state: 'REVISADO CONFORME' }]), '')
-    await expect(declareProgress(approved.portal, { entries: basic })).resolves.toMatchObject({
-      outcome: 'declined',
-      detail: 'noRows',
+    expect(simulation.posted('pe_avance3')).toEqual([])
+  })
+
+  test('a form whose rows have no field left is posted all the same, and stands', async () => {
+    const approved = declarationFormPage([
+      { label: 'SET BASICO', state: 'REVISADO CONFORME' },
+      { label: 'SET GUIA DE DESPACHO', state: 'EN REVISION' },
+    ])
+    const harness = await declaring(approved, DECLARATION_ANSWERS.success)
+    await expect(declareProgress(harness.portal, { entries: basic })).resolves.toMatchObject({
+      outcome: 'accepted',
+      success: true,
+      declared: [],
+      verified: true,
     })
-    expect(approved.posted('pe_avance3')).toEqual([])
+    expect(harness.posted('pe_avance3')).toEqual([
+      {
+        NUM_ENV1: '',
+        FEC_ENV1: '',
+        SET1: '',
+        EST1: '',
+        NUM_ENV2: '',
+        FEC_ENV2: '',
+        SET2: '',
+        EST2: '',
+        ...COMPANY,
+        TOTREG: '2',
+        ACEPTAR: 'Confirmar Revisión',
+      },
+    ])
   })
 
   test('invalid input is refused before any request', async () => {

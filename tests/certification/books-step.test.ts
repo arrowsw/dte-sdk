@@ -475,7 +475,7 @@ test('the period retries stop after 24 rounds of "every row empty"', async () =>
     estUpAlways('EPR'),
   ])
   const result = await runBooks(harness.deps, booksState())
-  expect(result).toMatchObject({ outcome: 'rejected', detail: 'allRejected' })
+  expect(result).toMatchObject({ outcome: 'rejected', detail: expect.stringMatching(/^notSaved: /) })
   // Each period is tried twice: an adjustment, then the next free period as a total submission.
   expect(harness.events.filter((event) => event.step === 'BOOK_PERIOD_RETRY')).toHaveLength(24)
   expect(result.state.books.adjustmentTried).toHaveLength(12)

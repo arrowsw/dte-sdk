@@ -330,7 +330,10 @@ test('a refusal without a sentence stops with the outcome itself; a run already 
     [entry, avance2([SETS_FORM, SETS_FORM]), post('pe_avance3', DECLARATION_ANSWERS.success)],
     sentState,
   )
-  await expect(runCertification(empty.deps)).resolves.toMatchObject({ stopped: 'rejected', detail: 'allRejected' })
+  await expect(runCertification(empty.deps)).resolves.toMatchObject({
+    stopped: 'rejected',
+    detail: 'notSaved: basic, guide, exempt, purchase',
+  })
   const simulated = stateWith({
     plan,
     sets: allSets,
@@ -347,7 +350,10 @@ test('a refusal without a sentence stops with the outcome itself; a run already 
     ],
     simulated,
   )
-  await expect(runCertification(never.deps)).resolves.toMatchObject({ stopped: 'rejected', detail: 'notProcessed' })
+  await expect(runCertification(never.deps)).resolves.toMatchObject({
+    stopped: 'rejected',
+    detail: 'notSaved: simulation',
+  })
   const confirmed = await seeded([entry, avance2([]), avance5, avance6([], () => AT_EXCHANGE)], {
     ...simulated,
     simulation: { ...simulated.simulation!, confirmed: true },

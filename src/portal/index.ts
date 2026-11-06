@@ -153,10 +153,9 @@ export type {
 } from './certification'
 export type { SetGenerationState, OptionalSetOption, SetGenerationPage } from './pages/certification-set'
 export type {
-  DeclarationRow,
   DeclarationForm,
   DeclarationAnswer,
-  VerificationState,
+  DeclarationVerification,
   AdvanceAnswer,
   ItemState,
   ProgressPage,
