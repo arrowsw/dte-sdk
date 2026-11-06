@@ -516,6 +516,12 @@ describe('verifyReceiptsAuthorization', () => {
     await expect(verifyReceiptsAuthorization({})).resolves.toEqual({ production: null, certification: null })
   })
 
+  test('the company goes into the stamping form as the caller wrote it, its verifier not changed to capitals', async () => {
+    const live = await production(typeSelector(QUOTED_BOLETA))
+    await verifyReceiptsAuthorization({ production: live.portal, companyRut: '60.803.000-k' })
+    expect(live.posted('of_solicita_folios_dcto')[0]).toMatchObject({ RUT_EMP: '60803000', DV_EMP: 'k' })
+  })
+
   test('an option whose value is not quoted is not a type, as in the field', async () => {
     const live = await production(typeSelector(`${FACTURA}<option value=39>BOLETA</option>`))
     const result = await verifyReceiptsAuthorization({ production: live.portal })
