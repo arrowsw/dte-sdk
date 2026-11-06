@@ -46,11 +46,7 @@ const warmUp: readonly FakeRoute[] = [
     reply: { body: '<html>portal</html>', headers: { 'set-cookie': 'JSESSIONID=abc; Path=/pfeInternet' } },
   },
 ]
-const nocache: FakeRoute = {
-  method: 'GET',
-  url: `${BASE}pfe.nocache.js`,
-  reply: { body: `var p='${KNOWN.permutation}';` },
-}
+const NOCACHE = `${BASE}pfe.nocache.js`
 const facade = (reply: FakeReply | ((request: RecordedRequest) => FakeReply)): FakeRoute => ({
   method: 'POST',
   url: FACADE,
@@ -143,8 +139,8 @@ describe('downloadExchangeSet', () => {
 })
 
 describe('validateExchangeUser', () => {
-  test('posts validarUsuario with the certificate holder and the company, over the discovered hashes', async () => {
-    const harness = await signedIn([...warmUp, nocache, facade({ body: EMPTY_OK })])
+  test('posts validarUsuario with the certificate holder and the company, over the known hashes and without looking for others', async () => {
+    const harness = await signedIn([...warmUp, facade({ body: EMPTY_OK })])
     const result = await validateExchangeUser(harness.portal, { companyRut: RECEIVER_RUT })
     expect(result).toEqual({
       inExchange: true,
@@ -154,7 +150,7 @@ describe('validateExchangeUser', () => {
       hashes: KNOWN,
       body: EMPTY_OK,
     })
-    expect(harness.urls()).toEqual([BASE, `${BASE}index.html`, `${BASE}pfe.nocache.js`, FACADE])
+    expect(harness.urls()).toEqual([BASE, `${BASE}index.html`, FACADE])
     const [request] = facadePosts(harness)
     expect(request.text).toBe(
       `7|0|8|${BASE}|${KNOWN.policy}|${SERVICE}|validarUsuario|${USER_TYPE}|3|5|${INTEGER}|1|2|3|4|1|5|5|0|0|0|0|6|7|8|12345678|0|0|0|0|0|8|76543210|`,
@@ -169,6 +165,15 @@ describe('validateExchangeUser', () => {
     expect(request.headers['cookie']).toContain('JSESSIONID=abc')
   })
 
+  test('the table keeps both verifiers in their own slots when the holder and the company share one', async () => {
+    const harness = await signedIn([...warmUp, facade({ body: EMPTY_OK })])
+    await validateExchangeUser(harness.portal)
+    const [request] = facadePosts(harness)
+    expect(request.text).toBe(
+      `7|0|8|${BASE}|${KNOWN.policy}|${SERVICE}|validarUsuario|${USER_TYPE}|3|3|${INTEGER}|1|2|3|4|1|5|5|0|0|0|0|6|7|8|76543210|0|0|0|0|0|8|76543210|`,
+    )
+  })
+
   test('reads the state the portal names when the company is not in the exchange, with the hashes given', async () => {
     const gwt = { permutation: 'A'.repeat(32), policy: 'B'.repeat(32) }
     const message = 'La empresa no esta en estado P06, estado: P90'
@@ -178,7 +183,7 @@ describe('validateExchangeUser', () => {
     const [request] = facadePosts(harness)
     expect(request.text).toContain(`|${gwt.policy}|`)
     expect(request.headers['x-gwt-permutation']).toBe(gwt.permutation)
-    expect(harness.urls()).not.toContain(`${BASE}pfe.nocache.js`)
+    expect(harness.urls()).not.toContain(NOCACHE)
   })
 
   test('refuses a certificate that names no holder before touching the portal', async () => {
@@ -265,7 +270,7 @@ describe('confirmExchange', () => {
     })
 
   test('validates the set, then confirms the follow-up ids 40, 41 and 43 in order', async () => {
-    const harness = await signedIn([...warmUp, nocache, confirming()])
+    const harness = await signedIn([...warmUp, confirming()])
     const result = await confirmExchange(harness.portal)
     expect(result).toEqual({
       validation: okAnswer([1], ['validado']),
@@ -280,10 +285,11 @@ describe('confirmExchange', () => {
       ),
     ])
     expect(posts.every((request) => request.headers['x-gwt-permutation'] === KNOWN.permutation)).toBe(true)
+    expect(harness.urls()).not.toContain(NOCACHE)
   })
 
   test('a confirmation without //OK is unexpected, named by its id, and stops the sequence', async () => {
-    const harness = await signedIn([...warmUp, nocache, confirming(41)])
+    const harness = await signedIn([...warmUp, confirming(41)])
     const error = await failure(confirmExchange(harness.portal, { gwt: KNOWN }))
     expect(error.code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
     expect(error.details['step']).toBe('updatePostulacionSeguimiento.41')
@@ -295,7 +301,7 @@ describe('confirmExchange', () => {
   })
 
   test('never retries a confirmation call, even when the client retries', async () => {
-    const harness = await signedIn([...warmUp, nocache, facade({ status: 503, body: 'busy' })], {
+    const harness = await signedIn([...warmUp, facade({ status: 503, body: 'busy' })], {
       retry: { maxAttempts: 3, initialDelayMs: 1 },
     })
     const error = await failure(confirmExchange(harness.portal))

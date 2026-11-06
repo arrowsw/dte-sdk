@@ -61,7 +61,7 @@ describe('runExchange', () => {
       'updatePostulacionSeguimiento',
       'updatePostulacionSeguimiento',
     ])
-    // The uploads carry the artefacts, and the hashes found once serve the confirmation too.
+    // The uploads carry the artefacts; the exchange portal's hashes are the known pair, never looked up.
     const uploads = harness.fake.requests.filter((request) => request.url.includes('/uploadFile'))
     // The fake reads every part as Latin-1; the answers travel as UTF-8.
     const asSent = async (name: string) => decodeLatin1(encodeUtf8((await harness.store.readArtefact(name))!))
@@ -70,7 +70,7 @@ describe('runExchange', () => {
       await asSent('intercambio/envio-recibos.xml'),
       await asSent('intercambio/respuesta-aprobacion-comercial.xml'),
     ])
-    expect(harness.urls().filter((url) => url.endsWith('nocache.js'))).toHaveLength(1)
+    expect(harness.urls().filter((url) => url.endsWith('nocache.js'))).toHaveLength(0)
     expect(harness.urls().some((url) => url.includes('downloadFile'))).toBe(false)
   })
 

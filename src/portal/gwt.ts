@@ -5,16 +5,16 @@ import { portalRequest, type PortalContext, type PortalPage } from './session'
 
 /**
  * EN: One parameter of a GWT-RPC call, as the SII's portals serialize it: a string (interned in the table, `0` when
- * null), a boxed `java.lang.Integer`, a boxed `java.lang.Long` (a number, or a token already in the GWT base-64
+ * null, or in a slot of its own when `distinct`), a boxed `java.lang.Integer`, a boxed `java.lang.Long` (a number, or a token already in the GWT base-64
  * alphabet), a primitive boolean (`Z`), null (a String unless it names its declared type), or an object with its fields
  * in serialization order.
  * ES: Un parámetro de una llamada GWT-RPC, como lo serializan los portales del SII: un string (en la tabla, `0` si es
- * null), un `java.lang.Integer` encajonado, un `java.lang.Long` encajonado (un número, o un token ya en el alfabeto
+ * null, o en un lugar propio si es `distinct`), un `java.lang.Integer` encajonado, un `java.lang.Long` encajonado (un número, o un token ya en el alfabeto
  * base 64 de GWT), un booleano primitivo (`Z`), null (un String salvo que nombre su tipo declarado), o un objeto con
  * sus campos en orden de serialización.
  */
 export type GwtParameter =
-  | { readonly kind: 'string'; readonly value: string | null }
+  | { readonly kind: 'string'; readonly value: string | null; readonly distinct?: boolean }
   | { readonly kind: 'integer'; readonly value: number }
   | { readonly kind: 'long'; readonly value: number | string }
   | { readonly kind: 'boolean'; readonly value: boolean }
@@ -119,11 +119,13 @@ const escapeTableString = (value: string): string => value.replace(/\\/g, '\\\\'
 // One pass that interns strings as it writes them: the four header slots, then the parameter types, then the values.
 const serialize = (call: GwtCall): { readonly table: string[]; readonly body: string[] } => {
   const table: string[] = []
-  const intern = (value: string): string => {
-    const at = table.indexOf(value)
-    if (at !== -1) return String(at + 1)
+  const add = (value: string): string => {
     table.push(value)
     return String(table.length)
+  }
+  const intern = (value: string): string => {
+    const at = table.indexOf(value)
+    return at === -1 ? add(value) : String(at + 1)
   }
   const typeOf = (parameter: GwtParameter): string => {
     switch (parameter.kind) {
@@ -145,7 +147,13 @@ const serialize = (call: GwtCall): { readonly table: string[]; readonly body: st
   const write = (parameter: GwtParameter): void => {
     switch (parameter.kind) {
       case 'string':
-        body.push(parameter.value === null ? NULL : intern(parameter.value))
+        body.push(
+          parameter.value === null
+            ? NULL
+            : parameter.distinct === true
+              ? add(parameter.value)
+              : intern(parameter.value),
+        )
         return
       case 'null':
         body.push(NULL)
@@ -312,6 +320,13 @@ export const discoverGwtHashes = async (context: PortalContext, input: GwtDiscov
 
 /** EN: A String parameter. ES: Un parámetro String. */
 export const gwtString = (value: string | null): GwtParameter => ({ kind: 'string', value })
+/**
+ * EN: A String parameter that takes its own slot of the string table even when an earlier string has the same text, as
+ * the field's body for `validarUsuario` writes its two verifiers.
+ * ES: Un parámetro String que toma su propio lugar de la tabla de strings aunque un string anterior tenga el mismo
+ * texto, como escribe el cuerpo de campo de `validarUsuario` sus dos dígitos verificadores.
+ */
+export const gwtDistinctString = (value: string): GwtParameter => ({ kind: 'string', value, distinct: true })
 /** EN: A boxed Integer parameter. ES: Un parámetro Integer encajonado. */
 export const gwtInteger = (value: number): GwtParameter => ({ kind: 'integer', value })
 /** EN: A boxed Long parameter: a number, or a token as the portal wrote it. ES: Un parámetro Long encajonado: un número, o un token como lo escribió el portal. */

@@ -64,6 +64,18 @@ describe('gwtBody writes the wire format of the SII portals', () => {
     )
   })
 
+  test('a distinct string takes its own slot of the table even when an earlier string has the same text', () => {
+    const body = gwtBody(
+      call(PFE, FACADE, 'm', [
+        string('3'),
+        { kind: 'string', value: '5', distinct: true },
+        { kind: 'string', value: '5', distinct: true },
+        string('5'),
+      ]),
+    )
+    expect(body).toBe(`7|0|8|${PFE}|${POLICY}|${FACADE}|m|${GWT_STRING}|3|5|5|1|2|3|4|4|5|5|5|5|6|7|8|7|`)
+  })
+
   test('validarSetContriPostSeguimiento: a boxed integer and a string', () => {
     expect(gwtBody(call(PFE, FACADE, 'validarSetContriPostSeguimiento', [integer(76543210), string('3')]))).toBe(
       `7|0|7|${PFE}|${POLICY}|${FACADE}|validarSetContriPostSeguimiento|${GWT_INTEGER}|${GWT_STRING}|3|1|2|3|4|2|5|6|5|76543210|7|`,

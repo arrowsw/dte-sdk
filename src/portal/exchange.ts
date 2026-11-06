@@ -14,7 +14,7 @@ import { encodeLatin1 } from '../text/latin1'
 import { resolvePortalCompany, type PortalClient } from './client'
 import {
   GWT_NULL,
-  gwtHashesOf,
+  gwtDistinctString,
   gwtInteger,
   gwtString,
   portalBoundary,
@@ -90,7 +90,7 @@ export type ExchangeCompanyInput = {
  * ES: Entrada de las operaciones del intercambio que llaman al servicio del portal.
  */
 export type ExchangeGwtInput = ExchangeCompanyInput & {
-  /** EN: The portal's hashes, when the caller knows them; discovered otherwise. ES: Los hashes del portal, si el llamador los conoce; si no, se descubren. */
+  /** EN: The portal's hashes, when the caller knows better than the pair known to work, which is the default; they are never looked up. ES: Los hashes del portal, si el llamador conoce otros mejores que el par que se sabe que funciona, que es el de por defecto; nunca se buscan. */
   readonly gwt?: GwtHashes
 }
 
@@ -210,10 +210,10 @@ export const downloadExchangeSet = (
   })
 
 /**
- * EN: Validates the user on the exchange portal: the warm-up, the hashes, then `validarUsuario` with the company and
- * the certificate holder. The answer says whether the company stands in the exchange stage; `//OK` is not required.
- * ES: Valida al usuario en el portal de intercambio: el calentamiento, los hashes y luego `validarUsuario` con la
- * empresa y el titular del certificado. La respuesta dice si la empresa está en la etapa de intercambio; no se exige `//OK`.
+ * EN: Validates the user on the exchange portal: the warm-up, then `validarUsuario` with the company and
+ * the certificate holder over the known hashes. The answer says whether the company stands in the exchange stage; `//OK` is not required.
+ * ES: Valida al usuario en el portal de intercambio: el calentamiento y luego `validarUsuario` con la
+ * empresa y el titular del certificado, sobre los hashes conocidos. La respuesta dice si la empresa está en la etapa de intercambio; no se exige `//OK`.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: the company and the hashes. ES: la empresa y los hashes.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
@@ -229,7 +229,7 @@ export const validateExchangeUser = (
     const company = companyOf(portal, input.companyRut)
     const holder = holderOf(portal)
     await enter(context)
-    const hashes = await gwtHashesOf(context, EXCHANGE_PORTAL, input.gwt)
+    const hashes = input.gwt ?? EXCHANGE_PORTAL.known
     const user: GwtParameter = {
       kind: 'object',
       type: USER_TYPE,
@@ -238,8 +238,8 @@ export const validateExchangeUser = (
         GWT_NULL,
         GWT_NULL,
         GWT_NULL,
-        gwtString(holder.verifier),
-        gwtString(company.verifier),
+        gwtDistinctString(holder.verifier),
+        gwtDistinctString(company.verifier),
         gwtInteger(Number(company.digits)),
         GWT_NULL,
         GWT_NULL,
@@ -358,7 +358,7 @@ export const confirmExchange = (
   withPortalSession(portal, 'confirmExchange', overrides, async (context) => {
     const company = companyOf(portal, input.companyRut)
     await enter(context)
-    const hashes = await gwtHashesOf(context, EXCHANGE_PORTAL, input.gwt)
+    const hashes = input.gwt ?? EXCHANGE_PORTAL.known
     const sent = once(context)
     const { page } = await postGwt(
       sent,
