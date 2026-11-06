@@ -165,6 +165,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CertificationIssuerInput`). `StampOptions.stampedAt`, the `signedAt` option of `signDocument` and
   `IssueDocumentInput.timestamp` let a caller set the stamps. `dte-sdk/portal` limit to 70 kB.
 
+- **The certification run keeps to the reference: the books, the advance, the simulation and the closing.** `runBooks`
+  starts over on every run: the period is the UTC month the test set was read in (`CertificationState.setReadDate` is
+  new) when the set brought a purchase book, else the current UTC month, and the approved books are what the portal
+  shows, by the name each row holds. The uploads follow the retries and the reading of the run; a purchase book goes
+  again as an adjustment only on a duplicate without a track id or a schema rule on the first error line. The SOAP
+  status is read for a minute with a count of failures per book; every book with a track id is declared with the sets;
+  while every row comes back empty all the books go again; the books the SOAP status rejected or the declaration named
+  with content errors are not awaited; after the wait the books the page shows rejected, closed or declared and never
+  reviewed go again under their exact name; no portal read stops the phase. `BooksOutcome` keeps its values, but only
+  `incomplete` stops the runner, and `BOOKS_DONE.success` means the three mandatory books were sent.
+  `queryCertificationSets` returns no sets for a page without rows instead of throwing. `advanceToNextStage` reads the
+  progress page (30 tries 10 s apart while it cannot be read), asks for the advance at once, reads the page again and
+  returns `advanced`, `unchanged`, `failed` or `timedOut` without throwing for a portal answer; the runner stops with
+  the portal's sentence when the portal does not move. The three certification books accept `submission:
+'adjustment'` (the guide book too), the withheld VAT rate of `OtrosImp` is written 0.19, the common-use credit is
+  rounded per document (`BookTotals.commonUseCredit` is new), the summaries carry no `TpoImp`, and the exempt purchase
+  book and the purchase-book sets are read as the reference reads them. The simulation carries the local date of the
+  process, UTC stamps to the second, the totals of the reference and a guide without `TpoDespacho`; it is declared
+  unless the progress page names the exchange, and awaited with reads that never throw, `REPARO` as a rejection and
+  one SOAP query when the polls run out. `advanceStage` and `declareCompliance` follow the client's retry policy;
+  the compliance wizard posts every named input of the page and counts the declaration as made when the last page no
+  longer shows its form; `declareComplianceFinal` asks for the advance once, without reading the progress, and declares
+  whatever came of it.
+
 ### Fixed
 
 - A receipt (39, 41) with a reference was written with the invoice shape of `Referencia` (`FchRef`), which the receipts
