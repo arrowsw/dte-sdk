@@ -287,6 +287,17 @@ describe('the purchase-book sets', () => {
     expect(exempt.bookDocuments.map((doc) => doc.folio)).toEqual([1])
   })
 
+  test('a separator line does not end the exempt-book set: its rows go on until a case header or the next set', () => {
+    const [exempt, next] = parseTestSetText(
+      `SET LIBRO DE COMPRAS PARA EXENTOS - NUMERO DE ATENCION: 1\n${'-'.repeat(30)}\nFACTURA    1    100\n${'-'.repeat(30)}\nOBS: FACTURA DEL GIRO\nFACTURA    2    200\nSET LIBRO DE COMPRAS - NUMERO DE ATENCION: 2\nFACTURA 3\n`,
+    )
+    expect(exempt.bookDocuments.map((doc) => [doc.folio, doc.observation])).toEqual([
+      [1, 'FACTURA DEL GIRO'],
+      [2, null],
+    ])
+    expect(next.bookDocuments.map((doc) => doc.folio)).toEqual([3])
+  })
+
   test('the observation flags of the regular book are case sensitive, the observation itself is not', () => {
     const [set] = parseTestSetText(
       `SET LIBRO DE COMPRAS - NUMERO DE ATENCION: 1\nFACTURA 1\nfactura con iva uso comun\n100\nFACTURA 2\nENTREGA gratuita\n100\nFACTURA 3\nCOMPRA CON RETENCION total\n100\n`,

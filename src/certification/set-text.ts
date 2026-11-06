@@ -362,7 +362,8 @@ export const parseTestSetText = (text: string): readonly TestSet[] => {
   let current: MutableCase | null = null
   let bookDocument: MutableBookDocument | null = null
   let awaitingAmounts = false
-  // The rows of a purchase-book set are read from its header until the first separator line or case header.
+  // The rows of a purchase-book set are read from its header until the first case header, or, in the regular book,
+  // the first separator line.
   let booksOpen = false
 
   const closeCase = (): void => {
@@ -409,7 +410,9 @@ export const parseTestSetText = (text: string): readonly TestSet[] => {
       continue
     }
     if (EQUALS_LINE.test(line)) continue
-    if (DASH_LINE.test(line)) {
+    // An open exempt-book set takes every line as a row or as nothing, so a separator does not end it.
+    const exemptRows = booksOpen && current === null && set.kind === TEST_SET_KINDS.exemptPurchaseBook
+    if (DASH_LINE.test(line) && !exemptRows) {
       closeCase()
       closeBookDocument()
       booksOpen = false
