@@ -20,12 +20,14 @@ import {
   type GwtParameter,
 } from './gwt'
 import {
+  isDeclaredState,
   isEmptyList,
+  isReadyState,
   isReceiptsSet,
   postulationOf,
   receiptsComplianceBody,
-  receiptsStatesOf,
   representativeDigitsOf,
+  stateNamedIn,
 } from './pages/receipts-certification'
 import {
   ensureSession,
@@ -69,18 +71,6 @@ const companyParameters = (company: Party): readonly GwtParameter[] => [
   gwtInteger(Number(company.digits)),
   gwtString(company.verifier),
 ]
-
-// A read whose answer is judged: a status other than 200 is not an answer.
-const read = async (
-  context: PortalContext,
-  hashes: GwtHashes,
-  method: string,
-  parameters: readonly GwtParameter[],
-): ReturnType<typeof postGwt> => {
-  const result = await call(context, hashes, method, parameters)
-  if (result.page.status !== 200) throw unexpectedPage(context, method, result.page.html)
-  return result
-}
 
 const REPRESENTATIVES_METHOD = 'recuperarRepresentantesVigentesUsuariosAutorizados'
 const POSTULATION_METHOD = 'obtenerPostulacionSeg'
@@ -269,7 +259,7 @@ export const downloadReceiptsTestSet = (
       `${RECEIPTS_PORTAL.base}DownloadFileServlet?${query}`,
       { referer: `${RECEIPTS_PORTAL.base}?SET=1`, headers: { Accept: 'text/plain,text/html,*/*' } },
     )
-    if (!isReceiptsSet(page.status, page.html)) throw unexpectedPage(context, 'DownloadFileServlet', page.html)
+    if (!isReceiptsSet(page.html)) throw unexpectedPage(context, 'DownloadFileServlet', page.html)
     return { text: page.html, representativeRut: `${representative.digits}-${representative.verifier}` }
   })
 
@@ -312,28 +302,25 @@ export const declareReceiptsTrackId = (
 const NOT_ENROLLED: ReceiptsStatus = { enrolled: false, readyToDeclare: false, declared: false, state: null }
 
 const statusIn = async (context: PortalContext, hashes: GwtHashes, company: Party): Promise<ReceiptsStatus> => {
-  const { answer: list } = await read(context, hashes, REPRESENTATIVES_METHOD, companyParameters(company))
+  const { answer: list } = await call(context, hashes, REPRESENTATIVES_METHOD, companyParameters(company))
   if (representativeDigitsOf(list) === null) return NOT_ENROLLED
-  const statesOf = async (state: number): Promise<{ readonly states: readonly string[]; readonly empty: boolean }> => {
-    const { page, answer } = await read(context, hashes, 'obtenerEstadoAutorizaEmp', [
-      ...companyParameters(company),
-      gwtInteger(state),
-      gwtString(null),
-    ])
-    return { states: receiptsStatesOf(answer), empty: isEmptyList(page.html) }
-  }
-  const asked = await statesOf(READY_STATE)
-  const readyToDeclare = asked.states.includes(READY)
-  const state = readyToDeclare ? READY : (asked.states[0] ?? null)
-  if (state !== null || !asked.empty) return { enrolled: true, readyToDeclare, declared: false, state }
+  const bodyFor = async (state: number): Promise<string> =>
+    (
+      await call(context, hashes, 'obtenerEstadoAutorizaEmp', [
+        ...companyParameters(company),
+        gwtInteger(state),
+        gwtString(null),
+      ])
+    ).page.html
+  const asked = await bodyFor(READY_STATE)
+  const readyToDeclare = isReadyState(asked)
+  const state = readyToDeclare ? READY : stateNamedIn(asked)
+  if (state !== null || !isEmptyList(asked)) return { enrolled: true, readyToDeclare, declared: false, state }
   // An empty list for 90 is "not approved yet" or "already declared": the state 91 tells them apart.
-  const declared = await statesOf(DECLARED_STATE).then(
-    (answer) => answer.states.includes(DECLARED),
-    (error: unknown) => {
-      context.portal.logger.warn('receipts declared state unavailable', { reason: errorMessage(error) })
-      return false
-    },
-  )
+  const declared = await bodyFor(DECLARED_STATE).then(isDeclaredState, (error: unknown) => {
+    context.portal.logger.warn('receipts declared state unavailable', { reason: errorMessage(error) })
+    return false
+  })
   return { enrolled: true, readyToDeclare: false, declared, state: declared ? DECLARED : null }
 }
 
@@ -409,7 +396,7 @@ export const declareReceiptsCompliance = (
     if (!status.readyToDeclare) return { outcome: 'notReady', state: status.state }
     const representative = await declarationRepresentativeOf(context, hashes, company)
     // The declaration cannot be undone: without the application's own Long, nothing is sent.
-    const application = await read(context, hashes, POSTULATION_METHOD, postulationParameters(company))
+    const application = await call(context, hashes, POSTULATION_METHOD, postulationParameters(company))
     const record = postulationOf(application.answer)
     if (record === null) throw unexpectedPage(context, POSTULATION_METHOD, application.page.html)
     const body = receiptsComplianceBody({

@@ -2,8 +2,8 @@ import type { GwtAnswer } from '../gwt'
 
 const REPRESENTATIVE = /^\d{7,8}$/
 const AUTHORIZATION_DATE = /^\d{2}\/\d{2}\/\d{4}$/
-const STATE = /^P\d+$/
-const EMPTY_LIST = /^\/\/OK\[0,\[\]/
+const QUOTED_STATE = /"(P\d+)"/
+const EMPTY_LIST = /\/\/OK\[0,\[\]/
 const MIN_SET_LENGTH = 10
 // A Long as GWT writes it in an answer: a single-quoted token of its base-64 alphabet.
 const LONG_TOKEN = /'([A-Za-z0-9$_]+)'/
@@ -46,28 +46,37 @@ export const postulationOf = (answer: GwtAnswer): ReceiptsPostulation | null => 
 }
 
 /**
- * EN: The states a status answer names: the strings of its table that are exactly `P<digits>`, in order. An answer
- * that is not `//OK` names none: the raw body is never searched, so a state quoted inside a sentence or an exception
- * does not count.
- * ES: Los estados que nombra una respuesta de estado: los strings de su tabla que son exactamente `P<dígitos>`, en
- * orden. Una respuesta que no es `//OK` no nombra ninguno: nunca se busca en el cuerpo crudo, así que un estado
- * citado dentro de una frase o de una excepción no cuenta.
+ * EN: The status answer holds `P90` anywhere in its body: the set was approved, the declaration can be made. The raw
+ * body is searched, as the field does, so a `P90` inside a sentence or an exception counts too.
+ * ES: La respuesta de estado trae `P90` en cualquier parte de su cuerpo: el set fue aprobado, se puede declarar. Se
+ * busca en el cuerpo crudo, como lo hace el campo, así que un `P90` dentro de una frase o de una excepción también cuenta.
  */
-export const receiptsStatesOf = (answer: GwtAnswer): readonly string[] =>
-  answer.ok ? answer.table.filter((item) => STATE.test(item)) : []
+export const isReadyState = (body: string): boolean => body.includes('P90')
 
 /**
- * EN: The status answer is an empty list: the company is not in the state asked for.
- * ES: La respuesta de estado es una lista vacía: la empresa no está en el estado consultado.
+ * EN: The status answer holds `P91` anywhere in its body: the declaration was made.
+ * ES: La respuesta de estado trae `P91` en cualquier parte de su cuerpo: la declaración ya se hizo.
+ */
+export const isDeclaredState = (body: string): boolean => body.includes('P91')
+
+/**
+ * EN: The first state a status answer names between quotes (`"P<digits>"`) in its raw body, or null.
+ * ES: El primer estado que una respuesta de estado nombra entre comillas (`"P<dígitos>"`) en su cuerpo crudo, o null.
+ */
+export const stateNamedIn = (body: string): string | null => QUOTED_STATE.exec(body)?.[1] ?? null
+
+/**
+ * EN: The status answer is an empty list, wherever in the body it starts: the company is not in the state asked for.
+ * ES: La respuesta de estado es una lista vacía, en cualquier parte del cuerpo donde empiece: la empresa no está en el
+ * estado consultado.
  */
 export const isEmptyList = (body: string): boolean => EMPTY_LIST.test(body)
 
 /**
- * EN: The download gave the receipts test set: HTTP 200 and at least ten characters of text.
- * ES: La descarga entregó el set de pruebas de boletas: HTTP 200 y al menos diez caracteres de texto.
+ * EN: The download gave the receipts test set: at least ten characters of text. The HTTP status is not looked at.
+ * ES: La descarga entregó el set de pruebas de boletas: al menos diez caracteres de texto. No se mira el estado HTTP.
  */
-export const isReceiptsSet = (status: number, text: string): boolean =>
-  status === 200 && text.trim().length >= MIN_SET_LENGTH
+export const isReceiptsSet = (text: string): boolean => text.trim().length >= MIN_SET_LENGTH
 
 /**
  * EN: The values of the declaration body.

@@ -138,6 +138,11 @@ describe('downloadReceiptsTestSet', () => {
     const short = await signedIn([facade(), servlet({ body: '  nada  ' })])
     expect((await failure(downloadReceiptsTestSet(short.portal))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
   })
+
+  test('the HTTP status of the download is not looked at: a set is a body of ten characters or more', async () => {
+    const odd = await signedIn([facade(), servlet({ status: 500, body: RECEIPTS_SET_TEXT })])
+    expect((await downloadReceiptsTestSet(odd.portal)).text).toBe(RECEIPTS_SET_TEXT)
+  })
 })
 
 describe('declareReceiptsTrackId', () => {
@@ -195,20 +200,30 @@ describe('readReceiptsStatus', () => {
     const earlier = await signedIn([facade({ obtenerEstadoAutorizaEmp: { body: okAnswer([1], ['x', 'P05']) } })])
     await expect(readReceiptsStatus(earlier.portal)).resolves.toMatchObject({ readyToDeclare: false, state: 'P05' })
     expect(methods(earlier)).toEqual([LIST, 'obtenerEstadoAutorizaEmp'])
+    // The raw body is read: a P90 inside a sentence counts, as the field reads it.
     const odd = await signedIn([
       facade({ obtenerEstadoAutorizaEmp: { body: okAnswer([1], ['La empresa no esta en estado P90']) } }),
     ])
-    await expect(readReceiptsStatus(odd.portal)).resolves.toMatchObject({
+    await expect(readReceiptsStatus(odd.portal)).resolves.toMatchObject({ readyToDeclare: true, state: 'P90' })
+    const quoted = await signedIn([facade({ obtenerEstadoAutorizaEmp: { body: '<html>"P07"</html>' } })])
+    await expect(readReceiptsStatus(quoted.portal)).resolves.toMatchObject({ readyToDeclare: false, state: 'P07' })
+    const nothing = await signedIn([facade({ obtenerEstadoAutorizaEmp: { body: EXCEPTION } })])
+    await expect(readReceiptsStatus(nothing.portal)).resolves.toEqual({
+      enrolled: true,
       readyToDeclare: false,
       declared: false,
       state: null,
     })
-    expect(methods(odd)).toHaveLength(2)
-    // An answer that is not HTTP 200 is not an answer, for the list or for the state.
+    expect(methods(nothing)).toHaveLength(2)
+  })
+
+  test('the HTTP status of a read is not looked at, for the list or for the state', async () => {
     const down = await signedIn([facade({ obtenerEstadoAutorizaEmp: { status: 500, body: READY } })])
-    expect((await failure(readReceiptsStatus(down.portal))).details['step']).toBe('obtenerEstadoAutorizaEmp')
+    await expect(readReceiptsStatus(down.portal)).resolves.toMatchObject({ readyToDeclare: true, state: 'P90' })
     const listDown = await signedIn([facade({ [LIST]: { status: 500, body: REPRESENTATIVES } })])
-    expect((await failure(readReceiptsStatus(listDown.portal))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
+    await expect(readReceiptsStatus(listDown.portal)).resolves.toMatchObject({ enrolled: true })
+    const unlisted = await signedIn([facade({ [LIST]: { status: 500, body: 'Error' } })])
+    await expect(readReceiptsStatus(unlisted.portal)).resolves.toMatchObject({ enrolled: false })
   })
 
   test('an empty list for 90 is settled by asking for 91: declared, or not approved yet', async () => {
@@ -353,6 +368,13 @@ describe('declareReceiptsCompliance', () => {
     // The 22nd string of the table, the authorisation date, is empty; the Long is the record's own.
     expect(declaration.text).toContain('DocumentoAutorizadoTo/493967287||java.lang.Long/4227064769|')
     expect(declaration.text).toContain('|23|BAqo|-11|')
+  })
+
+  test('the HTTP status of the application read is not looked at; the record is judged by its //OK and its Long', async () => {
+    const odd = await signedIn([ready({ obtenerPostulacionSeg: { status: 500, body: POSTULATION } })])
+    await expect(declareReceiptsCompliance(odd.portal, input)).resolves.toMatchObject({ outcome: 'declared' })
+    const bare = await signedIn([ready({ obtenerPostulacionSeg: { status: 500, body: 'Error' } })])
+    expect((await failure(declareReceiptsCompliance(bare.portal, input))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
   })
 
   test('an application record that is no //OK answer, or lacks its Long, stops the declaration before it is sent', async () => {

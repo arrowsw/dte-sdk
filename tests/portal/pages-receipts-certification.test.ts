@@ -1,12 +1,14 @@
 import { RECEIPTS_PORTAL } from '../../src/catalogs/certification'
 import { gwtAnswer } from '../../src/portal/gwt'
 import {
+  isDeclaredState,
   isEmptyList,
+  isReadyState,
   isReceiptsSet,
   postulationOf,
   receiptsComplianceBody,
-  receiptsStatesOf,
   representativeDigitsOf,
+  stateNamedIn,
 } from '../../src/portal/pages/receipts-certification'
 import { EMPTY_OK, EXCEPTION, okAnswer } from '../support/gwt-answers'
 
@@ -40,23 +42,32 @@ describe('the receipts portal answers', () => {
     expect(postulationOf(gwtAnswer(quoted))).toBeNull()
   })
 
-  test('the states are the table strings that are exactly a P code, and only of an //OK answer', () => {
-    expect(receiptsStatesOf(gwtAnswer(okAnswer([1], ['x', 'P90'])))).toEqual(['P90'])
-    expect(receiptsStatesOf(gwtAnswer(okAnswer([1], ['x', 'P05', 'P91'])))).toEqual(['P05', 'P91'])
-    expect(receiptsStatesOf(gwtAnswer(EMPTY_OK))).toEqual([])
-    // A state quoted inside a sentence, or inside an exception, is not a state.
-    expect(receiptsStatesOf(gwtAnswer(okAnswer([1], ['La empresa no esta en estado P90', 'xP90', 'P90x'])))).toEqual([])
-    expect(receiptsStatesOf(gwtAnswer('//EX[1,["P90"],0,7]'))).toEqual([])
-    expect(receiptsStatesOf(gwtAnswer('<html>"P90"</html>'))).toEqual([])
+  test('the states are read on the raw body: P90 and P91 anywhere, the first quoted P code as the state', () => {
+    expect(isReadyState(okAnswer([1], ['x', 'P90']))).toBe(true)
+    expect(isReadyState(okAnswer([1], ['La empresa no esta en estado P90']))).toBe(true)
+    expect(isReadyState('//EX[1,["P90"],0,7]')).toBe(true)
+    expect(isReadyState(okAnswer([1], ['x', 'P91']))).toBe(false)
+    expect(isReadyState(EMPTY_OK)).toBe(false)
+    expect(isDeclaredState(okAnswer([1], ['x', 'P91']))).toBe(true)
+    expect(isDeclaredState('<html>P91</html>')).toBe(true)
+    expect(isDeclaredState(okAnswer([1], ['x', 'P90']))).toBe(false)
+    expect(stateNamedIn(okAnswer([1], ['x', 'P05', 'P91']))).toBe('P05')
+    expect(stateNamedIn('<html>"P90"</html>')).toBe('P90')
+    expect(stateNamedIn(okAnswer([1], ['xP90', 'P90x', 'P']))).toBeNull()
+    expect(stateNamedIn(EMPTY_OK)).toBeNull()
+  })
+
+  test('an empty list is an //OK answer that starts with a zero count and an empty table, wherever it starts', () => {
     expect(isEmptyList(EMPTY_OK)).toBe(true)
+    expect(isEmptyList(`  ${EMPTY_OK}`)).toBe(true)
     expect(isEmptyList(okAnswer([1], ['P90']))).toBe(false)
     expect(isEmptyList(EXCEPTION)).toBe(false)
   })
 
-  test('a set is an HTTP 200 with at least ten characters of text', () => {
-    expect(isReceiptsSet(200, 'CASO-1\nItem')).toBe(true)
-    expect(isReceiptsSet(200, '   corto   ')).toBe(false)
-    expect(isReceiptsSet(500, 'CASO-1\nItem Cantidad Precio')).toBe(false)
+  test('a set is ten characters of text or more, whatever the HTTP status was', () => {
+    expect(isReceiptsSet('CASO-1\nItem')).toBe(true)
+    expect(isReceiptsSet('   corto   ')).toBe(false)
+    expect(isReceiptsSet('')).toBe(false)
   })
 })
 
