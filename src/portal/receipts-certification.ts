@@ -1,13 +1,13 @@
 import { RECEIPTS_PORTAL } from '../catalogs/certification'
 import { DteError, errorCode, errorMessage } from '../errors'
-import { siiRutOfBody, splitSiiRut, toSiiRut, type SiiRut } from '../model/rut'
+import { splitSiiRut, toSiiRut, type SiiRut } from '../model/rut'
 import type { CallOverrides } from '../sii/client'
 import { bodyExcerpt } from '../sii/operation'
 import { encodeUtf8 } from '../sii/transport'
 import { chileDate } from '../time/chile'
 import { readProgress } from './certification'
 import { resolvePortalCompany, type PortalClient } from './client'
-import { sessionRut } from './cookies'
+import { declarationRepresentative, downloadRepresentative, type CookieRepresentative } from './cookies'
 import {
   GWT_CONTENT_TYPE,
   GWT_INTEGER,
@@ -16,7 +16,6 @@ import {
   gwtNull,
   gwtString,
   postGwt,
-  type GwtAnswer,
   type GwtHashes,
   type GwtParameter,
 } from './gwt'
@@ -92,14 +91,23 @@ const postulationParameters = (company: Party): readonly GwtParameter[] => [
   gwtString(READY),
 ]
 
-// The representative is the owner of the session: with two people enrolled for a company, any other choice makes the
-// SII answer the declaration with a bare HTTP 500. The portal's list is only the fallback.
-const representativeOf = (context: PortalContext, list: GwtAnswer): SiiRut => {
-  const owner = sessionRut(context.state.cookies)
-  if (owner !== null) return owner
-  const digits = representativeDigitsOf(list)
-  if (digits === null) throw new DteError('MISSING_FIELD', { field: 'representative' })
-  return siiRutOfBody(digits, 'representative')
+// The representative of the declaration is the owner of the session: with two people enrolled for a company, any other
+// choice makes the SII answer the declaration with a bare HTTP 500. The portal's list is read again only when the
+// cookies name nobody.
+const declarationRepresentativeOf = async (
+  context: PortalContext,
+  hashes: GwtHashes,
+  company: Party,
+): Promise<CookieRepresentative> => {
+  const owner = declarationRepresentative(context.state.cookies)
+  const digits =
+    owner.digits !== ''
+      ? owner.digits
+      : (representativeDigitsOf(
+          (await call(context, hashes, REPRESENTATIVES_METHOD, companyParameters(company))).answer,
+        ) ?? '')
+  if (digits === '') throw new DteError('MISSING_FIELD', { field: 'representative' })
+  return { digits, verifier: owner.verifier }
 }
 
 /**
@@ -129,8 +137,8 @@ export type DownloadReceiptsTestSetInput = ReceiptsPortalInput & {
 export type ReceiptsTestSetDownload = {
   /** EN: The set text, for `parseReceiptsTestSet`. ES: El texto del set, para `parseReceiptsTestSet`. */
   readonly text: string
-  /** EN: The representative the download named. ES: `rutRepre` + `dvRepre` — El representante que nombró la descarga. */
-  readonly representativeRut: SiiRut
+  /** EN: The representative the download named, as `<digits>-<verifier>` from the session cookies; the verifier may be empty. ES: `rutRepre` + `dvRepre` — El representante que nombró la descarga, como `<dígitos>-<verificador>` desde las cookies de la sesión; el verificador puede venir vacío. */
+  readonly representativeRut: string
 }
 
 /**
@@ -249,9 +257,9 @@ export const downloadReceiptsTestSet = (
     const hashes = input.gwt ?? RECEIPTS_PORTAL.known
     await ensureSession(context)
     // The portal wants both calls before the download; their answers are not judged.
-    const list = await call(context, hashes, REPRESENTATIVES_METHOD, companyParameters(company))
-    const representativeRut = representativeOf(context, list.answer)
-    const representative = partyOf(representativeRut)
+    await call(context, hashes, REPRESENTATIVES_METHOD, companyParameters(company))
+    const representative = downloadRepresentative(context.state.cookies)
+    if (representative.digits === '') throw new DteError('MISSING_FIELD', { field: 'representative' })
     await call(context, hashes, POSTULATION_METHOD, postulationParameters(company))
     const query = `rutEmpresa=${company.digits}&dvEmpresa=${company.verifier}&rutRepre=${representative.digits}&dvRepre=${representative.verifier}&mailProvSw=${encodeURIComponent(input.providerMail ?? '')}`
     const page = await portalRequest(
@@ -262,7 +270,7 @@ export const downloadReceiptsTestSet = (
       { referer: `${RECEIPTS_PORTAL.base}?SET=1`, headers: { Accept: 'text/plain,text/html,*/*' } },
     )
     if (!isReceiptsSet(page.status, page.html)) throw unexpectedPage(context, 'DownloadFileServlet', page.html)
-    return { text: page.html, representativeRut }
+    return { text: page.html, representativeRut: `${representative.digits}-${representative.verifier}` }
   })
 
 /**
@@ -303,13 +311,9 @@ export const declareReceiptsTrackId = (
 
 const NOT_ENROLLED: ReceiptsStatus = { enrolled: false, readyToDeclare: false, declared: false, state: null }
 
-const statusIn = async (
-  context: PortalContext,
-  hashes: GwtHashes,
-  company: Party,
-): Promise<{ readonly status: ReceiptsStatus; readonly list: GwtAnswer }> => {
+const statusIn = async (context: PortalContext, hashes: GwtHashes, company: Party): Promise<ReceiptsStatus> => {
   const { answer: list } = await read(context, hashes, REPRESENTATIVES_METHOD, companyParameters(company))
-  if (representativeDigitsOf(list) === null) return { status: NOT_ENROLLED, list }
+  if (representativeDigitsOf(list) === null) return NOT_ENROLLED
   const statesOf = async (state: number): Promise<{ readonly states: readonly string[]; readonly empty: boolean }> => {
     const { page, answer } = await read(context, hashes, 'obtenerEstadoAutorizaEmp', [
       ...companyParameters(company),
@@ -321,8 +325,7 @@ const statusIn = async (
   const asked = await statesOf(READY_STATE)
   const readyToDeclare = asked.states.includes(READY)
   const state = readyToDeclare ? READY : (asked.states[0] ?? null)
-  if (state !== null || !asked.empty)
-    return { status: { enrolled: true, readyToDeclare, declared: false, state }, list }
+  if (state !== null || !asked.empty) return { enrolled: true, readyToDeclare, declared: false, state }
   // An empty list for 90 is "not approved yet" or "already declared": the state 91 tells them apart.
   const declared = await statesOf(DECLARED_STATE).then(
     (answer) => answer.states.includes(DECLARED),
@@ -331,7 +334,7 @@ const statusIn = async (
       return false
     },
   )
-  return { status: { enrolled: true, readyToDeclare: false, declared, state: declared ? DECLARED : null }, list }
+  return { enrolled: true, readyToDeclare: false, declared, state: declared ? DECLARED : null }
 }
 
 /**
@@ -356,7 +359,7 @@ export const readReceiptsStatus = (
   withPortalSession(portal, 'readReceiptsStatus', overrides, async (context) => {
     const company = partyOf(resolvePortalCompany(portal, input.companyRut))
     await ensureSession(context)
-    return (await statusIn(context, input.gwt ?? RECEIPTS_PORTAL.known, company)).status
+    return statusIn(context, input.gwt ?? RECEIPTS_PORTAL.known, company)
   })
 
 const requiredText = (value: string | undefined, field: string): string => {
@@ -400,11 +403,11 @@ export const declareReceiptsCompliance = (
     const company = partyOf(resolvePortalCompany(portal, input.companyRut))
     const hashes = input.gwt ?? RECEIPTS_PORTAL.known
     await ensureSession(context)
-    const { status, list } = await statusIn(context, hashes, company)
+    const status = await statusIn(context, hashes, company)
     if (!status.enrolled) throw rejected(context, 'receiptsNotEnrolled', {})
     if (status.declared) return { outcome: 'alreadyDeclared', state: status.state }
     if (!status.readyToDeclare) return { outcome: 'notReady', state: status.state }
-    const representative = partyOf(representativeOf(context, list))
+    const representative = await declarationRepresentativeOf(context, hashes, company)
     // The declaration cannot be undone: without the application's own Long, nothing is sent.
     const application = await read(context, hashes, POSTULATION_METHOD, postulationParameters(company))
     const record = postulationOf(application.answer)

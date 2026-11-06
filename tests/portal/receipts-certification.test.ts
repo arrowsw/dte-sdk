@@ -68,7 +68,7 @@ const logger = (): Logger & { readonly lines: string[] } => {
   return { debug: log, info: log, warn: log, error: log, lines }
 }
 const retrying = { retry: { maxAttempts: 3, initialDelayMs: 1 } }
-// A session whose cookies name no RUT: the representative then comes from the portal's list.
+// A session whose cookies name no RUT.
 const anonymous = async (routes: readonly FakeRoute[]): Promise<PortalHarness> => {
   const harness = portalWith(routes)
   await seedSession(harness.portal, { 'NETSCAPE_LIVEWIRE.locexp': 'x' })
@@ -97,8 +97,14 @@ describe('downloadReceiptsTestSet', () => {
     expect(download.headers).toMatchObject({ referer: `${BASE}?SET=1`, accept: 'text/plain,text/html,*/*' })
   })
 
-  test('without a RUT in the session the representative is the last of the portal list, its verifier computed', async () => {
-    const harness = await anonymous([facade(), servlet()])
+  test('the representative of the download comes from rut and dv, never from rutm and dvm, nor from the portal list', async () => {
+    const harness = portalWith([facade(), servlet()])
+    await seedSession(harness.portal, {
+      'NETSCAPE_LIVEWIRE.rut': '11111111',
+      'NETSCAPE_LIVEWIRE.dv': '1',
+      'NETSCAPE_LIVEWIRE.rutm': '14625621',
+      'NETSCAPE_LIVEWIRE.dvm': 'K',
+    })
     const gwt = { permutation: 'A'.repeat(32), policy: 'B'.repeat(32) }
     const result = await downloadReceiptsTestSet(harness.portal, { companyRut: '12.345.678-5', gwt })
     expect(result.representativeRut).toBe('11111111-1')
@@ -109,15 +115,28 @@ describe('downloadReceiptsTestSet', () => {
     expect(posts(harness)[0].headers['x-gwt-permutation']).toBe(gwt.permutation)
   })
 
-  test('no representative anywhere is a missing field; a download that is no set is unexpected', async () => {
-    const nobody = await anonymous([facade({ [LIST]: { body: EMPTY_OK } }), servlet()])
+  test('the fallback cookies name the representative, and a missing verifier goes out empty', async () => {
+    const harness = portalWith([facade(), servlet()])
+    await seedSession(harness.portal, { RUT_NS: '11111111', 'NETSCAPE_LIVEWIRE.locexp': 'x' })
+    const result = await downloadReceiptsTestSet(harness.portal)
+    expect(result.representativeRut).toBe('11111111-')
+    expect(harness.urls()[2]).toBe(
+      `${BASE}DownloadFileServlet?rutEmpresa=76543210&dvEmpresa=3&rutRepre=11111111&dvRepre=&mailProvSw=`,
+    )
+  })
+
+  test('no representative in the cookies is a missing field, even when the portal list names one', async () => {
+    const nobody = await anonymous([facade(), servlet()])
     const missing = await failure(downloadReceiptsTestSet(nobody.portal))
     expect(missing.code).toBe('MISSING_FIELD')
     expect(missing.details).toEqual({ field: 'representative' })
+    expect(methods(nobody)).toEqual([LIST])
+    expect(nobody.urls().filter((url) => url.includes('DownloadFileServlet'))).toEqual([])
+  })
+
+  test('a download that is no set is unexpected', async () => {
     const short = await signedIn([facade(), servlet({ body: '  nada  ' })])
     expect((await failure(downloadReceiptsTestSet(short.portal))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
-    const down = await signedIn([facade(), servlet({ status: 500, body: RECEIPTS_SET_TEXT })])
-    expect((await failure(downloadReceiptsTestSet(down.portal))).details['step']).toBe('DownloadFileServlet')
   })
 })
 
@@ -370,10 +389,59 @@ describe('declareReceiptsCompliance', () => {
     expect(quiet.urls()).toEqual([])
   })
 
-  test('without a RUT in the session the representative of the declaration comes from the portal list', async () => {
+  test('the representative of the declaration is rutm and dvm before rut and dv, its verifier in capitals', async () => {
+    const harness = portalWith([ready()])
+    await seedSession(harness.portal, {
+      'NETSCAPE_LIVEWIRE.rut': '11111111',
+      'NETSCAPE_LIVEWIRE.dv': '1',
+      'NETSCAPE_LIVEWIRE.rutm': '14625621',
+      'NETSCAPE_LIVEWIRE.dvm': 'k',
+    })
+    await declareReceiptsCompliance(harness.portal, input)
+    expect(posts(harness)[3].text).toContain('|8|76543210|8|10000004|8|14625621|')
+    expect(posts(harness)[3].text).toContain('|SII|')
+    expect(posts(harness)[3].text.split('|').slice(0, 30)).toContain('K')
+  })
+
+  test('without a RUT in the session the digits come from a new read of the portal list and the verifier is 8', async () => {
     const harness = await anonymous([ready()])
     await declareReceiptsCompliance(harness.portal, input)
-    expect(posts(harness)[3].text).toContain('|8|76543210|8|10000004|8|11111111|')
+    expect(methods(harness)).toEqual([
+      LIST,
+      'obtenerEstadoAutorizaEmp',
+      LIST,
+      'obtenerPostulacionSeg',
+      'autorizarEmpresaBolProd',
+    ])
+    const declaration = posts(harness)[4].text
+    expect(declaration).toContain('|8|76543210|8|10000004|8|11111111|')
+    expect(declaration.split('|').slice(3, 30)).toContain('8')
+    expect(
+      receiptsComplianceBody({
+        moduleBase: BASE,
+        policy: KNOWN.policy,
+        serviceInterface: SERVICE,
+        company: { digits: '76543210', verifier: '3' },
+        provider: { digits: '10000004', verifier: '0' },
+        representative: { digits: '11111111', verifier: '8' },
+        date: '15-11-2026',
+        providerMail: 'soporte@example.test',
+        providerName: 'Proveedor de Software SpA',
+        link: 'www.sii.cl',
+        authorizationDate: '10/11/2026',
+        token: 'BAqo',
+        businessName,
+      }),
+    ).toBe(declaration)
+  })
+
+  test('without a RUT in the session and none in the portal list, nothing is declared', async () => {
+    let lists = 0
+    const harness = await anonymous([ready({ [LIST]: () => ({ body: ++lists === 1 ? REPRESENTATIVES : EMPTY_OK }) })])
+    const error = await failure(declareReceiptsCompliance(harness.portal, input))
+    expect(error.code).toBe('MISSING_FIELD')
+    expect(error.details).toEqual({ field: 'representative' })
+    expect(methods(harness)).not.toContain('autorizarEmpresaBolProd')
   })
 })
 

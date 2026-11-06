@@ -4,6 +4,8 @@ import {
   mergeSetCookie,
   parseCookies,
   serializeCookies,
+  declarationRepresentative,
+  downloadRepresentative,
   sessionRut,
   splitSetCookie,
 } from '../../src/portal/cookies'
@@ -56,4 +58,40 @@ test('the stored form round trips and unreadable text is an empty jar', () => {
   expect(parseCookies('[1]')).toEqual({})
   expect(parseCookies('null')).toEqual({})
   expect(parseCookies('3')).toEqual({})
+})
+
+test('the representative of the set download is read from rut and dv, then from the fallback cookies, empty when absent', () => {
+  expect(
+    downloadRepresentative({
+      'NETSCAPE_LIVEWIRE.rut': '12345678',
+      'NETSCAPE_LIVEWIRE.dv': 'k',
+      'NETSCAPE_LIVEWIRE.rutm': '76543210',
+      'NETSCAPE_LIVEWIRE.dvm': '3',
+    }),
+  ).toEqual({ digits: '12345678', verifier: 'k' })
+  expect(downloadRepresentative({ RUT_NS: '11111111', DV_NS: '1' })).toEqual({ digits: '11111111', verifier: '1' })
+  expect(
+    downloadRepresentative({ 'NETSCAPE_LIVEWIRE.rut': '', RUT_NS: '11111111', 'NETSCAPE_LIVEWIRE.dv': '' }),
+  ).toEqual({ digits: '11111111', verifier: '' })
+  expect(downloadRepresentative({})).toEqual({ digits: '', verifier: '' })
+})
+
+test('the representative of the declaration prefers rutm and dvm, and its verifier is capital and 8 when no cookie has one', () => {
+  expect(
+    declarationRepresentative({
+      'NETSCAPE_LIVEWIRE.rut': '12345678',
+      'NETSCAPE_LIVEWIRE.dv': '5',
+      'NETSCAPE_LIVEWIRE.rutm': '76543210',
+      'NETSCAPE_LIVEWIRE.dvm': 'k',
+    }),
+  ).toEqual({ digits: '76543210', verifier: 'K' })
+  expect(declarationRepresentative({ 'NETSCAPE_LIVEWIRE.rut': '12345678', 'NETSCAPE_LIVEWIRE.dv': '5' })).toEqual({
+    digits: '12345678',
+    verifier: '5',
+  })
+  expect(declarationRepresentative({ 'NETSCAPE_LIVEWIRE.rutm': '76543210' })).toEqual({
+    digits: '76543210',
+    verifier: '8',
+  })
+  expect(declarationRepresentative({})).toEqual({ digits: '', verifier: '8' })
 })
