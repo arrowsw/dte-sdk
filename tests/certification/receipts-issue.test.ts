@@ -86,6 +86,31 @@ describe('issueReceiptsSet', () => {
     expect(issued.receipts[0].document.header.issueDate).toBe('2026-11-16')
   })
 
+  test('each receipt is stamped with the UTC instant to the second, and the envelope with the time of Chile', async () => {
+    const evening = new Date('2026-11-16T01:30:15.250Z')
+    const issued = await issueReceiptsSet(cases.slice(0, 2), { ...options(), now: () => evening })
+    for (const { document } of issued.receipts) {
+      expect(document.xml).toContain('<TSTED>2026-11-16T01:30:15</TSTED>')
+      expect(document.xml).toContain('<TmstFirma>2026-11-16T01:30:15</TmstFirma>')
+      expect(verifyDocumentSignature(document.xml).valid).toBe(true)
+    }
+    expect(issued.envelope.xml).toContain('<TmstFirmaEnv>2026-11-15T22:30:15</TmstFirmaEnv>')
+    await expect(validateAgainstXsd(issued.envelope.xml, 'EnvioBOLETA')).resolves.toEqual([])
+  })
+
+  test('the clock is read once for the date, once per receipt and once more for the envelope', async () => {
+    const ticks = [0, 1, 2, 3].map((second) => new Date(`2026-11-16T03:59:5${second}.000Z`))
+    const reads = { count: 0 }
+    const now = (): Date => ticks[Math.min(reads.count++, ticks.length - 1)]
+    const issued = await issueReceiptsSet(cases.slice(0, 2), { ...options(), now })
+    expect(issued.receipts.map(({ document }) => /<TSTED>([^<]+)<\/TSTED>/.exec(document.xml)?.[1])).toEqual([
+      '2026-11-16T03:59:51',
+      '2026-11-16T03:59:52',
+    ])
+    expect(issued.envelope.xml).toContain('<TmstFirmaEnv>2026-11-16T00:59:53</TmstFirmaEnv>')
+    expect(reads.count).toBe(4)
+  })
+
   test('the unit is the word after the last "en" of the observation, with no word boundary before it', async () => {
     const noted = parseReceiptsTestSet(
       'CASO-1\nItem\tCantidad\tPrecio\nPan\t1\t100\nOBSERVACION: La unidad de medida del almacen Kg.',

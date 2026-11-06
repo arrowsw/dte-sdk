@@ -14,6 +14,10 @@ const RECEIPT_TYPE = 39
 const UNIT_OBSERVATION = /unidad de medida/i
 const UNIT_WORD = /en\s+(\w+)\.?$/i
 
+// The stamps of a receipt are the UTC instant to the second, without a zone, as the field writes them: three or four
+// hours ahead of the time of Chile the envelope carries.
+const utcSeconds = (at: Date): string => at.toISOString().slice(0, 19)
+
 /**
  * EN: What issuing the receipts set needs.
  * ES: Lo que necesita emitir el set de boletas.
@@ -27,7 +31,7 @@ export type IssueReceiptsSetOptions = {
   readonly folios: FolioSource
   /** EN: The resolution of the certification environment; number 0 and the UTC date of the instant by default, field by field. ES: `NroResol`, `FchResol` — La resolución del ambiente de certificación; por defecto número 0 y la fecha UTC del instante, campo por campo. */
   readonly resolution?: { readonly number?: number; readonly date?: string }
-  /** EN: Clock; the issue date is the UTC date of it. ES: `FchEmis` — Reloj; la fecha de emisión es la fecha UTC de él. */
+  /** EN: Clock, read once for the issue date (its UTC date), once per receipt for its stamps (the UTC instant to the second) and once for the envelope (the time of Chile). ES: `FchEmis`, `TSTED`, `TmstFirma`, `TmstFirmaEnv` — Reloj, leído una vez para la fecha de emisión (su fecha UTC), una vez por boleta para sus marcas (el instante UTC al segundo) y una vez para el sobre (la hora de Chile). */
   readonly now?: () => Date
 }
 
@@ -82,12 +86,14 @@ const linesOf = (testCase: ReceiptsTestCase): readonly LineItemInput[] => {
  * the final consumer as receiver, the prices of the set taken as including VAT, the exemption of an exempt item, the
  * unit of measure an observation names on its first item, and one reference with the code `SET` and the reason
  * `CASO-<n>`; then signs the `EnvioBOLETA` that carries them, with the certificate holder as sender (the issuer when
- * the certificate names none) and the SII as receiver.
+ * the certificate names none) and the SII as receiver. The receipts are dated with the UTC day and each is stamped and
+ * signed with the UTC instant to the second, as the field does; only the envelope carries the time of Chile.
  * ES: Emite el set de pruebas de boletas: una boleta tipo 39 por caso, en orden, cada una con el siguiente folio de la
  * fuente, el consumidor final como receptor, los precios del set tomados con IVA incluido, la exención de un ítem
  * exento, la unidad de medida que nombra una observación en su primer ítem, y una referencia con el código `SET` y la
  * razón `CASO-<n>`; luego firma el `EnvioBOLETA` que las lleva, con el titular del certificado como enviador (el
- * emisor cuando el certificado no nombra ninguno) y el SII como receptor.
+ * emisor cuando el certificado no nombra ninguno) y el SII como receptor. Las boletas se fechan con el día UTC y cada
+ * una se timbra y se firma con el instante UTC al segundo, como lo hace el campo; solo el sobre lleva la hora de Chile.
  * @param cases EN: the cases of `parseReceiptsTestSet`. ES: los casos de `parseReceiptsTestSet`.
  * @param options EN: issuer, certificate, folios, resolution, clock. ES: emisor, certificado, folios, resolución, reloj.
  * @throws {DteError} EN: `MISSING_FIELD { field: 'cases' }` without cases, `FOLIO_OUT_OF_RANGE` from the folio source, and the phase 1 codes. ES: `MISSING_FIELD { field: 'cases' }` sin casos, `FOLIO_OUT_OF_RANGE` de la fuente de folios, y los códigos de la fase 1.
@@ -97,7 +103,8 @@ export const issueReceiptsSet = async (
   options: IssueReceiptsSetOptions,
 ): Promise<IssuedReceiptsSet> => {
   if (cases.length === 0) throw new DteError('MISSING_FIELD', { field: 'cases' })
-  const now = options.now?.() ?? new Date()
+  const clock = options.now ?? (() => new Date())
+  const now = clock()
   // The UTC date of the instant, as the field issues them: late in the evening in Chile it is already tomorrow's.
   const issueDate = now.toISOString().slice(0, 10)
   const issuer = completeIssuer(options.issuer)
@@ -105,6 +112,8 @@ export const issueReceiptsSet = async (
   const receipts: IssuedReceipt[] = []
   for (const testCase of cases) {
     const { caf, folio } = await options.folios.take(RECEIPT_TYPE)
+    // Each receipt is stamped and signed at its own reading of the clock, written as the field writes it.
+    const at = clock()
     const document = issueDocument({
       document: {
         type: RECEIPT_TYPE,
@@ -117,7 +126,8 @@ export const issueReceiptsSet = async (
       },
       caf,
       certificate: options.certificate,
-      now,
+      now: at,
+      timestamp: utcSeconds(at),
     })
     receipts.push({ caseNumber: testCase.number, folio, document })
   }
@@ -131,7 +141,8 @@ export const issueReceiptsSet = async (
         resolutionDate: resolution.date,
         resolutionNumber: resolution.number,
       },
-      now,
+      // The envelope is sealed at a later reading, in the time of Chile.
+      now: clock(),
     }),
     options.certificate,
   )
