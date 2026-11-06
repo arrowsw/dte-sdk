@@ -515,8 +515,9 @@ const stampingTypes = async (
   sessionChecked: boolean | undefined,
 ): Promise<readonly number[]> => {
   const resolved = resolvePortalCompany(portal, companyRut)
-  // The field posts the RUT as it was written, split on the hyphen: its verifier is not put in capitals.
-  const [digits, verifier] = (companyRut ?? resolved).replace(/\./g, '').split('-')
+  // The field posts the RUT as it was written, split on the hyphen: its verifier is not put in capitals, and one
+  // written without a hyphen goes whole, with an empty verifier.
+  const [digits, verifier = ''] = (companyRut ?? resolved).replace(/\./g, '').split('-')
   const company = companyRut === undefined ? companyFields(resolved) : { RUT_EMP: digits, DV_EMP: verifier }
   const entryUrl = cgiUrl(portal.environment, 'of_solicita_folios')
   const agent = { 'User-Agent': SHORT_AGENT }

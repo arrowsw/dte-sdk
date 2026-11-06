@@ -547,6 +547,12 @@ describe('verifyReceiptsAuthorization', () => {
     expect(live.posted('of_solicita_folios_dcto')[0]).toMatchObject({ RUT_EMP: '60803000', DV_EMP: 'k' })
   })
 
+  test('a company written without its hyphen is posted whole, with an empty verifier', async () => {
+    const live = await production(typeSelector(QUOTED_BOLETA))
+    await verifyReceiptsAuthorization({ production: live.portal, companyRut: '60.803.000K' })
+    expect(live.posted('of_solicita_folios_dcto')[0]).toMatchObject({ RUT_EMP: '60803000K', DV_EMP: '' })
+  })
+
   test('an option whose value is not quoted is not a type, as in the field', async () => {
     const live = await production(typeSelector(`${FACTURA}<option value=39>BOLETA</option>`))
     const result = await verifyReceiptsAuthorization({ production: live.portal })
