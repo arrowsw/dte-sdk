@@ -58,13 +58,25 @@ const answered = (code: string, message: string | null, raw: string | null): Fie
   raw,
 })
 
+const unanswered = (message: string | null, raw: string | null): FieldUploadState => ({
+  answered: false,
+  code: null,
+  message,
+  successful: false,
+  intermediate: false,
+  rejected: false,
+  raw,
+})
+
 /**
  * EN: Asks the SII once for the state of an envelope, as the certification run does: one request on the SOAP channel,
- * never repeated. An HTTP error or an answer without a state is "no answer", not a failure; a query-service error code
- * is an intermediate state; only a request that never got through throws.
+ * never retried (the client still renews a token the SII refuses and asks once more). An HTTP error or an answer
+ * without a state, or with an empty one, is "no answer", not a failure; a query-service error code is an intermediate
+ * state; only a request that never got through throws.
  * ES: Pregunta una vez al SII por el estado de un envío, como lo hace la corrida de certificación: una petición por el
- * canal SOAP, sin repetirla. Un error HTTP o una respuesta sin estado es "sin respuesta", no una falla; un código de
- * error del servicio de consulta es un estado intermedio; solo lanza una petición que nunca llegó.
+ * canal SOAP, sin reintentos (el cliente igual renueva un token que el SII rechaza y pregunta una vez más). Un error
+ * HTTP o una respuesta sin estado, o con uno vacío, es "sin respuesta", no una falla; un código de error del servicio
+ * de consulta es un estado intermedio; solo lanza una petición que nunca llegó.
  * @param sii EN: the client. ES: el cliente.
  * @param trackId EN: the track id of the envelope. ES: `TrackId` — el track id del envío.
  * @returns EN: the state as the run reads it. ES: el estado tal como lo lee la corrida.
@@ -73,20 +85,15 @@ const answered = (code: string, message: string | null, raw: string | null): Fie
 export const queryFieldUploadState = async (sii: SiiClient, trackId: string): Promise<FieldUploadState> => {
   try {
     const status = await queryUploadStatus(sii, { trackId, channel: 'soap' }, { retry: false })
-    return answered(status.code, status.message, status.raw)
+    // A state element with nothing in it is not a state.
+    return status.code === ''
+      ? unanswered(status.message, status.raw)
+      : answered(status.code, status.message, status.raw)
   } catch (error) {
     if (!isDteError(error)) throw error
     if (QUERY_CODE.has(error.code) && typeof error.details.code === 'string')
       return answered(error.details.code, null, null)
     if (!UNANSWERED.has(error.code)) throw error
-    return {
-      answered: false,
-      code: null,
-      message: error.message,
-      successful: false,
-      intermediate: false,
-      rejected: false,
-      raw: null,
-    }
+    return unanswered(error.message, null)
   }
 }

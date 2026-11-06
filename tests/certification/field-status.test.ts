@@ -87,6 +87,13 @@ describe('queryFieldUploadState', () => {
     expect(result.answered).toBe(false)
   })
 
+  test('an answer whose state is empty is no answer either', async () => {
+    const { result } = await state(estUp(''))
+    expect(result).toMatchObject({ answered: false, code: null, successful: false, intermediate: false })
+    // The answer as it came is kept for the diagnosis.
+    expect(result.raw).toContain('<ESTADO></ESTADO>')
+  })
+
   test('a request that never got through throws', async () => {
     const harness = await certificationHarness([
       estUpRoute(new DteError('TRANSPORT_FAILED', { reason: 'socket hang up' })),
