@@ -53,18 +53,33 @@ test('the input is never changed', () => {
   expect(ledger).toEqual(emptyLedger())
 })
 
-test('a gap left by a release is reused while something stays unsent', () => {
+test('a folio given back is handed out again before any higher one', () => {
   const { ledger } = reserveMany(emptyLedger(), 3)
   const released = releaseInLedger(ledger, scope, [2], AT)
   expect(reserveInLedger(released, scope, AT).folio).toBe(2)
 })
 
-test('after everything was sent a gap below stays a gap', () => {
+test('after everything was sent a gap below is still the next folio', () => {
   const big = { ...scope, range: { from: 1, to: 9 } }
   const { ledger } = reserveMany(emptyLedger(), 3, big)
   const sent = markSentInLedger(markSentInLedger(ledger, big, 1, {}, AT), big, 3, {}, AT)
   const released = releaseInLedger(sent, big, [2], AT)
-  expect(reserveInLedger(released, big, AT).folio).toBe(4)
+  expect(reserveInLedger(released, big, AT).folio).toBe(2)
+})
+
+test('a folio marked sent leaves the free folios below it available, and the count is true', () => {
+  const big = { ...scope, range: { from: 1, to: 9 } }
+  const marked = markSentInLedger(emptyLedger(), big, 5, {}, AT)
+  const { folios } = reserveMany(marked, 5, big)
+  expect(folios).toEqual([1, 2, 3, 4, 6])
+})
+
+test('annulled and used folios are skipped wherever they lie, and an exhausted range throws', () => {
+  const small = { ...scope, range: { from: 1, to: 4 } }
+  const annulled = markAnnulledInLedger(markSentInLedger(emptyLedger(), small, 3, {}, AT), small, [1], AT)
+  const { ledger, folios } = reserveMany(annulled, 2, small)
+  expect(folios).toEqual([2, 4])
+  expect(() => reserveInLedger(ledger, small, AT)).toThrow(expect.objectContaining({ code: 'FOLIO_OUT_OF_RANGE' }))
 })
 
 test('annulled folios of any entry of the company, type and environment are skipped', () => {

@@ -125,10 +125,10 @@ const outOfRange = (scope: FolioScope, folio: number): DteError =>
   new DteError('FOLIO_OUT_OF_RANGE', { folio, from: scope.range.from, to: scope.range.to, type: scope.type })
 
 /**
- * EN: The next free folio: it starts at the lowest reserved-but-unsent folio, or after the last reserved, and walks past
- * used and annulled folios.
- * ES: El siguiente folio libre: parte en el menor folio reservado y no enviado, o después del último reservado, y avanza
- * saltando los usados y los anulados.
+ * EN: The lowest folio of the range that is neither used nor annulled, wherever the used ones lie: a folio given back, or
+ * left free below a folio marked sent, is handed out again.
+ * ES: El menor folio del rango que no está usado ni anulado, estén donde estén los usados: un folio devuelto, o que quedó
+ * libre bajo un folio marcado como enviado, se vuelve a entregar.
  * @throws {DteError} EN: `FOLIO_OUT_OF_RANGE` past the end of the range. ES: `FOLIO_OUT_OF_RANGE` pasado el fin del rango.
  */
 export const reserveInLedger = (
@@ -139,9 +139,7 @@ export const reserveInLedger = (
   const entry = ledger.entries[keyOf(scope)] ?? freshEntry(scope, at)
   const annulled = annulledFolios(ledger, scope)
   const used = new Set(entry.used)
-  const unsent = entry.used.filter((folio) => entry.sent[String(folio)] === undefined && !annulled.has(folio))
-  const start = unsent[0] ?? (entry.lastReserved === null ? scope.range.from : entry.lastReserved + 1)
-  let folio = Math.max(start, scope.range.from)
+  let folio = scope.range.from
   while (used.has(folio) || annulled.has(folio)) folio += 1
   if (folio > scope.range.to) throw outOfRange(scope, folio)
   const nextUsed = [...entry.used, folio].sort((a, b) => a - b)
