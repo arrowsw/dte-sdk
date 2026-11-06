@@ -12,7 +12,7 @@ import type { ReceiptsTestCase } from './receipts-set'
 
 const RECEIPT_TYPE = 39
 const UNIT_OBSERVATION = /unidad de medida/i
-const UNIT_WORD = /\ben\s+(\w+)\.?$/i
+const UNIT_WORD = /en\s+(\w+)\.?$/i
 
 /**
  * EN: What issuing the receipts set needs.
@@ -59,7 +59,8 @@ export type IssuedReceiptsSet = {
   readonly lastFolio: number
 }
 
-// "… unidad de medida en Kg." names the unit of the first item: the last word after `en`.
+// "… unidad de medida en Kg." names the unit of the first item: the word after the `en` that ends the text. No word
+// boundary is asked before `en`, as in the field, so the end of a longer word counts too.
 const unitOf = (testCase: ReceiptsTestCase): string | undefined => {
   const observation = testCase.observations.find((text) => UNIT_OBSERVATION.test(text))
   return observation === undefined ? undefined : UNIT_WORD.exec(observation.trim())?.[1]

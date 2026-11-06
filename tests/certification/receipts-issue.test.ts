@@ -80,9 +80,25 @@ describe('issueReceiptsSet', () => {
     expect((await failure(issueReceiptsSet(cases, short))).code).toBe('FOLIO_OUT_OF_RANGE')
   })
 
-  test('the unit is the last word after the word "en", never after a word that ends in it', async () => {
+  test('the unit is the word after the last "en" of the observation, with no word boundary before it', async () => {
+    const noted = parseReceiptsTestSet(
+      'CASO-1\nItem\tCantidad\tPrecio\nPan\t1\t100\nOBSERVACION: La unidad de medida del almacen Kg.',
+    )
+    const issued = await issueReceiptsSet(noted, options())
+    expect(issued.receipts[0].document.items[0].unit).toBe('Kg')
+  })
+
+  test('the word after a word that merely contains "en" is taken as the unit, and the document builder refuses a long one', async () => {
     const noted = parseReceiptsTestSet(
       'CASO-1\nItem\tCantidad\tPrecio\nPan\t1\t100\nOBSERVACION: Los items con unidad de medida se deben informar.',
+    )
+    const refused = await failure(issueReceiptsSet(noted, options()))
+    expect(refused.details).toMatchObject({ field: 'UnmdItem', length: 8 })
+  })
+
+  test('an observation about the unit that does not end in a word after "en" gives no unit', async () => {
+    const noted = parseReceiptsTestSet(
+      'CASO-1\nItem\tCantidad\tPrecio\nPan\t1\t100\nOBSERVACION: La unidad de medida se informa.',
     )
     const issued = await issueReceiptsSet(noted, options())
     expect(issued.receipts[0].document.items[0].unit).toBeUndefined()

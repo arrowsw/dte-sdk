@@ -28,7 +28,7 @@ describe('parseReceiptsTestSet', () => {
           { name: 'item afecto 1', quantity: 8, unitPrice: 1590, exempt: false },
           { name: 'item exento 2', quantity: 2, unitPrice: 1000, exempt: true },
         ],
-        observations: ['Item exento debe informarse como exento'],
+        observations: ['Item exento debe informarse como exento', ''],
       },
     ])
   })
@@ -47,20 +47,56 @@ describe('parseReceiptsTestSet', () => {
     ])
   })
 
-  test('an observation keeps a quote inside its text, and a price drops every comma', () => {
+  test('an observation is cut at its first quote, and a price drops every dot and only its first comma', () => {
     const text = [
       'CASO-1',
       'Item\tCantidad\tPrecio',
       'Viga\t1\t1,234,567',
+      'Tubo\t1\t1.234,5',
       'OBSERVACION: "Clavo de 3/4" con unidad de medida en Kg."',
       'OBSERVACION: Tubo de 1/2" sin comillas',
+      'OBSERVACION: "  "',
     ].join('\n')
     expect(parseReceiptsTestSet(text)).toEqual([
       {
         number: 1,
-        items: [{ name: 'Viga', quantity: 1, unitPrice: 1234567, exempt: false }],
-        observations: ['Clavo de 3/4" con unidad de medida en Kg.', 'Tubo de 1/2" sin comillas'],
+        items: [
+          { name: 'Viga', quantity: 1, unitPrice: 1234, exempt: false },
+          { name: 'Tubo', quantity: 1, unitPrice: 12345, exempt: false },
+        ],
+        observations: ['Clavo de 3/4', 'Tubo de 1/2', ''],
       },
+    ])
+  })
+
+  test('the empty parts of an item line are dropped, so a tab followed by spaces does not shift the columns', () => {
+    expect(parseReceiptsTestSet('CASO-1\nItem\tCantidad\tPrecio\nitem\t  1\t1000\nPan \t\t 2   300')).toEqual([
+      {
+        number: 1,
+        items: [
+          { name: 'item', quantity: 1, unitPrice: 1000, exempt: false },
+          { name: 'Pan', quantity: 2, unitPrice: 300, exempt: false },
+        ],
+        observations: [],
+      },
+    ])
+  })
+
+  test('the item header and the observation line are matched in exact case', () => {
+    const text = [
+      'CASO-1',
+      'ITEM\tCANTIDAD\tPRECIO',
+      'Pan\t1\t100',
+      'Observacion: no es una observacion',
+      'item\tcantidad\tprecio',
+      'Pan\t1\t100',
+      'CASO-2',
+      'Item\tCantidad\tPrecio',
+      'Pan\t1\t100',
+    ].join('\n')
+    expect(parseReceiptsTestSet(text)).toEqual([
+      { number: 1, items: [], observations: [] },
+      { number: 2, items: [{ name: 'Pan', quantity: 1, unitPrice: 100, exempt: false }], observations: [] },
     ])
   })
 })
