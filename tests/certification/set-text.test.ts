@@ -275,6 +275,47 @@ describe('the purchase-book sets', () => {
     expect(plain.proportionalityFactor).toBe(0.5)
   })
 
+  test('a separator line or a case header ends the rows of a book set until the next set', () => {
+    const regular = parseTestSetText(
+      `SET LIBRO DE COMPRAS - NUMERO DE ATENCION: 1\nFACTURA 1\nFACTURA DEL GIRO\n100\n${'-'.repeat(30)}\nFACTURA 2\nFACTURA DEL GIRO\n200\nFACTOR DE PROPORCIONALIDAD 0.3\n`,
+    )[0]
+    expect(regular.bookDocuments.map((doc) => doc.folio)).toEqual([1])
+    expect(regular.proportionalityFactor).toBeNull()
+    const exempt = parseTestSetText(
+      `SET LIBRO DE COMPRAS PARA EXENTOS - NUMERO DE ATENCION: 1\nFACTURA    1    100\nCASO 1-1\nFACTURA    2    200\nFACTURA    3    300\n`,
+    )[0]
+    expect(exempt.bookDocuments.map((doc) => doc.folio)).toEqual([1])
+  })
+
+  test('the observation flags of the regular book are case sensitive, the observation itself is not', () => {
+    const [set] = parseTestSetText(
+      `SET LIBRO DE COMPRAS - NUMERO DE ATENCION: 1\nFACTURA 1\nfactura con iva uso comun\n100\nFACTURA 2\nENTREGA gratuita\n100\nFACTURA 3\nCOMPRA CON RETENCION total\n100\n`,
+    )
+    expect(
+      set.bookDocuments.map((doc) => [
+        doc.observation,
+        doc.commonUseVat,
+        doc.nonRecoverableVatCode,
+        doc.totalWithholding,
+      ]),
+    ).toEqual([
+      ['factura con iva uso comun', false, null, false],
+      ['ENTREGA gratuita', false, null, false],
+      ['COMPRA CON RETENCION total', false, null, false],
+    ])
+  })
+
+  test('an exempt-book amount column that is not a number counts as no amount', () => {
+    const [set] = parseTestSetText(
+      `SET LIBRO DE COMPRAS PARA EXENTOS - NUMERO DE ATENCION: 1\nFACTURA    1    -    -\nFACTURA EXENTA    2    -\nFACTURA    3    0    50\n`,
+    )
+    expect(set.bookDocuments.map((doc) => [doc.exemptAmount, doc.affectedAmount])).toEqual([
+      [null, null],
+      [null, null],
+      [null, 50],
+    ])
+  })
+
   test('a sales-book set keeps its instruction lines out and a factor outside book sets is read too', () => {
     const [set] = parseTestSetText(
       `SET LIBRO DE VENTAS - NUMERO DE ATENCION: 1\nUsar DTEs del SET BASICO\nFACTOR DE PROPORCIONALIDAD IVA: 0.7\n`,
@@ -405,6 +446,7 @@ describe('detectors', () => {
     ['FACTURA DE COMPRA ELECTRONICA', 46],
     ['FACTURA EXENTA ELECTRONICA', 34],
     ['FACTURA NO AFECTA ELECTRONICA', 34],
+    ['FACTURA NO AFECTA ELECTRONICO', 30],
     ['FACTURA ELECTRONICA', 33],
     ['FACTURA EXENTA', 30],
     ['FACTURA NO AFECTA', 30],
