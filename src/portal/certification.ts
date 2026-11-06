@@ -734,7 +734,7 @@ export const declareCompliance = (
       at('pe_avance8'),
       entry.url,
       { ...company, ACEPTAR: 'Continuar' },
-      entry.url,
+      at('pe_avance7'),
     )
     const blockedAtSecond = blockedOn(second)
     if (blockedAtSecond !== null) return blockedAtSecond

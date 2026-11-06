@@ -879,6 +879,17 @@ describe('declareCompliance', () => {
     await expect(declareCompliance(blocked.portal)).resolves.toMatchObject({ outcome: 'blocked' })
   })
 
+  test('the first post names pe_avance7 as its referer, wherever the entry page came from', async () => {
+    const moved = await signedIn([
+      { url: `${MAULLIN}/pe_avance7`, reply: { status: 302, headers: { location: 'pe_avance7x' } } },
+      get('pe_avance7x', COMPLIANCE_ENTRY),
+      post('pe_avance8', COMPLIANCE_DECLARED),
+    ])
+    await expect(declareCompliance(moved.portal)).resolves.toMatchObject({ outcome: 'declared' })
+    const [request] = moved.fake.requests.filter((item) => item.url.endsWith('/pe_avance8'))
+    expect(request.headers.referer).toBe(`${MAULLIN}/pe_avance7`)
+  })
+
   test('the posts of the wizard carry every input of the page and pe_avance8 as referer', async () => {
     const okMsg = page(
       '<form action="/cvc_cgi/dte/pe_avance8"><input type=hidden name=OK_MSG value=S><input type=text name=Extra value=5>' +

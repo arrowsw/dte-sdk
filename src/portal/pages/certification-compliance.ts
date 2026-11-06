@@ -1,4 +1,4 @@
-import { decodeEntities, inputValues, bodyText } from '../html'
+import { decodeEntities, bodyText } from '../html'
 
 /**
  * EN: The `pe_avance9` form, ready to post: its action and its fields.
@@ -22,6 +22,32 @@ const FORM_ACTION = /<form[^>]*action="([^"]+)"/i
 // writes it, or the company input written name first and type unquoted.
 const UNCONFIRMED = /NAME="OPC1"|name="RUT_EMP"[^>]*type=\s*text/i
 
+// How the field reads the name and the value of an input tag: the first written with double quotes, else with single
+// quotes, else bare after a separator. The quoted forms ask for no separator, and a name needs at least one character.
+const INPUT_NAME: readonly RegExp[] = [
+  /name\s*=\s*"([^"]+)"/i,
+  /name\s*=\s*'([^']+)'/i,
+  /(?:^|[\s<])name\s*=\s*([^\s>"']+)/i,
+]
+const INPUT_VALUE: readonly RegExp[] = [
+  /value\s*=\s*"([^"]*)"/i,
+  /value\s*=\s*'([^']*)'/i,
+  /(?:^|[\s<])value\s*=\s*([^\s>"']+)/i,
+]
+
+const firstMatch = (tag: string, patterns: readonly RegExp[]): string | undefined =>
+  patterns.map((pattern) => pattern.exec(tag)?.[1]).find((found) => found !== undefined)
+
+// Every named input of a compliance page, in page order; a repeated name keeps its first place and its last value. The
+// declaration is sworn and cannot be undone, so the page is read exactly as the reference reads it.
+const pageInputs = (html: string): Readonly<Record<string, string>> =>
+  Object.fromEntries(
+    (html.match(/<input[^>]+>/gi) ?? []).flatMap((tag) => {
+      const name = firstMatch(tag, INPUT_NAME)
+      return name === undefined ? [] : [[name, firstMatch(tag, INPUT_VALUE) ?? '']]
+    }),
+  )
+
 const sentenceAround = (text: string, pattern: RegExp): string | null => {
   const match = pattern.exec(text)
   if (match === null) return null
@@ -41,7 +67,7 @@ export const complianceBlock = (html: string): string | null =>
  * EN: The second screen carries an `OK_MSG` field with a value and asks to continue.
  * ES: La segunda pantalla trae un campo `OK_MSG` con valor y pide continuar.
  */
-export const hasOkMessage = (html: string): boolean => (inputValues(html).OK_MSG ?? '') !== ''
+export const hasOkMessage = (html: string): boolean => (pageInputs(html).OK_MSG ?? '') !== ''
 
 /**
  * EN: The fields of the continue screen, as the reference posts them: every input of the second screen, in page order,
@@ -50,7 +76,7 @@ export const hasOkMessage = (html: string): boolean => (inputValues(html).OK_MSG
  * orden de la página, con `Aceptar` en el texto de continuar.
  */
 export const continueFields = (html: string): Readonly<Record<string, string>> => ({
-  ...inputValues(html),
+  ...pageInputs(html),
   Aceptar: CONTINUE_VALUE,
 })
 
@@ -67,7 +93,7 @@ export const continueFields = (html: string): Readonly<Record<string, string>> =
 export const complianceForm = (html: string): ComplianceForm | null => {
   const action = FORM_ACTION.exec(html)?.[1]
   if (action === undefined || !action.includes('pe_avance9')) return null
-  const fields = Object.entries(inputValues(html))
+  const fields = Object.entries(pageInputs(html))
     .filter(([name]) => name !== EXIT_FIELD)
     .map(([name, value]): [string, string] => [name, OPTION_FIELD.test(name) ? 'S' : value])
   return { action, fields: { ...Object.fromEntries(fields), [CONFIRM_FIELD]: CONFIRM_VALUE } }

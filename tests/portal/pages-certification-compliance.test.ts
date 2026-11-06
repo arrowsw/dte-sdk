@@ -89,6 +89,37 @@ test('the pe_avance9 form takes the inputs of the whole page, buttons included, 
   ])
 })
 
+test('the inputs of a compliance page are read tag by tag as the field reads them', () => {
+  const html = page(
+    '<form action="/cvc_cgi/dte/pe_avance9">' +
+      // A quoted name glued to the attribute before it is still the name.
+      '<input type="hidden"name="GLUED" value="1">' +
+      // An input with an empty name is no field.
+      '<input name="" value="x">' +
+      // The value is the first one written `value="…"`, whatever stands before it.
+      '<input type=hidden data-value="first" name=TOKEN value="second">' +
+      // A bare name needs a separator before it; a value in single quotes, or none at all.
+      "<input type=hidden xname=NOT name=BARE value='single'>" +
+      '<input type=checkbox name=OPC1>' +
+      '</form>',
+  )
+  expect(Object.entries(complianceForm(html)!.fields)).toEqual([
+    ['GLUED', '1'],
+    ['TOKEN', 'first'],
+    ['BARE', 'single'],
+    ['OPC1', 'S'],
+    ['CONFIRMAR', 'Confirmar Declaración'],
+  ])
+  expect(Object.entries(continueFields(html))).toEqual([
+    ['GLUED', '1'],
+    ['TOKEN', 'first'],
+    ['BARE', 'single'],
+    ['OPC1', ''],
+    ['Aceptar', 'Continuar con la Declaración'],
+  ])
+  expect(hasOkMessage(page('<input type="hidden"name="OK_MSG" value="S">'))).toBe(true)
+})
+
 test('the form is the first one with a double-quoted action, and that action must name pe_avance9', () => {
   expect(
     complianceForm(
