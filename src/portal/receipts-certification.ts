@@ -298,7 +298,7 @@ export const declareReceiptsTrackId = (
       gwtString(null),
       gwtString(input.trackId.trim()),
     ])
-    if (page.status !== 200 || !answer.ok)
+    if (!answer.ok)
       throw rejected(context, 'receiptsTrackIdRefused', {
         httpStatus: page.status,
         portalMessage: bodyExcerpt(page.html),
@@ -427,7 +427,7 @@ export const declareReceiptsCompliance = (
       referer: RECEIPTS_PORTAL.base,
       headers: gwtHeaders(RECEIPTS_PORTAL.base, hashes.permutation),
     })
-    if (page.status !== 200 || !page.html.startsWith('//OK'))
+    if (!page.html.startsWith('//OK'))
       throw rejected(context, 'receiptsComplianceRefused', {
         httpStatus: page.status,
         portalMessage: bodyExcerpt(page.html),
