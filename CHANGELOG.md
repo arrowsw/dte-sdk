@@ -225,9 +225,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per stage, the cookies of a warm-up stay in its stage, and when the warm-up of the samples fails the known hashes
   stand. The calls of both portals are sent once, with no time-out of their own, the headers the reference sends and
   their answers read as UTF-8 (`withExchangeStage`, `withSamplesStage` and `GwtStage` are new; the operations take
-  `stage`). Any failure of the set download is `setUnavailable`; the download uses its own multipart limit. The
-  exchange set is read loosely (unreadable numbers are 0, missing dates and RUTs empty, only the document shapes the
-  reference reads) and the contact of the answers travels as given. A sample keeps its file name as given, written as
+  `stage`). Inside a stage every answer goes back to its call whatever its status, with no look for the firewall's
+  page: a 502, 503 or 504 on the user validation or on the set validation no longer stops the exchange, and a warm-up
+  that answers an error is a warm-up all the same. Any failure of the set download is `setUnavailable` (a downloaded
+  set the store cannot keep is an error of the run); the download uses its own multipart limit. The exchange set is
+  read loosely (no well-formedness check, tags by their full name, numbers as the parser reads them, unreadable ones
+  0, missing dates and RUTs empty, only the document shapes the reference reads) and the contact of the answers
+  travels as given. A sample keeps its file name as given, written as
   UTF-8 in the part header (`buildMultipartParts` takes `utf8Headers`), and a re-read that fails after submitting the
   review leaves the stage as submitted. `dte-sdk/portal` limit to 72 kB.
 

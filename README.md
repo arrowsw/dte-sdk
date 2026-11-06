@@ -610,10 +610,13 @@ to work; the samples portal's are discovered once on the way in, with the known 
   caller that chains the operations by hand (`stage` in their input); alone, each operation opens its own.
 - **These calls are sent once and wait as long as it takes:** no retry (but for a PDF upload the portal answers with
   a 5xx) and no time-out of their own, with the headers the reference sends to each portal and the answers read as
-  UTF-8. Pass `timeoutMs` to bound them.
+  UTF-8. Pass `timeoutMs` to bound them. Inside a stage each call reads its own answer whatever its status: the client
+  neither throws on a 502, 503 or 504 nor looks for the firewall's page there, so an error on the user validation or
+  on the set validation does not stop the exchange.
 - **A set that cannot be downloaded, for any reason, stops the run with `exchange`** and asks for the set by hand.
-- **The exchange set is read loosely:** a number that does not parse is 0, a missing date or RUT is empty, and only a
-  set without documents fails. The names of the PDFs travel as given.
+- **The exchange set is read loosely:** it is not checked for well-formedness, a number that does not parse is 0, a
+  missing date or RUT is empty, and only a set without documents (or one the parser cannot read at all) fails. The
+  names of the PDFs travel as given.
 
 - **Nothing here has been run against the two portals yet.** Every wire and wording comes from field behaviour; the
   first enrolled run should keep every artefact the store writes under `intercambio/` and `muestras/` as fixtures.
