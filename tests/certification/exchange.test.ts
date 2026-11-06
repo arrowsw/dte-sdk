@@ -168,6 +168,13 @@ describe('parseExchangeSet', () => {
     ])
   })
 
+  test('a type of zero is a type given: the other tag is read only when the first is absent', () => {
+    const both = document(33, 1, COMPANY).replace('<TipoDTE>33</TipoDTE>', '<TipoDTE>0</TipoDTE><TpoDoc>39</TpoDoc>')
+    expect(parseExchangeSet(envelope('EnvioDTE', both)).documents[0].type).toBe(0)
+    const empty = document(33, 1, COMPANY).replace('<TipoDTE>33</TipoDTE>', '<TipoDTE/><TpoDoc>39</TpoDoc>')
+    expect(parseExchangeSet(envelope('EnvioDTE', empty)).documents[0].type).toBe(0)
+  })
+
   test('the tags are read by their full name, and the set id may be a child element', () => {
     const prefixed = envelope('EnvioDTE', document(33, 1, COMPANY)).replace(/<(\/?)(EnvioDTE|SetDTE)/g, '<$1sii:$2')
     expect(thrown(() => parseExchangeSet(prefixed)).details).toEqual({ field: 'SetDTE', reason: 'no envelope root' })
