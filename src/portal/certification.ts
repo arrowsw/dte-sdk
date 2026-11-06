@@ -69,13 +69,6 @@ const at = (page: string): string => cgiUrl('certification', page)
 
 type Company = ReturnType<typeof companyFields>
 
-// A post that changes the application (generating a set, moving the stage, declaring compliance) is sent once: a
-// retry after a timeout could repeat it. The declaration of progress is repeated safely, so it keeps the policy.
-const once = (context: PortalContext): PortalContext => ({
-  ...context,
-  overrides: { ...context.overrides, retry: false },
-})
-
 /**
  * EN: The certification state of a company.
  * ES: El estado de certificación de una empresa.
@@ -653,7 +646,7 @@ export const advanceStage = (
     const formPage = await enter(context, company)
     const hidden = hiddenInputs(formPage.html)
     const page = await submitForm(
-      once(context),
+      context,
       'pe_avance4',
       at('pe_avance4'),
       formPage.url,
@@ -740,7 +733,7 @@ export const declareCompliance = (
     if (blockedAtSecond !== null) return blockedAtSecond
     const third = hasOkMessage(second.html)
       ? await submitForm(
-          once(context),
+          context,
           'pe_avance8.continue',
           at('pe_avance8'),
           second.url,
@@ -752,7 +745,7 @@ export const declareCompliance = (
     if (blockedAtThird !== null) return blockedAtThird
     const form = complianceForm(third.html)
     if (form === null) throw unexpectedPage(context, 'pe_avance9', third.html)
-    const final = await submitForm(once(context), 'pe_avance9', form.action, third.url, form.fields, third.url)
+    const final = await submitForm(context, 'pe_avance9', form.action, third.url, form.fields, third.url)
     const blockedAtFinal = blockedOn(final)
     if (blockedAtFinal !== null) return blockedAtFinal
     const message = complianceMessage(final.html)

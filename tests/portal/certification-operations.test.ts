@@ -568,7 +568,7 @@ describe('declareProgress', () => {
   })
 })
 
-describe('posts that change the application are never retried', () => {
+describe('the posts that change the application follow the retry policy', () => {
   const unavailable = { status: 503, body: 'down' }
   const retrying = { retry: { maxAttempts: 2, jitterRatio: 0, baseDelayMs: 1 } }
 
@@ -601,7 +601,7 @@ describe('posts that change the application are never retried', () => {
     expect(declare.posted('pe_avance3')).toHaveLength(2)
   })
 
-  test('pe_avance4, the OK_MSG continue and pe_avance9 are sent once', async () => {
+  test('pe_avance4, the OK_MSG continue and pe_avance9 follow it too, as the reference sends them', async () => {
     const advance = await signedIn(
       [
         entry,
@@ -614,8 +614,8 @@ describe('posts that change the application are never retried', () => {
       ],
       retrying,
     )
-    expect((await failure(advanceStage(advance.portal))).code).toBe('SII_HTTP_ERROR')
-    expect(advance.posted('pe_avance4')).toHaveLength(1)
+    await expect(advanceStage(advance.portal)).resolves.toMatchObject({ outcome: 'advanced' })
+    expect(advance.posted('pe_avance4')).toHaveLength(2)
     const cont = await signedIn(
       [
         get('pe_avance7', COMPLIANCE_ENTRY),
@@ -624,11 +624,12 @@ describe('posts that change the application are never retried', () => {
           method: 'POST' as const,
           reply: [{ body: COMPLIANCE_OK_MSG }, unavailable, { body: COMPLIANCE_FORM }],
         },
+        post('pe_avance9', COMPLIANCE_DECLARED),
       ],
       retrying,
     )
-    expect((await failure(declareCompliance(cont.portal))).code).toBe('SII_HTTP_ERROR')
-    expect(cont.posted('pe_avance8')).toHaveLength(2)
+    await expect(declareCompliance(cont.portal)).resolves.toMatchObject({ outcome: 'declared' })
+    expect(cont.posted('pe_avance8')).toHaveLength(3)
     const final = await signedIn(
       [
         get('pe_avance7', COMPLIANCE_ENTRY),
@@ -637,8 +638,8 @@ describe('posts that change the application are never retried', () => {
       ],
       retrying,
     )
-    expect((await failure(declareCompliance(final.portal))).code).toBe('SII_HTTP_ERROR')
-    expect(final.posted('pe_avance9')).toHaveLength(1)
+    await expect(declareCompliance(final.portal)).resolves.toMatchObject({ outcome: 'declared' })
+    expect(final.posted('pe_avance9')).toHaveLength(2)
   })
 })
 
