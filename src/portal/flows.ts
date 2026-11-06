@@ -99,10 +99,10 @@ const fromCaf = (caf: ObtainedCaf, quantity: number): FolioFlowResult => ({
 
 /**
  * EN: Requests one CAF that covers the whole quantity; below it nothing is stamped. With `allowAnnul`, a limit caused by
- * unused folios is lifted by annulling up to 20 ranges, never those in `exclude`, and asking once more. `FOLIOS_DISP` 0
+ * unused folios is lifted by annulling up to 20 ranges in each pass, never those in `exclude`, and asking once more. `FOLIOS_DISP` 0
  * means nothing is annullable, so that attempt is skipped; while blocked the field is absent, and that case does try.
  * ES: Solicita un CAF que cubra toda la cantidad; bajo ella no se timbra nada. Con `allowAnnul`, un límite causado por folios
- * sin usar se levanta anulando hasta 20 rangos, nunca los de `exclude`, y pidiendo una vez más. `FOLIOS_DISP` 0 significa que
+ * sin usar se levanta anulando hasta 20 rangos en cada pasada, nunca los de `exclude`, y pidiendo una vez más. `FOLIOS_DISP` 0 significa que
  * nada es anulable, así que ese intento se omite; con el timbraje bloqueado el campo no viene, y ese caso sí lo intenta.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: type, quantity and whether annulling is allowed. ES: tipo, cantidad y si se permite anular.

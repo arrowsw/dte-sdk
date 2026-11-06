@@ -91,7 +91,7 @@ describe('requestCafExact', () => {
     expect(harness.posted('af_anular')).not.toEqual([])
   })
 
-  test('annulling stops at 20 ranges in all', async () => {
+  test('annulling takes 20 ranges in each pass', async () => {
     const many = unusedRangesPage(
       Array.from({ length: 30 }, (_, index) => [index * 10 + 1, index * 10 + 5] as [number, number]),
     )
@@ -102,7 +102,7 @@ describe('requestCafExact', () => {
       ...annulRoutes(many),
     ])
     await requestCafExact(harness.portal, { type: 33, quantity: 5, allowAnnul: true })
-    expect(harness.posted('af_anular')).toHaveLength(20)
+    expect(harness.posted('af_anular')).toHaveLength(30)
   })
 
   test('exclude and knownAnnulled reach the annulment, and the memory comes back', async () => {

@@ -29,6 +29,8 @@ import {
 const MAX_EXTRA_PAGES = 20
 const MAX_PASSES = 4
 const PASS_PAUSE_MS = 1500
+const STEP_RETRIES = 2
+const STEP_RETRY_PAUSE_MS = 1500
 const DEFAULT_MAX_RANGES = 50
 const MAX_REFUSALS_IN_A_ROW = 2
 const DEFAULT_REASON = 'Folios no utilizados'
@@ -75,7 +77,7 @@ export type AnnulFoliosInput = {
   readonly all?: boolean
   /** EN: Reason; "Folios no utilizados" by default. ES: `MOTIVO` — Motivo; "Folios no utilizados" por defecto. */
   readonly reason?: string
-  /** EN: Most ranges annulled in one call, taken from the end of the listing; 50 by default. Ranges the SII had already annulled do not count. ES: Máximo de rangos anulados en una llamada, tomados del final del listado; 50 por defecto. Los que el SII ya tenía anulados no cuentan. */
+  /** EN: Most ranges tried in each pass, taken from the end of the listing; 50 by default. There are up to four passes. ES: Máximo de rangos que se intentan en cada pasada, tomados del final del listado; 50 por defecto. Hay hasta cuatro pasadas. */
   readonly maxRanges?: number
   /** EN: Folios never to touch, such as a CAF still in use. ES: Folios que no se tocan, como un CAF todavía en uso. */
   readonly exclude?: readonly { readonly from: number; readonly to: number }[]
@@ -104,6 +106,23 @@ export type AnnulmentResult = {
 
 const at = (context: PortalContext, page: string): string => cgiUrl(context.portal.environment, page)
 
+// A second layer over the request retries of the client, as field behaviour has: every query of the listing and every
+// step of the annulment is tried up to three times, whatever the error, with a pause between tries. A POST that did
+// change something on the first try is recovered by the "already annulled" answer of the next one.
+const withStepRetries = async <T>(
+  context: PortalContext,
+  run: () => Promise<T>,
+  retries = STEP_RETRIES,
+): Promise<T> => {
+  try {
+    return await run()
+  } catch (error) {
+    if (retries === 0) throw error
+    await context.portal.sleep(STEP_RETRY_PAUSE_MS, context.overrides?.signal)
+    return withStepRetries(context, run, retries - 1)
+  }
+}
+
 const moreRanges = async (
   context: PortalContext,
   current: PortalPage,
@@ -114,13 +133,15 @@ const moreRanges = async (
   if (button === null || remaining === 0) return ranges
   const form = namedForm(current.html, 'frm') ?? ''
   const action = formAction(form) ?? at(context, 'af_anular2')
-  const next = await submitForm(
-    context,
-    'af_anular2.page',
-    action,
-    current.url,
-    { ...inputValues(form), ...(button.page === null ? {} : { PAGINA: String(button.page) }) },
-    at(context, 'af_anular2'),
+  const next = await withStepRetries(context, () =>
+    submitForm(
+      context,
+      'af_anular2.page',
+      action,
+      current.url,
+      { ...inputValues(form), ...(button.page === null ? {} : { PAGINA: String(button.page) }) },
+      at(context, 'af_anular2'),
+    ),
   )
   assertNotRejected(context, next.html)
   const merged = uniqueRanges([...ranges, ...parseUnusedRanges(next.html)])
@@ -137,13 +158,15 @@ const listInSession = async (context: PortalContext, type: number, companyRut?: 
   const entry = await ensurePage(context, 'af_anular1', at(context, 'af_anular1'))
   assertNotRejected(context, entry.html)
   if (!entry.html.includes('ANULACION DE FOLIOS')) throw unexpectedPage(context, 'af_anular1', entry.html)
-  const first = await submitForm(
-    context,
-    'af_anular2',
-    at(context, 'af_anular2'),
-    entry.url,
-    { ...inputValues(entry.html), ...company, PAGINA: '1', COD_DOCTO: String(type), ACEPTAR: 'Consultar' },
-    at(context, 'af_anular1'),
+  const first = await withStepRetries(context, () =>
+    submitForm(
+      context,
+      'af_anular2',
+      at(context, 'af_anular2'),
+      entry.url,
+      { ...inputValues(entry.html), ...company, PAGINA: '1', COD_DOCTO: String(type), ACEPTAR: 'Consultar' },
+      at(context, 'af_anular1'),
+    ),
   )
   assertNotRejected(context, first.html)
   const ranges = await moreRanges(context, first, parseUnusedRanges(first.html), MAX_EXTRA_PAGES)
@@ -211,7 +234,7 @@ const attempt = async (
   referer: string,
 ): Promise<PortalPage | null> => {
   try {
-    return await submitForm(context, step, at(context, page), base, fields, referer)
+    return await withStepRetries(context, () => submitForm(context, step, at(context, page), base, fields, referer))
   } catch (error) {
     if (isRetryablePortalError(error)) return null
     throw error
@@ -338,9 +361,8 @@ export const annulFoliosInSession = async (
   const earliestMs = input.withinDays === undefined ? null : context.portal.now().getTime() - input.withinDays * DAY_MS
   const tally: Tally = { annulled: [], rejected: [], known: new Set(input.knownAnnulled ?? []) }
   const seen = new Set<string>()
+  // The limit applies to each pass, as in field behaviour: four passes can reach four times `maxRanges`.
   const limit = input.maxRanges ?? DEFAULT_MAX_RANGES
-  // Only ranges really annulled spend the limit: the listing keeps offering old ones, and the passes walk past them.
-  const spent = { ranges: 0 }
   for (let pass = 0; pass < MAX_PASSES; pass += 1) {
     const { ranges } = await listInSession(context, input.type, input.companyRut)
     const candidates = ranges
@@ -350,7 +372,6 @@ export const annulFoliosInSession = async (
     if (candidates.length === 0) break
     const counter = { refusals: 0 }
     for (const range of candidates) {
-      if (spent.ranges >= limit) break
       if (counter.refusals >= MAX_REFUSALS_IN_A_ROW) {
         context.portal.logger.warn('sii portal stopped annulling: the SII keeps refusing', {
           operation: context.operation,
@@ -359,12 +380,9 @@ export const annulFoliosInSession = async (
         break
       }
       seen.add(`${range.from}-${range.to}`)
-      const annulledBefore = tally.annulled.length
       const added = await annulRange(context, range, input, company, tally)
-      if (tally.annulled.length > annulledBefore) spent.ranges += 1
       counter.refusals = added === null ? 0 : counter.refusals + added
     }
-    if (spent.ranges >= limit) break
     if (pass < MAX_PASSES - 1) await context.portal.sleep(PASS_PAUSE_MS, context.overrides?.signal)
   }
   return {
@@ -378,11 +396,11 @@ export const annulFoliosInSession = async (
 
 /**
  * EN: Annuls unused folios: up to four passes over the listing, by range and folio by folio when the range conflicts,
- * stopping after two real refusals in a row or at `maxRanges` ranges annulled. Annulment cannot be undone and counts
+ * stopping a pass after two real refusals in a row. Each pass takes the last `maxRanges` ranges it has not tried yet. Every query and step is tried up to three times with a pause of 1.5 s. Annulment cannot be undone and counts
  * against the quota for six months; to lift a stamping block, issuing with the unused folios works and annulling makes it
  * worse.
  * ES: Anula folios sin usar: hasta cuatro pasadas por el listado, por rango y folio por folio cuando el rango choca,
- * deteniéndose tras dos negativas reales seguidas o al anular `maxRanges` rangos. La anulación no se puede deshacer y pesa
+ * deteniendo una pasada tras dos negativas reales seguidas. Cada pasada toma los últimos `maxRanges` rangos que aún no intentó. Cada consulta y cada paso se intenta hasta tres veces con 1,5 s de pausa. La anulación no se puede deshacer y pesa
  * contra el cupo seis meses; para levantar un bloqueo de timbraje, emitir con los folios sin usar sirve y anular lo empeora.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: type and an explicit scope. ES: tipo y un alcance explícito.
