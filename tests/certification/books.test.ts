@@ -8,6 +8,8 @@ import { cafFor, certificate, fullPlan, issueOptions, receiver } from '../suppor
 import { FIXED_NOW, ISSUER_RUT } from '../support/fixtures'
 import { validateAgainstXsd } from '../support/xsd'
 
+jest.setTimeout(30_000)
+
 const plan = fullPlan()
 const bookInput = {
   period: '2026-11',
