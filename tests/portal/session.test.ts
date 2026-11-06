@@ -79,7 +79,7 @@ describe('openPortalSession', () => {
     expect(login.headers['content-type']).toBe('application/x-www-form-urlencoded')
     expect(login.headers['origin']).toBe('https://herculesr.sii.cl')
     expect(login.headers['referer']).toBe(login.url)
-    expect(login.timeoutMs).toBe(30000)
+    expect(login.timeoutMs).toBe(20000)
     expect(harness.fake.requests[0].headers['cookie']).toBeUndefined()
     const stored = await harness.portal.sessionCache.get(SESSION_KEY)
     expect(JSON.parse(stored!.token)).toMatchObject({ 'NETSCAPE_LIVEWIRE.rut': '12345678', TS01: 'abc' })

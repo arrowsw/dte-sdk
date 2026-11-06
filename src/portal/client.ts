@@ -52,7 +52,7 @@ export const DEFAULT_PORTAL_SESSION_TTL_MS = 90 * 60 * 1000
  * EN: Timeout per portal request, ms.
  * ES: Timeout por petición al portal, en ms.
  */
-export const DEFAULT_PORTAL_TIMEOUT_MS = 30000
+export const DEFAULT_PORTAL_TIMEOUT_MS = 20000
 
 /**
  * EN: Options of `createPortalClient`.

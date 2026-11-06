@@ -391,6 +391,21 @@ describe('sendTestSet', () => {
     expect((await harness.store.load())?.sets).toEqual({})
   })
 
+  test('a duplicate the SII only names in an error text is a failed send; a network failure is sent again', async () => {
+    const refused = { body: siiFixture('reception-duplicate-99.xml') }
+    const harness = await certificationHarness([
+      uploadRoute(refused, new DteError('TRANSPORT_FAILED', { reason: 'ECONNRESET' }), reception('77')),
+    ])
+    const state = stateWith({ plan, cafs: certificationCafXmls() })
+    const error = await failure(sendTestSet(harness.deps, state, { kind: 'exempt' }))
+    expect(error.code).toBe('SII_UPLOAD_REJECTED')
+    expect(error.details.status).toBe(99)
+    expect(harness.steps()).toEqual(['SET_START', 'SET_ERROR'])
+    const again = await sendTestSet(harness.deps, (await harness.store.load())!, { kind: 'exempt' })
+    expect(again.state.sets.exempt?.trackId).toBe('77')
+    expect(harness.urls()).toEqual([UPLOAD, UPLOAD, UPLOAD])
+  })
+
   test('a type with no CAF in hand, or with every CAF exhausted, cannot issue', async () => {
     const harness = await certificationHarness([])
     const error = await failure(sendTestSet(harness.deps, stateWith({ plan, cafs: [cafXml(33)] }), { kind: 'guide' }))

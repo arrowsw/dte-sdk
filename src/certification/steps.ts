@@ -24,6 +24,7 @@ import {
   type HeldCaf,
 } from './folios-step'
 import { queryFieldUploadState, type FieldUploadState } from './field-status'
+import { uploadForTrackId } from './field-upload'
 import { issueTestSet, type IssuableSetPlan, type IssuedCase } from './issue-set'
 import { issueSimulation } from './simulation'
 import { planCertificationSets } from './set-plan'
@@ -185,11 +186,14 @@ export const sendTestSet = async (
   const sentAt = rt.now().toISOString()
   const usedFolios = [...state.usedFolios, ...issued.cases.map((c) => ({ type: c.type, folio: c.folio }))]
   try {
-    const receipt = await uploadEnvelope(rt.sii, { envelope: issued.envelope })
-    await markSent(rt, held, issued.cases, { trackId: receipt.trackId, sentAt })
-    const sent = { trackId: receipt.trackId, date: chileDate(rt.now()), sentAt, cases: issued.cases.map(sentCase) }
+    const trackId = await uploadForTrackId(
+      (overrides) => uploadEnvelope(rt.sii, { envelope: issued.envelope }, overrides),
+      'uploadEnvelope',
+    )
+    await markSent(rt, held, issued.cases, { trackId, sentAt })
+    const sent = { trackId, date: chileDate(rt.now()), sentAt, cases: issued.cases.map(sentCase) }
     const next = await saveState(rt, state, { usedFolios, sets: { ...state.sets, [options.kind]: sent } })
-    rt.emit({ step: 'SET_OK', set: options.kind, trackId: receipt.trackId })
+    rt.emit({ step: 'SET_OK', set: options.kind, trackId })
     return { state: next, outcome: 'sent' }
   } catch (error) {
     await markSent(rt, held, issued.cases, { sentAt })
@@ -454,13 +458,16 @@ export const sendSimulation = async (
   const sentAt = rt.now().toISOString()
   const usedFolios = [...prepared.state.usedFolios, ...issued.cases.map((c) => ({ type: c.type, folio: c.folio }))]
   try {
-    const receipt = await uploadEnvelope(rt.sii, { envelope: issued.envelope })
-    await markSent(rt, held, issued.cases, { trackId: receipt.trackId, sentAt })
+    const trackId = await uploadForTrackId(
+      (overrides) => uploadEnvelope(rt.sii, { envelope: issued.envelope }, overrides),
+      'uploadEnvelope',
+    )
+    await markSent(rt, held, issued.cases, { trackId, sentAt })
     const next = await saveState(rt, prepared.state, {
       usedFolios,
-      simulation: { trackId: receipt.trackId, date: chileDate(rt.now()), sentAt },
+      simulation: { trackId, date: chileDate(rt.now()), sentAt },
     })
-    rt.emit({ step: 'SIM_OK', trackId: receipt.trackId })
+    rt.emit({ step: 'SIM_OK', trackId })
     return { state: next, outcome: 'sent' }
   } catch (error) {
     await markSent(rt, held, issued.cases, { sentAt })
