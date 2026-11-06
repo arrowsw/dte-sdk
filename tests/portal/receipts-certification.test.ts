@@ -797,4 +797,20 @@ describe('the transport of the receipts portal, as the field talks to it', () =>
     })
     expect(progress.urls()).toEqual([SESSION_CHECK_URL, `${MAULLIN}/pe_avance6`])
   })
+
+  test("the firewall's page is an answer like any other too: no call of the receipts portal looks for it", async () => {
+    const blocked = { status: 403, body: '<html>acceso restringido: Transaccion Rechazada</html>' }
+    const unlisted = await signed([facade({ [LIST]: blocked })])
+    await expect(readReceiptsStatus(unlisted.portal)).resolves.toMatchObject({ enrolled: false })
+    const refused = await signed([facade({ ingresarTrackId: blocked })])
+    const error = await failure(declareReceiptsTrackId(refused.portal, { trackId: '9876543210' }))
+    expect(error.code).toBe('SII_PORTAL_REJECTED')
+    expect(error.details).toMatchObject({ rejection: 'receiptsTrackIdRefused', httpStatus: 403 })
+    const download = await signed([facade(), servlet(blocked)])
+    expect((await downloadReceiptsTestSet(download.portal)).text).toBe(blocked.body)
+    const progress = await signed([{ url: `${MAULLIN}/pe_avance6`, method: 'GET', reply: blocked }])
+    await expect(verifyReceiptsAuthorization({ certification: progress.portal })).resolves.toMatchObject({
+      certification: { authorized: false, queryFailed: false, state: null },
+    })
+  })
 })

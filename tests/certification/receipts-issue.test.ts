@@ -177,5 +177,6 @@ describe('issueReceiptsSet', () => {
     expect(dated.envelope.cover).toMatchObject({ resolutionNumber: 0, resolutionDate: '2026-02-03' })
     const blank = await issueReceiptsSet(cases.slice(0, 1), { ...options(), resolution: { number: 5, date: '' } })
     expect(blank.envelope.cover).toMatchObject({ resolutionNumber: 5, resolutionDate: '2026-11-15' })
-  })
+    // Four sets issued and signed in one test: it gets twice the time of the suite.
+  }, 60_000)
 })

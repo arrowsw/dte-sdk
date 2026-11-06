@@ -297,7 +297,8 @@ describe('sendReceiptsSet', () => {
       [104, 'accepted', undefined],
     ])
     expect(sleeps).toEqual([20000, 30000, 30000])
-  })
+    // Five signed reports in one test: it gets twice the time of the suite.
+  }, 60_000)
 
   test('a STATUS 7 report with a track id is an uploaded one: it waits for its status', async () => {
     const { result, sleeps } = await run(
