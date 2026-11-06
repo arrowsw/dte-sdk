@@ -20,11 +20,13 @@ export type CertificationDependencies = {
   readonly store: CertificationStore
   /** EN: The folio registry. ES: El registro de folios. */
   readonly registry: FolioRegistry
-  readonly issuer: IssuerInput
-  readonly receiver: ReceiverInput
+  /** EN: The company that certifies; what it leaves out takes the defaults of `DEFAULT_CERTIFICATION_ISSUER`. ES: `Emisor` — La empresa que se certifica; lo que omita toma los valores de `DEFAULT_CERTIFICATION_ISSUER`. */
+  readonly issuer: CertificationIssuerInput
+  /** EN: The receiver of the documents of the run; the test receiver of `DEFAULT_CERTIFICATION_RECEIVER` by default, field by field. ES: `Receptor` — El receptor de los documentos de la corrida; por defecto el receptor de prueba de `DEFAULT_CERTIFICATION_RECEIVER`, campo por campo. */
+  readonly receiver?: Partial<ReceiverInput>
   readonly certificate: Certificate
-  /** EN: The resolution of the certification environment: number 0 and its date. ES: La resolución del ambiente de certificación: número 0 y su fecha. */
-  readonly resolution: { readonly number: number; readonly date: string }
+  /** EN: The resolution of the certification environment; number 0 and today's UTC date by default. ES: `NroResol`, `FchResol` — La resolución del ambiente de certificación; por defecto número 0 y la fecha UTC de hoy. */
+  readonly resolution?: { readonly number?: number; readonly date?: string }
   /** EN: Clock; dates are Chile dates of it. ES: Reloj; las fechas son fechas de Chile de él. */
   readonly now?: () => Date
   /** EN: Wait function; the waits of the field by default. ES: Función de espera; por defecto las esperas del campo. */
@@ -34,6 +36,43 @@ export type CertificationDependencies = {
   /** EN: The contact the exchange answers name, when any. ES: `NmbContacto`, `MailContacto`, `FonoContacto` — El contacto que nombran las respuestas del intercambio, si hay. */
   readonly contact?: ExchangeContact
 }
+
+/**
+ * EN: The issuer as the run takes it: the line of business and the commune may be left out.
+ * ES: El emisor tal como lo recibe la corrida: el giro y la comuna se pueden omitir.
+ */
+export type CertificationIssuerInput = Omit<IssuerInput, 'businessActivity' | 'commune'> & {
+  /** EN: Line of business; `ACTIVIDADES DE PROGRAMACION INFORMATICA` by default. ES: `GiroEmis` — Giro; por defecto `ACTIVIDADES DE PROGRAMACION INFORMATICA`. */
+  readonly businessActivity?: string
+  /** EN: Commune; `Santiago` by default. ES: `CmnaOrigen` — Comuna; por defecto `Santiago`. */
+  readonly commune?: string
+}
+
+/**
+ * EN: What the run fills in for an issuer that leaves it out: the line of business, the activity code, the commune and
+ * the city. The RUT, the name and the address have no default.
+ * ES: Lo que la corrida completa en un emisor que lo omite: el giro, el código de actividad, la comuna y la ciudad. El
+ * RUT, la razón social y la dirección no tienen valor por defecto.
+ */
+export const DEFAULT_CERTIFICATION_ISSUER = Object.freeze({
+  businessActivity: 'ACTIVIDADES DE PROGRAMACION INFORMATICA',
+  activityCode: 620200,
+  commune: 'Santiago',
+  city: 'Santiago',
+})
+
+/**
+ * EN: The test receiver the run uses when none is given.
+ * ES: El receptor de prueba que usa la corrida cuando no se le da uno.
+ */
+export const DEFAULT_CERTIFICATION_RECEIVER: ReceiverInput = Object.freeze({
+  rut: '66666666-6',
+  businessName: 'CLIENTE TEST',
+  businessActivity: 'ACTIVIDADES VARIAS',
+  address: 'AVENIDA PRINCIPAL 123',
+  commune: 'Santiago',
+  city: 'Santiago',
+})
 
 /**
  * EN: The progress events the steps emit, with the field's step names.
@@ -93,7 +132,10 @@ export type StepResult<Outcome extends string> = {
  * EN: The dependencies with their defaults resolved. Internal to the steps.
  * ES: Las dependencias con sus valores por defecto resueltos. Interno de los pasos.
  */
-export type Runtime = CertificationDependencies & {
+export type Runtime = Omit<CertificationDependencies, 'issuer' | 'receiver' | 'resolution'> & {
+  readonly issuer: IssuerInput
+  readonly receiver: ReceiverInput
+  readonly resolution: { readonly number: number; readonly date: string }
   readonly now: () => Date
   readonly sleep: (ms: number) => Promise<void>
   readonly emit: (event: CertificationProgressEvent) => void
@@ -101,16 +143,27 @@ export type Runtime = CertificationDependencies & {
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
+// What the caller gave: a field left undefined or empty takes its default.
+const given = <T extends object>(value: T): T =>
+  Object.fromEntries(Object.entries(value).filter(([, field]) => field !== undefined && field !== '')) as T
+
 /**
  * EN: Resolves the defaults of the dependencies.
  * ES: Resuelve los valores por defecto de las dependencias.
  */
-export const runtime = (deps: CertificationDependencies): Runtime => ({
-  ...deps,
-  now: deps.now ?? (() => new Date()),
-  sleep: deps.sleep ?? defaultSleep,
-  emit: (event) => deps.onProgress?.(event),
-})
+export const runtime = (deps: CertificationDependencies): Runtime => {
+  const now = deps.now ?? (() => new Date())
+  return {
+    ...deps,
+    issuer: { ...DEFAULT_CERTIFICATION_ISSUER, ...given(deps.issuer) },
+    receiver: { ...DEFAULT_CERTIFICATION_RECEIVER, ...given(deps.receiver ?? {}) },
+    // The date of a resolution left out is the UTC day of the moment the step starts.
+    resolution: { number: 0, date: now().toISOString().slice(0, 10), ...given(deps.resolution ?? {}) },
+    now,
+    sleep: deps.sleep ?? defaultSleep,
+    emit: (event) => deps.onProgress?.(event),
+  }
+}
 
 /**
  * EN: Saves a changed state through the store and returns it.
