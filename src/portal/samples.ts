@@ -37,8 +37,9 @@ import {
 
 const NO_CACHE: Readonly<Record<string, string>> = { 'Cache-Control': 'no-cache', Pragma: 'no-cache' }
 const FILE_FIELD = 'Filedata'
-// It travels in the multipart `filename`, so it cannot be free text.
-const SAFE_FILE_NAME = /^[\w.-]+\.pdf$/i
+// The name travels as it comes in the multipart `filename`; only what would end the header or its quoted value early
+// is refused.
+const BREAKS_FILE_NAME = /[\r\n"]/
 const FILE_CONTENT_TYPE = 'application/octet-stream'
 const MAX_UPLOAD_ATTEMPTS = 4
 const UPLOAD_WAIT_MS = 2000
@@ -294,7 +295,7 @@ const uploadOnce = async (
  * @param input EN: the review, the file and the hashes. ES: la revisión, el archivo y los hashes.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: the answer and the attempts made. ES: la respuesta y los intentos hechos.
- * @throws {DteError} EN: `INVALID_OPTION { field: 'fileName' }` unless the name is `[\w.-]+.pdf`; `SII_PORTAL_REJECTED { rejection: 'sampleUploadRefused', file, httpStatus }` on a 4xx; `SII_HTTP_ERROR` on the last 5xx; `SII_PORTAL_UNEXPECTED_PAGE` on any other status; session, block and transport codes. ES: los mismos códigos.
+ * @throws {DteError} EN: `INVALID_OPTION { field: 'fileName' }` when the name holds a CR, an LF or a double quote; `SII_PORTAL_REJECTED { rejection: 'sampleUploadRefused', file, httpStatus }` on a 4xx; `SII_HTTP_ERROR` on the last 5xx; `SII_PORTAL_UNEXPECTED_PAGE` on any other status; session, block and transport codes. ES: los mismos códigos.
  */
 export const uploadSample = (
   portal: PortalClient,
@@ -302,7 +303,7 @@ export const uploadSample = (
   overrides?: CallOverrides,
 ): Promise<SampleUploaded> =>
   withPortalSession(portal, 'uploadSample', overrides, async (context) => {
-    if (!SAFE_FILE_NAME.test(input.fileName)) throw new DteError('INVALID_OPTION', { field: 'fileName' })
+    if (BREAKS_FILE_NAME.test(input.fileName)) throw new DteError('INVALID_OPTION', { field: 'fileName' })
     await enter(context)
     const hashes = await gwtHashesOf(context, SAMPLES_PORTAL, input.gwt)
     const boundary = portalBoundary(portal.now())

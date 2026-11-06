@@ -201,14 +201,21 @@ describe('uploadSample', () => {
     expect(uploads(harness)).toHaveLength(1)
   })
 
-  test('a file name that cannot travel in a part header is refused before any request', async () => {
+  test('a file name that would break the part header is refused before any request', async () => {
     const harness = await signedIn([])
-    for (const fileName of ['muestra"; name="id', 'muestra.xml', 'a/b.pdf', 'x\r\n.pdf']) {
+    for (const fileName of ['muestra"; name="id', 'x\r\n.pdf', 'x\n.pdf', 'x\r.pdf', 'say "hi".pdf']) {
       const error = await failure(uploadSample(harness.portal, { ...input, fileName }))
       expect(error.code).toBe('INVALID_OPTION')
       expect(error.details).toEqual({ field: 'fileName' })
     }
     expect(harness.urls()).toEqual([])
+  })
+
+  test('any other file name travels as it comes: spaces, brackets, another extension', async () => {
+    const names = ['muestra (1) final.pdf', 'copia #2.PDF', 'muestra.xml', 'sin extension']
+    const harness = await signedIn([warmUp, nocache, upload(...names.map(() => ({ body: 'ok' })))])
+    for (const fileName of names) await uploadSample(harness.portal, { ...input, fileName })
+    expect(uploads(harness).map((request) => request.parts[0].fileName)).toEqual(names)
   })
 
   test('any other status is unexpected', async () => {
