@@ -187,7 +187,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one SOAP query when the polls run out. `advanceStage` and `declareCompliance` follow the client's retry policy;
   the compliance wizard posts every named input of the page and counts the declaration as made when the last page no
   longer shows its form; `declareComplianceFinal` asks for the advance once, without reading the progress, and declares
-  whatever came of it.
+  whatever came of it. Found while checking each of these against the reference, and brought to it: a separator line
+  no longer ends the purchase-book set for exempt taxpayers; a document flagged as common use with no VAT stays out of
+  `TotOpIVAUsoComun`; a receiver's business activity is cut at 40 characters instead of refused, so an issuer with a
+  longer one can be the receiver of its purchase documents, internal transfers and simulation; the books are declared
+  sales first, which is the order a diagnosis asks the status service in; after the first wait every failed row of the
+  page keeps the search going and is awaited in the order of the page, also one of a book the run does not send; the
+  first post of the declaration of compliance names `pe_avance7` as its referer and its pages are read with the
+  reference's own patterns; and a progress page that cannot be read before the simulation is declared no longer ends
+  the run.
 
 ### Fixed
 

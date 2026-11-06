@@ -518,7 +518,10 @@ and the runner makes it only with `declareCompliance: true`.
   portal shows, not what the state remembers, so a run resumed at the books sends again every book the portal does not
   show as `REVISADO CONFORME`. When a period is taken every book goes again as an adjustment, the guide book and the
   exempt purchase book too; the books the declaration names with "ENVIO CON ERRORES O REPAROS" or the SOAP status
-  rejects are not awaited but sent again; no portal read of the phase stops the run.
+  rejects are not awaited but sent again; no portal read of the phase stops the run. A row the page leaves rejected,
+  closed or declared keeps that search going even when it is of a book this run does not send (an exempt purchase book
+  the test set did not bring): nothing is sent for it, but the books are declared again and that row is awaited, up
+  to 24 times.
 - **The portal decides the stage.** With the three mandatory books sent the runner asks for the next stage whether or
   not the books were approved, as the reference does, and stops with the portal's sentence when the portal does not
   move. `runBooks` ends `incomplete` only when a mandatory book could not be sent.
@@ -530,7 +533,9 @@ and the runner makes it only with `declareCompliance: true`.
 - **The operator gives less.** Without `receiver` the documents go to the test receiver (`DEFAULT_CERTIFICATION_RECEIVER`);
   without `resolution` every envelope of the run carries number 0 and the UTC date of the day the run started, which
   is only right on the day the SII resolved the application, so give `resolution.date` on any other day; the issuer's
-  line of business, activity code, commune and city fall back to `DEFAULT_CERTIFICATION_ISSUER`.
+  line of business, activity code, commune and city fall back to `DEFAULT_CERTIFICATION_ISSUER`. A receiver's line of
+  business is cut at its 40 characters instead of being refused, the issuer's too where the issuer is the receiver of
+  its own documents (the purchase set, internal transfers, the simulation); as issuer it keeps its 80.
 - **The waits are the field's:** 5 polls of 10 s for the sets, 40 of 15 s for the books, 30 of 10 s for the
   simulation, 10 declaration attempts 5 s apart after 10 s. Inject `sleep` and `now` to test without waiting.
 - **Nothing here has been run against the portal yet.** Every page shape comes from field behaviour; the first
