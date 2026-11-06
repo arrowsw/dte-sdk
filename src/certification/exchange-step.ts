@@ -1,6 +1,12 @@
 import { EXCHANGE_ANSWER_KEYS } from '../catalogs/certification'
 import { errorMessage, isDteError } from '../errors'
-import { confirmExchange, downloadExchangeSet, uploadExchangeAnswers, validateExchangeUser } from '../portal/exchange'
+import {
+  confirmExchange,
+  downloadExchangeSet,
+  uploadExchangeAnswers,
+  validateExchangeUser,
+  withExchangeStage,
+} from '../portal/exchange'
 import { createExchangeAnswers } from './exchange'
 import { runtime, saveState, type CertificationDependencies, type Runtime, type StepResult } from './runtime'
 import type { CertificationState, ExchangeState } from './state'
@@ -95,39 +101,43 @@ export const runExchange = async (
     uploaded: false,
     confirmed: false,
   }
-  const validation = await validateExchangeUser(rt.portal, { companyRut: state.companyRut })
-  await rt.store.writeArtefact(artefact('pfe-validar.html'), validation.body)
-  if (!validation.inExchange) {
-    // The company is out of the exchange only when the portal's sentence said so: the message is there.
-    const message = validation.message!
-    const portalState = validation.state === null ? {} : { portalState: validation.state }
-    if (validation.completed) {
-      const next = await saveState(rt, state, {
-        exchange: { ...exchange, portalState: COMPLETED_STATE },
-        stage: laterStage(state.stage, 'printedSamples'),
-      })
-      return { state: next, outcome: 'alreadyDone', detail: message }
+  // The user validation, the uploads and the confirmations are one stage of the portal, with one warm-up, as in the field.
+  return withExchangeStage(rt.portal, 'runExchange', undefined, async (stage): Promise<StepResult<ExchangeOutcome>> => {
+    const validation = await validateExchangeUser(rt.portal, { companyRut: state.companyRut, stage })
+    await rt.store.writeArtefact(artefact('pfe-validar.html'), validation.body)
+    if (!validation.inExchange) {
+      // The company is out of the exchange only when the portal's sentence said so: the message is there.
+      const message = validation.message!
+      const portalState = validation.state === null ? {} : { portalState: validation.state }
+      if (validation.completed) {
+        const next = await saveState(rt, state, {
+          exchange: { ...exchange, portalState: COMPLETED_STATE },
+          stage: laterStage(state.stage, 'printedSamples'),
+        })
+        return { state: next, outcome: 'alreadyDone', detail: message }
+      }
+      const next = await saveState(rt, state, { exchange: { ...exchange, ...portalState } })
+      return { state: next, outcome: 'notInExchange', detail: message }
     }
-    const next = await saveState(rt, state, { exchange: { ...exchange, ...portalState } })
-    return { state: next, outcome: 'notInExchange', detail: message }
-  }
-  const uploaded = await uploadExchangeAnswers(rt.portal, {
-    companyRut: state.companyRut,
-    reception: answers.reception.xml,
-    receipts: answers.receipts.xml,
-    approval: answers.approval.xml,
+    const uploaded = await uploadExchangeAnswers(rt.portal, {
+      companyRut: state.companyRut,
+      stage,
+      reception: answers.reception.xml,
+      receipts: answers.receipts.xml,
+      approval: answers.approval.xml,
+    })
+    for (const [index, answer] of uploaded.answers.entries())
+      await rt.store.writeArtefact(artefact(`pfe-upload-${index + 1}.html`), answer.body)
+    const sent = await saveState(rt, state, { exchange: { ...exchange, uploaded: true } })
+    const confirmation = await confirmExchange(rt.portal, { companyRut: state.companyRut, stage })
+    await rt.store.writeArtefact(artefact('pfe-validarset.html'), confirmation.validation)
+    for (const { id, body } of confirmation.confirmations)
+      await rt.store.writeArtefact(artefact(`pfe-seguimiento-${id}.html`), body)
+    const next = await saveState(rt, sent, {
+      exchange: { ...exchange, uploaded: true, confirmed: true },
+      stage: laterStage(sent.stage, 'printedSamples'),
+    })
+    rt.emit({ step: 'INTERCAMBIO_DONE', uploaded: true })
+    return { state: next, outcome: 'done' }
   })
-  for (const [index, answer] of uploaded.answers.entries())
-    await rt.store.writeArtefact(artefact(`pfe-upload-${index + 1}.html`), answer.body)
-  const sent = await saveState(rt, state, { exchange: { ...exchange, uploaded: true } })
-  const confirmation = await confirmExchange(rt.portal, { companyRut: state.companyRut, gwt: validation.hashes })
-  await rt.store.writeArtefact(artefact('pfe-validarset.html'), confirmation.validation)
-  for (const { id, body } of confirmation.confirmations)
-    await rt.store.writeArtefact(artefact(`pfe-seguimiento-${id}.html`), body)
-  const next = await saveState(rt, sent, {
-    exchange: { ...exchange, uploaded: true, confirmed: true },
-    stage: laterStage(sent.stage, 'printedSamples'),
-  })
-  rt.emit({ step: 'INTERCAMBIO_DONE', uploaded: true })
-  return { state: next, outcome: 'done' }
 }

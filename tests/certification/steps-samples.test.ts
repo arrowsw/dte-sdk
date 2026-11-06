@@ -7,6 +7,7 @@ import {
   REVIEW_TOKEN,
   reviewAnswer,
   SAMPLES_BLOCKED,
+  SESSION_CHECK_URL,
   SAMPLES_SERVICE_URL,
   SAMPLES_UPLOAD_URL,
   samplesRoutes,
@@ -69,6 +70,32 @@ describe('uploadPrintedSamples', () => {
       { step: 'MUESTRAS_DONE', success: true },
     ])
     expect(harness.urls().filter((url) => url.endsWith('nocache.js'))).toHaveLength(1)
+  })
+
+  test('the whole stage is one stage of the portal: one session check, one warm-up, one look at the hashes', async () => {
+    const harness = await certificationHarness(
+      samplesRoutes({
+        service: {
+          leeImpreso: (call) => ({ body: call === 1 ? EMPTY_OK : reviewAnswer('RECHAZADO') }),
+          creaLista: { body: CREATED_REVIEW },
+          muestraMail: { body: detailAnswer(DETAIL_ROWS) },
+        },
+      }),
+    )
+    await uploadPrintedSamples(harness.deps, atSamples(), { samples })
+    const base = SAMPLES_SERVICE_URL.replace('ServicePdfDte', '')
+    expect(harness.urls().map((url) => url.replace(base, '<pdf>/'))).toEqual([
+      SESSION_CHECK_URL,
+      '<pdf>/',
+      '<pdf>/pdfdte.nocache.js',
+      '<pdf>/ServicePdfDte',
+      '<pdf>/ServicePdfDte',
+      '<pdf>/upload',
+      '<pdf>/upload',
+      '<pdf>/ServicePdfDte',
+      '<pdf>/ServicePdfDte',
+      '<pdf>/ServicePdfDte',
+    ])
   })
 
   test('a review in INGRESO with a readable id is resumed; one without an id is replaced by a new review', async () => {

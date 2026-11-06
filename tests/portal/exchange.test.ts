@@ -4,12 +4,24 @@ import {
   downloadExchangeSet,
   uploadExchangeAnswers,
   validateExchangeUser,
+  withExchangeStage,
 } from '../../src/portal/exchange'
+import { createMemoryCapture } from '../../src/sii/capture'
 import type { Logger } from '../../src/sii/logger'
 import type { FakeReply, FakeRoute, RecordedRequest } from '../support/fake-sii'
 import { FIXED_NOW, RECEIVER_RUT } from '../support/fixtures'
+import { SESSION_CHECK_URL, sessionCheckRoute as alive } from '../support/exchange-fixtures'
 import { EMPTY_OK, EXCEPTION, okAnswer } from '../support/gwt-answers'
-import { certificate, failure, HERCULES, portalWith, signedIn, type PortalHarness } from '../support/portal'
+import {
+  certificate,
+  failure,
+  HERCULES,
+  portalWith,
+  SESSION_COOKIES,
+  SESSION_KEY,
+  signedIn,
+  type PortalHarness,
+} from '../support/portal'
 import { page } from '../support/portal-pages'
 
 const BASE = EXCHANGE_PORTAL.base
@@ -35,6 +47,7 @@ const LOGIN_OK = {
 const HOME = { url: 'https://misiir.sii.cl/cgi_misii/siihome.cgi', reply: { body: page('Mi SII') } }
 
 const warmUp: readonly FakeRoute[] = [
+  alive,
   {
     method: 'GET',
     url: BASE,
@@ -72,6 +85,15 @@ const logger = (): Logger & { readonly lines: string[] } => {
   }
   return { debug: log, info: log, warn: log, error: log, lines }
 }
+const LONGEST_TIMEOUT_MS = 2147483647
+const BROWSER_LINE = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+const ACCEPT_LIST = 'text/html,application/xhtml+xml,*/*;q=0.8'
+const names = (request: RecordedRequest): readonly string[] => Object.keys(request.headers).sort()
+const BASE_HEADERS = ['accept', 'connection', 'cookie', 'user-agent']
+const sessionCookiesOf = async (harness: PortalHarness): Promise<unknown> => {
+  const entry = await harness.portal.sessionCache.get(SESSION_KEY)
+  return entry === null ? null : JSON.parse(entry.token)
+}
 const ANSWERS = {
   reception: '<RespuestaDTE>1</RespuestaDTE>',
   receipts: '<EnvioRecibos/>',
@@ -79,43 +101,85 @@ const ANSWERS = {
 }
 
 describe('downloadExchangeSet', () => {
-  test('warms the portal up through one redirect, merges its cookies and posts the empty multipart with the company in the query', async () => {
+  test('warms the portal up through one redirect and posts the empty multipart with the company in the query', async () => {
     const harness = await signedIn([...warmUp, download({ body: SET_XML })])
     await expect(downloadExchangeSet(harness.portal)).resolves.toEqual({ xml: SET_XML })
-    expect(harness.urls()).toEqual([BASE, `${BASE}index.html`, `${BASE}downloadFile${COMPANY_QUERY}`])
-    const [, redirected, request] = harness.fake.requests
-    expect(redirected.headers['referer']).toBe(BASE)
-    expect(request.headers['content-type']).toBe(`multipart/form-data; boundary=${BOUNDARY}`)
+    expect(harness.urls()).toEqual([
+      SESSION_CHECK_URL,
+      BASE,
+      `${BASE}index.html`,
+      `${BASE}downloadFile${COMPANY_QUERY}`,
+    ])
+    const [, warming, redirected, request] = harness.fake.requests
     expect(request.text).toBe(`--${BOUNDARY}--\r\n`)
-    expect(request.headers['referer']).toBe(BASE)
-    expect(request.headers['origin']).toBe('https://www4.sii.cl')
+    expect(request.headers['content-type']).toBe(`multipart/form-data; boundary=${BOUNDARY}`)
     expect(request.headers['cookie']).toContain('NETSCAPE_LIVEWIRE.rut=12345678')
     expect(request.headers['cookie']).toContain('PFE=warm')
     expect(request.headers['cookie']).toContain('JSESSIONID=abc')
+    // The warm-up and its redirect carry the portal's base headers and the cookies, no referer, no origin.
+    for (const warm of [warming, redirected]) {
+      expect(names(warm)).toEqual(BASE_HEADERS)
+      expect(warm.headers).toMatchObject({ 'user-agent': BROWSER_LINE, accept: ACCEPT_LIST, connection: 'keep-alive' })
+    }
+    expect(redirected.headers['cookie']).toContain('PFE=warm')
+    // The download adds only its content type, its referer and its origin (and the length the transport needs).
+    expect(names(request)).toEqual([...BASE_HEADERS, 'content-length', 'content-type', 'origin', 'referer'].sort())
+    expect(request.headers).toMatchObject({ referer: BASE, origin: 'https://www4.sii.cl', 'user-agent': BROWSER_LINE })
+  })
+
+  test('the cookies the warm-up brings last as long as the stage: the shared session keeps the session cookies only', async () => {
+    const harness = await signedIn([...warmUp, download({ body: SET_XML })])
+    await downloadExchangeSet(harness.portal)
+    await expect(sessionCookiesOf(harness)).resolves.toEqual(SESSION_COOKIES)
+  })
+
+  test('waits as long as a timer allows, once, whatever the client retry policy; a caller timeout still wins', async () => {
+    const busy = await signedIn([...warmUp, download({ status: 503, body: 'busy' })], {
+      retry: { maxAttempts: 3, initialDelayMs: 1 },
+    })
+    const error = await failure(downloadExchangeSet(busy.portal))
+    expect(error.code).toBe('SII_HTTP_ERROR')
+    expect(busy.fake.requests.filter((request) => request.url.includes('downloadFile'))).toHaveLength(1)
+    expect(busy.sleeps).toEqual([])
+    expect(busy.fake.requests.slice(1).map((request) => request.timeoutMs)).toEqual([
+      LONGEST_TIMEOUT_MS,
+      LONGEST_TIMEOUT_MS,
+      LONGEST_TIMEOUT_MS,
+    ])
+    const short = await signedIn([...warmUp, download({ body: SET_XML })])
+    await downloadExchangeSet(short.portal, {}, { timeoutMs: 5000 })
+    expect(short.fake.requests.slice(1).map((request) => request.timeoutMs)).toEqual([5000, 5000, 5000])
+  })
+
+  test('reads the answer as UTF-8 whatever the portal says, so accents in the set survive', async () => {
+    const set = SET_XML.replace('SetDoc', 'Cajón')
+    const harness = await signedIn([...warmUp, download({ body: set, encoding: 'utf8' })])
+    await expect(downloadExchangeSet(harness.portal)).resolves.toEqual({ xml: set })
   })
 
   test('logs a failed warm-up and goes on', async () => {
     const log = logger()
     const harness = await signedIn(
-      [{ method: 'GET', url: BASE, reply: new Error('socket hang up') }, download({ body: SET_XML })],
+      [alive, { method: 'GET', url: BASE, reply: new Error('socket hang up') }, download({ body: SET_XML })],
       {
         logger: log,
       },
     )
     await expect(downloadExchangeSet(harness.portal)).resolves.toEqual({ xml: SET_XML })
     expect(log.lines).toContain('gwt portal warm-up failed')
-    expect(harness.urls()).toHaveLength(2)
+    expect(harness.urls()).toHaveLength(3)
   })
 
   test('a page that is no set is unexpected, with the whole page in the details', async () => {
     const harness = await signedIn([
+      alive,
       { method: 'GET', url: BASE, reply: { body: '<html>portal</html>' } },
       download({ body: REFUSED_PAGE }),
     ])
     const error = await failure(downloadExchangeSet(harness.portal))
     expect(error.code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
     expect(error.details).toMatchObject({ step: 'downloadFile', httpStatus: 200, page: REFUSED_PAGE })
-    expect(harness.urls()).toEqual([BASE, `${BASE}downloadFile${COMPANY_QUERY}`])
+    expect(harness.urls()).toEqual([SESSION_CHECK_URL, BASE, `${BASE}downloadFile${COMPANY_QUERY}`])
   })
 
   test('logs in first when the jar holds no session, and takes the company from the call', async () => {
@@ -135,6 +199,53 @@ describe('downloadExchangeSet', () => {
     const request = harness.fake.requests[harness.fake.requests.length - 1]
     expect(request.url).toBe(`${BASE}downloadFile?re=12345678&dve=5`)
     expect(request.headers['cookie']).toContain('NETSCAPE_LIVEWIRE.rut=12345678')
+    expect(harness.urls()).not.toContain(SESSION_CHECK_URL)
+  })
+
+  test('a saved session is checked against the company page before the portal is entered, and kept when it is alive', async () => {
+    const harness = await signedIn([...warmUp, download({ body: SET_XML })])
+    await downloadExchangeSet(harness.portal)
+    expect(harness.urls()[0]).toBe(SESSION_CHECK_URL)
+    expect(harness.urls().filter((url) => url === SESSION_CHECK_URL)).toHaveLength(1)
+    expect(harness.urls().some((url) => url.includes('zeusr'))).toBe(false)
+  })
+
+  test('a saved session the SII no longer answers for is dropped and the login starts again', async () => {
+    const harness = await signedIn([
+      {
+        method: 'GET',
+        url: SESSION_CHECK_URL,
+        reply: { status: 302, headers: { location: 'https://zeusr.sii.cl/login' } },
+      },
+      { url: ENTRY, reply: { body: page('x') } },
+      { url: `${HERCULES}*`, method: 'POST', reply: LOGIN_OK },
+      HOME,
+      ...warmUp.slice(1),
+      download({ body: SET_XML }),
+    ])
+    await expect(downloadExchangeSet(harness.portal)).resolves.toEqual({ xml: SET_XML })
+    expect(harness.urls().slice(0, 4)).toEqual([
+      SESSION_CHECK_URL,
+      `https://zeusr.sii.cl/AUT2000/InicioAutenticacion/IngresoCertificado.html?${HOME.url}`,
+      `${HERCULES}?${HOME.url}`,
+      HOME.url,
+    ])
+    const request = harness.fake.requests[harness.fake.requests.length - 1]
+    expect(request.headers['cookie']).not.toContain('TS01ab')
+    expect(request.headers['cookie']).toContain('NETSCAPE_LIVEWIRE.dv=5')
+  })
+
+  test('a check that fails counts as a dead session too', async () => {
+    const harness = await signedIn([
+      { method: 'GET', url: SESSION_CHECK_URL, reply: new Error('socket hang up') },
+      { url: ENTRY, reply: { body: page('x') } },
+      { url: `${HERCULES}*`, method: 'POST', reply: LOGIN_OK },
+      HOME,
+      ...warmUp.slice(1),
+      download({ body: SET_XML }),
+    ])
+    await expect(downloadExchangeSet(harness.portal)).resolves.toEqual({ xml: SET_XML })
+    expect(harness.urls()[1]).toContain('zeusr.sii.cl')
   })
 })
 
@@ -150,7 +261,7 @@ describe('validateExchangeUser', () => {
       hashes: KNOWN,
       body: EMPTY_OK,
     })
-    expect(harness.urls()).toEqual([BASE, `${BASE}index.html`, FACADE])
+    expect(harness.urls()).toEqual([SESSION_CHECK_URL, BASE, `${BASE}index.html`, FACADE])
     const [request] = facadePosts(harness)
     expect(request.text).toBe(
       `7|0|8|${BASE}|${KNOWN.policy}|${SERVICE}|validarUsuario|${USER_TYPE}|3|5|${INTEGER}|1|2|3|4|1|5|5|0|0|0|0|6|7|8|12345678|0|0|0|0|0|8|76543210|`,
@@ -161,8 +272,33 @@ describe('validateExchangeUser', () => {
       'x-gwt-permutation': KNOWN.permutation,
       origin: 'https://www4.sii.cl',
       referer: BASE,
+      'user-agent': BROWSER_LINE,
+      accept: ACCEPT_LIST,
+      connection: 'keep-alive',
     })
     expect(request.headers['cookie']).toContain('JSESSIONID=abc')
+    // Nothing else of the client's goes along with the field's headers.
+    expect(names(request)).toEqual(
+      [
+        ...BASE_HEADERS,
+        'content-length',
+        'content-type',
+        'x-gwt-module-base',
+        'x-gwt-permutation',
+        'origin',
+        'referer',
+      ].sort(),
+    )
+  })
+
+  test('is sent once, with the longest timeout, even when the client retries', async () => {
+    const harness = await signedIn([...warmUp, facade({ status: 503, body: 'busy' })], {
+      retry: { maxAttempts: 3, initialDelayMs: 1 },
+    })
+    expect((await failure(validateExchangeUser(harness.portal))).code).toBe('SII_HTTP_ERROR')
+    expect(facadePosts(harness)).toHaveLength(1)
+    expect(facadePosts(harness)[0].timeoutMs).toBe(LONGEST_TIMEOUT_MS)
+    expect(harness.sleeps).toEqual([])
   })
 
   test('the table keeps both verifiers in their own slots when the holder and the company share one', async () => {
@@ -209,7 +345,7 @@ describe('uploadExchangeAnswers', () => {
       { fileName: 'envio-recibos.xml', body: 'dos' },
       { fileName: 'respuesta-aprobacion-comercial.xml', body: 'tres' },
     ])
-    const uploads = harness.fake.requests.slice(2)
+    const uploads = harness.fake.requests.slice(3)
     expect(uploads.map((request) => request.url)).toEqual([1, 2, 3].map((n) => `${BASE}uploadFile${n}${COMPANY_QUERY}`))
     expect(uploads.map((request) => request.parts)).toEqual([
       [
@@ -234,6 +370,7 @@ describe('uploadExchangeAnswers', () => {
       expect(request.headers['content-type']).toBe(`multipart/form-data; boundary=${BOUNDARY}`)
       expect(request.headers['referer']).toBe(BASE)
       expect(request.headers['origin']).toBe('https://www4.sii.cl')
+      expect(names(request)).toEqual([...BASE_HEADERS, 'content-length', 'content-type', 'origin', 'referer'].sort())
     }
   })
 
@@ -247,7 +384,7 @@ describe('uploadExchangeAnswers', () => {
       httpStatus: 200,
     })
     expect(error.details['portalMessage']).toContain('no vienen los parametros')
-    expect(harness.urls()).toHaveLength(4)
+    expect(harness.urls()).toHaveLength(5)
   })
 
   test('never retries an upload, even when the client retries', async () => {
@@ -257,7 +394,7 @@ describe('uploadExchangeAnswers', () => {
     const error = await failure(uploadExchangeAnswers(harness.portal, ANSWERS))
     expect(error.code).toBe('SII_HTTP_ERROR')
     expect(error.details['httpStatus']).toBe(503)
-    expect(harness.urls()).toHaveLength(3)
+    expect(harness.urls()).toHaveLength(4)
     expect(harness.sleeps).toEqual([])
   })
 })
@@ -308,5 +445,76 @@ describe('confirmExchange', () => {
     expect(error.code).toBe('SII_HTTP_ERROR')
     expect(facadePosts(harness)).toHaveLength(1)
     expect(harness.sleeps).toEqual([])
+  })
+})
+
+describe('withExchangeStage', () => {
+  const routes = (): FakeRoute[] => [
+    ...warmUp,
+    facade((request) =>
+      methodOf(request) === 'validarUsuario'
+        ? { body: EMPTY_OK, headers: { 'set-cookie': 'LATE=1; Path=/' } }
+        : { body: EMPTY_OK },
+    ),
+    upload(1, { body: 'uno' }),
+    upload(2, { body: 'dos' }),
+    upload(3, { body: 'tres' }),
+  ]
+
+  test('the user validation, the uploads and the confirmations share one session check and one warm-up', async () => {
+    const harness = await signedIn(routes())
+    const result = await withExchangeStage(harness.portal, 'stage', undefined, async (stage) => {
+      const validation = await validateExchangeUser(harness.portal, { stage })
+      const uploaded = await uploadExchangeAnswers(harness.portal, { ...ANSWERS, stage })
+      const confirmed = await confirmExchange(harness.portal, { stage })
+      return { validation, uploaded, confirmed }
+    })
+    expect(result.validation.hashes).toEqual(KNOWN)
+    expect(result.uploaded.answers).toHaveLength(3)
+    expect(result.confirmed.confirmations).toHaveLength(3)
+    expect(harness.urls()).toEqual([
+      SESSION_CHECK_URL,
+      BASE,
+      `${BASE}index.html`,
+      FACADE,
+      `${BASE}uploadFile1${COMPANY_QUERY}`,
+      `${BASE}uploadFile2${COMPANY_QUERY}`,
+      `${BASE}uploadFile3${COMPANY_QUERY}`,
+      FACADE,
+      FACADE,
+      FACADE,
+      FACADE,
+    ])
+    expect(facadePosts(harness).map(methodOf)).toEqual([
+      'validarUsuario',
+      'validarSetContriPostSeguimiento',
+      'updatePostulacionSeguimiento',
+      'updatePostulacionSeguimiento',
+      'updatePostulacionSeguimiento',
+    ])
+  })
+
+  test('every request carries the cookies of the warm-up, and no cookie a later answer sets joins them', async () => {
+    const harness = await signedIn(routes())
+    await withExchangeStage(harness.portal, 'stage', undefined, async (stage) => {
+      await validateExchangeUser(harness.portal, { stage })
+      await confirmExchange(harness.portal, { stage })
+    })
+    const [, , , ...calls] = harness.fake.requests
+    for (const request of calls) {
+      expect(request.headers['cookie']).toContain('PFE=warm')
+      expect(request.headers['cookie']).toContain('JSESSIONID=abc')
+      expect(request.headers['cookie']).not.toContain('LATE')
+    }
+    await expect(sessionCookiesOf(harness)).resolves.toEqual(SESSION_COOKIES)
+  })
+
+  test('the calls inside the stage keep their own names for the captures', async () => {
+    const memory = createMemoryCapture()
+    const harness = await signedIn(routes(), { capture: memory.capture })
+    await withExchangeStage(harness.portal, 'stage', undefined, (stage) =>
+      validateExchangeUser(harness.portal, { stage }),
+    )
+    expect(memory.exchanges().map((exchange) => exchange.operation)).toContain('validateExchangeUser.validarUsuario')
   })
 })

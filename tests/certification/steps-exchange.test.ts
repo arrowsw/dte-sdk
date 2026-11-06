@@ -6,6 +6,7 @@ import { parseXml } from '../../src/xml/parse'
 import { certificationHarness, stateWith } from '../support/certification-harness'
 import {
   EXCHANGE_COMPLETED,
+  SESSION_CHECK_URL,
   exchangeRoutes,
   exchangeSetXml,
   gwtMethodOf,
@@ -72,6 +73,29 @@ describe('runExchange', () => {
     ])
     expect(harness.urls().filter((url) => url.endsWith('nocache.js'))).toHaveLength(0)
     expect(harness.urls().some((url) => url.includes('downloadFile'))).toBe(false)
+  })
+
+  test('the download is a stage of its own, and the validation, the uploads and the confirmations are one more: two warm-ups in all', async () => {
+    const harness = await certificationHarness(exchangeRoutes())
+    await runExchange(harness.deps, atExchange())
+    expect(harness.urls().map((url) => url.replace(BASE, '<pfe>/'))).toEqual([
+      SESSION_CHECK_URL,
+      '<pfe>/',
+      '<pfe>/downloadFile?re=76543210&dve=3',
+      SESSION_CHECK_URL,
+      '<pfe>/',
+      '<pfe>/facade',
+      '<pfe>/uploadFile1?re=76543210&dve=3',
+      '<pfe>/uploadFile2?re=76543210&dve=3',
+      '<pfe>/uploadFile3?re=76543210&dve=3',
+      '<pfe>/facade',
+      '<pfe>/facade',
+      '<pfe>/facade',
+      '<pfe>/facade',
+    ])
+    const given = await certificationHarness(exchangeRoutes())
+    await runExchange(given.deps, atExchange(), { setXml: exchangeSetXml() })
+    expect(given.urls().filter((url) => url === BASE)).toHaveLength(1)
   })
 
   test('not in the exchange: the state the portal names is kept, nothing is uploaded, and the next run finds the set kept', async () => {

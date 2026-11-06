@@ -1,6 +1,6 @@
 import { DteError, errorMessage } from '../errors'
 import type { PrintedSampleFile } from '../pdf/samples'
-import type { GwtHashes } from '../portal/gwt'
+import type { GwtStage } from '../portal/gwt'
 import { summarizeSampleDetails } from '../portal/pages/samples'
 import {
   createSamplesReview,
@@ -8,6 +8,7 @@ import {
   readSamplesReview,
   submitSamplesReview,
   uploadSample,
+  withSamplesStage,
   type SamplesReview,
 } from '../portal/samples'
 import { runtime, saveState, type CertificationDependencies, type Runtime, type StepResult } from './runtime'
@@ -64,10 +65,10 @@ const finish = <Outcome extends SamplesOutcome>(
 const readStateAfterSubmission = async (
   rt: Runtime,
   companyRut: string,
-  gwt: GwtHashes,
+  stage: GwtStage,
 ): Promise<SamplesReview | null> => {
   try {
-    return await readSamplesReview(rt.portal, { companyRut, gwt })
+    return await readSamplesReview(rt.portal, { companyRut, stage })
   } catch (error) {
     rt.portal.logger.warn('sii samples state unreadable after the submission', { reason: errorMessage(error) })
     return null
@@ -97,55 +98,63 @@ export const uploadPrintedSamples = async (
   if (input.samples.length === 0) throw new DteError('MISSING_FIELD', { field: 'samples' })
   rt.emit({ step: 'MUESTRAS_UPLOADING', count: input.samples.length })
   const companyRut = state.companyRut
-  const review = await readSamplesReview(rt.portal, { companyRut })
-  await rt.store.writeArtefact(artefact('pdfte-lee-impreso.html'), review.body)
-  if (review.blocked !== null) {
-    const next = await saveState(rt, state, { samples: samplesOf(review, []) })
-    return finish(rt, next, 'blocked', false, review.blocked)
-  }
-  // No state is no review yet: the first one is created. Only `INGRESO` resumes; `RECHAZADO` and `APROBADO` allow a new one.
-  if (review.state !== null && review.state !== RESUMABLE && !CREATABLE.includes(review.state)) {
-    const next = await saveState(rt, state, {
-      samples: samplesOf(review, state.samples?.uploaded ?? []),
-      stage: laterStage(state.stage, 'compliance'),
-    })
-    return finish(rt, next, 'alreadySubmitted', true, review.state)
-  }
-  const gwt = review.hashes
-  const resumed = review.state === RESUMABLE && review.revisionId !== null && review.revisionToken !== null
-  const created = resumed ? null : await createSamplesReview(rt.portal, { companyRut, gwt })
-  if (created !== null) await rt.store.writeArtefact(artefact('pdfte-crea-lista.html'), created.body)
-  // A resumed review has both its id and its token: that is what `resumed` checks.
-  const target =
-    created === null
-      ? { revisionId: review.revisionId!, revisionToken: review.revisionToken! }
-      : { revisionId: created.revisionId, revisionToken: created.revisionToken }
-  const opened: SamplesState = { ...samplesOf(review, []), ...target, state: review.state }
-  const current = { state: await saveState(rt, state, { samples: opened }), uploaded: [] as readonly string[] }
-  for (const [index, sample] of input.samples.entries()) {
-    const result = await uploadSample(rt.portal, { revisionId: target.revisionId, ...sample, gwt })
-    await rt.store.writeArtefact(artefact(`upload-${index + 1}.html`), result.body)
-    current.uploaded = [...current.uploaded, sample.fileName]
-    current.state = await saveState(rt, current.state, { samples: { ...opened, uploaded: current.uploaded } })
-  }
-  const submitted = await submitSamplesReview(rt.portal, { revisionToken: target.revisionToken, gwt })
-  await rt.store.writeArtefact(artefact('pdfte-enviar-sii.html'), submitted.body)
-  const after = await readStateAfterSubmission(rt, companyRut, gwt)
-  if (after !== null) await rt.store.writeArtefact(artefact('pdfte-estado-post-envio.html'), after.body)
-  const sent: SamplesState = { ...opened, uploaded: current.uploaded, submittedAt: rt.now().toISOString() }
-  const afterState = after === null ? null : after.state
-  if (afterState === REJECTED) {
-    const detail = await readSamplesDetail(rt.portal, { revisionToken: target.revisionToken, gwt })
-    if (detail.body !== '') await rt.store.writeArtefact(artefact('pdfte-detalle-revision.html'), detail.body)
-    const summary = detail.rows.length === 0 ? NO_DETAIL : summarizeSampleDetails(detail.rows)
-    const next = await saveState(rt, current.state, {
-      samples: { ...sent, state: REJECTED, detail: detail.rows, summary },
-    })
-    return finish(rt, next, 'rejected', false, summary)
-  }
-  const next = await saveState(rt, current.state, {
-    samples: { ...sent, state: afterState },
-    stage: laterStage(current.state.stage, 'compliance'),
-  })
-  return finish(rt, next, 'submitted', true, afterState ?? 'submitted')
+  // The reading, the creation, every PDF, the submission and the re-reading are one stage of the portal, with one
+  // warm-up, as in the field.
+  return withSamplesStage(
+    rt.portal,
+    'uploadPrintedSamples',
+    undefined,
+    async (stage): Promise<StepResult<SamplesOutcome>> => {
+      const review = await readSamplesReview(rt.portal, { companyRut, stage })
+      await rt.store.writeArtefact(artefact('pdfte-lee-impreso.html'), review.body)
+      if (review.blocked !== null) {
+        const next = await saveState(rt, state, { samples: samplesOf(review, []) })
+        return finish(rt, next, 'blocked', false, review.blocked)
+      }
+      // No state is no review yet: the first one is created. Only `INGRESO` resumes; `RECHAZADO` and `APROBADO` allow a new one.
+      if (review.state !== null && review.state !== RESUMABLE && !CREATABLE.includes(review.state)) {
+        const next = await saveState(rt, state, {
+          samples: samplesOf(review, state.samples?.uploaded ?? []),
+          stage: laterStage(state.stage, 'compliance'),
+        })
+        return finish(rt, next, 'alreadySubmitted', true, review.state)
+      }
+      const resumed = review.state === RESUMABLE && review.revisionId !== null && review.revisionToken !== null
+      const created = resumed ? null : await createSamplesReview(rt.portal, { companyRut, stage })
+      if (created !== null) await rt.store.writeArtefact(artefact('pdfte-crea-lista.html'), created.body)
+      // A resumed review has both its id and its token: that is what `resumed` checks.
+      const target =
+        created === null
+          ? { revisionId: review.revisionId!, revisionToken: review.revisionToken! }
+          : { revisionId: created.revisionId, revisionToken: created.revisionToken }
+      const opened: SamplesState = { ...samplesOf(review, []), ...target, state: review.state }
+      const current = { state: await saveState(rt, state, { samples: opened }), uploaded: [] as readonly string[] }
+      for (const [index, sample] of input.samples.entries()) {
+        const result = await uploadSample(rt.portal, { revisionId: target.revisionId, ...sample, stage })
+        await rt.store.writeArtefact(artefact(`upload-${index + 1}.html`), result.body)
+        current.uploaded = [...current.uploaded, sample.fileName]
+        current.state = await saveState(rt, current.state, { samples: { ...opened, uploaded: current.uploaded } })
+      }
+      const submitted = await submitSamplesReview(rt.portal, { revisionToken: target.revisionToken, stage })
+      await rt.store.writeArtefact(artefact('pdfte-enviar-sii.html'), submitted.body)
+      const after = await readStateAfterSubmission(rt, companyRut, stage)
+      if (after !== null) await rt.store.writeArtefact(artefact('pdfte-estado-post-envio.html'), after.body)
+      const sent: SamplesState = { ...opened, uploaded: current.uploaded, submittedAt: rt.now().toISOString() }
+      const afterState = after === null ? null : after.state
+      if (afterState === REJECTED) {
+        const detail = await readSamplesDetail(rt.portal, { revisionToken: target.revisionToken, stage })
+        if (detail.body !== '') await rt.store.writeArtefact(artefact('pdfte-detalle-revision.html'), detail.body)
+        const summary = detail.rows.length === 0 ? NO_DETAIL : summarizeSampleDetails(detail.rows)
+        const next = await saveState(rt, current.state, {
+          samples: { ...sent, state: REJECTED, detail: detail.rows, summary },
+        })
+        return finish(rt, next, 'rejected', false, summary)
+      }
+      const next = await saveState(rt, current.state, {
+        samples: { ...sent, state: afterState },
+        stage: laterStage(current.state.stage, 'compliance'),
+      })
+      return finish(rt, next, 'submitted', true, afterState ?? 'submitted')
+    },
+  )
 }

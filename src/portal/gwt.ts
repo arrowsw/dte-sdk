@@ -1,7 +1,9 @@
 import type { GwtPortal } from '../catalogs/certification'
 import { errorMessage } from '../errors'
+import type { CallOverrides } from '../sii/client'
 import { encodeUtf8 } from '../sii/transport'
-import { portalRequest, type PortalContext, type PortalPage } from './session'
+import type { PortalClient } from './client'
+import { ensureLiveSession, portalRequest, withPortalSession, type PortalContext, type PortalPage } from './session'
 
 /**
  * EN: One parameter of a GWT-RPC call, as the SII's portals serialize it: a string (interned in the table, `0` when
@@ -338,39 +340,26 @@ export const GWT_NULL: GwtParameter = { kind: 'null' }
 /** EN: A null parameter declared with a type other than String. ES: Un parámetro nulo declarado con un tipo distinto de String. */
 export const gwtNull = (type: string): GwtParameter => ({ kind: 'null', type })
 
-const REDIRECT_STATUS: ReadonlySet<number> = new Set([301, 302, 303, 307, 308])
+const REDIRECT_STATUS: ReadonlySet<number> = new Set([301, 302])
 
 /**
- * EN: The warm-up of a GWT portal: `GET` of its base with the session and one redirect followed, so the server opens
- * the portal's context as it would for a browser; every cookie it sets joins the jar. A failure is logged and ignored.
- * ES: El calentamiento de un portal GWT: `GET` de su base con la sesión y una redirección seguida, para que el servidor
- * abra el contexto del portal como lo haría para un navegador; cada cookie que fija entra a la bolsa. Una falla se
- * registra y se ignora.
+ * EN: The warm-up of a GWT portal: `GET` of its base with the session and one redirect (301 or 302) followed, so the
+ * server opens the portal's context as it would for a browser; every cookie it sets joins the jar. A failure is logged
+ * and ignored.
+ * ES: El calentamiento de un portal GWT: `GET` de su base con la sesión y una redirección (301 o 302) seguida, para que
+ * el servidor abra el contexto del portal como lo haría para un navegador; cada cookie que fija entra a la bolsa. Una
+ * falla se registra y se ignora.
  */
 export const warmUpGwtPortal = async (context: PortalContext, portal: GwtPortal): Promise<void> => {
   try {
     const first = await portalRequest(context, 'warm-up', 'GET', portal.base)
     const location = first.headers['location']
     if (location !== undefined && REDIRECT_STATUS.has(first.status))
-      await portalRequest(context, 'warm-up', 'GET', new URL(location, portal.base).toString(), {
-        referer: portal.base,
-      })
+      await portalRequest(context, 'warm-up', 'GET', new URL(location, portal.base).toString())
   } catch (error) {
     context.portal.logger.warn('gwt portal warm-up failed', { module: portal.moduleName, reason: errorMessage(error) })
   }
 }
-
-/**
- * EN: The hashes of a portal for one operation: the caller's pair, else the discovery from the portal's known pair.
- * ES: Los hashes de un portal para una operación: el par del llamador, si no el descubrimiento desde el par conocido del portal.
- */
-export const gwtHashesOf = (context: PortalContext, portal: GwtPortal, override?: GwtHashes): Promise<GwtHashes> =>
-  discoverGwtHashes(context, {
-    moduleBase: portal.base,
-    moduleName: portal.moduleName,
-    known: portal.known,
-    ...(override === undefined ? {} : { override }),
-  })
 
 /**
  * EN: One GWT-RPC call posted to a portal's service: the page and the answer read from it.
@@ -406,3 +395,95 @@ export const postGwt = async (
  * ES: El límite multipart de las subidas de los portales: el prefijo del navegador y el reloj en hexadecimal.
  */
 export const portalBoundary = (now: Date): string => `----WebKitFormBoundary${now.getTime().toString(16)}`
+
+// The longest wait a timer holds (Node truncates a larger one to 1 ms); the field's calls to these portals have none.
+const LONGEST_TIMEOUT_MS = 2 ** 31 - 1
+
+/**
+ * EN: How a stage talks to a GWT portal: the portal, the headers every request of the stage starts from, and whether
+ * the hashes are looked up in the portal's module script (else the known pair stands).
+ * ES: Cómo habla una etapa con un portal GWT: el portal, las cabeceras de las que parte cada petición de la etapa, y si
+ * los hashes se buscan en el script del módulo del portal (si no, vale el par conocido).
+ */
+export type GwtStageSpec = {
+  /** EN: The portal. ES: El portal. */
+  readonly portal: GwtPortal
+  /** EN: The headers each request starts from; the client adds no others. ES: Las cabeceras de las que parte cada petición; el cliente no agrega otras. */
+  readonly headers: Readonly<Record<string, string>>
+  /** EN: True to look the hashes up once, after the warm-up. ES: True para buscar los hashes una vez, tras el calentamiento. */
+  readonly discoverHashes: boolean
+}
+
+/**
+ * EN: A stage of work on one GWT portal: one authenticated entry, one warm-up and one pair of hashes that every call of
+ * the stage shares. Its cookies live only as long as the stage.
+ * ES: Una etapa de trabajo en un portal GWT: una entrada autenticada, un calentamiento y un par de hashes que comparten
+ * todas las llamadas de la etapa. Sus cookies viven solo lo que dura la etapa.
+ */
+export type GwtStage = {
+  /** EN: The context the calls of the stage run in. ES: El contexto en que corren las llamadas de la etapa. */
+  readonly context: PortalContext
+  /** EN: The hashes the calls of the stage use. ES: Los hashes que usan las llamadas de la etapa. */
+  readonly hashes: GwtHashes
+}
+
+/**
+ * EN: Runs a stage on a GWT portal, as the field does: the session is made sure of first (a cached one is checked and
+ * replaced when dead); then the portal is warmed up once, with its cookies kept for the stage alone, so they neither
+ * join the shared session nor travel to another portal; the hashes are taken once; and every call of `run` is sent
+ * once, with no retry and the longest timeout a timer allows, with the portal's own headers, its answers read as UTF-8.
+ * ES: Ejecuta una etapa en un portal GWT, como lo hace el campo: primero se asegura la sesión (una en caché se comprueba
+ * y se reemplaza si está muerta); luego se calienta el portal una vez, con sus cookies guardadas solo para la etapa,
+ * de modo que ni entran a la sesión compartida ni viajan a otro portal; los hashes se toman una vez; y cada llamada de
+ * `run` se envía una sola vez, sin reintento y con el mayor timeout que admite un timer, con las cabeceras propias del
+ * portal y sus respuestas leídas como UTF-8.
+ * @param hashes EN: a pair that wins over the known one and over any lookup. ES: un par que gana sobre el conocido y sobre cualquier búsqueda.
+ * @throws {DteError} EN: the session codes of `ensureSession`; whatever `run` throws. ES: los códigos de sesión de `ensureSession`; lo que lance `run`.
+ */
+export const withGwtStage = <T>(
+  portal: PortalClient,
+  operation: string,
+  overrides: CallOverrides | undefined,
+  spec: GwtStageSpec,
+  hashes: GwtHashes | undefined,
+  run: (stage: GwtStage) => Promise<T>,
+): Promise<T> =>
+  withPortalSession(portal, operation, overrides, async (session) => {
+    await ensureLiveSession(session)
+    const warming: PortalContext = {
+      ...session,
+      overrides: { ...overrides, retry: false, timeoutMs: overrides?.timeoutMs ?? LONGEST_TIMEOUT_MS },
+      // The stage's own jar: it starts from the session's cookies, and what the warm-up sets stays here.
+      state: { cookies: session.state.cookies, loggedIn: session.state.loggedIn },
+      verbatim: { headers: spec.headers, sealed: false },
+    }
+    await warmUpGwtPortal(warming, spec.portal)
+    const context: PortalContext = { ...warming, verbatim: { headers: spec.headers, sealed: true } }
+    const { portal: gwtPortal } = spec
+    const used =
+      hashes ??
+      (spec.discoverHashes
+        ? await discoverGwtHashes(context, {
+            moduleBase: gwtPortal.base,
+            moduleName: gwtPortal.moduleName,
+            known: gwtPortal.known,
+          })
+        : gwtPortal.known)
+    return run({ context, hashes: used })
+  })
+
+/**
+ * EN: Runs inside the caller's stage when there is one, else opens a stage of its own for the call.
+ * ES: Corre dentro de la etapa de quien llama si la hay; si no, abre una etapa propia para la llamada.
+ */
+export const inGwtStage = <T>(
+  portal: PortalClient,
+  operation: string,
+  overrides: CallOverrides | undefined,
+  spec: GwtStageSpec,
+  input: { readonly stage?: GwtStage; readonly gwt?: GwtHashes },
+  run: (stage: GwtStage) => Promise<T>,
+): Promise<T> =>
+  input.stage === undefined
+    ? withGwtStage(portal, operation, overrides, spec, input.gwt, run)
+    : run({ context: { ...input.stage.context, operation }, hashes: input.gwt ?? input.stage.hashes })

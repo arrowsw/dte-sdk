@@ -22,8 +22,17 @@ export const exchangeSetXml = (count = 2): string =>
 /** The method of a GWT-RPC body: the fourth string of its table. */
 export const gwtMethodOf = (request: RecordedRequest): string => request.text.split('|')[6]
 
-/** The warm-up page and the module script that confirms the known permutation. */
+/** The company page the stage reads to check a saved session is still alive. */
+export const SESSION_CHECK_URL = 'https://maullin.sii.cl/cvc_cgi/dte/ad_empresa1'
+export const sessionCheckRoute: FakeRoute = {
+  method: 'GET',
+  url: SESSION_CHECK_URL,
+  reply: { body: '<form name="ad_empresa">RUT_EMP</form>' },
+}
+
+/** The session check, the warm-up page and the module script that confirms the known permutation. */
 export const gwtWarmUpRoutes = (portal: GwtPortal): FakeRoute[] => [
+  sessionCheckRoute,
   { method: 'GET', url: portal.base, reply: { body: '<html>portal</html>' } },
   {
     method: 'GET',

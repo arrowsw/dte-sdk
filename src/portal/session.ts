@@ -64,6 +64,21 @@ export type PortalContext = {
   readonly overrides?: CallOverrides
   /** EN: Current cookies and whether this operation already logged in. ES: Cookies actuales y si esta operación ya inició sesión. */
   readonly state: { cookies: CookieJar; loggedIn: boolean }
+  /** EN: When set, every request carries these headers and no others of the client's, its answers are read as UTF-8, and, once `sealed`, its `Set-Cookie` lines no longer change the jar. ES: Si está presente, cada petición lleva estas cabeceras y ninguna otra del cliente, sus respuestas se leen como UTF-8 y, una vez `sealed`, sus líneas `Set-Cookie` ya no cambian la bolsa. */
+  readonly verbatim?: PortalVerbatim
+}
+
+/**
+ * EN: How a request is written when it must match the field's exactly: the whole set of headers it starts from, and
+ * whether the jar is closed to new cookies.
+ * ES: Cómo se escribe una petición cuando debe calzar exactamente con la del campo: el conjunto completo de cabeceras
+ * del que parte, y si la bolsa está cerrada a cookies nuevas.
+ */
+export type PortalVerbatim = {
+  /** EN: The headers every request starts from; the request's own content type, referer, cookie and headers go over them. ES: Las cabeceras de las que parte cada petición; el tipo de contenido, el referer, la cookie y las cabeceras propias de la petición van encima. */
+  readonly headers: Readonly<Record<string, string>>
+  /** EN: True when responses no longer add cookies to the jar. ES: True cuando las respuestas ya no agregan cookies a la bolsa. */
+  readonly sealed: boolean
 }
 
 /**
@@ -103,6 +118,11 @@ export const formEncode = (fields: Readonly<Record<string, string>>): string =>
 
 const portalEncoding = (response: Pick<HttpResponse, 'headers'>): BodyEncoding =>
   /charset=utf-?8/i.test(response.headers['content-type'] ?? '') ? 'utf8' : 'latin1'
+
+const encodingOf =
+  (context: PortalContext) =>
+  (response: Pick<HttpResponse, 'headers'>): BodyEncoding =>
+    context.verbatim === undefined ? portalEncoding(response) : 'utf8'
 
 // The jar is flat, so the URL is all that keeps the session on the SII: no cookie goes to another host or in clear text,
 // and no other host writes into the jar.
@@ -179,6 +199,19 @@ const rawHeaders = (
   ...extra,
 })
 
+// A verbatim request is its base headers, then what the request itself names, then the cookies of the jar.
+const verbatimHeaders = (
+  base: Readonly<Record<string, string>>,
+  url: string,
+  cookies: CookieJar,
+  options: PortalRequestOptions,
+): Readonly<Record<string, string>> => ({
+  ...base,
+  ...(options.contentType === undefined ? {} : { 'Content-Type': options.contentType }),
+  ...contextHeaders(url, cookies, options.referer),
+  ...options.headers,
+})
+
 /**
  * EN: What a request may carry: a form, a JSON value, or raw bytes with their content type, plus the referer and any
  * header the page expects.
@@ -243,11 +276,13 @@ export const portalRequest = async (
   url: string,
   options: PortalRequestOptions = {},
 ): Promise<PortalPage> => {
-  const { portal, overrides, state } = context
+  const { portal, overrides, state, verbatim } = context
+  const responseEncoding = encodingOf(context)
   const operation = `${context.operation}.${step}`
   const text = options.json === undefined ? options.form && formEncode(options.form) : JSON.stringify(options.json)
   const body = options.body ?? (text === undefined ? undefined : encodeUtf8(text))
   const headersOf = (): Readonly<Record<string, string>> => {
+    if (verbatim !== undefined) return verbatimHeaders(verbatim.headers, url, state.cookies, options)
     if (options.body !== undefined)
       return rawHeaders(
         url,
@@ -273,10 +308,10 @@ export const portalRequest = async (
         signal: overrides?.signal,
         attempt,
         requestEncoding: 'utf8',
-        responseEncoding: portalEncoding,
+        responseEncoding,
       })
       if (RETRYABLE_STATUS.has(answer.status))
-        throw httpError(answer, decodeBody(answer.body, portalEncoding(answer)), operation, 'portal', url)
+        throw httpError(answer, decodeBody(answer.body, responseEncoding(answer)), operation, 'portal', url)
       return answer
     },
     {
@@ -286,8 +321,9 @@ export const portalRequest = async (
         portal.logger.warn('sii portal retrying', { operation, attempt, delayMs, code: error.code }),
     },
   )
-  if (isSiiUrl(url)) state.cookies = mergeSetCookie(state.cookies, response.headers['set-cookie'])
-  const html = decodeBody(response.body, portalEncoding(response))
+  if (isSiiUrl(url) && verbatim?.sealed !== true)
+    state.cookies = mergeSetCookie(state.cookies, response.headers['set-cookie'])
+  const html = decodeBody(response.body, responseEncoding(response))
   if (isBlockedPage(response.status, isStructuredBody(html) ? '' : html))
     throw new DteError('SII_PORTAL_BLOCKED', {
       operation: context.operation,
@@ -559,6 +595,18 @@ export const ensureSession = async (context: PortalContext): Promise<void> => {
   if (hasSessionCookie(context.state.cookies)) return
   await portalRequest(context, 'entry', 'GET', `${CERTIFICATE_ENTRY_URL}?${PORTAL_LANDING_URL}`)
   await login(context, PORTAL_LANDING_URL)
+}
+
+/**
+ * EN: Makes sure the jar holds a session that is alive: a session it already holds is checked with a read of the
+ * company page and dropped when the SII no longer answers for it, then `ensureSession` logs in when there is none.
+ * ES: Se asegura de que la bolsa tenga una sesión viva: una sesión que ya tiene se comprueba con una lectura de la
+ * página de empresa y se descarta cuando el SII ya no responde por ella; luego `ensureSession` inicia sesión si no hay.
+ * @throws {DteError} EN: the codes of `ensureSession`. ES: los códigos de `ensureSession`.
+ */
+export const ensureLiveSession = async (context: PortalContext): Promise<void> => {
+  if (hasSessionCookie(context.state.cookies) && !(await cachedSessionAlive(context))) forgetSession(context)
+  await ensureSession(context)
 }
 
 /**
