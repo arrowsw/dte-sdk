@@ -29,6 +29,8 @@ const FACADE = `${BASE}facade`
 const KNOWN = EXCHANGE_PORTAL.known
 const SERVICE = EXCHANGE_PORTAL.serviceInterface
 const BOUNDARY = `----WebKitFormBoundary${FIXED_NOW.getTime().toString(16)}`
+// The download's own limit: the browser prefix and the clock in decimal.
+const DOWNLOAD_BOUNDARY = `----WebKitFormBoundary${FIXED_NOW.getTime()}`
 const COMPANY_QUERY = '?re=76543210&dve=3'
 const SET_XML = '<?xml version="1.0" encoding="ISO-8859-1"?><EnvioDTE><SetDTE ID="SetDoc"></SetDTE></EnvioDTE>'
 const REFUSED_PAGE = '<html><head><title>ERROR</title></head><body>no vienen los parametros necesarios</body></html>'
@@ -111,8 +113,8 @@ describe('downloadExchangeSet', () => {
       `${BASE}downloadFile${COMPANY_QUERY}`,
     ])
     const [, warming, redirected, request] = harness.fake.requests
-    expect(request.text).toBe(`--${BOUNDARY}--\r\n`)
-    expect(request.headers['content-type']).toBe(`multipart/form-data; boundary=${BOUNDARY}`)
+    expect(request.text).toBe(`--${DOWNLOAD_BOUNDARY}--\r\n`)
+    expect(request.headers['content-type']).toBe(`multipart/form-data; boundary=${DOWNLOAD_BOUNDARY}`)
     expect(request.headers['cookie']).toContain('NETSCAPE_LIVEWIRE.rut=12345678')
     expect(request.headers['cookie']).toContain('PFE=warm')
     expect(request.headers['cookie']).toContain('JSESSIONID=abc')

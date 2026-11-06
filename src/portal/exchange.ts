@@ -204,7 +204,8 @@ export const downloadExchangeSet = async (
 ): Promise<ExchangeSetDownload> => {
   const company = companyOf(portal, input.companyRut)
   return inGwtStage(portal, 'downloadExchangeSet', overrides, EXCHANGE_STAGE, input, async ({ context }) => {
-    const boundary = portalBoundary(portal.now())
+    // The download's limit is the prefix and the clock in decimal; the uploads' is the clock in hexadecimal.
+    const boundary = `----WebKitFormBoundary${portal.now().getTime()}`
     const page = await portalRequest(
       context,
       'downloadFile',
