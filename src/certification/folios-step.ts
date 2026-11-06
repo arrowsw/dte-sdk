@@ -364,10 +364,10 @@ export const prepareFolios = async (
       queryFolioQuota(rt.portal, { type: type as DocumentType }).catch(() => null)
     if (missing > 0) {
       const quota = await readQuota()
-      // A quota that is not unrestricted always carries its maximum.
+      // A quota that is not unrestricted always carries its maximum and the count of unused folios.
       const short =
         quota !== null &&
-        (quota.blocked || (!quota.unrestricted && quota.maxAuthorized! < required && (quota.availableFolios ?? 0) > 0))
+        (quota.blocked || (!quota.unrestricted && quota.maxAuthorized! < required && quota.availableFolios! > 0))
       if (short) await reobtain()
       if (missing > 0) {
         last = await ask(quota, missing)

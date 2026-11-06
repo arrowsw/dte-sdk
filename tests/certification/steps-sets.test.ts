@@ -512,6 +512,17 @@ describe('prepareFolios', () => {
     })
   })
 
+  test('a short maximum with no unused folios does not re-obtain', async () => {
+    const harness = await certificationHarness([
+      stampEntry,
+      quota(...repeat(quotaForm(1), 5)),
+      confirm(cafXml(33, { from: 1, to: 1 }), cafXml(33, { from: 2, to: 2 })),
+    ])
+    const result = await prepareFolios(harness.deps, stateWith(), { needs: { 33: 2 } })
+    expect(result.cafs).toHaveLength(2)
+    expect(harness.urls().some((url) => url.includes('rf_reobtencion'))).toBe(false)
+  })
+
   test('a blocked maximum re-obtains first and, if that covers the need, asks the portal for nothing', async () => {
     const harness = await certificationHarness([
       stampEntry,
