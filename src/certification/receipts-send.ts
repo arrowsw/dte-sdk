@@ -198,10 +198,14 @@ const fieldReception = async (upload: () => Promise<UploadReceipt>, operation: s
   try {
     receipt = await upload()
   } catch (error) {
-    // A `STATUS` 7 the client refused for want of any track id is still a duplicate for the field.
+    // A `STATUS` 7 the client refused is still a duplicate, or a sent file, for the field, which reads only the first
+    // error line and the `TRACKID` element.
     const reading =
       isDteError(error) && error.code === 'SII_UPLOAD_REJECTED' && error.details.status === 7
-        ? readStatusSeven(error.details.errors as readonly string[], undefined)
+        ? readStatusSeven(
+            error.details.errors as readonly string[],
+            (error.details.trackIdElement as string | null) ?? undefined,
+          )
         : null
     if (reading === null) throw error
     return reading

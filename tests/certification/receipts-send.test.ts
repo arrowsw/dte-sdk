@@ -44,6 +44,14 @@ const RECEIVED_TRACK_IN_TEXT: FakeReply = {
     '<DETAIL><ERROR>Trackid 555</ERROR></DETAIL>',
   ),
 }
+// STATUS 7 with a TRACKID element whose first error line is benign and a later one looks like a refusal: the field
+// reads only the first line, so it is a sent file.
+const SEVEN_LATE_REFUSAL: FakeReply = {
+  body: SEVEN.replace('</DETAIL>', '<ERROR>cvc-complex-type.2.4.a: algo</ERROR>\n</DETAIL>').replace(
+    '9876543210',
+    '444',
+  ),
+}
 const REFUSED: FakeReply = { body: siiFixture('reception-schema-error.xml') }
 const rejected = (trackId: string, gloss = 'Envio Rechazado'): FakeReply => ({
   body: siiFixture('soap-estup-epr.xml')
@@ -126,6 +134,15 @@ describe('sendReceiptsSet', () => {
     })
     expect(sleeps).toEqual([20000, 30000])
     expect(steps).toEqual(['BOLETA_SOAP_CHECK', 'BOLETA_RCOF'])
+  })
+
+  test('a STATUS 7 with a track id whose later error line looks like a refusal is still a sent envelope and report', async () => {
+    const { result, sleeps } = await run(
+      [SEVEN_LATE_REFUSAL, SEVEN_LATE_REFUSAL],
+      [estUp('EPR', '444'), estUp('EPR', '444')],
+    )
+    expect(result).toMatchObject({ outcome: 'sent', envelopeTrackId: '444', consumptionTrackId: '444' })
+    expect(sleeps).toEqual([20000, 30000])
   })
 
   test.each([
