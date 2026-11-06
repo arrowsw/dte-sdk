@@ -40,8 +40,9 @@ const RATIONING: ReadonlySet<PortalRejection> = new Set([
   'quotaCapReached',
   'personWithPendingIssues',
 ])
-// After an exact request these mean "less than asked": a run of batches may still cover it.
-const BATCH_FALLBACK: ReadonlySet<PortalRejection> = new Set(['quotaInsufficient', 'foliosShort', 'quotaExceeded'])
+// After an exact request these mean "less than asked": a run of batches may still cover it. A single folio over the
+// maximum is not one of them: that refusal stands.
+const BATCH_FALLBACK: ReadonlySet<PortalRejection> = new Set(['quotaInsufficient', 'foliosShort'])
 
 /**
  * EN: The CAFs of a run, parsed; an expired one is left out, because the SII refuses its folios.
@@ -312,8 +313,18 @@ export const prepareFolios = async (
         missing = reobtained.complete ? 0 : required - reobtained.available
       }
     }
+    // The floor of the SII is a maximum of one folio and every batch asks for at least one, so as many batches as
+    // folios are missing always reach; four, the default, fall short as soon as the SII gives them one by one.
+    const batches = (quantity: number, initialQuota?: FolioQuota): Promise<FolioFlowResult> =>
+      requestCafInBatches(rt.portal, {
+        type: type as DocumentType,
+        quantity,
+        maxBatches: Math.max(1, quantity),
+        ...(initialQuota === undefined ? {} : { initialQuota }),
+      })
     // A blocked maximum asks for nothing: the portal is not even visited. Otherwise one exact request, or batches when
-    // the maximum is below the need, falling back to batches when the exact request falls short.
+    // the maximum is below the need, falling back to batches when the exact request falls short and the maximum it
+    // showed is not zero.
     const ask = async (quota: FolioQuota | null, quantity: number): Promise<FolioFlowResult> => {
       if (quota !== null && quota.blocked)
         return {
@@ -329,17 +340,18 @@ export const prepareFolios = async (
         quota === null || quota.unrestricted || quota.maxAuthorized === null || quota.maxAuthorized >= quantity
       const first = exactFirst
         ? await requestCafExact(rt.portal, { type: type as DocumentType, quantity })
-        : await requestCafInBatches(rt.portal, { type: type as DocumentType, quantity, initialQuota: quota })
+        : await batches(quantity, quota)
       add(first.cafs)
-      if (!first.complete && exactFirst && first.rejection !== null && BATCH_FALLBACK.has(first.rejection)) {
-        const rest = await requestCafInBatches(rt.portal, {
-          type: type as DocumentType,
-          quantity: quantity - first.granted,
-        })
-        add(rest.cafs)
-        return rest
-      }
-      return first
+      const fallsBack =
+        !first.complete &&
+        exactFirst &&
+        first.rejection !== null &&
+        BATCH_FALLBACK.has(first.rejection) &&
+        (first.maxAuthorized === null || first.maxAuthorized > 0)
+      if (!fallsBack) return first
+      const rest = await batches(quantity - first.granted)
+      add(rest.cafs)
+      return rest
     }
     // A refusal or a failure reading the maximum is not a stop: the run goes on with no maximum, asking in one go.
     const readQuota = (): Promise<FolioQuota | null> =>

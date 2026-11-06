@@ -300,6 +300,51 @@ describe('prepareFolios', () => {
     expect(error.details).toMatchObject({ rejection: 'companyNotAuthorized' })
   })
 
+  test('batches go on for as many trips as folios are missing, not four', async () => {
+    const one = (folio: number): string => cafXml(33, { from: folio, to: folio })
+    const harness = await certificationHarness([
+      { ...stampEntry, reply: repeat({ body: STAMP_ENTRY }, 14) },
+      quota(...repeat(quotaForm(1, 0), 14)),
+      confirm(one(1), one(2), one(3), one(4), one(5), one(6)),
+    ])
+    const result = await prepareFolios(harness.deps, stateWith(), { needs: { 33: 6 } })
+    expect(result.cafs).toEqual([one(1), one(2), one(3), one(4), one(5), one(6)])
+    expect(harness.posted('of_confirma_folio')).toHaveLength(6)
+  })
+
+  describe('an exact request that falls short goes on in batches only as the reference does', () => {
+    const exceeded = page('debe ser menor o igual al m&aacute;ximo autorizado')
+
+    test('not when a single folio is over the maximum: the refusal stands', async () => {
+      const harness = await certificationHarness([
+        stampEntry,
+        quota(...repeat(quotaForm(), 6)),
+        confirm(exceeded, exceeded),
+      ])
+      const error = await failure(prepareFolios(harness.deps, stateWith(), { needs: { 33: 1 } }))
+      expect(error.details).toMatchObject({ rejection: 'quotaExceeded', required: 1, available: 0 })
+      expect(harness.posted('of_confirma_folio')).toHaveLength(1)
+      expect(harness.posted('of_solicita_folios_dcto')).toHaveLength(2)
+    })
+
+    test('not when the maximum the request shows is zero', async () => {
+      const harness = await certificationHarness([stampEntry, quota(quotaForm(), ...repeat(quotaForm(0, 0), 5))])
+      const error = await failure(prepareFolios(harness.deps, stateWith(), { needs: { 33: 2 } }))
+      expect(error.details).toMatchObject({ rejection: 'quotaInsufficient', maxAuthorized: 0 })
+      expect(harness.posted('of_solicita_folios_dcto')).toHaveLength(2)
+    })
+
+    test('yes when the maximum the request shows is short and not zero', async () => {
+      const harness = await certificationHarness([
+        stampEntry,
+        quota(quotaForm(), ...repeat(quotaForm(1, 0), 6)),
+        confirm(cafXml(33, { from: 1, to: 1 }), cafXml(33, { from: 2, to: 2 })),
+      ])
+      const result = await prepareFolios(harness.deps, stateWith(), { needs: { 33: 2 } })
+      expect(result.cafs).toEqual([cafXml(33, { from: 1, to: 1 }), cafXml(33, { from: 2, to: 2 })])
+    })
+  })
+
   test('a short quota with unused folios at the SII re-obtains them first', async () => {
     const harness = await certificationHarness([
       stampEntry,
