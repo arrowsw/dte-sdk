@@ -463,9 +463,24 @@ describe('resendReceiptsConsumption', () => {
 
   test('an envelope with one receipt and no totals still gives a report', async () => {
     const one = `<EnvioBOLETA><SetDTE ID="X"><Caratula><RutEmisor>76543210-3</RutEmisor><RutEnvia>76543210-3</RutEnvia><FchResol>2026-01-01</FchResol><NroResol>0</NroResol></Caratula><DTE><Documento ID="B"><Encabezado><IdDoc><TipoDTE>41</TipoDTE><Folio>9</Folio><FchEmis>2026-11-15</FchEmis></IdDoc></Encabezado></Documento></DTE></SetDTE></EnvioBOLETA>`
-    const harness = await certificationHarness([uploadRoute(STATUS_99)])
+    const harness = await certificationHarness([uploadRoute({ body: SEVEN })])
     const result = await resendReceiptsConsumption(harness.deps.sii, { envelopeXml: one, sequence: 2 })
     expect(result).toMatchObject({ duplicate: true, trackId: '9876543210' })
     expect(result.xml).toContain('<TipoDocumento>41</TipoDocumento>')
+  })
+
+  test('the reply to a report sent again is read as the field reads it', async () => {
+    const resend = async (reply: FakeReply) => {
+      const harness = await certificationHarness([uploadRoute(reply)])
+      return resendReceiptsConsumption(harness.deps.sii, { envelopeXml: issued.envelope.xml, sequence: 7 })
+    }
+    // `STATUS` 7 with a `TRACKID` element is a sent file, whatever a later error line says.
+    await expect(resend(SEVEN_LATE_REFUSAL)).resolves.toMatchObject({ trackId: '444', duplicate: true })
+    // `STATUS` 99 is a refusal although it names a track id, and so is a `STATUS` 7 that names none in an element.
+    for (const reply of [STATUS_99, DUPLICATE, DUPLICATE_TRACK_IN_TEXT]) {
+      const refused = await failure(resend(reply))
+      expect(refused.code).toBe('SII_UPLOAD_REJECTED')
+    }
+    expect((await failure(resend(DUPLICATE))).details).toMatchObject({ status: 7, duplicate: true })
   })
 })

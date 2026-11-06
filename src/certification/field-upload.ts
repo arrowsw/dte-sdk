@@ -108,17 +108,12 @@ export const uploadAsField = async (
 }
 
 /**
- * EN: `uploadAsField` for a file the run cannot go on without a track id for: a duplicate the SII named no track id
- * for is a refusal too. Internal.
- * ES: `uploadAsField` para un archivo sin cuyo track id la corrida no puede seguir: un duplicado para el que el SII no
- * nombró track id también es un rechazo. Interno.
+ * EN: The track id of a reception, or the refusal a duplicate without one is where the track id is needed. Internal.
+ * ES: `TRACKID` — El track id de una recepción, o el rechazo que es un duplicado sin él donde el track id hace falta.
+ * Interno.
  * @throws {DteError} EN: `SII_UPLOAD_REJECTED { status: 7, duplicate: true }` for that duplicate. ES: `SII_UPLOAD_REJECTED { status: 7, duplicate: true }` por ese duplicado.
  */
-export const uploadForTrackId = async (
-  upload: (overrides: CallOverrides) => Promise<UploadReceipt>,
-  operation: string,
-): Promise<string> => {
-  const reception = await uploadAsField(upload, operation)
+export const requireTrackId = (reception: FieldReception, operation: string): string => {
   if (reception.trackId === null)
     throw new DteError('SII_UPLOAD_REJECTED', {
       status: 7,
@@ -128,3 +123,15 @@ export const uploadForTrackId = async (
     })
   return reception.trackId
 }
+
+/**
+ * EN: `uploadAsField` for a file the run cannot go on without a track id for: a duplicate the SII named no track id
+ * for is a refusal too. Internal.
+ * ES: `uploadAsField` para un archivo sin cuyo track id la corrida no puede seguir: un duplicado para el que el SII no
+ * nombró track id también es un rechazo. Interno.
+ * @throws {DteError} EN: `SII_UPLOAD_REJECTED { status: 7, duplicate: true }` for that duplicate. ES: `SII_UPLOAD_REJECTED { status: 7, duplicate: true }` por ese duplicado.
+ */
+export const uploadForTrackId = async (
+  upload: (overrides: CallOverrides) => Promise<UploadReceipt>,
+  operation: string,
+): Promise<string> => requireTrackId(await uploadAsField(upload, operation), operation)

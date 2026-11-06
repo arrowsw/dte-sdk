@@ -6,7 +6,7 @@ import type { SiiClient } from '../sii/client'
 import { uploadEnvelope, uploadFolioConsumption } from '../sii/upload'
 import { parseXmlWithoutNamespaces } from '../xml/parse'
 import { queryFieldUploadState, type FieldUploadState } from './field-status'
-import { FIELD_UPLOAD_RETRY, uploadAsField } from './field-upload'
+import { requireTrackId, uploadAsField } from './field-upload'
 
 const ENVELOPE_WAIT_MS = 20000
 const CONSUMPTION_WAIT_MS = 30000
@@ -329,10 +329,14 @@ export type ResendReceiptsConsumptionInput = {
 
 /**
  * EN: Builds the folio consumption report again from a receipts envelope already sent and uploads it once, with the
- * sequence number given.
+ * sequence number given. The upload is sent again only when the network fails and its reply is read as
+ * `sendReceiptsSet` reads it: `STATUS` 0 or 7 with a `TRACKID` element is a sent report; a `STATUS` 7 that names no
+ * track id, a `STATUS` 99 and any other reply are refusals.
  * ES: Arma de nuevo el reporte de consumo de folios desde un sobre de boletas ya enviado y lo sube una vez, con la
- * secuencia dada.
- * @throws {DteError} EN: `ENVELOPE_EMPTY`, `MISSING_FIELD` for an incomplete cover; the phase 2 codes of the upload. ES: `ENVELOPE_EMPTY`, `MISSING_FIELD` por una carátula incompleta; los códigos de la fase 2 de la subida.
+ * secuencia dada. La subida se vuelve a enviar solo cuando falla la red y su respuesta se lee como la lee
+ * `sendReceiptsSet`: `STATUS` 0 o 7 con un elemento `TRACKID` es un reporte enviado; un `STATUS` 7 que no nombra track
+ * id, un `STATUS` 99 y cualquier otra respuesta son rechazos.
+ * @throws {DteError} EN: `ENVELOPE_EMPTY`, `MISSING_FIELD` for an incomplete cover; `SII_UPLOAD_REJECTED` for a refusal; the phase 2 codes of the upload. ES: `ENVELOPE_EMPTY`, `MISSING_FIELD` por una carátula incompleta; `SII_UPLOAD_REJECTED` por un rechazo; los códigos de la fase 2 de la subida.
  */
 export const resendReceiptsConsumption = async (
   sii: SiiClient,
@@ -344,6 +348,12 @@ export const resendReceiptsConsumption = async (
   readonly duplicate: boolean
 }> => {
   const xml = consumptionXml(sii, readReceiptsEnvelope(input.envelopeXml), input.sequence)
-  const receipt = await uploadFolioConsumption(sii, { xml }, { retry: FIELD_UPLOAD_RETRY })
-  return { sequence: input.sequence, xml, trackId: receipt.trackId, duplicate: receipt.duplicate }
+  const operation = 'uploadFolioConsumption'
+  const reception = await uploadAsField((overrides) => uploadFolioConsumption(sii, { xml }, overrides), operation)
+  return {
+    sequence: input.sequence,
+    xml,
+    trackId: requireTrackId(reception, operation),
+    duplicate: reception.duplicate,
+  }
 }
