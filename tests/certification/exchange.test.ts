@@ -78,12 +78,15 @@ describe('parseExchangeSet', () => {
     expect(parseExchangeSet(envelope('EnvioDTETraslado', one)).documents).toHaveLength(1)
   })
 
-  test('reads export and settlement documents, the lower-case RUT tags, and the cover issuer of a document without one', () => {
-    const exportDocument = `<DTE version="1.0"><Exportaciones ID="E1"><Encabezado><IdDoc><TipoDTE>110</TipoDTE><Folio>4</Folio><FchEmis>2026-11-04</FchEmis></IdDoc><Emisor><RutEmisor>${SET_ISSUER}</RutEmisor></Emisor><Receptor><RutRecep>${OTHER_RECEIVER}</RutRecep></Receptor><Totales><MntTotal>10</MntTotal></Totales></Encabezado></Exportaciones></DTE>`
-    const settlement = `<DTE version="1.0"><Liquidacion ID="L1"><Encabezado><IdDoc><TipoDTE>43</TipoDTE><Folio>5</Folio><FchEmis>2026-11-05</FchEmis></IdDoc></Encabezado></Liquidacion></DTE>`
-    expect(parseExchangeSet(envelope('EnvioDTE', exportDocument + settlement)).documents).toEqual([
-      { type: 110, folio: 4, issueDate: '2026-11-04', issuerRut: SET_ISSUER, receiverRut: OTHER_RECEIVER, total: 10 },
-      { type: 43, folio: 5, issueDate: '2026-11-05', issuerRut: SET_ISSUER, receiverRut: COMPANY, total: 0 },
+  test('reads a document nested in a second DTE and the lower-case RUT tags; export and settlement documents read as empty', () => {
+    const inner = `<Documento ID="N1"><Encabezado><IdDoc><TipoDTE>33</TipoDTE><Folio>4</Folio><FchEmis>2026-11-04</FchEmis></IdDoc><Emisor><RutEmisor>${SET_ISSUER}</RutEmisor></Emisor><Receptor><RutRecep>${OTHER_RECEIVER}</RutRecep></Receptor><Totales><MntTotal>10</MntTotal></Totales></Encabezado></Documento>`
+    const nested = `<DTE version="1.0"><DTE version="1.0">${inner}</DTE></DTE>`
+    const exportDocument = `<DTE version="1.0"><Exportaciones ID="E1"><Encabezado><IdDoc><TipoDTE>110</TipoDTE><Folio>4</Folio></IdDoc></Encabezado></Exportaciones></DTE>`
+    const settlement = `<DTE version="1.0"><Liquidacion ID="L1"><Encabezado><IdDoc><TipoDTE>43</TipoDTE><Folio>5</Folio></IdDoc></Encabezado></Liquidacion></DTE>`
+    expect(parseExchangeSet(envelope('EnvioDTE', nested + exportDocument + settlement)).documents).toEqual([
+      { type: 33, folio: 4, issueDate: '2026-11-04', issuerRut: SET_ISSUER, receiverRut: OTHER_RECEIVER, total: 10 },
+      { type: 0, folio: 0, issueDate: null, issuerRut: SET_ISSUER, receiverRut: COMPANY, total: 0 },
+      { type: 0, folio: 0, issueDate: null, issuerRut: SET_ISSUER, receiverRut: COMPANY, total: 0 },
     ])
   })
 

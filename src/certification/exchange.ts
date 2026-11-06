@@ -143,7 +143,8 @@ const optionalSetRut = (value: string | null): string | null => {
 }
 
 const documentOf = (dte: Node | null, coverIssuer: string, coverReceiver: string | null): ExchangeDocument => {
-  const document = nodeOf(dte?.['Documento']) ?? nodeOf(dte?.['Exportaciones']) ?? nodeOf(dte?.['Liquidacion'])
+  // Only a plain `Documento` is read, or one nested inside a second `DTE`; any other kind of document reads as empty.
+  const document = nodeOf(dte?.['Documento']) ?? nodeOf(nodeOf(dte?.['DTE'])?.['Documento'])
   const header = nodeOf(document?.['Encabezado'])
   const idDoc = nodeOf(header?.['IdDoc'])
   const issuer = nodeOf(header?.['Emisor'])
