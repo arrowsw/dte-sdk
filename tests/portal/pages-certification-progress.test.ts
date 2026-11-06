@@ -250,23 +250,42 @@ describe('parseProgressPage', () => {
     })
   })
 
-  test('a row without bold leaves no state; a label is read once; a label split by a tag still reads', () => {
+  test('the state is the first bold after the label anywhere on the page, so a row without one takes the next', () => {
     const parsed = parseProgressPage(
       page(
-        '<p>paso <b>INTERCAMBIO</b></p><tr><td>SET BASICO</td><td>x</td></tr><tr><td>SET BASICO</td><td><b>EN REVISION</b></td></tr><tr><td>LIBRO DE <i>GUIAS</i></td><td><b>POR REALIZAR</b></td></tr>',
+        '<p>paso <b>INTERCAMBIO</b></p><tr><td>SET BASICO</td><td>x</td></tr><tr><td>SET GUIA DE DESPACHO</td><td><b> EN REVISION </b></td></tr><tr><td>LIBRO DE <i>GUIAS</i></td><td><b>Por Realizar</b></td></tr><tr><td>LIBRO DE VENTAS</td><td>sin estado</td></tr>',
       ),
     )
     expect(parsed.states).toEqual({
+      // The basic set has no bold of its own: it reads the guide set's.
       basic: { text: 'EN REVISION', state: 'inReview' },
-      guideBook: { text: 'POR REALIZAR', state: 'pending' },
+      guide: { text: 'EN REVISION', state: 'inReview' },
+      // The text is kept as written, trimmed; its class does not depend on the case.
+      guideBook: { text: 'Por Realizar', state: 'pending' },
     })
     expect(parsed.simulationAwaitsConfirmation).toBe(false)
+  })
+
+  test('an offer to confirm the simulation without a state for it stands as a state in review', () => {
+    const offered = parseProgressPage(progressPage('SIMULACION', {}, { confirm: true }))
+    // The offer itself shows the simulation approved in bold, and that is the state read.
+    expect(offered.states.simulation).toEqual({ text: 'REVISADO CONFORME', state: 'approved' })
+    const bare = parseProgressPage(
+      page('<form action="/cvc_cgi/dte/pe_avance3">SET DE SIMULACION<input value="Confirmar Revisi&oacute;n"></form>'),
+    )
+    expect(bare.simulationAwaitsConfirmation).toBe(true)
+    expect(bare.states.simulation).toEqual({ text: 'PENDIENTE CONFIRMAR', state: 'inReview' })
+    // The offer is read as the portal writes it: another case is not it.
+    expect(parseProgressPage(page('pe_avance3 set de simulacion Confirmar Revisi')).simulationAwaitsConfirmation).toBe(
+      false,
+    )
   })
 
   test.each([
     ['etapa', 'INTERCAMBIO', 'exchange'],
     ['etapaColon', 'DOCUMENTOS IMPRESOS', 'printedSamples'],
     ['etapaDe', 'LIBROS', 'books'],
+    ['etapaDeLower', 'LIBROS', 'books'],
     ['paso', 'SET DE PRUEBAS', 'testSets'],
   ] as const)('the stage through the "%s" wording', (wording, stage, key) => {
     const parsed = parseProgressPage(progressPage(stage, {}, { wording }))
@@ -292,6 +311,13 @@ test('portalStageOf and classifyItemState on the wordings of the field', () => {
   expect(classifyItemState('revisado conforme')).toBe('approved')
   expect(classifyItemState('FECHA INV&Aacute;LIDA')).toBe('unknown')
   expect(classifyItemState('FECHA INVALIDA')).toBe('inconsistent')
+  expect(classifyItemState('Rut no coincide')).toBe('inconsistent')
+  expect(classifyItemState('ENVIO CON ERRORES O REPAROS')).toBe('rejected')
+  expect(classifyItemState('RECHAZADO')).toBe('rejected')
+  // Objections alone are not a rejection.
+  expect(classifyItemState('CON REPAROS')).toBe('objections')
+  expect(classifyItemState('EN REVISION')).toBe('inReview')
+  expect(classifyItemState('ANULADO')).toBe('annulled')
 })
 
 describe('the receipts row of the progress page', () => {

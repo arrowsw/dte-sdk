@@ -149,7 +149,8 @@ test('resumed at the books: approved books, the advance, the simulation sent, de
     [
       ...history(),
       entry,
-      avance2([BOOKS_APPROVED, page('x'), page('x'), page('x'), SIM_FORM, SIM_KEPT]),
+      // While the stage reads SIMULACION each progress read asks for the declaration form once more.
+      avance2([BOOKS_APPROVED, page('x'), page('x'), page('x'), page('x'), page('x'), SIM_FORM, SIM_KEPT]),
       post('pe_avance4', ADVANCE_ANSWERS.advanced),
       avance5,
       avance6([progressPage('SIMULACION', {}), IN_SIMULATION], () => AT_EXCHANGE),
@@ -269,7 +270,7 @@ test('the simulation: a refused declaration, a rejected wait, a confirmed one sk
   const refused = await seeded(
     [
       entry,
-      avance2([page('x'), SIM_FORM]),
+      avance2([page('x'), page('x'), SIM_FORM]),
       avance5,
       avance6([], () => IN_SIMULATION),
       post('pe_avance3', DECLARATION_ANSWERS.contentMismatch),
@@ -283,7 +284,7 @@ test('the simulation: a refused declaration, a rejected wait, a confirmed one sk
   const rejected = await seeded(
     [
       entry,
-      avance2([page('x'), SIM_FORM, SIM_KEPT]),
+      avance2([page('x'), page('x'), SIM_FORM, SIM_KEPT]),
       avance5,
       avance6([IN_SIMULATION], () => progressPage('SIMULACION', { 'SET SIMULACION': 'RECHAZADO' })),
       post('pe_avance3', DECLARATION_ANSWERS.success),

@@ -346,30 +346,38 @@ export const declareTestSets = async (
 }
 
 /**
- * EN: Waits for the sent sets to be approved: 5 attempts 10 s apart, sleeping first, reading the progress page. Every
- * set approved is approval; a rejected or inconsistent one stops; no set at all is not approval.
- * ES: Espera la aprobación de los sets enviados: 5 intentos cada 10 s, durmiendo primero, leyendo la página de avance.
- * Todos los sets aprobados es aprobación; uno rechazado o inconsistente detiene; ningún set no es aprobación.
+ * EN: Waits for the sent sets to be approved, as the reference does: 5 attempts 10 s apart, sleeping first, reading
+ * the progress page. A read that fails only uses up its attempt. Of the states the page shows for the sets sent (or
+ * of every state, when no set was sent), all approved is approval, and so is a page that shows none of them; a
+ * rejected or inconsistent one stops with its wording.
+ * ES: Espera la aprobación de los sets enviados, como lo hace la referencia: 5 intentos cada 10 s, durmiendo primero,
+ * leyendo la página de avance. Una lectura que falla solo gasta su intento. De los estados que la página muestra para
+ * los sets enviados (o de todos los estados, si no se envió ninguno), todos aprobados es aprobación, y también lo es
+ * una página que no muestra ninguno; uno rechazado o inconsistente detiene con su texto.
  */
 export const waitForTestSetsApproval = async (
   deps: CertificationDependencies,
   state: CertificationState,
 ): Promise<StepResult<'approved' | 'rejected' | 'timedOut'>> => {
   const rt = runtime(deps)
-  const wanted = SET_KEYS.filter((key) => state.sets[key] !== undefined)
+  const wanted: readonly string[] = SET_KEYS.filter((key) => state.sets[key] !== undefined)
   for (let attempt = 1; attempt <= SETS_APPROVAL_ATTEMPTS; attempt += 1) {
     await rt.sleep(SETS_APPROVAL_INTERVAL_MS)
     rt.emit({ step: 'POLLING', attempt, max: SETS_APPROVAL_ATTEMPTS, label: 'sets' })
-    const report = await readProgress(rt.portal)
-    const states = wanted.map((key) => report.states[key])
-    const rejected = states.filter((item) => item?.state === 'rejected' || item?.state === 'inconsistent')
-    if (rejected.length > 0) {
-      rt.emit({ step: 'SETS_REJECTED' })
-      return { state, outcome: 'rejected', detail: rejected.map((item) => item!.text).join(' | ') }
-    }
-    if (wanted.length > 0 && states.every((item) => item?.state === 'approved')) {
+    const report = await readProgress(rt.portal).catch((error: unknown) => {
+      rt.portal.logger.warn('certification progress read failed', { attempt, reason: errorMessage(error) })
+      return null
+    })
+    if (report === null) continue
+    const relevant = Object.entries(report.states).filter(([key]) => wanted.length === 0 || wanted.includes(key))
+    if (relevant.every(([, item]) => item.state === 'approved')) {
       rt.emit({ step: 'SETS_APPROVED' })
       return { state: await saveState(rt, state, { setsApproved: true, stage: 'books' }), outcome: 'approved' }
+    }
+    const rejected = relevant.filter(([, item]) => item.state === 'rejected' || item.state === 'inconsistent')
+    if (rejected.length > 0) {
+      rt.emit({ step: 'SETS_REJECTED' })
+      return { state, outcome: 'rejected', detail: rejected.map(([key, item]) => `${key}: ${item.text}`).join('; ') }
     }
   }
   return { state, outcome: 'timedOut' }

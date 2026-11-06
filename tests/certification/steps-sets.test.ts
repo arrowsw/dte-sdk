@@ -722,19 +722,73 @@ describe('waitForTestSetsApproval', () => {
       ),
     )
     const result = await waitForTestSetsApproval(harness.deps, stateWith({ sets: sent }))
-    expect(result).toMatchObject({ outcome: 'rejected', detail: 'ENVIO CON ERRORES O REPAROS | FECHA NO CORRESPONDE' })
+    expect(result).toMatchObject({
+      outcome: 'rejected',
+      detail: 'basic: ENVIO CON ERRORES O REPAROS; guide: FECHA NO CORRESPONDE',
+    })
     expect(harness.steps()).toEqual(['POLLING', 'SETS_REJECTED'])
   })
 
-  test('five polls, then a time-out; no set at all is never approval', async () => {
+  test('objections alone do not stop the wait, and a set that was not sent is not looked at', async () => {
+    const harness = await certificationHarness(
+      progressRoutes(
+        ...repeat(
+          progressPage('SET', {
+            'SET BASICO': 'CON REPAROS',
+            'SET GUIA DESP.': 'REVISADO CONFORME',
+            'SET FACTURA EXENTA': 'RECHAZADO',
+          }),
+          5,
+        ),
+      ),
+    )
+    await expect(waitForTestSetsApproval(harness.deps, stateWith({ sets: sent }))).resolves.toMatchObject({
+      outcome: 'timedOut',
+    })
+    expect(harness.sleeps).toHaveLength(5)
+  })
+
+  test('five polls, then a time-out', async () => {
     const pending = progressPage('SET', { 'SET BASICO': 'EN REVISION', 'SET GUIA DESP.': 'REVISADO CONFORME' })
     const harness = await certificationHarness(progressRoutes(...repeat(pending, 5)))
     await expect(waitForTestSetsApproval(harness.deps, stateWith({ sets: sent }))).resolves.toMatchObject({
       outcome: 'timedOut',
     })
     expect(harness.sleeps).toHaveLength(5)
-    const none = await certificationHarness(progressRoutes(...repeat(progressPage('SET', {}), 5)))
-    await expect(waitForTestSetsApproval(none.deps, stateWith())).resolves.toMatchObject({ outcome: 'timedOut' })
+  })
+
+  test('a page that shows none of the sets sent counts as approval', async () => {
+    const none = await certificationHarness(progressRoutes(progressPage('SET', {})))
+    const result = await waitForTestSetsApproval(none.deps, stateWith({ sets: sent }))
+    expect(result).toMatchObject({ outcome: 'approved', state: { setsApproved: true, stage: 'books' } })
+    expect(none.steps()).toEqual(['POLLING', 'SETS_APPROVED'])
+  })
+
+  test('with no set sent every state of the page is looked at', async () => {
+    const books = progressPage('SET', { 'SET BASICO': 'REVISADO CONFORME', 'LIBRO DE COMPRAS': 'RECHAZADO' })
+    const harness = await certificationHarness(progressRoutes(books))
+    await expect(waitForTestSetsApproval(harness.deps, stateWith())).resolves.toMatchObject({
+      outcome: 'rejected',
+      detail: 'purchaseBook: RECHAZADO',
+    })
+  })
+
+  test('a read that fails only uses up its attempt', async () => {
+    const approved = progressPage('SET', { 'SET BASICO': 'REVISADO CONFORME', 'SET GUIA DESP.': 'REVISADO CONFORME' })
+    const harness = await certificationHarness([
+      entry,
+      post('pe_avance2', page('x'), page('x')),
+      get('pe_avance5', page('p5'), page('p5')),
+      {
+        url: 'https://maullin.sii.cl/cvc_cgi/dte/pe_avance6',
+        method: 'POST' as const,
+        reply: [new DteError('TRANSPORT_FAILED', { reason: 'socket hang up' }), { body: approved }],
+      },
+    ])
+    const result = await waitForTestSetsApproval(harness.deps, stateWith({ sets: sent }))
+    expect(result.outcome).toBe('approved')
+    expect(harness.sleeps).toEqual([10000, 10000])
+    expect(harness.warnings()).toContain('certification progress read failed')
   })
 })
 

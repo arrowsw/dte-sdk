@@ -619,8 +619,9 @@ describe('posts that change the application are never retried', () => {
 })
 
 describe('readProgress', () => {
-  const reading = (form: string, progress: string): Promise<PortalHarness> =>
-    signedIn([entry, post('pe_avance2', form), get('pe_avance5', page('p5')), post('pe_avance6', progress)])
+  const reading = (form: string, progress: string, ...more: readonly string[]): Promise<PortalHarness> =>
+    signedIn([entry, post('pe_avance2', form, ...more), get('pe_avance5', page('p5')), post('pe_avance6', progress)])
+  const lastSegment = (url: string) => url.split('/').pop()
 
   test('the entry sequence, pe_avance5, pe_avance6 with the company, the rows on the way', async () => {
     const harness = await reading(
@@ -632,27 +633,58 @@ describe('readProgress', () => {
     expect(report.states.basic).toEqual({ text: 'REVISADO CONFORME', state: 'approved' })
     expect(report.rows).toHaveLength(7)
     expect(harness.posted('pe_avance6')).toEqual([{ ...COMPANY, ACEPTAR: 'Continuar' }])
-    expect(harness.urls().map((url) => url.split('/').pop())).toEqual([
+    expect(harness.urls().map(lastSegment)).toEqual(['pe_avance1', 'pe_avance2', 'pe_avance5', 'pe_avance6'])
+    const referer = (name: string) =>
+      harness.fake.requests.find((request) => request.url.endsWith(`/${name}`))?.headers.referer
+    expect(referer('pe_avance2')).toBe(`${MAULLIN}/pe_avance1`)
+    expect(referer('pe_avance6')).toBe(`${MAULLIN}/pe_avance5`)
+  })
+
+  test('while the stage reads SIMULACION and nothing offers to confirm, the declaration form is asked for once more', async () => {
+    const offer = progressPage('SIMULACION', {}, { confirm: true })
+    const onForm = await reading(certificationPage(), progressPage('SIMULACION', {}), offer)
+    await expect(readProgress(onForm.portal)).resolves.toMatchObject({
+      simulationAwaitsConfirmation: true,
+      // The form shows the simulation approved in bold; the progress page showed nothing for it.
+      states: { simulation: { text: 'PENDIENTE CONFIRMAR', state: 'inReview' } },
+    })
+    expect(onForm.urls().map(lastSegment)).toEqual([
       'pe_avance1',
       'pe_avance2',
       'pe_avance5',
       'pe_avance6',
+      'pe_avance1',
+      'pe_avance2',
     ])
-  })
-
-  test('in the simulation stage the confirmation offer is also looked for on pe_avance2', async () => {
-    const offer = progressPage('SIMULACION', {}, { confirm: true })
-    const onForm = await reading(offer, progressPage('SIMULACION', { 'SET SIMULACION': 'EN REVISION' }))
-    await expect(readProgress(onForm.portal)).resolves.toMatchObject({ simulationAwaitsConfirmation: true })
+    // A state on the progress page is kept as it is.
+    const stated = await reading(
+      certificationPage(),
+      progressPage('SIMULACION', { 'SET SIMULACION': 'EN REVISION' }),
+      offer,
+    )
+    await expect(readProgress(stated.portal)).resolves.toMatchObject({
+      simulationAwaitsConfirmation: true,
+      states: { simulation: { text: 'EN REVISION', state: 'inReview' } },
+    })
+    // No offer on the form either, or a form that cannot be read: nothing awaits.
+    const none = await reading(certificationPage(), progressPage('SIMULACION', {}), certificationPage())
+    await expect(readProgress(none.portal)).resolves.toMatchObject({ simulationAwaitsConfirmation: false })
+    const failing = await reading(certificationPage(), progressPage('SIMULACION', {}))
+    await expect(readProgress(failing.portal)).resolves.toMatchObject({ simulationAwaitsConfirmation: false })
+    // Another stage, or an offer on the progress page itself, asks for nothing more.
     const elsewhere = await reading(offer, progressPage('INTERCAMBIO', { 'SET SIMULACION': 'REVISADO CONFORME' }))
     await expect(readProgress(elsewhere.portal)).resolves.toMatchObject({ simulationAwaitsConfirmation: false })
+    expect(elsewhere.urls()).toHaveLength(4)
+    const offered = await reading(certificationPage(), offer)
+    await expect(readProgress(offered.portal)).resolves.toMatchObject({ simulationAwaitsConfirmation: true })
+    expect(offered.urls()).toHaveLength(4)
   })
 
-  test('a page with no stage and no state is unexpected; a refusal is a refusal', async () => {
+  test('a page with no stage and no state is still an answer, and a refusal is not looked for', async () => {
     const blank = await reading(certificationPage(), page('<p>nada</p>'))
-    expect((await failure(readProgress(blank.portal))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
-    const refused = await reading(certificationPage(), REJECTION_PAGES.optionNotAuthorized)
-    expect((await failure(readProgress(refused.portal))).details).toMatchObject({ rejection: 'optionNotAuthorized' })
+    await expect(readProgress(blank.portal)).resolves.toMatchObject({ stage: null, stageKey: 'testSets', states: {} })
+    const refused = await reading(REJECTION_PAGES.optionNotAuthorized, REJECTION_PAGES.optionNotAuthorized)
+    await expect(readProgress(refused.portal)).resolves.toMatchObject({ stage: null, states: {}, rows: [] })
   })
 })
 

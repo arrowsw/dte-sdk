@@ -39,11 +39,9 @@ test('a set not approved, or missing, says so', async () => {
   await expect(queryCertificationSets(missing.portal)).resolves.toMatchObject({ allSetsApproved: false })
 })
 
-test('a rejection is a rejection, and a page with no rows does not pass for empty', async () => {
+test('a page with no rows does not pass for empty, whatever it says', async () => {
   const rejected = await signedIn(routes(REJECTION_PAGES.companyNotAuthorized))
-  expect((await failure(queryCertificationSets(rejected.portal))).details).toMatchObject({
-    rejection: 'companyNotAuthorized',
-  })
+  expect((await failure(queryCertificationSets(rejected.portal))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
   const empty = await signedIn(routes(page('hola')))
   expect((await failure(queryCertificationSets(empty.portal))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
 })

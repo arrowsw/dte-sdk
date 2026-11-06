@@ -1,5 +1,5 @@
 import { PORTAL_STAGE_WORDS, type CertificationStage, type DeclarationKey } from '../../catalogs/certification'
-import { decodeEntities, stripTags, bodyText } from '../html'
+import { bodyText } from '../html'
 
 /**
  * EN: The `pe_avance2` form as the declaration reads it: only what a quoted attribute gives.
@@ -63,7 +63,15 @@ export type AdvanceAnswer = {
  * EN: The state of one set or book on the progress page.
  * ES: El estado de un set o libro en la página de avance.
  */
-export type ItemState = 'approved' | 'inReview' | 'rejected' | 'pending' | 'annulled' | 'inconsistent' | 'unknown'
+export type ItemState =
+  | 'approved'
+  | 'inReview'
+  | 'rejected'
+  | 'objections'
+  | 'pending'
+  | 'annulled'
+  | 'inconsistent'
+  | 'unknown'
 
 /**
  * EN: The progress page (`pe_avance6`) read.
@@ -110,17 +118,18 @@ const DECLARATION_LABELS: readonly { readonly key: DeclarationKey; readonly patt
   { key: 'settlement', pattern: /SET LIQUIDACION FACTURA/i },
 ]
 
-// The labels of the progress page, looser: the portal abbreviates there.
-const PROGRESS_LABELS: readonly { readonly key: DeclarationKey; readonly pattern: RegExp }[] = [
-  { key: 'basic', pattern: /SET BASICO/i },
-  { key: 'guide', pattern: /SET GUIA[\s\S]*?DESP/i },
-  { key: 'exempt', pattern: /SET FACTURA EXENTA/i },
-  { key: 'purchase', pattern: /SET CASO GENERAL FACTURA COMPRA/i },
-  { key: 'simulation', pattern: /SET(?: DE)? SIMULACION/i },
-  { key: 'salesBook', pattern: /LIBRO[\s\S]*?VENTA/i },
-  { key: 'exemptPurchaseBook', pattern: /LIBRO DE COMPRAS PARA EXENTOS/i },
-  { key: 'purchaseBook', pattern: /LIBRO DE COMPRAS(?!\s+PARA EXENTOS)/i },
-  { key: 'guideBook', pattern: /LIBRO[\s\S]*?GUIA/i },
+// The state of each set and book on the progress page: the first bold text after its label, searched over the whole
+// page as it came. The labels are loose because the portal abbreviates there.
+const PROGRESS_STATES: readonly { readonly key: DeclarationKey; readonly pattern: RegExp }[] = [
+  { key: 'basic', pattern: /SET BASICO[\s\S]*?<b>([^<]+)<\/b>/i },
+  { key: 'guide', pattern: /SET GUIA[\s\S]*?DESP[\s\S]*?<b>([^<]+)<\/b>/i },
+  { key: 'exempt', pattern: /SET FACTURA EXENTA[\s\S]*?<b>([^<]+)<\/b>/i },
+  { key: 'purchase', pattern: /SET CASO GENERAL FACTURA COMPRA[\s\S]*?<b>([^<]+)<\/b>/i },
+  { key: 'simulation', pattern: /SET(?:\s+DE)?\s+SIMULACION[\s\S]*?<b>([^<]+)<\/b>/i },
+  { key: 'salesBook', pattern: /LIBRO[\s\S]*?VENTA[\s\S]*?<b>([^<]+)<\/b>/i },
+  { key: 'purchaseBook', pattern: /LIBRO DE COMPRAS(?!\s+PARA EXENTOS)[\s\S]*?<b>([^<]+)<\/b>/i },
+  { key: 'exemptPurchaseBook', pattern: /LIBRO DE COMPRAS PARA EXENTOS[\s\S]*?<b>([^<]+)<\/b>/i },
+  { key: 'guideBook', pattern: /LIBRO[\s\S]*?GUIA[\s\S]*?<b>([^<]+)<\/b>/i },
 ]
 
 // The names the answer of `pe_avance3` is searched for next to "ENVIO CON ERRORES O REPAROS".
@@ -152,15 +161,8 @@ const STAGE_PATTERNS: readonly RegExp[] = [
   /paso\s*<b>\s*([^<]+)<\/b>/i,
   /etapa[:\s]+<b>([^<]+)<\/b>/i,
   /etapa\s*<b>\s*([^<]+)<\/b>/i,
-  /ETAPA\s+DE\s+([A-ZÁÉÍÓÚÑ\s]+)/,
+  /ETAPA\s+DE\s+([A-ZÁÉÍÓÚÑ\s]+)/i,
 ]
-
-const rowsOf = (html: string): readonly string[] => html.split(/<tr\b/i)
-
-const boldText = (fragment: string): string | null => {
-  const match = /<b>([^<]+)<\/b>/i.exec(fragment)
-  return match === null ? null : stripTags(match[1]).toUpperCase()
-}
 
 const sentenceAround = (text: string, pattern: RegExp): string | null => {
   const match = pattern.exec(text)
@@ -320,15 +322,18 @@ export const classifyAdvanceAnswer = (html: string): AdvanceAnswer => {
 }
 
 /**
- * EN: The class of a state wording.
- * ES: La clase de un texto de estado.
+ * EN: The class of a state wording, as the reference reads it: "REVISADO CONFORME" is approved; a date or number that
+ * does not match is inconsistent; "RECHAZADO" or "ERRORES" is a rejection; "REPAROS" alone is only an objection.
+ * ES: La clase de un texto de estado, como lo lee la referencia: "REVISADO CONFORME" es aprobado; una fecha o número
+ * que no corresponde es inconsistente; "RECHAZADO" o "ERRORES" es un rechazo; "REPAROS" solo es apenas un reparo.
  */
 export const classifyItemState = (text: string): ItemState => {
-  const upper = decodeEntities(text).toUpperCase()
-  if (/NO CORRESPONDE|NO COINCIDE|FECHA INVALIDA/.test(upper)) return 'inconsistent'
+  const upper = text.toUpperCase()
   if (upper.includes('REVISADO CONFORME')) return 'approved'
+  if (/NO CORRESPONDE|NO COINCIDE|FECHA INVALIDA/.test(upper)) return 'inconsistent'
+  if (upper.includes('RECHAZADO') || upper.includes('ERRORES')) return 'rejected'
   if (upper.includes('EN REVISION')) return 'inReview'
-  if (/RECHAZADO|ERRORES|REPARO/.test(upper)) return 'rejected'
+  if (upper.includes('REPAROS')) return 'objections'
   if (upper.includes('POR REALIZAR')) return 'pending'
   if (upper.includes('ANULADO')) return 'annulled'
   return 'unknown'
@@ -357,33 +362,45 @@ const receiptsProgressOf = (html: string): ReceiptsProgress | null => {
 }
 
 /**
- * EN: Reads the progress page: the stage from the first pattern that matches, and per set or book the first bold text
- * after its label, row by row (a page-wide search once took the next row's state), plus whether an approved
- * simulation awaits its confirmation.
- * ES: Lee la página de avance: la etapa por el primer patrón que calza, y por set o libro el primer texto en negrita
- * después de su etiqueta, fila por fila (una búsqueda sobre toda la página ya tomó el estado de la fila siguiente),
- * más si una simulación aprobada espera su confirmación.
+ * EN: The page offers to confirm the review of an approved simulation: it posts to `pe_avance3`, names the simulation
+ * set and carries the button, each written as the portal writes it.
+ * ES: La página ofrece confirmar la revisión de una simulación aprobada: envía a `pe_avance3`, nombra el set de
+ * simulación y trae el botón, cada uno escrito como lo escribe el portal.
+ */
+export const offersSimulationConfirmation = (html: string): boolean =>
+  html.includes('pe_avance3') && html.includes('SET DE SIMULACION') && html.includes('Confirmar Revisi')
+
+/**
+ * EN: The state that stands for a simulation whose confirmation is offered while the page shows no state for it.
+ * ES: El estado que representa a una simulación cuya confirmación se ofrece mientras la página no le muestra estado.
+ */
+export const SIMULATION_AWAITS_CONFIRMATION = { text: 'PENDIENTE CONFIRMAR', state: 'inReview' } as const
+
+/**
+ * EN: Reads the progress page as the reference does: the stage from the first pattern that matches, and per set or
+ * book the first bold text after its label anywhere on the page (so a row without a state takes the next row's),
+ * plus whether an approved simulation awaits its confirmation.
+ * ES: Lee la página de avance como lo hace la referencia: la etapa por el primer patrón que calza, y por set o libro el
+ * primer texto en negrita después de su etiqueta en cualquier parte de la página (así una fila sin estado toma el de
+ * la fila siguiente), más si una simulación aprobada espera su confirmación.
  */
 export const parseProgressPage = (html: string): ProgressPage => {
   const stageMatch = STAGE_PATTERNS.map((pattern) => pattern.exec(html)).find((match) => match !== null)
-  const stage = stageMatch === undefined ? null : stripTags(stageMatch[1]).toUpperCase()
+  const stage = stageMatch === undefined ? null : stageMatch[1].trim().toUpperCase()
   const states: Partial<Record<DeclarationKey, { readonly text: string; readonly state: ItemState }>> = {}
-  for (const row of rowsOf(html)) {
-    const text = stripTags(row)
-    for (const label of PROGRESS_LABELS) {
-      if (label.key in states) continue
-      const at = label.pattern.exec(text)
-      if (at === null) continue
-      const bold = boldText(row.slice(Math.max(0, row.search(label.pattern))))
-      if (bold !== null) states[label.key] = { text: bold, state: classifyItemState(bold) }
-    }
+  for (const { key, pattern } of PROGRESS_STATES) {
+    const text = pattern.exec(html)?.[1].trim()
+    if (text !== undefined) states[key] = { text, state: classifyItemState(text) }
   }
+  const simulationAwaitsConfirmation = offersSimulationConfirmation(html)
   return {
     stage,
     stageKey: portalStageOf(stage),
-    states,
-    simulationAwaitsConfirmation:
-      html.includes('pe_avance3') && /SET DE SIMULACION/i.test(html) && /Confirmar Revisi/i.test(decodeEntities(html)),
+    states:
+      simulationAwaitsConfirmation && states.simulation === undefined
+        ? { ...states, simulation: SIMULATION_AWAITS_CONFIRMATION }
+        : states,
+    simulationAwaitsConfirmation,
     receipts: receiptsProgressOf(html),
   }
 }

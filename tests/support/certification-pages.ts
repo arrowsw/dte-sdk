@@ -101,7 +101,10 @@ export type ProgressStates = Readonly<Partial<Record<string, string>>>
 export const progressPage = (
   stage: string,
   states: ProgressStates = {},
-  options: { readonly confirm?: boolean; readonly wording?: 'paso' | 'etapa' | 'etapaColon' | 'etapaDe' } = {},
+  options: {
+    readonly confirm?: boolean
+    readonly wording?: 'paso' | 'etapa' | 'etapaColon' | 'etapaDe' | 'etapaDeLower'
+  } = {},
 ): string => {
   const rows = Object.entries(states)
     .map(([label, state]) => `<tr><td>${label}</td><td><b>${state}</b></td></tr>`)
@@ -113,7 +116,9 @@ export const progressPage = (
         ? `<p>Etapa: <b>${stage}</b></p>`
         : options.wording === 'etapaDe'
           ? `<p>ETAPA DE ${stage}</p>`
-          : `<p>La empresa se encuentra en el paso <b>${stage}</b></p>`
+          : options.wording === 'etapaDeLower'
+            ? `<p>Etapa de ${stage.toLowerCase()}</p>`
+            : `<p>La empresa se encuentra en el paso <b>${stage}</b></p>`
   const confirm = options.confirm
     ? `<form action="/cvc_cgi/dte/pe_avance3" method=post><table><tr><td>SET DE SIMULACION</td><td><b>REVISADO CONFORME</b></td></tr></table><input type=submit name=ACEPTAR value="Confirmar Revisi&oacute;n"></form>`
     : ''

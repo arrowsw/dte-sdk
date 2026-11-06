@@ -20,8 +20,10 @@ import {
 import {
   classifyAdvanceAnswer,
   classifyDeclarationAnswer,
+  offersSimulationConfirmation,
   parseDeclarationForm,
   parseProgressPage,
+  SIMULATION_AWAITS_CONFIRMATION,
   verifyDeclaration,
   type AdvanceAnswer,
   type ItemState,
@@ -58,6 +60,7 @@ const BASIC_SET_FIELD = 'SET01'
 const COMPANY_CODE = '8'
 const DEFAULT_TOTAL_ROWS = 10
 const DEFAULT_STEP = 'P01'
+const SIMULATION_STAGE_WORD = 'SIMULACION'
 const MIN_YEAR = 1990
 const MAX_YEAR = 2100
 const UPL_URL = `https://${SII_HOSTS.certification}/cgi_dte/UPL/`
@@ -264,9 +267,8 @@ const enter = async (context: PortalContext, company: Company): Promise<PortalPa
     at('pe_avance2'),
     entry.url,
     { ...company, ACEPTAR: 'Continuar' },
-    entry.url,
+    at('pe_avance1'),
   )
-  assertNotRejected(context, page.html)
   return page
 }
 
@@ -577,15 +579,19 @@ export const declareProgress = (
   })
 
 /**
- * EN: Reads the progress page: the entry sequence, `pe_avance5`, then `pe_avance6` with the company. In the
- * simulation stage the confirmation offer is looked for on `pe_avance2` as well.
- * ES: Lee la página de avance: la secuencia de entrada, `pe_avance5` y luego `pe_avance6` con la empresa. En la etapa
- * de simulación la oferta de confirmación se busca también en `pe_avance2`.
+ * EN: Reads the progress page as the reference does: the entry sequence, `pe_avance5`, then `pe_avance6` with the
+ * company. No page on the way is searched for a refusal, and a page that names no stage and no state is still an
+ * answer. While the stage reads `SIMULACION` and the page does not offer to confirm the simulation, the declaration
+ * form is asked for once more and the offer looked for there; a failure of that read is ignored.
+ * ES: Lee la página de avance como lo hace la referencia: la secuencia de entrada, `pe_avance5` y luego `pe_avance6`
+ * con la empresa. En ninguna página del camino se busca un rechazo, y una página que no nombra etapa ni estado sigue
+ * siendo una respuesta. Mientras la etapa diga `SIMULACION` y la página no ofrezca confirmar la simulación, se pide
+ * una vez más el formulario de declaración y la oferta se busca ahí; un fallo de esa lectura se ignora.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: the company. ES: la empresa.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: the stage, the states and the rows. ES: la etapa, los estados y las filas.
- * @throws {DteError} EN: `SII_PORTAL_REJECTED`, `SII_PORTAL_UNEXPECTED_PAGE`, session and transport codes. ES: los mismos códigos.
+ * @throws {DteError} EN: session and transport codes. ES: los códigos de sesión y de transporte.
  */
 export const readProgress = (
   portal: PortalClient,
@@ -594,27 +600,24 @@ export const readProgress = (
 ): Promise<ProgressReport> =>
   withPortalSession(portal, 'readProgress', overrides, async (context) => {
     const company = companyFields(resolvePortalCompany(portal, input.companyRut))
-    const formPage = await enter(context, company)
-    const entry = await ensurePage(context, 'pe_avance5', at('pe_avance5'))
-    const page = await submitForm(
-      context,
-      'pe_avance6',
-      at('pe_avance6'),
-      entry.url,
-      { ...company, ACEPTAR: 'Continuar' },
-      entry.url,
-    )
-    assertNotRejected(context, page.html)
-    const progress = parseProgressPage(page.html)
-    if (progress.stage === null && Object.keys(progress.states).length === 0)
-      throw unexpectedPage(context, 'pe_avance6', page.html)
-    const onForm = progress.stageKey === 'simulation' && parseProgressPage(formPage.html).simulationAwaitsConfirmation
+    const pages = await progressPages(context, company)
+    const progress = parseProgressPage(pages.progress.html)
+    const onForm =
+      progress.stage === SIMULATION_STAGE_WORD && !progress.simulationAwaitsConfirmation
+        ? await enter(context, company).then(
+            (form) => offersSimulationConfirmation(form.html),
+            () => false,
+          )
+        : false
     return {
       stage: progress.stage,
       stageKey: progress.stageKey,
-      states: progress.states,
+      states:
+        onForm && progress.states.simulation === undefined
+          ? { ...progress.states, simulation: SIMULATION_AWAITS_CONFIRMATION }
+          : progress.states,
       simulationAwaitsConfirmation: progress.simulationAwaitsConfirmation || onForm,
-      rows: parseCertificationSets(formPage.html),
+      rows: parseCertificationSets(pages.form.html),
       receipts: progress.receipts,
     }
   })
