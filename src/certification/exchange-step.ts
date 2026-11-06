@@ -1,5 +1,5 @@
 import { EXCHANGE_ANSWER_KEYS } from '../catalogs/certification'
-import { isDteError } from '../errors'
+import { errorMessage, isDteError } from '../errors'
 import { confirmExchange, downloadExchangeSet, uploadExchangeAnswers, validateExchangeUser } from '../portal/exchange'
 import { createExchangeAnswers } from './exchange'
 import { runtime, saveState, type CertificationDependencies, type Runtime, type StepResult } from './runtime'
@@ -45,9 +45,11 @@ const obtainSet = async (rt: Runtime, companyRut: string, given: string | undefi
     await rt.store.writeArtefact(EXCHANGE_SET_ARTEFACT, xml)
     return xml
   } catch (error) {
-    if (!isDteError(error) || error.code !== 'SII_PORTAL_UNEXPECTED_PAGE') throw error
-    // `downloadExchangeSet` always puts the page in its details.
-    await rt.store.writeArtefact(artefact('pfe-download-error.html'), String(error.details['page']))
+    // Whatever went wrong (the network, the session, a page that is no set) the set is to be saved by hand, as in field
+    // behaviour: only a page that came back is worth keeping.
+    rt.portal.logger.warn('sii exchange set could not be downloaded', { reason: errorMessage(error) })
+    if (isDteError(error) && error.code === 'SII_PORTAL_UNEXPECTED_PAGE' && typeof error.details['page'] === 'string')
+      await rt.store.writeArtefact(artefact('pfe-download-error.html'), error.details['page'])
     return null
   }
 }

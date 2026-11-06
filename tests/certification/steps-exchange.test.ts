@@ -108,8 +108,17 @@ describe('runExchange', () => {
     expect(await harness.store.listArtefacts()).toEqual(['intercambio/pfe-download-error.html'])
     expect(await harness.store.readArtefact('intercambio/pfe-download-error.html')).toBe(REFUSED_UPLOAD)
     expect(harness.steps()).toEqual(['INTERCAMBIO_START'])
-    const failing = await certificationHarness(exchangeRoutes({ download: new Error('socket hang up') }))
-    await expect(runExchange(failing.deps, atExchange())).rejects.toThrow('socket hang up')
+  })
+
+  test('any failure of the download, not only an unexpected page, leaves the set to be saved by hand', async () => {
+    for (const download of [new Error('socket hang up'), { status: 503, body: 'busy' }]) {
+      const failing = await certificationHarness(exchangeRoutes({ download }))
+      const result = await runExchange(failing.deps, atExchange())
+      expect(result).toEqual({ state: atExchange(), outcome: 'setUnavailable', detail: EXCHANGE_SET_ARTEFACT })
+      expect(await failing.store.listArtefacts()).toEqual([])
+      expect(failing.warnings()).toContain('sii exchange set could not be downloaded')
+      expect(failing.steps()).toEqual(['INTERCAMBIO_START'])
+    }
   })
 
   test('the exchange already completed at the portal, or confirmed in the state, is done without uploading', async () => {
