@@ -117,7 +117,7 @@ describe('readSamplesReview', () => {
 
   test('is sent once with the longest timeout even when the client retries', async () => {
     const busy = await signedIn([alive, warmUp, nocache, service({ status: 503, body: 'busy' })], retrying)
-    expect((await failure(readSamplesReview(busy.portal))).code).toBe('SII_HTTP_ERROR')
+    expect((await failure(readSamplesReview(busy.portal))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
     expect(servicePosts(busy)).toHaveLength(1)
     expect(busy.sleeps).toEqual([])
     expect(busy.fake.requests.slice(1).map((request) => request.timeoutMs)).toEqual([
@@ -137,6 +137,20 @@ describe('readSamplesReview', () => {
     const result = await readSamplesReview(harness.portal)
     expect(result.hashes).toEqual(KNOWN)
     expect(harness.urls()).toEqual([SESSION_CHECK_URL, BASE, SERVICE_URL])
+  })
+
+  test('a warm-up that answers an error is a warm-up all the same: its cookies stay and the hashes are looked up', async () => {
+    for (const status of [503, 403]) {
+      const harness = await signedIn([
+        alive,
+        { method: 'GET', url: BASE, reply: { status, body: 'busy', headers: { 'set-cookie': 'JSESSIONID=abc' } } },
+        nocache,
+        service({ body: reviewAnswer('INGRESO') }),
+      ])
+      await expect(readSamplesReview(harness.portal)).resolves.toMatchObject({ state: 'INGRESO', hashes: KNOWN })
+      expect(harness.urls()).toEqual([SESSION_CHECK_URL, BASE, `${BASE}pdfdte.nocache.js`, SERVICE_URL])
+      expect(servicePosts(harness)[0].headers['cookie']).toContain('JSESSIONID=abc')
+    }
   })
 
   test('reads the sentence that blocks when the portal names no state', async () => {
@@ -194,7 +208,7 @@ describe('createSamplesReview', () => {
 
   test('is never retried by the transport, even when the client retries', async () => {
     const harness = await signedIn([alive, warmUp, service({ status: 503, body: 'busy' })], retrying)
-    expect((await failure(createSamplesReview(harness.portal, { gwt: KNOWN }))).code).toBe('SII_HTTP_ERROR')
+    expect((await failure(createSamplesReview(harness.portal, { gwt: KNOWN }))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
     expect(servicePosts(harness)).toHaveLength(1)
     expect(harness.sleeps).toEqual([])
   })
@@ -347,6 +361,14 @@ describe('readSamplesDetail', () => {
     })
     const [request] = servicePosts(harness)
     expect(request.text).toBe(`7|0|5|${BASE}|${KNOWN.policy}|${SERVICE}|muestraMail|${LONG}|1|2|3|4|1|5|5|${TOKEN}|`)
+  })
+
+  test('an answer is read for its rows whatever its status', async () => {
+    const harness = await signedIn([alive, warmUp, service({ status: 503, body: 'busy' })])
+    await expect(readSamplesDetail(harness.portal, { revisionToken: TOKEN, gwt: KNOWN })).resolves.toEqual({
+      rows: [],
+      body: 'busy',
+    })
   })
 
   test('a failure is logged and gives an empty detail', async () => {

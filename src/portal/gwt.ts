@@ -344,17 +344,19 @@ const REDIRECT_STATUS: ReadonlySet<number> = new Set([301, 302])
 
 /**
  * EN: The warm-up of a GWT portal: `GET` of its base with the session and one redirect (301 or 302) followed, so the
- * server opens the portal's context as it would for a browser; every cookie it sets joins the jar. A failure is logged
- * and ignored; it returns whether the warm-up ended without failing.
+ * server opens the portal's context as it would for a browser; every cookie it sets joins the jar. In a stage any
+ * answer is a warm-up, an error status too: only a request that gets no answer fails. A failure is logged and ignored;
+ * it returns whether the warm-up ended without failing.
  * ES: El calentamiento de un portal GWT: `GET` de su base con la sesión y una redirección (301 o 302) seguida, para que
- * el servidor abra el contexto del portal como lo haría para un navegador; cada cookie que fija entra a la bolsa. Una
- * falla se registra y se ignora. Devuelve si el calentamiento terminó sin falla.
+ * el servidor abra el contexto del portal como lo haría para un navegador; cada cookie que fija entra a la bolsa. En una
+ * etapa cualquier respuesta es un calentamiento, también un estado de error: solo falla una petición que no recibe
+ * respuesta. Una falla se registra y se ignora. Devuelve si el calentamiento terminó sin falla.
  */
 export const warmUpGwtPortal = async (context: PortalContext, portal: GwtPortal): Promise<boolean> => {
   try {
     const first = await portalRequest(context, 'warm-up', 'GET', portal.base)
     const location = first.headers['location']
-    if (location !== undefined && REDIRECT_STATUS.has(first.status))
+    if (location !== undefined && location !== '' && REDIRECT_STATUS.has(first.status))
       await portalRequest(context, 'warm-up', 'GET', new URL(location, portal.base).toString())
     return true
   } catch (error) {

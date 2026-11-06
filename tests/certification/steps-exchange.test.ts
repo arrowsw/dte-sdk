@@ -135,13 +135,30 @@ describe('runExchange', () => {
   })
 
   test('any failure of the download, not only an unexpected page, leaves the set to be saved by hand', async () => {
-    for (const download of [new Error('socket hang up'), { status: 503, body: 'busy' }]) {
+    // A request that never got an answer leaves nothing to keep; an answer that is no set is kept, whatever its status.
+    const cases = [
+      { download: new Error('socket hang up'), kept: [] },
+      { download: { status: 503, body: 'busy' }, kept: ['intercambio/pfe-download-error.html'] },
+    ]
+    for (const { download, kept } of cases) {
       const failing = await certificationHarness(exchangeRoutes({ download }))
       const result = await runExchange(failing.deps, atExchange())
       expect(result).toEqual({ state: atExchange(), outcome: 'setUnavailable', detail: EXCHANGE_SET_ARTEFACT })
-      expect(await failing.store.listArtefacts()).toEqual([])
+      expect(await failing.store.listArtefacts()).toEqual(kept)
       expect(failing.warnings()).toContain('sii exchange set could not be downloaded')
       expect(failing.steps()).toEqual(['INTERCAMBIO_START'])
+    }
+  })
+
+  test('an error status on the user validation or on the set validation does not stop the stage, as in the field', async () => {
+    const busy = { status: 503, body: 'busy' }
+    for (const method of ['validarUsuario', 'validarSetContriPostSeguimiento']) {
+      const harness = await certificationHarness(exchangeRoutes({ facade: { [method]: busy } }))
+      const result = await runExchange(harness.deps, atExchange(), { setXml: exchangeSetXml() })
+      expect(result.outcome).toBe('done')
+      expect(result.state.exchange).toMatchObject({ uploaded: true, confirmed: true })
+      expect(harness.urls().filter((url) => url.includes('/uploadFile'))).toHaveLength(3)
+      expect(facadeMethods(harness)).toHaveLength(5)
     }
   })
 

@@ -64,15 +64,17 @@ export type PortalContext = {
   readonly overrides?: CallOverrides
   /** EN: Current cookies and whether this operation already logged in. ES: Cookies actuales y si esta operación ya inició sesión. */
   readonly state: { cookies: CookieJar; loggedIn: boolean }
-  /** EN: When set, every request carries these headers and no others of the client's, its answers are read as UTF-8, and, once `sealed`, its `Set-Cookie` lines no longer change the jar. ES: Si está presente, cada petición lleva estas cabeceras y ninguna otra del cliente, sus respuestas se leen como UTF-8 y, una vez `sealed`, sus líneas `Set-Cookie` ya no cambian la bolsa. */
+  /** EN: When set, every request carries these headers and no others of the client's, its answers are read as UTF-8, every status comes back as a page (502, 503 and 504 too, and no page is read as the firewall's) and, once `sealed`, its `Set-Cookie` lines no longer change the jar. ES: Si está presente, cada petición lleva estas cabeceras y ninguna otra del cliente, sus respuestas se leen como UTF-8, todo estado vuelve como página (también 502, 503 y 504, y ninguna página se lee como la del firewall) y, una vez `sealed`, sus líneas `Set-Cookie` ya no cambian la bolsa. */
   readonly verbatim?: PortalVerbatim
 }
 
 /**
  * EN: How a request is written when it must match the field's exactly: the whole set of headers it starts from, and
- * whether the jar is closed to new cookies.
+ * whether the jar is closed to new cookies. Its answer goes back to the caller whatever its status or its wording: the
+ * operation alone decides what a 503 or a refusal page means, as each call of the field does.
  * ES: Cómo se escribe una petición cuando debe calzar exactamente con la del campo: el conjunto completo de cabeceras
- * del que parte, y si la bolsa está cerrada a cookies nuevas.
+ * del que parte, y si la bolsa está cerrada a cookies nuevas. Su respuesta vuelve a quien llama sea cual sea su estado
+ * o su texto: solo la operación decide qué significa un 503 o una página de rechazo, como hace cada llamada del campo.
  */
 export type PortalVerbatim = {
   /** EN: The headers every request starts from; the request's own content type, referer, cookie and headers go over them. ES: Las cabeceras de las que parte cada petición; el tipo de contenido, el referer, la cookie y las cabeceras propias de la petición van encima. */
@@ -264,10 +266,12 @@ export const assertNotRejected = (context: PortalContext, html: string): void =>
 /**
  * EN: One request and no redirects: one `send` inside the retry loop. Cookies go into the jar; a block throws. Any other
  * status is a page, except 502, 503 and 504, which are repeated. A body that is a document or JSON is not read for the
- * firewall's words, although HTTP 403 still blocks.
+ * firewall's words, although HTTP 403 still blocks. A `verbatim` context gets every answer back as a page instead: no
+ * status throws and no block is looked for.
  * ES: Una petición sin redirecciones: un `send` dentro del ciclo de reintentos. Las cookies entran a la bolsa; un bloqueo
  * lanza. Cualquier otro estado es una página, salvo 502, 503 y 504, que se repiten. Un cuerpo que sea un documento o JSON
- * no se revisa en busca de las palabras del firewall, aunque un HTTP 403 igual bloquea.
+ * no se revisa en busca de las palabras del firewall, aunque un HTTP 403 igual bloquea. Un contexto `verbatim` recibe en
+ * cambio toda respuesta como página: ningún estado lanza y no se busca ningún bloqueo.
  */
 export const portalRequest = async (
   context: PortalContext,
@@ -310,7 +314,7 @@ export const portalRequest = async (
         requestEncoding: 'utf8',
         responseEncoding,
       })
-      if (RETRYABLE_STATUS.has(answer.status))
+      if (verbatim === undefined && RETRYABLE_STATUS.has(answer.status))
         throw httpError(answer, decodeBody(answer.body, responseEncoding(answer)), operation, 'portal', url)
       return answer
     },
@@ -324,7 +328,7 @@ export const portalRequest = async (
   if (isSiiUrl(url) && verbatim?.sealed !== true)
     state.cookies = mergeSetCookie(state.cookies, response.headers['set-cookie'])
   const html = decodeBody(response.body, responseEncoding(response))
-  if (isBlockedPage(response.status, isStructuredBody(html) ? '' : html))
+  if (verbatim === undefined && isBlockedPage(response.status, isStructuredBody(html) ? '' : html))
     throw new DteError('SII_PORTAL_BLOCKED', {
       operation: context.operation,
       step,

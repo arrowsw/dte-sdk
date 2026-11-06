@@ -139,8 +139,10 @@ describe('downloadExchangeSet', () => {
     const busy = await signedIn([...warmUp, download({ status: 503, body: 'busy' })], {
       retry: { maxAttempts: 3, initialDelayMs: 1 },
     })
+    // A 503 is one more page that is no set: the stage's requests come back whatever their status.
     const error = await failure(downloadExchangeSet(busy.portal))
-    expect(error.code).toBe('SII_HTTP_ERROR')
+    expect(error.code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
+    expect(error.details).toMatchObject({ httpStatus: 503, page: 'busy' })
     expect(busy.fake.requests.filter((request) => request.url.includes('downloadFile'))).toHaveLength(1)
     expect(busy.sleeps).toEqual([])
     expect(busy.fake.requests.slice(1).map((request) => request.timeoutMs)).toEqual([
@@ -157,6 +159,33 @@ describe('downloadExchangeSet', () => {
     const set = SET_XML.replace('SetDoc', 'Cajón')
     const harness = await signedIn([...warmUp, download({ body: set, encoding: 'utf8' })])
     await expect(downloadExchangeSet(harness.portal)).resolves.toEqual({ xml: set })
+  })
+
+  test('a warm-up that answers an error is a warm-up all the same: its cookies stay for the stage', async () => {
+    for (const status of [503, 403]) {
+      const log = logger()
+      const harness = await signedIn(
+        [
+          alive,
+          { method: 'GET', url: BASE, reply: { status, body: 'busy', headers: { 'set-cookie': 'PFE=warm; Path=/' } } },
+          download({ body: SET_XML }),
+        ],
+        { logger: log },
+      )
+      await expect(downloadExchangeSet(harness.portal)).resolves.toEqual({ xml: SET_XML })
+      expect(harness.fake.requests[2].headers['cookie']).toContain('PFE=warm')
+      expect(log.lines).not.toContain('gwt portal warm-up failed')
+    }
+  })
+
+  test('a redirect without a place to go is not followed', async () => {
+    const harness = await signedIn([
+      alive,
+      { method: 'GET', url: BASE, reply: { status: 302, headers: { location: '' } } },
+      download({ body: SET_XML }),
+    ])
+    await downloadExchangeSet(harness.portal)
+    expect(harness.urls()).toEqual([SESSION_CHECK_URL, BASE, `${BASE}downloadFile${COMPANY_QUERY}`])
   })
 
   test('logs a failed warm-up and goes on', async () => {
@@ -293,14 +322,26 @@ describe('validateExchangeUser', () => {
     )
   })
 
-  test('is sent once, with the longest timeout, even when the client retries', async () => {
+  test('is sent once, with the longest timeout, even when the client retries, and its answer is read whatever its status', async () => {
     const harness = await signedIn([...warmUp, facade({ status: 503, body: 'busy' })], {
       retry: { maxAttempts: 3, initialDelayMs: 1 },
     })
-    expect((await failure(validateExchangeUser(harness.portal))).code).toBe('SII_HTTP_ERROR')
+    // The field never looks at the status of this answer: one without the portal's sentence reads as "in the exchange".
+    await expect(validateExchangeUser(harness.portal)).resolves.toMatchObject({
+      inExchange: true,
+      state: null,
+      message: null,
+      body: 'busy',
+    })
     expect(facadePosts(harness)).toHaveLength(1)
     expect(facadePosts(harness)[0].timeoutMs).toBe(LONGEST_TIMEOUT_MS)
     expect(harness.sleeps).toEqual([])
+  })
+
+  test('a page the client would take for the firewall is the call own to read, as any other', async () => {
+    const refusal = '<html><body>acceso restringido</body></html>'
+    const harness = await signedIn([...warmUp, facade({ status: 403, body: refusal })])
+    await expect(validateExchangeUser(harness.portal)).resolves.toMatchObject({ inExchange: true, body: refusal })
   })
 
   test('the table keeps both verifiers in their own slots when the holder and the company share one', async () => {
@@ -394,8 +435,8 @@ describe('uploadExchangeAnswers', () => {
       retry: { maxAttempts: 3, initialDelayMs: 1 },
     })
     const error = await failure(uploadExchangeAnswers(harness.portal, ANSWERS))
-    expect(error.code).toBe('SII_HTTP_ERROR')
-    expect(error.details['httpStatus']).toBe(503)
+    expect(error.code).toBe('SII_PORTAL_REJECTED')
+    expect(error.details).toMatchObject({ rejection: 'exchangeUploadRefused', httpStatus: 503 })
     expect(harness.urls()).toHaveLength(4)
     expect(harness.sleeps).toEqual([])
   })
@@ -443,10 +484,25 @@ describe('confirmExchange', () => {
     const harness = await signedIn([...warmUp, facade({ status: 503, body: 'busy' })], {
       retry: { maxAttempts: 3, initialDelayMs: 1 },
     })
+    // The set validation is not judged; the first confirmation without `//OK` is what stops the sequence.
     const error = await failure(confirmExchange(harness.portal))
-    expect(error.code).toBe('SII_HTTP_ERROR')
-    expect(facadePosts(harness)).toHaveLength(1)
+    expect(error.code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
+    expect(error.details['step']).toBe('updatePostulacionSeguimiento.40')
+    expect(facadePosts(harness)).toHaveLength(2)
     expect(harness.sleeps).toEqual([])
+  })
+
+  test('the set validation is not judged whatever its status: the three confirmations still go', async () => {
+    const harness = await signedIn([
+      ...warmUp,
+      facade((request) =>
+        methodOf(request) === 'validarSetContriPostSeguimiento' ? { status: 503, body: 'busy' } : { body: EMPTY_OK },
+      ),
+    ])
+    await expect(confirmExchange(harness.portal)).resolves.toEqual({
+      validation: 'busy',
+      confirmations: [40, 41, 43].map((id) => ({ id, body: EMPTY_OK })),
+    })
   })
 })
 

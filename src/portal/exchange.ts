@@ -82,6 +82,7 @@ const EXCHANGE_STAGE: GwtStageSpec = {
  * given the stage sent once over it. The upload, the user validation and the confirmation share one stage in the field.
  * ES: Ejecuta `run` en una etapa del portal de intercambio: la sesión asegurada, un calentamiento, y cada llamada que
  * recibe la etapa enviada una vez sobre ella. La subida, la validación del usuario y la confirmación comparten una etapa en el campo.
+ * @param sessionChecked EN: true when an earlier stage of the same run already checked the saved session (the download, before the uploads). ES: true cuando una etapa anterior de la misma corrida ya comprobó la sesión guardada (la descarga, antes de las subidas).
  * @throws {DteError} EN: session, block and transport codes, and whatever `run` throws. ES: códigos de sesión, bloqueo y transporte, y lo que lance `run`.
  */
 export const withExchangeStage = <T>(
