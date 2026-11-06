@@ -32,6 +32,7 @@ import {
   progressPage,
   STANDARD_ROWS,
 } from '../support/certification-pages'
+import { DteError } from '../../src/errors'
 import { failure } from '../support/portal'
 import { page } from '../support/portal-pages'
 
@@ -98,6 +99,21 @@ describe('declareSimulation', () => {
     expect(result).toMatchObject({ outcome: 'skipped', detail: 'INTERCAMBIO' })
     expect(result.state.stage).toBe('exchange')
     expect(harness.steps()).toEqual([])
+  })
+
+  test('only the exchange is skipped: a later step is declared like any other', async () => {
+    const later = progressPage('DOCUMENTOS IMPRESOS', { 'SET SIMULACION': 'REVISADO CONFORME' })
+    const harness = await certificationHarness([
+      entry,
+      avance2([page('x')], () => SIM_KEPT),
+      avance5,
+      avance6([later], () => later),
+      post('pe_avance3', DECLARATION_ANSWERS.success),
+    ])
+    const result = await declareSimulation(harness.deps, stateWith({ simulation }))
+    expect(result.outcome).toBe('accepted')
+    expect(harness.steps()).toEqual(['SIM_DECLARING', 'POLLING'])
+    expect(harness.posted('pe_avance3')[0]).toMatchObject({ NUM_ENV1: '777' })
   })
 
   test('declared with the simulation flag: every row empty is retried', async () => {
@@ -185,6 +201,142 @@ describe('waitForSimulationApproval', () => {
       outcome: 'rejected',
       detail: 'ENVIO CON ERRORES O REPAROS',
     })
+  })
+
+  test('an approved row reads the page once more for the stage it left the application in', async () => {
+    const approved = progressPage('SIMULACION', { 'SET SIMULACION': 'REVISADO CONFORME' })
+    const harness = await reading([approved], AT_EXCHANGE)
+    const result = await waitForSimulationApproval(harness.deps, stateWith({ simulation }))
+    expect(result).toMatchObject({ outcome: 'done', state: { stage: 'exchange' } })
+    expect(harness.urls().filter((url) => url.endsWith('pe_avance6'))).toHaveLength(2)
+    const unreadable = await certificationHarness([
+      entry,
+      avance2([page('x')], () => page('x')),
+      avance5,
+      {
+        url: `${MAULLIN}/pe_avance6`,
+        method: 'POST',
+        reply: [{ body: approved }, new DteError('TRANSPORT_FAILED', { reason: 'socket hang up' })],
+      },
+    ])
+    await expect(waitForSimulationApproval(unreadable.deps, stateWith({ simulation }))).resolves.toMatchObject({
+      outcome: 'done',
+      state: { stage: 'exchange' },
+    })
+  })
+
+  test('a read that fails only uses up its attempt', async () => {
+    const harness = await certificationHarness([
+      entry,
+      avance2([], () => page('x')),
+      avance5,
+      {
+        url: `${MAULLIN}/pe_avance6`,
+        method: 'POST',
+        reply: [new DteError('TRANSPORT_FAILED', { reason: 'socket hang up' }), { body: AT_EXCHANGE }],
+      },
+    ])
+    const result = await waitForSimulationApproval(harness.deps, stateWith({ simulation }))
+    expect(result.outcome).toBe('done')
+    expect(harness.sleeps).toEqual([10000])
+    expect(harness.steps()).toEqual(['POLLING', 'POLLING', 'SIM_DONE'])
+    expect(harness.warnings()).toContain('certification simulation read failed')
+  })
+
+  test('objections alone reject the simulation, a date that does not match keeps the wait going', async () => {
+    const objections = await reading([progressPage('SIMULACION', { 'SET SIMULACION': 'CON REPAROS' })], AT_EXCHANGE)
+    await expect(waitForSimulationApproval(objections.deps, stateWith({ simulation }))).resolves.toMatchObject({
+      outcome: 'rejected',
+      detail: 'CON REPAROS',
+    })
+    const mismatch = await reading(
+      [],
+      progressPage('SIMULACION', { 'SET SIMULACION': 'FECHA NO CORRESPONDE' }),
+      [],
+      [estUpRoute(estUp('LSO', '777'))],
+    )
+    await expect(waitForSimulationApproval(mismatch.deps, stateWith({ simulation }))).resolves.toMatchObject({
+      outcome: 'timedOut',
+    })
+    expect(mismatch.sleeps).toHaveLength(30)
+  })
+
+  test('a confirmation the portal does not take leaves the page to be judged as it is', async () => {
+    const offer = progressPage('SIMULACION', { 'SET SIMULACION': 'REVISADO CONFORME' }, { confirm: true })
+    const harness = await certificationHarness([
+      entry,
+      avance2([page('x'), SIM_FORM], () => page('x')),
+      avance5,
+      avance6([offer], () => AT_EXCHANGE),
+      post('pe_avance3', DECLARATION_ANSWERS.plainError),
+    ])
+    const result = await waitForSimulationApproval(harness.deps, stateWith({ simulation }))
+    expect(result.outcome).toBe('done')
+    expect(harness.sleeps).toEqual([])
+    const broken = await certificationHarness([
+      entry,
+      avance2([page('x'), SIM_FORM], () => page('x')),
+      avance5,
+      avance6([offer], () => AT_EXCHANGE),
+      {
+        url: `${MAULLIN}/pe_avance3`,
+        method: 'POST',
+        reply: [new DteError('TRANSPORT_FAILED', { reason: 'socket hang up' })],
+      },
+    ])
+    await expect(waitForSimulationApproval(broken.deps, stateWith({ simulation }))).resolves.toMatchObject({
+      outcome: 'done',
+    })
+  })
+
+  test('after a confirmation, the exchange, a row approved or no form left all count; none of them keeps waiting', async () => {
+    const offer = (state: string, stage = 'SIMULACION') =>
+      progressPage(stage, { 'SET SIMULACION': state }, { confirm: true })
+    const confirmed = async (after: string) => {
+      const harness = await certificationHarness([
+        entry,
+        avance2([page('x'), SIM_FORM, SIM_KEPT], () => page('x')),
+        avance5,
+        avance6([offer('EN REVISION'), after], () => after),
+        post('pe_avance3', DECLARATION_ANSWERS.success),
+      ])
+      return waitForSimulationApproval(harness.deps, stateWith({ simulation }))
+    }
+    await expect(confirmed(offer('EN REVISION', 'INTERCAMBIO'))).resolves.toMatchObject({ outcome: 'confirmed' })
+    await expect(confirmed(offer('REVISADO CONFORME'))).resolves.toMatchObject({ outcome: 'confirmed' })
+    await expect(confirmed(progressPage('SIMULACION', { 'SET SIMULACION': 'EN REVISION' }))).resolves.toMatchObject({
+      outcome: 'confirmed',
+    })
+  })
+
+  test('a page with no row for the simulation is waited on', async () => {
+    const rowless = await reading(
+      [progressPage('SIMULACION', {})],
+      progressPage('SIMULACION', {}),
+      [],
+      [estUpRoute(estUp('LSO', '777'))],
+    )
+    await expect(waitForSimulationApproval(rowless.deps, stateWith({ simulation }))).resolves.toMatchObject({
+      outcome: 'timedOut',
+    })
+    expect(rowless.sleeps).toHaveLength(30)
+  })
+
+  test('a confirmation followed by a read that fails counts as confirmed', async () => {
+    const offer = progressPage('SIMULACION', { 'SET SIMULACION': 'REVISADO CONFORME' }, { confirm: true })
+    const harness = await certificationHarness([
+      entry,
+      avance2([page('x'), SIM_FORM, SIM_KEPT], () => page('x')),
+      avance5,
+      {
+        url: `${MAULLIN}/pe_avance6`,
+        method: 'POST',
+        reply: [{ body: offer }, new DteError('TRANSPORT_FAILED', { reason: 'socket hang up' })],
+      },
+      post('pe_avance3', DECLARATION_ANSWERS.success),
+    ])
+    const result = await waitForSimulationApproval(harness.deps, stateWith({ simulation }))
+    expect(result).toMatchObject({ outcome: 'confirmed', state: { stage: 'exchange' } })
   })
 
   test('thirty polls, then the SOAP status decides: rejected, pending, or unreachable', async () => {

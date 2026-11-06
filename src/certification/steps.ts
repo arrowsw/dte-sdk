@@ -13,7 +13,6 @@ import {
   type ProgressReport,
 } from '../portal/certification'
 import { saysNotProcessedYet, saysRejection } from '../portal/pages/certification-progress'
-import { queryUploadStatus } from '../sii/status'
 import { uploadEnvelope } from '../sii/upload'
 import { chileDate } from '../time/chile'
 import {
@@ -59,6 +58,11 @@ const ADVANCE_READ_INTERVAL_MS = 10000
 const SIMULATION_APPROVAL_ATTEMPTS = 30
 const SIMULATION_APPROVAL_INTERVAL_MS = 10000
 const SIMULATION_ARTEFACT = 'simulacion/envio-simulacion.xml'
+const SIMULATION_DIAGNOSIS_PREFIX = 'declaracion-simulacion'
+// How the reference reads the simulation row of the progress page: by the wording, in capitals.
+const EXCHANGE_WORD = 'INTERCAMBIO'
+const APPROVED_WORDING = 'REVISADO CONFORME'
+const REJECTED_WORDING = /RECHAZADO|ERRORES|REPARO/
 const STAGE_ORDER: readonly CertificationStage[] = [
   'testSets',
   'books',
@@ -510,10 +514,12 @@ export const sendSimulation = async (
 }
 
 /**
- * EN: Declares the simulation, unless the portal already stands at the exchange or later. "Every row empty" is
- * retried here: the portal shows the simulation as not declared while it still processes the track id.
- * ES: Declara la simulación, salvo que el portal ya esté en el intercambio o después. "Toda fila vacía" aquí se
- * reintenta: el portal muestra la simulación sin declarar mientras aún procesa el track id.
+ * EN: Declares the simulation, unless the progress page names the exchange as the step the application is at, as the
+ * reference does: a later step is declared like any other. "Every row empty" is retried here: the portal shows the
+ * simulation as not declared while it still processes the track id.
+ * ES: Declara la simulación, salvo que la página de avance nombre el intercambio como el paso en que está la
+ * postulación, como lo hace la referencia: un paso posterior se declara como cualquier otro. "Toda fila vacía" aquí
+ * se reintenta: el portal muestra la simulación sin declarar mientras aún procesa el track id.
  * @throws {DteError} EN: `MISSING_FIELD { field: 'simulation' }` before the send; the portal codes. ES: `MISSING_FIELD { field: 'simulation' }` antes del envío; los códigos del portal.
  */
 export const declareSimulation = async (
@@ -523,13 +529,12 @@ export const declareSimulation = async (
   const rt = runtime(deps)
   if (state.simulation === undefined) throw new DteError('MISSING_FIELD', { field: 'simulation' })
   const report = await readProgress(rt.portal)
-  if (atLeast(report.stageKey, 'exchange'))
+  if (report.stage?.startsWith(EXCHANGE_WORD) === true)
     return {
       state: await saveState(rt, state, { stage: laterStage(state.stage, report.stageKey) }),
       outcome: 'skipped',
       success: true,
-      // A stage key at the exchange or past it always comes from a wording on the page.
-      detail: report.stage!,
+      detail: report.stage,
     }
   rt.emit({ step: 'SIM_DECLARING' })
   const { result, diagnosis } = await declareWithRetries(
@@ -555,14 +560,19 @@ export const declareSimulation = async (
 }
 
 /**
- * EN: Waits for the simulation: 30 polls 10 s apart of the progress page, polling first. The exchange or a later
- * stage is done; an approved simulation that awaits its confirmation is declared once more (the portal's "Confirmar
- * Revisión") and the page read again; an approved state is done; a rejected one stops. After the polls the SOAP
- * status decides: a rejected envelope is the answer (a time-out often hides one), else the wait timed out.
- * ES: Espera la simulación: 30 consultas cada 10 s a la página de avance, consultando primero. El intercambio o una
- * etapa posterior es listo; una simulación aprobada que espera su confirmación se declara una vez más (el "Confirmar
- * Revisión" del portal) y se relee la página; un estado aprobado es listo; uno rechazado detiene. Tras las consultas
- * decide el estado SOAP: un envío rechazado es la respuesta (un timeout suele esconder uno), si no, la espera venció.
+ * EN: Waits for the simulation as the reference does: 30 polls 10 s apart of the progress page, polling first. A read
+ * that fails only uses up its attempt. The exchange or a later stage is done; an approved simulation that awaits its
+ * confirmation is declared once more (the portal's "Confirmar Revisión") and the page read again, and a declaration
+ * the portal did not take leaves the page to be judged as it is; a row saying "REVISADO CONFORME" is done, after one
+ * more read of the page; one saying "RECHAZADO", "ERRORES" or "REPARO" stops. After the polls the SOAP status decides:
+ * a rejected envelope is the answer (a time-out often hides one), else the wait timed out.
+ * ES: Espera la simulación como lo hace la referencia: 30 consultas cada 10 s a la página de avance, consultando
+ * primero. Una lectura que falla solo gasta su intento. El intercambio o una etapa posterior es listo; una simulación
+ * aprobada que espera su confirmación se declara una vez más (el "Confirmar Revisión" del portal) y se relee la
+ * página, y una declaración que el portal no tomó deja la página para juzgarla tal como está; una fila que dice
+ * "REVISADO CONFORME" es listo, tras una lectura más de la página; una que dice "RECHAZADO", "ERRORES" o "REPARO"
+ * detiene. Tras las consultas decide el estado SOAP: un envío rechazado es la respuesta (un timeout suele esconder
+ * uno), si no, la espera venció.
  * @throws {DteError} EN: `MISSING_FIELD { field: 'simulation' }` before the send; the portal codes. ES: `MISSING_FIELD { field: 'simulation' }` antes del envío; los códigos del portal.
  */
 export const waitForSimulationApproval = async (
@@ -583,35 +593,54 @@ export const waitForSimulationApproval = async (
     rt.emit({ step: 'SIM_DONE' })
     return { state: next, outcome }
   }
+  // The stage the application stands at after a read that may have failed: the exchange is what a simulation that
+  // passed leads to.
+  const stageAfter = (after: ProgressReport | null): CertificationStage =>
+    after === null ? 'exchange' : laterStage('exchange', after.stageKey)
+  const reread = (): Promise<ProgressReport | null> => readProgress(rt.portal).catch(() => null)
+  const wording = (report: ProgressReport): string => report.states.simulation?.text.toUpperCase() ?? ''
   for (let attempt = 1; attempt <= SIMULATION_APPROVAL_ATTEMPTS; attempt += 1) {
     rt.emit({ step: 'POLLING', attempt, max: SIMULATION_APPROVAL_ATTEMPTS, label: 'simulation' })
-    const report = await readProgress(rt.portal)
+    const report = await readProgress(rt.portal).catch((error: unknown) => {
+      rt.portal.logger.warn('certification simulation read failed', { attempt, reason: errorMessage(error) })
+      return null
+    })
+    if (report === null) {
+      await rt.sleep(SIMULATION_APPROVAL_INTERVAL_MS)
+      continue
+    }
     if (atLeast(report.stageKey, 'exchange')) return finish('done', report.stageKey)
     if (report.simulationAwaitsConfirmation) {
-      await declareProgress(rt.portal, { entries: { simulation: entryOf(simulation.trackId, rt.now()) } })
-      const after = await readProgress(rt.portal)
-      if (
-        atLeast(after.stageKey, 'exchange') ||
-        after.states.simulation?.state === 'approved' ||
-        !after.simulationAwaitsConfirmation
-      )
-        return finish('confirmed', 'exchange')
-    } else {
-      const item = report.states.simulation
-      if (item?.state === 'approved') return finish('done', 'exchange')
-      if (item?.state === 'rejected') return { state, outcome: 'rejected', detail: item.text }
+      const confirmation = await declareProgress(rt.portal, {
+        entries: { simulation: entryOf(simulation.trackId, rt.now()) },
+      }).catch((error: unknown) => {
+        rt.portal.logger.warn('certification simulation confirmation failed', { reason: errorMessage(error) })
+        return null
+      })
+      if (confirmation?.success === true) {
+        const after = await reread()
+        if (
+          after === null ||
+          after.stage?.includes(EXCHANGE_WORD) === true ||
+          !after.simulationAwaitsConfirmation ||
+          wording(after).includes(APPROVED_WORDING)
+        )
+          return finish('confirmed', stageAfter(after))
+        await rt.sleep(SIMULATION_APPROVAL_INTERVAL_MS)
+        continue
+      }
     }
+    const upper = wording(report)
+    if (upper.includes(APPROVED_WORDING)) return finish('done', stageAfter(await reread()))
+    if (REJECTED_WORDING.test(upper)) return { state, outcome: 'rejected', detail: report.states.simulation!.text }
     await rt.sleep(SIMULATION_APPROVAL_INTERVAL_MS)
   }
-  const status = await queryUploadStatus(rt.sii, { trackId: simulation.trackId }).catch(() => null)
-  if (status?.status === 'rejected') {
-    const next = await saveState(rt, state, {
-      diagnosis: {
-        ...state.diagnosis,
-        [simulation.trackId]: { code: status.code, status: status.status, message: status.message },
-      },
-    })
-    return { state: next, outcome: 'rejected', detail: `${status.code}: ${status.message}` }
+  const found = (
+    await diagnose(rt, { simulation: entryOf(simulation.trackId, rt.now()) }, SIMULATION_DIAGNOSIS_PREFIX)
+  )[simulation.trackId]
+  if (found?.status === 'rejected') {
+    const next = await saveState(rt, state, { diagnosis: { ...state.diagnosis, [simulation.trackId]: found } })
+    return { state: next, outcome: 'rejected', detail: `${found.code}: ${found.message}` }
   }
   return { state, outcome: 'timedOut' }
 }
