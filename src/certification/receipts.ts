@@ -6,7 +6,6 @@ import { createEnvelope } from '../envelope/create'
 import { signEnvelope, type SignedEnvelope } from '../envelope/sign'
 import { DteError } from '../errors'
 import type { IssuerInput, LineItemInput } from '../model/document'
-import { chileDate } from '../time/chile'
 import type { FolioSource } from './folios'
 import type { ReceiptsTestCase } from './receipts-set'
 
@@ -27,7 +26,7 @@ export type IssueReceiptsSetOptions = {
   readonly folios: FolioSource
   /** EN: The resolution of the certification environment: number 0 and its date. ES: `NroResol`, `FchResol` — La resolución del ambiente de certificación: número 0 y su fecha. */
   readonly resolution: { readonly number: number; readonly date: string }
-  /** EN: Clock; the issue date is the Chile date of it. ES: Reloj; la fecha de emisión es la fecha de Chile de él. */
+  /** EN: Clock; the issue date is the UTC date of it. ES: `FchEmis` — Reloj; la fecha de emisión es la fecha UTC de él. */
   readonly now?: () => Date
 }
 
@@ -98,7 +97,8 @@ export const issueReceiptsSet = async (
 ): Promise<IssuedReceiptsSet> => {
   if (cases.length === 0) throw new DteError('MISSING_FIELD', { field: 'cases' })
   const now = options.now?.() ?? new Date()
-  const issueDate = chileDate(now)
+  // The UTC date of the instant, as the field issues them: late in the evening in Chile it is already tomorrow's.
+  const issueDate = now.toISOString().slice(0, 10)
   const receipts: IssuedReceipt[] = []
   for (const testCase of cases) {
     const { caf, folio } = await options.folios.take(RECEIPT_TYPE)

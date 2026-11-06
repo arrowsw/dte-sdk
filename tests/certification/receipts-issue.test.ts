@@ -80,6 +80,12 @@ describe('issueReceiptsSet', () => {
     expect((await failure(issueReceiptsSet(cases, short))).code).toBe('FOLIO_OUT_OF_RANGE')
   })
 
+  test('the issue date is the UTC date of the instant, which is the next day in Chile in the evening', async () => {
+    const evening = new Date('2026-11-16T01:00:00.000Z')
+    const issued = await issueReceiptsSet(cases.slice(0, 1), { ...options(), now: () => evening })
+    expect(issued.receipts[0].document.header.issueDate).toBe('2026-11-16')
+  })
+
   test('the unit is the word after the last "en" of the observation, with no word boundary before it', async () => {
     const noted = parseReceiptsTestSet(
       'CASO-1\nItem\tCantidad\tPrecio\nPan\t1\t100\nOBSERVACION: La unidad de medida del almacen Kg.',
