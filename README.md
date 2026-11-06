@@ -686,10 +686,11 @@ again later.
   fallback, and when no cookie gives the check digit the declaration sends `8`. With two people enrolled for a
   company, any other choice is refused.
 - **The receipts keep to the reference too.** The set is read by position (tabs or two or more spaces; the header and
-  `OBSERVACION` in exact case); the receipts carry the UTC day; every request to the receipts portal carries only the
-  headers the reference sends, is sent once, waits 30 s and is read as UTF-8 whatever its status; `P90` and `P91` are
-  searched in the raw answer; the posts that declare are judged by `//OK` alone. `verifyReceiptsAuthorization` reads a
-  row as authorised when its state contains `conform`, `aprobad` or `autoriz`: read the state it returns yourself.
+  `OBSERVACION` in exact case); the receipts carry the UTC day and each is stamped with the UTC instant to the second,
+  while the envelope keeps the time of Chile; every request to the receipts portal carries only the headers the
+  reference sends, is sent once, waits 30 s and is read as UTF-8 whatever its status; `P90` and `P91` are searched in
+  the raw answer; the posts that declare are judged by `//OK` alone. `verifyReceiptsAuthorization` reads a row as
+  authorised when its state contains `conform`, `aprobad` or `autoriz`: read the state it returns yourself.
 - **A receipt has its own reference.** The receipts schema gives `Referencia` no date and a free-text code, so a
   receipt takes `receiptReferences` (`{ code, reason, documentType?, folio? }`) and refuses `references`.
 - **`verifyReceiptsAuthorization` never throws.** A stamping form the portal does not serve is `queryFailed`, not "not
