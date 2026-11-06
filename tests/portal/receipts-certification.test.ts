@@ -8,20 +8,11 @@ import {
   verifyReceiptsAuthorization,
 } from '../../src/portal/receipts-certification'
 import type { Logger } from '../../src/sii/logger'
-import { get, post } from '../support/certification-harness'
-import { progressPage } from '../support/certification-pages'
 import { gwtMethodOf } from '../support/exchange-fixtures'
 import type { FakeReply, FakeRoute, RecordedRequest } from '../support/fake-sii'
 import { EMPTY_OK, EXCEPTION, okAnswer } from '../support/gwt-answers'
-import { failure, PALENA, portalWith, seedSession, signedIn, type PortalHarness } from '../support/portal'
-import {
-  BOLETA_OPTION,
-  certificationPage,
-  FACTURA_OPTION,
-  page,
-  STAMP_ENTRY,
-  typeSelector,
-} from '../support/portal-pages'
+import { failure, MAULLIN, PALENA, portalWith, seedSession, signedIn, type PortalHarness } from '../support/portal'
+import { page, STAMP_ENTRY, typeSelector } from '../support/portal-pages'
 import { RECEIPTS_SET_TEXT } from '../support/receipts-set-samples'
 
 const BASE = RECEIPTS_PORTAL.base
@@ -468,38 +459,50 @@ describe('declareReceiptsCompliance', () => {
 })
 
 describe('verifyReceiptsAuthorization', () => {
-  const stamping = (selector: string): FakeRoute[] => [
-    { url: `${PALENA}/of_solicita_folios`, method: 'GET', reply: { body: STAMP_ENTRY } },
-    { url: `${PALENA}/of_solicita_folios_dcto`, method: 'POST', reply: { body: selector } },
+  const QUOTED_BOLETA = '<option value="39">BOLETA ELECTRONICA</option>'
+  const FACTURA = '<option value="33">FACTURA ELECTRONICA</option>'
+  const stamping = (
+    selector: string,
+    entry = STAMP_ENTRY,
+    secondUrl = `${PALENA}/of_solicita_folios_dcto`,
+  ): FakeRoute[] => [
+    { url: `${PALENA}/of_solicita_folios`, method: 'GET', reply: { body: entry } },
+    { url: secondUrl, method: 'POST', reply: { body: selector } },
   ]
-  const production = async (selector: string) => {
-    const harness = portalWith(stamping(selector), { environment: 'production' })
+  const production = async (selector: string, entry?: string, secondUrl?: string) => {
+    const harness = portalWith(stamping(selector, entry, secondUrl), { environment: 'production' })
     await seedSession(harness.portal)
     return harness
   }
-  const certification = (progress: string) =>
+  const certification = (progress: FakeReply | string) =>
     signedIn([
-      get('pe_avance1', page('entry')),
-      post('pe_avance2', certificationPage()),
-      get('pe_avance5', page('p5')),
-      post('pe_avance6', progress),
+      {
+        url: `${MAULLIN}/pe_avance6`,
+        method: 'GET',
+        reply: typeof progress === 'string' ? { body: progress } : progress,
+      },
     ])
+  const row = (state: string): string =>
+    page(`<table><tr><td>BOLETA ELECTRONICA</td><td><b>${state}</b></td></tr></table>`)
 
   test('production is authorised when type 39 can be stamped; certification reads the receipts row', async () => {
-    const live = await production(typeSelector(`${FACTURA_OPTION}${BOLETA_OPTION}`))
-    const test = await certification(progressPage('DOCUMENTOS IMPRESOS', { 'BOLETA ELECTRONICA': 'REVISADO CONFORME' }))
+    const live = await production(typeSelector(`${FACTURA}${QUOTED_BOLETA}`))
+    const test = await certification(row('REVISADO CONFORME'))
     await expect(verifyReceiptsAuthorization({ production: live.portal, certification: test.portal })).resolves.toEqual(
       {
         production: { authorized: true, queryFailed: false, types: [33, 39] },
         certification: { authorized: true, queryFailed: false, state: 'REVISADO CONFORME' },
       },
     )
-    expect(live.posted('of_solicita_folios_dcto')[0]).toMatchObject({ RUT_EMP: '76543210', DV_EMP: '3' })
+    expect(live.urls()).toEqual([`${PALENA}/of_solicita_folios`, `${PALENA}/of_solicita_folios_dcto`])
+    expect(live.posted('of_solicita_folios_dcto')[0]).toMatchObject({ RUT_EMP: '76543210', DV_EMP: '3', KEY: '7' })
+    expect(test.urls()).toEqual([`${MAULLIN}/pe_avance6`])
+    expect(test.fake.requests[0].method).toBe('GET')
   })
 
   test('no type 39 and no receipts row are plain answers; a side without a client is null', async () => {
-    const live = await production(typeSelector(FACTURA_OPTION))
-    const test = await certification(progressPage('LIBROS', { 'SET BASICO': 'REVISADO CONFORME' }))
+    const live = await production(typeSelector(FACTURA))
+    const test = await certification(page('<tr><td>SET BASICO</td><td><b>REVISADO CONFORME</b></td></tr>'))
     await expect(
       verifyReceiptsAuthorization({ production: live.portal, certification: test.portal, companyRut: '76543210-3' }),
     ).resolves.toEqual({
@@ -507,6 +510,43 @@ describe('verifyReceiptsAuthorization', () => {
       certification: { authorized: false, queryFailed: false, state: null },
     })
     await expect(verifyReceiptsAuthorization({})).resolves.toEqual({ production: null, certification: null })
+  })
+
+  test('an option whose value is not quoted is not a type, as in the field', async () => {
+    const live = await production(typeSelector(`${FACTURA}<option value=39>BOLETA</option>`))
+    const result = await verifyReceiptsAuthorization({ production: live.portal })
+    expect(result.production).toEqual({ authorized: false, queryFailed: false, types: [33] })
+  })
+
+  test('the second request goes to the action of the first page, or to the default when it names none', async () => {
+    const other = `${PALENA}/of_otra`
+    const named = await production(
+      typeSelector(QUOTED_BOLETA),
+      page('<form action="of_otra" method=post><input name=RUT_EMP value=1></form>'),
+      other,
+    )
+    await expect(verifyReceiptsAuthorization({ production: named.portal })).resolves.toMatchObject({
+      production: { authorized: true },
+    })
+    expect(named.urls()[1]).toBe(other)
+    expect(named.posted('of_otra')[0]).toMatchObject({ RUT_EMP: '76543210', DV_EMP: '3' })
+    const bare = await production(typeSelector(QUOTED_BOLETA), page('<p>sin formulario</p>'))
+    await expect(verifyReceiptsAuthorization({ production: bare.portal })).resolves.toMatchObject({
+      production: { authorized: true },
+    })
+    expect(bare.urls()[1]).toBe(`${PALENA}/of_solicita_folios_dcto`)
+  })
+
+  test('a certification state is read whatever the HTTP status, and the page can say authorised on its own', async () => {
+    const odd = await certification({ status: 500, body: row('APROBADO') })
+    const worded = await certification(page('<p>Empresa autorizada para emitir boleta electronica</p>'))
+    const result = await verifyReceiptsAuthorization({ certification: odd.portal })
+    expect(result.certification).toEqual({ authorized: true, queryFailed: false, state: 'APROBADO' })
+    expect((await verifyReceiptsAuthorization({ certification: worded.portal })).certification).toEqual({
+      authorized: true,
+      queryFailed: false,
+      state: 'AUTORIZADA',
+    })
   })
 
   test('a form the portal does not serve is a failed query, never "not authorised"', async () => {

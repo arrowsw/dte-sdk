@@ -1,11 +1,11 @@
 import { RECEIPTS_PORTAL } from '../catalogs/certification'
+import { cgiUrl } from '../catalogs/portal'
 import { DteError, errorCode, errorMessage } from '../errors'
 import { splitSiiRut, toSiiRut, type SiiRut } from '../model/rut'
 import type { CallOverrides } from '../sii/client'
 import { bodyExcerpt } from '../sii/operation'
 import { encodeUtf8 } from '../sii/transport'
 import { chileDate } from '../time/chile'
-import { readProgress } from './certification'
 import { resolvePortalCompany, type PortalClient } from './client'
 import { declarationRepresentative, downloadRepresentative, type CookieRepresentative } from './cookies'
 import {
@@ -20,16 +20,22 @@ import {
   type GwtParameter,
 } from './gwt'
 import {
+  hasSelector,
+  inputFieldsOf,
   isDeclaredState,
   isEmptyList,
   isReadyState,
   isReceiptsSet,
+  offeredTypes,
   postulationOf,
   receiptsComplianceBody,
+  receiptsProgressRow,
   representativeDigitsOf,
+  stampingAction,
   stateNamedIn,
 } from './pages/receipts-certification'
 import {
+  companyFields,
   ensureSession,
   portalRequest,
   rejected,
@@ -37,7 +43,6 @@ import {
   withPortalSession,
   type PortalContext,
 } from './session'
-import { listStampableTypes } from './stamping'
 
 const RECEIPT_TYPE = 39
 const READY_STATE = 90
@@ -188,9 +193,9 @@ export type ReceiptsComplianceResult = {
  * ES: Entrada de `verifyReceiptsAuthorization`.
  */
 export type VerifyReceiptsAuthorizationInput = {
-  /** EN: A client on production, to read the stamping types. ES: Un cliente en producción, para leer los tipos timbrables. */
+  /** EN: A client on production, to read the stamping form. ES: Un cliente en producción, para leer el formulario de timbraje. */
   readonly production?: PortalClient
-  /** EN: A client on certification, to read the progress page. ES: Un cliente en certificación, para leer la página de avance. */
+  /** EN: A client on certification, to read the progress page. ES: Un cliente en certificación, para leer la página de avance (`pe_avance6`). */
   readonly certification?: PortalClient
   /** EN: Company RUT; each client's by default. ES: RUT de la empresa; por defecto el de cada cliente. */
   readonly companyRut?: string
@@ -435,41 +440,62 @@ const failed = (error: unknown): ReceiptsAuthorizationCheck => ({
   error: errorMessage(error),
 })
 
+// The types the stamping form offers: the entry page is read, its form posted with the company, and every option with
+// a quoted value read from the answer, which must have a selector to be the form.
+const stampingTypes = (portal: PortalClient, companyRut: string | undefined): Promise<readonly number[]> =>
+  withPortalSession(portal, 'verifyReceiptsAuthorization', undefined, async (context) => {
+    const company = companyFields(resolvePortalCompany(portal, companyRut))
+    await ensureSession(context)
+    const entryUrl = cgiUrl(portal.environment, 'of_solicita_folios')
+    const entry = await portalRequest(context, 'of_solicita_folios', 'GET', entryUrl)
+    const form = await portalRequest(
+      context,
+      'of_solicita_folios_dcto',
+      'POST',
+      stampingAction(entry.html, new URL(entryUrl).origin),
+      { form: { ...inputFieldsOf(entry.html), ...company } },
+    )
+    if (!hasSelector(form.html)) throw unexpectedPage(context, 'of_solicita_folios_dcto', form.html)
+    return offeredTypes(form.html)
+  })
+
+// The receipts row of the progress page, which is one GET: the status of the answer is not looked at.
+const progressRow = (portal: PortalClient): Promise<ReturnType<typeof receiptsProgressRow>> =>
+  withPortalSession(portal, 'verifyReceiptsAuthorization', undefined, async (context) => {
+    await ensureSession(context)
+    const page = await portalRequest(context, 'pe_avance6', 'GET', cgiUrl(portal.environment, 'pe_avance6'))
+    return receiptsProgressRow(page.html)
+  })
+
 /**
- * EN: Reads whether the company may issue receipts: in production, whether type 39 is among the types it can stamp
- * (the stamping operation of phase 4 on a production client); in certification, the receipts row of the progress page.
- * A query the portal does not answer is `queryFailed`, never "not authorised": a missing stamping form was once read
- * as a refusal. Neither side throws.
- * ES: Lee si la empresa puede emitir boletas: en producción, si el tipo 39 está entre los tipos que puede timbrar (la
- * operación de timbraje de la fase 4 sobre un cliente de producción); en certificación, la fila de boletas de la
- * página de avance. Una consulta que el portal no responde es `queryFailed`, nunca "no autorizada": un formulario de
- * timbraje ausente se leyó una vez como rechazo. Ningún lado lanza.
+ * EN: Reads whether the company may issue receipts, with the requests of the field. In production, a GET of the
+ * stamping entry page and a POST of its form with the company, and type 39 among the quoted option values of the answer
+ * (which must have a selector). In certification, one GET of the progress page: its receipts row says conform, approved
+ * or authorised, or a line of the page says the receipts are authorised. A query the portal does not answer is
+ * `queryFailed`, never "not authorised": a missing stamping form was once read as a refusal. Neither side throws.
+ * ES: Lee si la empresa puede emitir boletas, con las peticiones del campo. En producción, un GET de la página de
+ * entrada del timbraje y un POST de su formulario con la empresa, y el tipo 39 entre los valores de opción entre
+ * comillas de la respuesta (que debe tener un selector). En certificación, un GET de la página de avance: su fila de
+ * boletas dice conforme, aprobado o autorizado, o una línea de la página dice que las boletas están autorizadas. Una
+ * consulta que el portal no responde es `queryFailed`, nunca "no autorizada": un formulario de timbraje ausente se leyó
+ * una vez como rechazo. Ningún lado lanza.
  * @param input EN: the two clients and the company. ES: los dos clientes y la empresa.
  */
 export const verifyReceiptsAuthorization = async (
   input: VerifyReceiptsAuthorizationInput,
 ): Promise<ReceiptsAuthorization> => {
-  const company = input.companyRut === undefined ? {} : { companyRut: input.companyRut }
   const production =
     input.production === undefined
       ? null
-      : await listStampableTypes(input.production, company).then(
-          (types) => ({
-            authorized: types.some((entry) => entry.type === RECEIPT_TYPE),
-            queryFailed: false,
-            types: types.map((entry) => entry.type),
-          }),
+      : await stampingTypes(input.production, input.companyRut).then(
+          (types) => ({ authorized: types.includes(RECEIPT_TYPE), queryFailed: false, types }),
           (error: unknown) => ({ ...failed(error), types: [] }),
         )
   const certification =
     input.certification === undefined
       ? null
-      : await readProgress(input.certification, company).then(
-          (report) => ({
-            authorized: report.receipts?.authorized ?? false,
-            queryFailed: false,
-            state: report.receipts?.text ?? null,
-          }),
+      : await progressRow(input.certification).then(
+          (row) => ({ authorized: row.authorized, queryFailed: false, state: row.state }),
           (error: unknown) => ({ ...failed(error), state: null }),
         )
   return { production, certification }

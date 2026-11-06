@@ -5,6 +5,14 @@ const AUTHORIZATION_DATE = /^\d{2}\/\d{2}\/\d{4}$/
 const QUOTED_STATE = /"(P\d+)"/
 const EMPTY_LIST = /\/\/OK\[0,\[\]/
 const MIN_SET_LENGTH = 10
+const DEFAULT_STAMPING_ACTION = '/cvc_cgi/dte/of_solicita_folios_dcto'
+const STAMPING_PATH = '/cvc_cgi/dte/'
+const FORM_ACTION = /<form[^>]*action="([^"]+)"/i
+const INPUT_TAG = /<input[^>]+>/gi
+const OPTION_VALUE = /<option[^>]+value="(\d+)"[^>]*>/gi
+const RECEIPTS_ROW = /BOLETA[^<]*<\/[^>]+>\s*<[^>]+><b>([^<]+)<\/b>/i
+const PROGRESS_WORDS = /conform|aprobad|autoriz/i
+const AUTHORIZED_RECEIPTS_LINE = /autorizada.*boleta|boleta.*autorizada/i
 // A Long as GWT writes it in an answer: a single-quoted token of its base-64 alphabet.
 const LONG_TOKEN = /'([A-Za-z0-9$_]+)'/
 
@@ -159,4 +167,79 @@ export const receiptsComplianceBody = (values: ReceiptsComplianceValues): string
   const L = values.token
   const body = `1|2|3|4|1|5|5|6|0|7|8|90|0|0|0|0|9|0|10|0|7|9|11|12|13|14|14|14|15|16|17|18|8|${E}|8|${P}|8|${U}|19|14|14|0|20|2|21|0|0|9|12|22|0|0|0|0|0|0|8|${E}|8|${U}|23|${L}|-11|8|39|0|21|0|0|9|12|22|0|0|0|0|0|0|8|${E}|8|${U}|-11|-11|8|41|0|0|24|-11|0|8|${E}|0|0|`
   return `7|0|${table.length}|${table.map(escapeTableString).join('|')}|${body}`
+}
+
+/**
+ * EN: Where the stamping entry page posts: the `action` of the first form tag that has a double-quoted one, or the
+ * selector page when there is none, resolved against the host (an absolute URL as it is, a path from the host root, a
+ * name from the stamping directory).
+ * ES: A dónde envía la página de entrada del timbraje: el `action` de la primera etiqueta de formulario que tiene uno
+ * entre comillas dobles, o la página del selector cuando no hay ninguno, resuelto contra el host (una URL absoluta tal
+ * cual, una ruta desde la raíz del host, un nombre desde el directorio del timbraje).
+ * @param html EN: the entry page. ES: la página de entrada.
+ * @param origin EN: the scheme and host of the portal. ES: el esquema y el host del portal.
+ */
+export const stampingAction = (html: string, origin: string): string => {
+  const action = FORM_ACTION.exec(html)?.[1] ?? DEFAULT_STAMPING_ACTION
+  if (action.startsWith('http')) return action
+  return action.startsWith('/') ? `${origin}${action}` : `${origin}${STAMPING_PATH}${action}`
+}
+
+// The first of these attribute shapes that matches: double quotes, single quotes, or none after a separator. A name
+// needs at least one character between quotes and a value may be empty.
+const attributeOf = (tag: string, name: 'name' | 'value'): string | undefined => {
+  const count = name === 'name' ? '+' : '*'
+  return (
+    new RegExp(`${name}\\s*=\\s*"([^"]${count})"`, 'i').exec(tag)?.[1] ??
+    new RegExp(`${name}\\s*=\\s*'([^']${count})'`, 'i').exec(tag)?.[1] ??
+    new RegExp(`(?:^|[\\s<])${name}\\s*=\\s*([^\\s>"']+)`, 'i').exec(tag)?.[1]
+  )
+}
+
+/**
+ * EN: The named inputs of a page as a map, as the field reads them: the name and the value each with double quotes,
+ * single quotes or none; an input without a value is empty, one without a name is left out, and a repeated name keeps
+ * the last value.
+ * ES: Los inputs con nombre de una página como mapa, como los lee el campo: el nombre y el valor cada uno con comillas
+ * dobles, simples o sin ellas; un input sin valor queda vacío, uno sin nombre se omite, y un nombre repetido conserva el
+ * último valor.
+ */
+export const inputFieldsOf = (html: string): Readonly<Record<string, string>> =>
+  Object.fromEntries(
+    (html.match(INPUT_TAG) ?? []).flatMap((tag) => {
+      const name = attributeOf(tag, 'name')
+      return name === undefined ? [] : [[name, attributeOf(tag, 'value') ?? '']]
+    }),
+  )
+
+/**
+ * EN: The page has a selector, whatever it is called: a page without one is not the stamping form.
+ * ES: La página tiene un selector, se llame como se llame: una página sin él no es el formulario de timbraje.
+ */
+export const hasSelector = (html: string): boolean => /<select[^>]*>/i.test(html)
+
+/**
+ * EN: The document types the page offers: the positive integers of every option with a double-quoted value, in order,
+ * wherever they are in the page.
+ * ES: Los tipos de documento que ofrece la página: los enteros positivos de cada opción con valor entre comillas
+ * dobles, en orden, en cualquier parte de la página.
+ */
+export const offeredTypes = (html: string): readonly number[] =>
+  [...html.matchAll(OPTION_VALUE)].map((match) => Number.parseInt(match[1], 10)).filter((type) => type > 0)
+
+/**
+ * EN: The receipts row of the progress page, as the field reads it: the state is the bold text after the first cell
+ * that starts a `BOLETA` text, and it is authorised when it says conform, approved or authorised. When the row gives no
+ * state, a line of the page that says authorised and receipt, in either order, makes it `AUTORIZADA`.
+ * ES: La fila de boletas de la página de avance, como la lee el campo: el estado es el texto en negrita tras la primera
+ * celda que empieza un texto `BOLETA`, y está autorizada cuando dice conforme, aprobado o autorizado. Cuando la fila no
+ * da estado, una línea de la página que diga autorizada y boleta, en cualquier orden, lo vuelve `AUTORIZADA`.
+ * @param html EN: the progress page. ES: la página de avance.
+ */
+export const receiptsProgressRow = (html: string): { readonly authorized: boolean; readonly state: string | null } => {
+  const found = RECEIPTS_ROW.exec(html)?.[1].trim() ?? null
+  const authorized = found !== null && PROGRESS_WORDS.test(found)
+  return (found === null || found === '') && AUTHORIZED_RECEIPTS_LINE.test(html)
+    ? { authorized: true, state: 'AUTORIZADA' }
+    : { authorized, state: found }
 }
