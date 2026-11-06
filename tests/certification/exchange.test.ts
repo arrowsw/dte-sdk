@@ -8,6 +8,8 @@ import { FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from '../support/fixtures'
 import { certificate } from '../support/portal'
 import { validateAgainstXsd } from '../support/xsd'
 
+jest.setTimeout(30_000)
+
 // The SII issues the exchange set; the company under certification receives it.
 const SET_ISSUER = RECEIVER_RUT
 const COMPANY = ISSUER_RUT

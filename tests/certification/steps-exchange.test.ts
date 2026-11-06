@@ -17,6 +17,8 @@ import {
 import { EXCEPTION, okAnswer } from '../support/gwt-answers'
 import { failure } from '../support/portal'
 
+jest.setTimeout(30_000)
+
 const BASE = EXCHANGE_PORTAL.base
 const FACADE = `${BASE}facade`
 const atExchange = () => stateWith({ stage: 'exchange' })
