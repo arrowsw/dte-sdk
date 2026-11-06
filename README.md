@@ -512,9 +512,9 @@ and the runner makes it only with `declareCompliance: true`.
   connection or an unresolved host: eight attempts, 2 s growing by 1.8 up to 15 s. Only `STATUS` 0 with a `TRACKID`
   element is a sent file; `STATUS` 7 is a duplicate recovered by that element; `STATUS` 99 is a failed send.
 - **The operator gives less.** Without `receiver` the documents go to the test receiver (`DEFAULT_CERTIFICATION_RECEIVER`);
-  without `resolution` the envelope carries number 0 and today's UTC date, which is only right on the day the SII
-  resolved the application, so give `resolution.date` on any other day; the issuer's line of business, activity code,
-  commune and city fall back to `DEFAULT_CERTIFICATION_ISSUER`.
+  without `resolution` every envelope of the run carries number 0 and the UTC date of the day the run started, which
+  is only right on the day the SII resolved the application, so give `resolution.date` on any other day; the issuer's
+  line of business, activity code, commune and city fall back to `DEFAULT_CERTIFICATION_ISSUER`.
 - **The waits are the field's:** 5 polls of 10 s for the sets, 40 of 15 s for the books, 30 of 10 s for the
   simulation, 10 declaration attempts 5 s apart after 10 s. Inject `sleep` and `now` to test without waiting.
 - **Nothing here has been run against the portal yet.** Every page shape comes from field behaviour; the first

@@ -147,7 +147,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the reference does. The test set is asked for with the company in the last post (`RUT_EMP`, `DV_EMP`), a fixed
   referer and the progress pages read first when no session is cached; no page on the way is searched for a refusal.
   The documents of the test sets carry the UTC day and UTC stamps with milliseconds, unit prices with six decimals
-  (`LineItemInput.unitPriceDecimals` is new), zero totals without a VAT rate on the notes that correct a text, the unit
+  (`LineItemInput.unitPriceDecimals` is new; `SiiDetalle.PrcItem` is now `number | string`, a text when the price is
+  written with fixed decimals), zero totals without a VAT rate on the notes that correct a text, the unit
   `UN` on the exempt notes, and every case of the guide set is planned as a guide. `declareProgress` reads the form by
   its quoted attributes, posts even when no row has a field, verifies with one post and returns the new
   `DeclarationResult` (`success`, `verified`, `inReview`, `emptyFields`, `contentErrors`, `allRejected`); the outcomes
@@ -157,7 +158,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   page and `ItemState` gains `objections`; the wait for the sets counts a failed read as an attempt, takes a page that
   shows none of the sets sent as approval and goes on waiting on objections alone. The envelopes of the run are
   uploaded with eight attempts on network failures only and read again as the reference reads them (`STATUS` 99 is a
-  failed send; `SII_UPLOAD_REJECTED` carries `trackIdElement`). `DEFAULT_PORTAL_TIMEOUT_MS` is 20 s.
+  failed send; `SII_UPLOAD_REJECTED` carries `trackIdElement`). `DEFAULT_PORTAL_TIMEOUT_MS` is 20 s, for every portal
+  operation that sets no `timeoutMs` of its own, not only the certification ones.
   `CertificationDependencies.receiver` and `.resolution` are optional and the issuer may leave out its activity, its
   activity code, its commune and its city (`DEFAULT_CERTIFICATION_RECEIVER`, `DEFAULT_CERTIFICATION_ISSUER`,
   `CertificationIssuerInput`). `StampOptions.stampedAt`, the `signedAt` option of `signDocument` and
