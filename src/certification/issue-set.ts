@@ -9,6 +9,7 @@ import { signEnvelope, type SignedEnvelope } from '../envelope/sign'
 import { DteError } from '../errors'
 import type { DocumentInput, IssuerInput, LineItemInput, ReceiverInput, ReferenceInput } from '../model/document'
 import { chileDate } from '../time/chile'
+import { calculateLineAmount } from '../totals/calculate'
 import type { FolioSource } from './folios'
 import type {
   BasicSetPlan,
@@ -79,6 +80,8 @@ const GLOBAL_DISCOUNT_DESCRIPTION = 'DESCUENTO GLOBAL ITEMES AFECTOS'
 const NO_AMOUNT_LINE: PlannedItem = { name: 'SIN MONTO', quantity: 1, unitPrice: 0 }
 const CORRECTION = 'CORRECCION'
 const PURCHASE_TAX_CODE = 15
+// The test sets write the price of a priced line with six decimals; guides and the simulation write the plain number.
+const SET_PRICE_DECIMALS = 6
 const INTERNAL_TRANSFER = 5
 
 /**
@@ -133,14 +136,16 @@ export const issuerAsReceiver = (issuer: IssuerInput): ReceiverInput => ({
   city: issuer.city ?? issuer.commune,
 })
 
-const line = (item: PlannedItem, style: LineStyle): LineItemInput => {
+const line = (item: PlannedItem, style: LineStyle, priceDecimals: number | undefined): LineItemInput => {
   const priced = item.unitPrice > 0
+  const unitPriceDecimals = priced ? priceDecimals : undefined
   if (style === 'purchase')
     return compact({
       name: item.name,
       quantity: item.quantity,
       unit: item.unit ?? 'UN',
       unitPrice: item.unitPrice,
+      unitPriceDecimals,
       exempt: item.exempt,
       additionalTaxCodes: item.exempt ? undefined : [PURCHASE_TAX_CODE],
     })
@@ -157,6 +162,7 @@ const line = (item: PlannedItem, style: LineStyle): LineItemInput => {
     quantity: priced ? item.quantity : undefined,
     unit: priced ? item.unit : undefined,
     unitPrice: priced ? item.unitPrice : undefined,
+    unitPriceDecimals,
     discountPercent: priced ? item.discountPercent : undefined,
     exempt: item.exempt,
   })
@@ -195,6 +201,15 @@ export const sameName = (a: string, b: string): boolean => a.toUpperCase().trim(
 export const exemptAll = (items: readonly PlannedItem[]): readonly PlannedItem[] =>
   items.map((item) => ({ ...item, exempt: true }))
 
+// The items of an exempt note taken as the case gives them: every one exempt, with the unit `UN` when it has none.
+const exemptWithUnit = (items: readonly PlannedItem[]): readonly PlannedItem[] =>
+  items.map((item) => ({ ...item, unit: item.unit ?? 'UN', exempt: true }))
+
+// The totals of a document of the basic or the purchase set whose lines add up to nothing: the total alone, without a
+// VAT rate. The exempt set and the guides keep the rate next to a zero total.
+const zeroTotals = (items: readonly PlannedItem[]): DocumentInput['totals'] =>
+  items.every((item) => calculateLineAmount(item).amount === 0) ? { totalAmount: 0 } : undefined
+
 const basicCreditItems = (context: IssueContext, note: PlannedNote): readonly PlannedItem[] => {
   const referenced = referencedRecord(context, note)
   const base = note.itemsFromCase === null ? note.items : referenced.items
@@ -217,7 +232,7 @@ const basicDebitItems = (note: PlannedNote): readonly PlannedItem[] =>
 const newPriceItems = (note: PlannedNote, referenced: IssuedRecord): readonly PlannedItem[] =>
   note.items.map((item) => {
     const original = referenced.items.find((candidate) => sameName(candidate.name, item.name))
-    return original === undefined
+    return original === undefined || !original.quantity
       ? { ...item, exempt: true }
       : {
           name: item.name,
@@ -244,7 +259,7 @@ const exemptCreditItems = (context: IssueContext, note: PlannedNote): readonly P
       return exemptAll(referenced.items)
     if (upper.includes('MODIFICA MONTO') && note.items.length > 0 && referenced.items.length > 0)
       return newPriceItems(note, referenced)
-    return note.items.length > 0 ? exemptAll(note.items) : exemptAll(referenced.items)
+    return note.items.length > 0 ? exemptWithUnit(note.items) : exemptAll(referenced.items)
   }
   return exemptAll(referenced.items)
 }
@@ -254,7 +269,7 @@ const exemptDebitItems = (context: IssueContext, note: PlannedNote): readonly Pl
   if (note.items.length === 0) return exemptAll(referenced.items)
   if (note.referenceCode === 3 && note.reasonText.toUpperCase().includes('MODIFICA MONTO'))
     return newPriceItems(note, referenced)
-  return exemptAll(note.items)
+  return exemptWithUnit(note.items)
 }
 
 const purchaseNoteItems = (note: PlannedNote, referenced: IssuedRecord): readonly PlannedItem[] =>
@@ -262,7 +277,7 @@ const purchaseNoteItems = (note: PlannedNote, referenced: IssuedRecord): readonl
     const original = referenced.items.find((candidate) => candidate.name === item.name)
     return compact({
       name: item.name,
-      quantity: item.quantity,
+      quantity: item.quantity || 1,
       unitPrice: item.unitPrice || original?.unitPrice || 0,
       unit: item.unit ?? original?.unit,
     })
@@ -301,6 +316,8 @@ export type IssueDocumentSpec = {
   readonly options?: DocumentInput['options']
   /** EN: Totals given instead of computed. ES: `Totales` — Totales dados en vez de calculados. */
   readonly totals?: DocumentInput['totals']
+  /** EN: Decimals `PrcItem` is written with on a priced line; the plain number when omitted. ES: `PrcItem` — Decimales con que se escribe el precio de una línea con precio; el número tal cual si se omite. */
+  readonly priceDecimals?: number
   /** EN: Withhold the VAT (`ImptoReten`). ES: `ImptoReten` — Retener el IVA. */
   readonly withholdVat?: boolean
   /** EN: Keep a record of the document for the notes that reference it. ES: Guardar un registro del documento para las notas que lo refieren. */
@@ -322,7 +339,7 @@ export const issueCertificationDocument = async (
     issueDate: context.date,
     issuer: context.options.issuer,
     receiver: input.receiver ?? context.options.receiver,
-    items: input.items.map((item) => line(item, input.style)),
+    items: input.items.map((item) => line(item, input.style, input.priceDecimals)),
     references: input.references,
     globalAdjustments:
       input.globalDiscountPercent === undefined
@@ -358,6 +375,7 @@ const issueInvoicesAndNotes = async (
   const creditNotes = kind === 'purchase' ? (plan.creditNote === null ? [] : [plan.creditNote]) : plan.creditNotes
   const debitNotes = kind === 'purchase' ? (plan.debitNote === null ? [] : [plan.debitNote]) : plan.debitNotes
   const invoiceType: DocumentType = kind === 'basic' ? 33 : kind === 'exempt' ? 34 : 46
+  const bareZero = kind !== 'exempt'
   if (invoices.length === 0) throw new DteError('MISSING_FIELD', { field: 'invoices', kind })
 
   for (const invoice of invoices) {
@@ -370,6 +388,8 @@ const issueInvoicesAndNotes = async (
       references: [setReference(invoice.caseId, context.date)],
       globalDiscountPercent: invoice.globalDiscountPercent,
       options: kind === 'basic' ? { saleTransactionType: 1 } : undefined,
+      totals: bareZero ? zeroTotals(invoice.items) : undefined,
+      priceDecimals: SET_PRICE_DECIMALS,
       record: true,
     })
   }
@@ -384,6 +404,8 @@ const issueInvoicesAndNotes = async (
       receiver,
       references: [setReference(note.caseId, context.date), documentReference(referencedRecord(context, note), note)],
       withholdVat: kind === 'purchase' ? true : undefined,
+      totals: bareZero ? zeroTotals(items) : undefined,
+      priceDecimals: SET_PRICE_DECIMALS,
       record: true,
     })
   }
@@ -402,6 +424,8 @@ const issueInvoicesAndNotes = async (
       receiver,
       references: [setReference(note.caseId, context.date), documentReference(referencedRecord(context, note), note)],
       withholdVat: kind === 'purchase' ? true : undefined,
+      totals: bareZero ? zeroTotals(items) : undefined,
+      priceDecimals: SET_PRICE_DECIMALS,
       record: false,
     })
   }

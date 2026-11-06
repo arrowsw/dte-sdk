@@ -221,20 +221,41 @@ test('invoice and exempt rows without a price get price 0', () => {
   expect(plan.creditNotes[0].items).toEqual([{ name: 'Cajon', quantity: 2, unitPrice: 0, exempt: true }])
 })
 
-test('a purchase debit note keeps its own items, and copies nothing when there is no credit note', () => {
+test('a purchase debit note takes the items of the credit note before it, never its own', () => {
   const own = purchaseSetText().replace(
     'RAZON REFERENCIA                 ANULA NOTA DE CREDITO',
     'RAZON REFERENCIA                 MODIFICA MONTO\nChatarra de fierro  1500',
   )
-  expect(planCertificationSets(parseTestSetText(own)).purchase!.debitNote!.items).toEqual([
-    { name: 'Chatarra de fierro', quantity: 1, unitPrice: 1500 },
-  ])
+  const credit = planCertificationSets(parseTestSetText(own)).purchase!.creditNote!.items
+  expect(credit).toHaveLength(1)
+  expect(planCertificationSets(parseTestSetText(own)).purchase!.debitNote!.items).toEqual(credit)
   const noCredit = purchaseSetText().replace('NOTA DE CREDITO ELECTRONICA', 'GUIA DE DESPACHO')
   expect(planCertificationSets(parseTestSetText(noCredit)).purchase).toMatchObject({
     creditNote: null,
     debitNote: { items: [] },
     folios: { 46: 1, 61: 0, 56: 1 },
   })
+  // A debit note the text gives before the credit note finds none to take from.
+  const purchase = parseTestSetText(purchaseSetText()).find((set) => set.kind === 'purchase')!
+  const debitFirst = {
+    ...purchase,
+    cases: [...purchase.cases].sort((a, b) => Number(b.documentType === 56) - Number(a.documentType === 56)),
+  }
+  expect(planCertificationSets([debitFirst]).purchase).toMatchObject({
+    creditNote: { items: credit },
+    debitNote: { items: [] },
+  })
+})
+
+test('every case of the guide set is planned as a guide, whatever its text was read as', () => {
+  const guide = parseTestSetText(FULL_SET_TEXT).find((set) => set.kind === 'guide')!
+  const odd = {
+    ...guide,
+    cases: guide.cases.map((item, index) => (index === 0 ? { ...item, documentType: null } : item)),
+  }
+  const planned = planCertificationSets([odd]).guide!
+  expect(planned.guides).toHaveLength(guide.cases.length)
+  expect(planned.folios).toEqual({ 52: guide.cases.length })
 })
 
 test('a later purchase set without an invoice keeps the earlier plan', () => {

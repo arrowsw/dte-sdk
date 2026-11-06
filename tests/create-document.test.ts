@@ -1,4 +1,5 @@
 import { createDocument, FIELD_LIMITS } from '../src/document/create'
+import { fromSiiDocument, toSiiDocument } from '../src/model/codec'
 import { DteError } from '../src/errors'
 import type { DocumentInput } from '../src/model/document'
 import { FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from './support/fixtures'
@@ -328,4 +329,36 @@ test('withholdVat withholds the whole VAT on a note that affects a purchase invo
     totalAmount: 11900,
   })
   expect(createDocument({ ...base, type: 46, withholdVat: false }).header.totals.totalAmount).toBe(11900)
+})
+
+describe('the decimals of a line price', () => {
+  const priced = (unitPriceDecimals: number | undefined, price: { unitPrice?: number } = { unitPrice: 1200 }) =>
+    createDocument({
+      type: 33,
+      folio: 7,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver,
+      items: [{ name: 'Plan anual', quantity: 2, ...price, unitPriceDecimals }],
+    })
+
+  test('the price is written with the decimals asked for, and plain without them', () => {
+    expect(toSiiDocument(priced(6)).Detalle[0].PrcItem).toBe('1200.000000')
+    expect(toSiiDocument(priced(0)).Detalle[0].PrcItem).toBe('1200')
+    expect(toSiiDocument(priced(undefined)).Detalle[0].PrcItem).toBe(1200)
+    expect(priced(6).items[0]).toMatchObject({ unitPrice: 1200, unitPriceDecimals: 6, amount: 2400 })
+  })
+
+  test('a line without a price keeps no decimals, and a text price reads back as a number', () => {
+    const bare = priced(6, {})
+    expect(bare.items[0].unitPriceDecimals).toBeUndefined()
+    expect(toSiiDocument(bare).Detalle[0].PrcItem).toBeUndefined()
+    const sii = toSiiDocument(priced(6))
+    expect(fromSiiDocument(sii).items[0].unitPrice).toBe(1200)
+    expect(fromSiiDocument(toSiiDocument(bare)).items[0].unitPrice).toBeUndefined()
+  })
+
+  test.each([-1, 7, 1.5, Number.NaN])('%p decimals are refused', (decimals) => {
+    expectError(() => priced(decimals), 'INVALID_OPTION', { field: 'items[0].unitPriceDecimals' })
+  })
 })

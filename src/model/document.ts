@@ -109,6 +109,8 @@ export type LineItemInput = {
   readonly unit?: string
   /** EN: Unit price, net or VAT-included according to `pricesIncludeVat`. ES: `PrcItem` — Precio unitario, neto o con IVA según `pricesIncludeVat`. */
   readonly unitPrice?: number
+  /** EN: Decimals `PrcItem` is written with (0 to 6); the plain number when omitted. ES: `PrcItem` — Decimales con que se escribe el precio (0 a 6); el número tal cual si se omite. */
+  readonly unitPriceDecimals?: number
   /** EN: Shorthand for `exemptIndicator: 1`. ES: Atajo para `exemptIndicator: 1` (`IndExe=1`). */
   readonly exempt?: boolean
   /** EN: Explicit exemption indicator. ES: `IndExe` — Indicador de exención explícito (1 a 6). */
@@ -162,6 +164,8 @@ export type LineItem = {
   readonly unit?: string
   /** EN: Unit price as declared. ES: `PrcItem` — Precio unitario tal como se declara. */
   readonly unitPrice?: number
+  /** EN: Decimals `PrcItem` is written with; the plain number when absent. ES: `PrcItem` — Decimales con que se escribe el precio; el número tal cual si falta. */
+  readonly unitPriceDecimals?: number
   /** EN: Discount percent. ES: `DescuentoPct` — Porcentaje de descuento. */
   readonly discountPercent?: number
   /** EN: Discount amount. ES: `DescuentoMonto` — Monto del descuento. */

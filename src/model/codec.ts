@@ -186,7 +186,10 @@ const toSiiDetalle = (item: LineItem): SiiDetalle =>
     PrcRef: item.referencePrice,
     QtyItem: item.quantity,
     UnmdItem: item.unit,
-    PrcItem: item.unitPrice,
+    PrcItem:
+      item.unitPrice === undefined || item.unitPriceDecimals === undefined
+        ? item.unitPrice
+        : item.unitPrice.toFixed(item.unitPriceDecimals),
     DescuentoPct: item.discountPercent,
     DescuentoMonto: item.discountAmount,
     RecargoPct: item.surchargePercent,
@@ -398,7 +401,7 @@ const fromSiiDetalle = (detalle: SiiDetalle): LineItem =>
     referencePrice: detalle.PrcRef,
     quantity: detalle.QtyItem,
     unit: detalle.UnmdItem,
-    unitPrice: detalle.PrcItem,
+    unitPrice: detalle.PrcItem === undefined ? undefined : Number(detalle.PrcItem),
     discountPercent: detalle.DescuentoPct,
     discountAmount: detalle.DescuentoMonto,
     surchargePercent: detalle.RecargoPct,
