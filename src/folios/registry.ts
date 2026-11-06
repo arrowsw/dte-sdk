@@ -11,6 +11,7 @@ import {
   type FolioLedger,
   type FolioScope,
   type FolioStats,
+  type ReserveOptions,
 } from './ledger'
 
 /**
@@ -20,8 +21,8 @@ import {
  * funciones con sus propias transacciones; el resto arma una con `createFolioRegistry`.
  */
 export type FolioRegistry = {
-  /** EN: Reserves the next free folio. ES: Reserva el siguiente folio libre. */
-  readonly reserve: (scope: FolioScope) => Promise<number>
+  /** EN: Reserves the next free folio: after the last one reserved, or from the lowest reserved and not sent; never one that is used or annulled. With `lowestFree` it is the lowest free folio of the whole range, which the certification run asks for: an implementation of its own must honour the option to be used in a run. ES: Reserva el siguiente folio libre: después del último reservado, o desde el menor reservado y no enviado; nunca uno usado o anulado. Con `lowestFree` es el menor folio libre de todo el rango, que es lo que pide la corrida de certificación: una implementación propia debe respetar la opción para usarse en una corrida. */
+  readonly reserve: (scope: FolioScope, options?: ReserveOptions) => Promise<number>
   /** EN: Records a folio as sent. ES: Registra un folio como enviado. */
   readonly markSent: (
     scope: FolioScope,
@@ -88,9 +89,9 @@ export const createFolioRegistry = (store: FolioLedgerStore, now: () => Date = (
     })
   const read = async (): Promise<FolioLedger> => (await store.load()) ?? emptyLedger()
   return {
-    reserve: (scope) =>
+    reserve: (scope, options) =>
       update((ledger, at) => {
-        const reserved = reserveInLedger(ledger, scope, at)
+        const reserved = reserveInLedger(ledger, scope, at, options)
         return { ledger: reserved.ledger, value: reserved.folio }
       }),
     markSent: (scope, folio, sent = {}) =>

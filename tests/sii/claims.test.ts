@@ -52,7 +52,7 @@ describe('wire format', () => {
     expect(request.method).toBe('POST')
     expect(request.url).toBe(CLAIMS)
     expect(request.headers['content-type']).toBe('text/xml; charset=utf-8')
-    expect(request.headers.soapaction).toBe('""')
+    expect(request.headers.soapaction).toBe('')
     expect(request.headers.cookie).toBe(`TOKEN=${SOAP_TOKEN}`)
     expect(request.text).toBe(
       '<?xml version="1.0" encoding="UTF-8"?>' +

@@ -18,11 +18,18 @@ const scope: FolioScope = {
   environment: 'certification',
 }
 
-const reserveMany = (ledger: FolioLedger, count: number, target = scope): { ledger: FolioLedger; folios: number[] } => {
+const LOWEST = { lowestFree: true }
+
+const reserveMany = (
+  ledger: FolioLedger,
+  count: number,
+  target = scope,
+  options?: { readonly lowestFree?: boolean },
+): { ledger: FolioLedger; folios: number[] } => {
   const folios: number[] = []
   const box = { ledger }
   for (let index = 0; index < count; index += 1) {
-    const reserved = reserveInLedger(box.ledger, target, AT)
+    const reserved = reserveInLedger(box.ledger, target, AT, options)
     box.ledger = reserved.ledger
     folios.push(reserved.folio)
   }
@@ -65,6 +72,72 @@ test('after everything was sent a gap below stays a gap', () => {
   const sent = markSentInLedger(markSentInLedger(ledger, big, 1, {}, AT), big, 3, {}, AT)
   const released = releaseInLedger(sent, big, [2], AT)
   expect(reserveInLedger(released, big, AT).folio).toBe(4)
+})
+
+test('a folio marked sent moves the pointer: the free folios below it are not handed out', () => {
+  const big = { ...scope, range: { from: 1, to: 9 } }
+  const marked = markSentInLedger(emptyLedger(), big, 5, {}, AT)
+  expect(reserveMany(marked, 2, big).folios).toEqual([6, 7])
+})
+
+describe('with `lowestFree` the lowest folio that is neither used nor annulled goes out, wherever the used ones lie', () => {
+  test('a folio given back is handed out again before any higher one', () => {
+    const { ledger } = reserveMany(emptyLedger(), 3)
+    const released = releaseInLedger(ledger, scope, [2], AT)
+    expect(reserveInLedger(released, scope, AT, LOWEST).folio).toBe(2)
+  })
+
+  test('after everything was sent a gap below is still the next folio', () => {
+    const big = { ...scope, range: { from: 1, to: 9 } }
+    const { ledger } = reserveMany(emptyLedger(), 3, big)
+    const sent = markSentInLedger(markSentInLedger(ledger, big, 1, {}, AT), big, 3, {}, AT)
+    const released = releaseInLedger(sent, big, [2], AT)
+    expect(reserveInLedger(released, big, AT, LOWEST).folio).toBe(2)
+  })
+
+  test('a folio marked sent leaves the free folios below it available, and the count is true', () => {
+    const big = { ...scope, range: { from: 1, to: 9 } }
+    const marked = markSentInLedger(emptyLedger(), big, 5, {}, AT)
+    const { ledger, folios } = reserveMany(marked, 5, big, LOWEST)
+    expect(folios).toEqual([1, 2, 3, 4, 6])
+    expect(remainingInLedger(ledger, big)).toBe(3)
+  })
+
+  test('annulled and used folios are skipped wherever they lie, and an exhausted range throws', () => {
+    const small = { ...scope, range: { from: 1, to: 4 } }
+    const annulled = markAnnulledInLedger(markSentInLedger(emptyLedger(), small, 3, {}, AT), small, [1], AT)
+    const { ledger, folios } = reserveMany(annulled, 2, small, LOWEST)
+    expect(folios).toEqual([2, 4])
+    expect(() => reserveInLedger(ledger, small, AT, LOWEST)).toThrow(
+      expect.objectContaining({ code: 'FOLIO_OUT_OF_RANGE' }),
+    )
+  })
+})
+
+test.each([
+  ['by the pointer', undefined, [5, 6, 7, 10, 11, 12]],
+  ['with `lowestFree`', LOWEST, [1, 5, 6, 7, 10, 11, 12]],
+])('a folio that is used or annulled is never handed out, %s', (_name, options, expected) => {
+  const wide = { ...scope, range: { from: 1, to: 12 } }
+  // 2 and 3 reserved, 2 sent; 1 given back; 8 marked sent without a reservation; 4 and 9 annulled.
+  const reserved = reserveMany(emptyLedger(), 3, wide).ledger
+  const sent = markSentInLedger(markSentInLedger(reserved, wide, 2, {}, AT), wide, 8, {}, AT)
+  const start = markAnnulledInLedger(releaseInLedger(sent, wide, [1], AT), wide, [4, 9], AT)
+  const taken = new Set([2, 3, 8, 4, 9])
+  const folios: number[] = []
+  const box = { ledger: start }
+  for (;;) {
+    try {
+      const next = reserveInLedger(box.ledger, wide, AT, options)
+      box.ledger = next.ledger
+      folios.push(next.folio)
+    } catch {
+      break
+    }
+  }
+  expect(folios.filter((folio) => taken.has(folio))).toEqual([])
+  expect(new Set(folios).size).toBe(folios.length)
+  expect(folios).toEqual(expected)
 })
 
 test('annulled folios of any entry of the company, type and environment are skipped', () => {

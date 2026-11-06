@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redaction (`createMemoryCapture`, `createDirectoryCapture`) and upload archive
   (`createMemoryUploadArchive`, `createDirectoryUploadArchive`; a duplicate answer is kept
   as `<trackId>-<kind>-duplicate-<timestamp>` and archived replies and SOAP fault reasons have
-  tokens redacted). SOAP calls send `SOAPAction: ""`. The Node adapters load
+  tokens redacted). SOAP calls send an empty `SOAPAction`. The Node adapters load
   `node:` modules lazily, so importing the package evaluates no `node:` module.
 - Catalogs: `DTEUpload` reception statuses, claim actions/events/response codes,
   `FAN` document status, the `RCO` envelope status (rejected), REST per-document status
@@ -196,6 +196,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first post of the declaration of compliance names `pe_avance7` as its referer and its pages are read with the
   reference's own patterns; and a progress page that cannot be read before the simulation is declared no longer ends
   the run.
+
+- **The certification run keeps to the reference: folios and web services.** Most of this reaches every caller,
+  not only the run. SOAP calls send an empty `SOAPAction` and escape their parameters with `&`, `<` and `>` only
+  (`escapeXmlMarkup` is internal); the REST status queries send the upload `User-Agent`; `folioReceived` asks as the
+  company and reads the answer from the code and the state gloss alone (`FAU` or "no recibido" is free, any other
+  "recibido" is used, the rest is undetermined), and `queryDocumentStatus` takes `consultantRut`. An authorised range
+  is recovered with the UTC date, and "company not authorised" is only the wording `empresa no está autorizada para
+  operar`. The reobtention sends referers without a host, picks its forms by their exact opening tag, reads only
+  inputs with a quoted name and value, does no session handling on the way in and looks for no refusal: an expired
+  session or a refusal page is an empty list, and in `reobtainFolios` a listing that fails for any reason is no ranges
+  (`ReobtainResult` loses `rejection`). `annulFolios` applies `maxRanges` to each pass, not to the call (up to four
+  passes: up to 200 ranges by default, 80 in `requestCafExact`), and tries each step up to three times whatever the
+  error. `FolioRegistry.reserve` takes `{ lowestFree: true }` (`ReserveOptions`): the lowest folio of the range that
+  is neither used nor annulled, instead of the next one after the last reserved, which stays the default. In the run,
+  folios are taken with that option, because the run marks used the folios the SII did not show free;
+  `prepareFolios` asks the SII for the folios it is about to use (30 queries per CAF at the most) and marks the
+  received ones used, reads a maximum it cannot read as no cap, obtains again with the whole need (the ranges kept
+  take the place of the CAFs in hand; ranges only listed cover nothing), never asks for a blocked type, asks in as
+  many batches as folios are missing, reads the maximum again after annulling, never annuls a range it downloaded,
+  keeps a range obtained again only through the folios the SII showed free, saves every CAF as it is obtained, and
+  remembers the annulled ranges in the new `CertificationState.annulledRanges`. `dte-sdk/portal` limit to 72 kB.
 
 ### Fixed
 

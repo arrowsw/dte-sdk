@@ -1,5 +1,6 @@
 import { DteError } from '../../src/errors'
 import type { SleepFn } from '../../src/sii/client'
+import { UPLOAD_USER_AGENT } from '../../src/catalogs/endpoints'
 import { folioReceived, queryDocumentStatus, queryUploadStatus, waitForUploadStatus } from '../../src/sii/status'
 import type { FakeReply, FakeRoute } from '../support/fake-sii'
 import {
@@ -251,6 +252,7 @@ describe('queryUploadStatus (REST)', () => {
     expect(fake.requests[0]).toMatchObject({ method: 'GET', url: REST_STATUS })
     expect(fake.requests[0].headers.cookie).toBe(`TOKEN=${REST_TOKEN}`)
     expect(fake.requests[0].headers.accept).toBe('application/json')
+    expect(fake.requests[0].headers['user-agent']).toBe(UPLOAD_USER_AGENT)
     expect(status).toEqual({
       code: 'RCH',
       status: 'rejected',
@@ -791,6 +793,17 @@ describe('queryDocumentStatus', () => {
     ])
   })
 
+  test('an explicit consultant replaces the sender', async () => {
+    const { sii, fake } = cachedSii(route(EST_DTE, fx('soap-estdte-dok.xml')))
+    await queryDocumentStatus(sii, { ...document, consultantRut: '12345678-5' })
+    expect(params(fake.requests[0].text).slice(0, 4)).toEqual([
+      ['RutConsultante', '12345678'],
+      ['DvConsultante', '5'],
+      ['RutCompania', '10000004'],
+      ['DvCompania', '0'],
+    ])
+  })
+
   test.each([
     [0.4, '0'],
     [1499.5, '1500'],
@@ -938,6 +951,7 @@ describe('queryDocumentStatus', () => {
     expect(fake.requests[0]).toMatchObject({ method: 'GET', url: REST_DOC })
     expect(fake.requests[0].headers.cookie).toBe(`TOKEN=${REST_TOKEN}`)
     expect(fake.requests[0].headers.accept).toBe('application/json')
+    expect(fake.requests[0].headers['user-agent']).toBe(UPLOAD_USER_AGENT)
     expect(status).toEqual({
       code: 'DOK',
       status: 'received',
@@ -1037,13 +1051,13 @@ describe('folioReceived', () => {
       .replace(/&lt;GLOSA_ESTADO&gt;[^&]*&lt;\/GLOSA_ESTADO&gt;/, `&lt;GLOSA_ESTADO&gt;${gloss}&lt;/GLOSA_ESTADO&gt;`),
   })
 
-  test('asks QueryEstDte as the sender with the generic receiver, today and amount 1', async () => {
+  test('asks QueryEstDte as the company with the generic receiver, today and amount 1', async () => {
     const { sii, fake } = cachedSii(route(EST_DTE, fx('soap-estdte-dok.xml')))
     expect(await folioReceived(sii, { type: 33, folio: 45 })).toBe(true)
     expect(fake.requests).toHaveLength(1)
     expect(params(fake.requests[0].text)).toEqual([
-      ['RutConsultante', '76543210'],
-      ['DvConsultante', '3'],
+      ['RutConsultante', '10000004'],
+      ['DvConsultante', '0'],
       ['RutCompania', '10000004'],
       ['DvCompania', '0'],
       ['RutReceptor', '66666666'],
@@ -1053,6 +1067,17 @@ describe('folioReceived', () => {
       ['FechaEmisionDte', '15112026'],
       ['MontoDte', '1'],
       ['Token', SOAP_TOKEN],
+    ])
+  })
+
+  test('asks as the company, not as the sender, when they differ', async () => {
+    const { sii, fake } = cachedSii(route(EST_DTE, fx('soap-estdte-dok.xml')), { senderRut: '12345678-5' })
+    await folioReceived(sii, { type: 33, folio: 45 })
+    expect(params(fake.requests[0].text).slice(0, 4)).toEqual([
+      ['RutConsultante', '10000004'],
+      ['DvConsultante', '0'],
+      ['RutCompania', '10000004'],
+      ['DvCompania', '0'],
     ])
   })
 
@@ -1088,16 +1113,21 @@ describe('folioReceived', () => {
     SLOW,
   )
 
+  // The reading of the reference: `FAU`, or a gloss with "no recibido", is free; any other gloss with "recibido" is
+  // used; everything else is undetermined. Only `GLOSA_ESTADO` is read, as plain substrings.
   test.each([
     ['FAU', 'DTE No Recibido por el SII.', false],
     ['FAU', 'Documento recibido', false],
     ['DOK', 'Documento Recibido por el SII.', true],
-    ['DOK', 'Sin glosa de recepción', true],
-    ['DNK', 'Datos no coinciden', true],
+    ['DNK', 'Documento Recibido por SII pero Datos NO Coinciden con los registrados', true],
     ['XYZ', 'Documento recibido con observaciones', true],
     ['XYZ', 'RECIBIDO', true],
-    ['XYZ', 'Documento no recibido', null],
-    ['XYZ', 'DTE NO  RECIBIDO por el SII', null],
+    ['XYZ', 'Documentos recibidos', true],
+    ['XYZ', 'Documento no recibido', false],
+    ['DOK', 'DTE No Recibido', false],
+    ['XYZ', 'DTE NO  RECIBIDO por el SII', true],
+    ['DOK', 'Sin glosa de recepción', null],
+    ['DNK', 'Datos no coinciden', null],
     ['XYZ', 'Folio sin información', null],
     ['EMP', 'Empresa no autorizada', null],
     ['FAN', 'Folio anulado', null],
@@ -1107,9 +1137,25 @@ describe('folioReceived', () => {
     expect(await folioReceived(sii, { type: 33, folio: 45 })).toBe(expected)
   })
 
-  test('with no gloss at all the catalog message decides', async () => {
-    const { sii } = cachedSii(route(EST_DTE, withEstado('XYZ', '')))
-    expect(await folioReceived(sii, { type: 33, folio: 45 })).toBeNull()
+  test('with no gloss the answer is undetermined, whatever the code but FAU: the catalog message is not read', async () => {
+    const empty = cachedSii(route(EST_DTE, withEstado('XYZ', '')))
+    expect(await folioReceived(empty.sii, { type: 33, folio: 45 })).toBeNull()
+    const received = cachedSii(route(EST_DTE, withEstado('DOK', '')))
+    expect(await folioReceived(received.sii, { type: 33, folio: 45 })).toBeNull()
+    const free = cachedSii(route(EST_DTE, withEstado('FAU', '')))
+    expect(await folioReceived(free.sii, { type: 33, folio: 45 })).toBe(false)
+  })
+
+  test('an answer with no state gloss at all is undetermined, or free with FAU', async () => {
+    const without = (code: string): FakeReply => ({
+      body: siiFixture('soap-estdte-dok.xml')
+        .replace('&lt;ESTADO&gt;DOK&lt;/ESTADO&gt;', `&lt;ESTADO&gt;${code}&lt;/ESTADO&gt;`)
+        .replace(/&lt;GLOSA_ESTADO&gt;[^&]*&lt;\/GLOSA_ESTADO&gt;/, ''),
+    })
+    const received = cachedSii(route(EST_DTE, without('DOK')))
+    expect(await folioReceived(received.sii, { type: 33, folio: 45 })).toBeNull()
+    const free = cachedSii(route(EST_DTE, without('FAU')))
+    expect(await folioReceived(free.sii, { type: 33, folio: 45 })).toBe(false)
   })
 
   test('a failed query is an error, not an undetermined answer', async () => {

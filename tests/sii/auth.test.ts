@@ -136,7 +136,7 @@ describe('getSeed', () => {
     expect(fake.requests[0].method).toBe('POST')
     expect(fake.requests[0].url).toBe(SOAP_SEED)
     expect(fake.requests[0].headers['content-type']).toBe('text/xml; charset=utf-8')
-    expect(fake.requests[0].headers.soapaction).toBe('""')
+    expect(fake.requests[0].headers.soapaction).toBe('')
     expect(fake.requests[0].text).toBe(buildSoapEnvelope({ method: 'getSeed' }))
   })
 
@@ -245,7 +245,7 @@ describe('getToken', () => {
       expect(fake.requests.map((r) => r.url)).toEqual([SOAP_SEED, SOAP_TOKEN_URL])
       const envelope = fake.requests[1].text
       expect(envelope).toContain(
-        '<getToken><pszXml>&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;\n&lt;getToken&gt;&lt;item&gt;&lt;Semilla&gt;000000000078&lt;/Semilla&gt;&lt;/item&gt;&lt;Signature',
+        '<getToken><pszXml>&lt;?xml version="1.0" encoding="UTF-8"?&gt;\n&lt;getToken&gt;&lt;item&gt;&lt;Semilla&gt;000000000078&lt;/Semilla&gt;&lt;/item&gt;&lt;Signature',
       )
       // Unescaped, pszXml is exactly what signSeed returns: the same bytes the REST channel posts.
       const pszXml = /<pszXml>([\s\S]*)<\/pszXml>/.exec(envelope)![1]

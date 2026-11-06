@@ -333,13 +333,24 @@ present a client certificate.
 - **A grant can be smaller than asked.** `requestCaf` caps at `MAX_AUTOR` and, past the effective maximum with no
   `minQuantity`, asks for one folio, so read `granted`. `minQuantity` and `requestCafExact` are the strict forms.
 - **Annulling cannot be undone** and counts against the quota for six months. `annulFolios` needs `range`,
-  `withinDays` or `all: true`, and `requestCafExact` annuls only with `allowAnnul: true`. One call annuls at most
-  `maxRanges` ranges (50, or 20 in `requestCafExact`), and `exclude` protects a CAF still in use. Pass `knownAnnulled` back
-  between runs: the portal keeps listing annulled ranges forever.
+  `withinDays` or `all: true`, and `requestCafExact` annuls only with `allowAnnul: true`. `maxRanges` limits a pass,
+  not the call: each pass tries at most `maxRanges` ranges (50, or 20 in `requestCafExact`) and there are up to four
+  passes, so one call can annul up to four times that many (200, or 80). Every step is tried up to three times,
+  whatever the error, on top of the retries of the client. `exclude` protects a CAF still in use. Pass `knownAnnulled`
+  back between runs: the portal keeps listing annulled ranges forever.
+- **Getting a range back asks the SII which folios are free.** `reobtainFolios` sends the requests the reference
+  sends (referers without a host, the forms picked by their exact opening tag, no session handling on the way in) and
+  reads the listing for ranges and nothing else: with a session that expired, or on a page that states a refusal, the
+  list is empty, and a listing that fails for any reason reads as no ranges to get back (the failure is in `reason`).
+  It does not sign in on demand: call it with a session that is alive.
 
-`createFolioRegistry`, `createMemoryFolioRegistry` and, from `dte-sdk/node`, `createDirectoryFolioRegistry` keep local track of the folios of
-each CAF: reserve, mark as sent or annulled, release. A service with its own database implements `FolioRegistry` with
-its own transactions.
+`createFolioRegistry`, `createMemoryFolioRegistry` and, from `dte-sdk/node`, `createDirectoryFolioRegistry` keep local
+track of the folios of each CAF: reserve, mark as sent or annulled, release. `reserve` hands out the next free folio:
+after the last one reserved, or from the lowest one reserved and not sent, never one that is used or annulled and never
+a free one below that point. With `{ lowestFree: true }` it hands out the lowest free folio of the whole range, which is
+what the certification run asks for; use it only when the registry records every folio the range has spent. A service
+with its own database implements `FolioRegistry` with its own transactions, the option included if it is to back a
+certification run.
 
 A refusal of the SII is `SII_PORTAL_REJECTED`, with `details.rejection` and `portalRejectionMessage` saying what it means
 and what to do; the composite flows return it as data, so the CAFs already obtained are not lost. Login, logout and the
@@ -530,6 +541,15 @@ and the runner makes it only with `declareCompliance: true`.
   without `TpoDespacho`. Run the process with `TZ=America/Santiago`.
 - **The declaration of compliance counts as made when the last page no longer shows its form.** That is the
   reference's reading; keep the page the store saves and check it.
+- **The folios of a run are checked against the SII.** Before a set is issued the SII is asked whether it already
+  holds the folios the run is about to use (as the company, up to 30 queries per CAF); one it holds is marked used. A
+  range obtained again is used only through the folios the SII showed free, and takes the place of the CAFs in hand of
+  its type. A maximum that cannot be read counts as no cap, a blocked type is not asked for but obtained again, a
+  maximum below the need is asked in as many batches as folios are missing, and after annulling the maximum is read
+  again. Annulling (the last resort: unused ranges of the last 180 days, 10 in each of up to four passes) never
+  touches a range the run downloaded, and the ranges the SII reported annulled are kept in the state
+  (`annulledRanges`) and not tried again. Every CAF obtained is saved in the state at once, so a step that ends short
+  leaves it in hand for the next attempt.
 - **The operator gives less.** Without `receiver` the documents go to the test receiver (`DEFAULT_CERTIFICATION_RECEIVER`);
   without `resolution` every envelope of the run carries number 0 and the UTC date of the day the run started, which
   is only right on the day the SII resolved the application, so give `resolution.date` on any other day; the issuer's

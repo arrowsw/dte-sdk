@@ -20,6 +20,17 @@ test('the fingerprint tells two files apart', () => {
   expect(cafFingerprint('a')).toBe(cafFingerprint('a'))
 })
 
+test('the registry passes `lowestFree` on: by default the pointer moves on, with it the lowest free folio goes out', async () => {
+  const wide = { ...scope, range: { from: 1, to: 9 } }
+  const registry = createMemoryFolioRegistry(() => FIXED_NOW)
+  await registry.markSent(wide, 5)
+  await expect(registry.reserve(wide)).resolves.toBe(6)
+  await expect(registry.reserve(wide, { lowestFree: true })).resolves.toBe(1)
+  await expect(registry.reserve(wide, { lowestFree: true })).resolves.toBe(2)
+  // The pointer starts again at the lowest folio reserved and not sent, which is now 1, and walks up from there.
+  await expect(registry.reserve(wide)).resolves.toBe(3)
+})
+
 test('the whole cycle', async () => {
   const registry = createMemoryFolioRegistry(() => FIXED_NOW)
   await expect(registry.reserve(scope)).resolves.toBe(1)

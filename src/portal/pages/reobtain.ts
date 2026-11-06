@@ -1,4 +1,15 @@
-import { formBlocks, formWithAction, inputValues, namedForm } from '../html'
+// Each form is chosen by its exact opening tag, as field behaviour does: double quotes, and the name right after
+// `<form`, for the list and the final form; the `action` ending in the download page for the download form.
+const LIST_FORM = /<form\s+name="frm\d+"[\s\S]*?<\/form>/gi
+const FINAL_FORM = /<form\s+name="form1"[\s\S]*?<\/form>/i
+const DOWNLOAD_FORM = /<form[^>]*action="[^"]*rf_genera_archivo"[\s\S]*?<\/form>/i
+
+// Only an input whose double-quoted name is followed by a double-quoted value is a field: one without a `value` is
+// not sent, as field behaviour does. A repeated name keeps the last value.
+const NAME_THEN_VALUE = /<input[^>]*name="([^"]+)"[^>]*value="([^"]*)"/gi
+
+const inputValues = (html: string): Readonly<Record<string, string>> =>
+  Object.fromEntries(Array.from(html.matchAll(NAME_THEN_VALUE), ([, name, value]) => [name, value]))
 
 const hasRange = (fields: Readonly<Record<string, string>>): boolean => Boolean(fields.FOLIO_INI && fields.FOLIO_FIN)
 
@@ -7,10 +18,7 @@ const hasRange = (fields: Readonly<Record<string, string>>): boolean => Boolean(
  * ES: Los campos de cada rango de la lista, un `<form name="frmN">` por rango.
  */
 export const parseReobtainList = (html: string): readonly Readonly<Record<string, string>>[] =>
-  formBlocks(html)
-    .filter((block) => /<form\b[^>]*\bname\s*=\s*["']?frm\d+/i.test(block))
-    .map(inputValues)
-    .filter(hasRange)
+  Array.from(html.matchAll(LIST_FORM), ([block]) => inputValues(block)).filter(hasRange)
 
 /**
  * EN: The detail page says the range is annulled: the list itself does not.
@@ -23,8 +31,7 @@ export const isRangeAnnulled = (html: string): boolean => /ha sido anulado/i.tes
  * ES: Los campos del formulario final de la página de detalle, o null.
  */
 export const reobtainFormFields = (html: string): Readonly<Record<string, string>> | null => {
-  const form = namedForm(html, 'form1')
-  const fields = form === null ? {} : inputValues(form)
+  const fields = inputValues(FINAL_FORM.exec(html)?.[0] ?? '')
   return fields.FOLIO_INI ? fields : null
 }
 
@@ -33,7 +40,6 @@ export const reobtainFormFields = (html: string): Readonly<Record<string, string
  * ES: Los campos del formulario de descarga que sigue a la resolución, o null.
  */
 export const reobtainDownloadFields = (html: string): Readonly<Record<string, string>> | null => {
-  const form = formWithAction(html, 'rf_genera_archivo')
-  const fields = form === null ? {} : inputValues(form)
+  const fields = inputValues(DOWNLOAD_FORM.exec(html)?.[0] ?? '')
   return fields.FOLIO_INI ? fields : null
 }

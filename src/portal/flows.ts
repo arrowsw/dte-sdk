@@ -1,7 +1,7 @@
 import { isCafExpired } from '../caf/validity'
 import type { DocumentType } from '../catalogs/document-types'
 import type { PortalRejection } from '../catalogs/portal'
-import { isDteError } from '../errors'
+import { errorMessage, isDteError } from '../errors'
 import type { CallOverrides } from '../sii/client'
 import { annulFoliosInSession } from './annulment'
 import type { PortalClient } from './client'
@@ -99,11 +99,13 @@ const fromCaf = (caf: ObtainedCaf, quantity: number): FolioFlowResult => ({
 
 /**
  * EN: Requests one CAF that covers the whole quantity; below it nothing is stamped. With `allowAnnul`, a limit caused by
- * unused folios is lifted by annulling up to 20 ranges, never those in `exclude`, and asking once more. `FOLIOS_DISP` 0
- * means nothing is annullable, so that attempt is skipped; while blocked the field is absent, and that case does try.
+ * unused folios is lifted by annulling up to 20 ranges in each of up to four passes (80 ranges in all), never those in
+ * `exclude`, and asking once more. `FOLIOS_DISP` 0 means nothing is annullable, so that attempt is skipped; while
+ * blocked the field is absent, and that case does try.
  * ES: Solicita un CAF que cubra toda la cantidad; bajo ella no se timbra nada. Con `allowAnnul`, un límite causado por folios
- * sin usar se levanta anulando hasta 20 rangos, nunca los de `exclude`, y pidiendo una vez más. `FOLIOS_DISP` 0 significa que
- * nada es anulable, así que ese intento se omite; con el timbraje bloqueado el campo no viene, y ese caso sí lo intenta.
+ * sin usar se levanta anulando hasta 20 rangos en cada una de hasta cuatro pasadas (80 rangos en total), nunca los de
+ * `exclude`, y pidiendo una vez más. `FOLIOS_DISP` 0 significa que nada es anulable, así que ese intento se omite; con
+ * el timbraje bloqueado el campo no viene, y ese caso sí lo intenta.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: type, quantity and whether annulling is allowed. ES: tipo, cantidad y si se permite anular.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
@@ -289,10 +291,8 @@ export type ReobtainResult = {
   readonly expired: readonly { readonly from: number; readonly to: number; readonly authorizationDate: string | null }[]
   /** EN: Free folios covered. ES: Folios libres cubiertos. */
   readonly available: number
-  /** EN: Why it fell short, in words, or null. ES: Por qué no alcanzó, en palabras, o null. */
+  /** EN: Why it fell short, in words, or null; when the listing failed, the message of that failure. ES: Por qué no alcanzó, en palabras, o null; si el listado falló, el mensaje de ese fallo. */
   readonly reason: string | null
-  /** EN: The refusal behind it, when the SII refused the listing; otherwise null. ES: El rechazo detrás de eso, si el SII rechazó el listado; si no, null. */
-  readonly rejection: PortalRejection | null
 }
 
 const freeFoliosOf = async (
@@ -327,19 +327,14 @@ const usableRanges = async (
 
 const reobtainInSession = async (context: PortalContext, input: ReobtainFoliosInput): Promise<ReobtainResult> => {
   const company = input.companyRut === undefined ? {} : { companyRut: input.companyRut }
-  const listed = await listReobtainableInSession(context, { type: input.type, ...company }).catch((error: unknown) =>
-    asRefusal(error),
-  )
-  if ('rejection' in listed)
-    return {
-      complete: false,
-      cafs: [],
-      ranges: [],
-      expired: [],
-      available: 0,
-      reason: listed.details.portalMessage as string,
-      rejection: listed.rejection,
-    }
+  // Whatever fails while listing leaves the run with no ranges to use, as field behaviour does: the flow goes on by the
+  // normal way. Only the caller's own abort is not a failure of the listing.
+  const listed = await listReobtainableInSession(context, { type: input.type, ...company }).catch((error: unknown) => {
+    if (isDteError(error) && error.code === 'REQUEST_ABORTED') throw error
+    return { failed: errorMessage(error) }
+  })
+  if ('failed' in listed)
+    return { complete: false, cafs: [], ranges: [], expired: [], available: 0, reason: listed.failed }
   const usable = await usableRanges(listed, input)
   const total = usable.reduce((sum, range) => sum + range.quantity, 0)
   if (total < input.quantity)
@@ -350,7 +345,6 @@ const reobtainInSession = async (context: PortalContext, input: ReobtainFoliosIn
       expired: [],
       available: total,
       reason: `usable ranges do not reach the quantity: ${total} of ${input.quantity}`,
-      rejection: null,
     }
   const cafs: ObtainedCaf[] = []
   const used: { from: number; to: number; freeFolios: readonly number[] }[] = []
@@ -384,22 +378,27 @@ const reobtainInSession = async (context: PortalContext, input: ReobtainFoliosIn
     expired,
     available: covered.folios,
     reason: complete ? null : `usable ranges do not reach the quantity: ${covered.folios} of ${input.quantity}`,
-    rejection: null,
   }
 }
 
 /**
  * EN: Covers a quantity from authorized ranges without spending quota, oldest folio first. It is what lifts a stamping
  * block, since the SII asks for folios to be issued. A range with some received folios is not discarded: its free folios
- * are used. An expired CAF does not count and the walk moves on.
+ * are used. An expired CAF does not count and the walk moves on. As the reference does, the listing is asked for with
+ * no session handling on the way in (no login on demand: with a session that expired the list comes back empty) and
+ * whatever fails while listing reads as no ranges, with the failure in `reason`: it does not throw. A page that states
+ * a refusal is not told apart either: it has no ranges.
  * ES: Cubre una cantidad con rangos autorizados sin gastar cupo, partiendo por el folio más antiguo. Es lo que levanta un
  * bloqueo de timbraje, porque el SII pide emitir folios. Un rango con algunos folios recibidos no se descarta: se usan sus
- * folios libres. Un CAF vencido no cuenta y se sigue con el siguiente.
+ * folios libres. Un CAF vencido no cuenta y se sigue con el siguiente. Como la referencia, el listado se pide sin manejo
+ * de sesión al entrar (sin login a pedido: con una sesión vencida la lista vuelve vacía) y cualquier fallo al listar se
+ * lee como sin rangos, con el fallo en `reason`: no lanza. Una página que declara un rechazo tampoco se distingue: no
+ * tiene rangos.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: type, quantity and the checks the caller can make. ES: tipo, cantidad y las verificaciones que puede hacer quien llama.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: what was obtained, even when it falls short. ES: lo obtenido, aunque no alcance.
- * @throws {DteError} EN: session, block and transport codes. ES: códigos de sesión, bloqueo y transporte.
+ * @throws {DteError} EN: session, block and transport codes while downloading a range; `REQUEST_ABORTED`. ES: códigos de sesión, bloqueo y transporte al descargar un rango; `REQUEST_ABORTED`.
  */
 export const reobtainFolios = (
   portal: PortalClient,

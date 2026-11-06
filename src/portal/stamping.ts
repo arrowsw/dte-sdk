@@ -3,7 +3,6 @@ import { isDocumentType, type DocumentType } from '../catalogs/document-types'
 import { cgiUrl, type PortalRejection } from '../catalogs/portal'
 import { DteError, isDteError } from '../errors'
 import type { CallOverrides } from '../sii/client'
-import { chileDate } from '../time/chile'
 import { resolvePortalCompany, type PortalClient } from './client'
 import { formAction, inputValues } from './html'
 import { asksForAuthentication, looksLikeLoginRedirect, portalMessageOf } from './pages/auth'
@@ -271,7 +270,8 @@ const recoverAuthorizedRange = async (
     COD_DOCTO: String(type),
     FOLIO_INI: String(range.from),
     FOLIO_FIN: String(range.to),
-    FECHA: chileDate(context.portal.now()),
+    // The day of the instant in UTC, not in Chile: it is what field behaviour sends and the SII accepts.
+    FECHA: context.portal.now().toISOString().slice(0, 10),
     ACEPTAR: 'AQUI',
   }).catch((error: unknown) => {
     context.portal.logger.warn('sii portal could not recover an authorized range', { operation: context.operation })

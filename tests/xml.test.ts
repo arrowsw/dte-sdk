@@ -1,4 +1,4 @@
-import { escapeXmlText, escapeXmlAttribute } from '../src/xml/escape'
+import { escapeXmlText, escapeXmlAttribute, escapeXmlMarkup } from '../src/xml/escape'
 import { buildXml } from '../src/xml/build'
 import {
   parseXml,
@@ -14,6 +14,10 @@ describe('escape', () => {
   test('text escapes the five XML entities', () => {
     expect(escapeXmlText(`a & b < c > d "e" 'f'`)).toBe('a &amp; b &lt; c &gt; d &quot;e&quot; &apos;f&apos;')
     expect(escapeXmlAttribute(`x"y<z&`)).toBe('x&quot;y&lt;z&amp;')
+  })
+
+  test('markup escapes only the ampersand and the angle brackets', () => {
+    expect(escapeXmlMarkup(`a & b < c > d "e" 'f'`)).toBe(`a &amp; b &lt; c &gt; d "e" 'f'`)
   })
 })
 
