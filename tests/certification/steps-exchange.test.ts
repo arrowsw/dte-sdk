@@ -150,6 +150,20 @@ describe('runExchange', () => {
     }
   })
 
+  test('a set that was downloaded and cannot be kept is an error of the run, not a set to save by hand', async () => {
+    const harness = await certificationHarness(exchangeRoutes())
+    const store = {
+      ...harness.store,
+      writeArtefact: async (name: string, content: string): Promise<void> => {
+        if (name === EXCHANGE_SET_ARTEFACT) throw new Error('disk full')
+        await harness.store.writeArtefact(name, content)
+      },
+    }
+    await expect(runExchange({ ...harness.deps, store }, atExchange())).rejects.toThrow('disk full')
+    expect(await harness.store.listArtefacts()).toEqual(['intercambio/pfe-download.html'])
+    expect(harness.warnings()).not.toContain('sii exchange set could not be downloaded')
+  })
+
   test('an error status on the user validation or on the set validation does not stop the stage, as in the field', async () => {
     const busy = { status: 503, body: 'busy' }
     for (const method of ['validarUsuario', 'validarSetContriPostSeguimiento']) {

@@ -41,6 +41,21 @@ const artefact = (name: string): string => `${DIRECTORY}/${name}`
 // `downloaded` says the portal was entered: the saved session was then checked once, and the run does not check it again.
 type ObtainedSet = { readonly xml: string; readonly downloaded: boolean }
 
+// The download and the copy of what it answered: whatever goes wrong here (the network, the session, a page that is
+// no set) leaves the set to be saved by hand, as in field behaviour; only a page that came back is worth keeping.
+const downloadSet = async (rt: Runtime, companyRut: string): Promise<string | null> => {
+  try {
+    const { xml } = await downloadExchangeSet(rt.portal, { companyRut })
+    await rt.store.writeArtefact(artefact('pfe-download.html'), xml)
+    return xml
+  } catch (error) {
+    rt.portal.logger.warn('sii exchange set could not be downloaded', { reason: errorMessage(error) })
+    if (isDteError(error) && error.code === 'SII_PORTAL_UNEXPECTED_PAGE' && typeof error.details['page'] === 'string')
+      await rt.store.writeArtefact(artefact('pfe-download-error.html'), error.details['page'])
+    return null
+  }
+}
+
 const obtainSet = async (rt: Runtime, companyRut: string, given: string | undefined): Promise<ObtainedSet | null> => {
   if (given !== undefined) {
     await rt.store.writeArtefact(EXCHANGE_SET_ARTEFACT, given)
@@ -48,19 +63,11 @@ const obtainSet = async (rt: Runtime, companyRut: string, given: string | undefi
   }
   const kept = await rt.store.readArtefact(EXCHANGE_SET_ARTEFACT)
   if (kept !== null) return { xml: kept, downloaded: false }
-  try {
-    const { xml } = await downloadExchangeSet(rt.portal, { companyRut })
-    await rt.store.writeArtefact(artefact('pfe-download.html'), xml)
-    await rt.store.writeArtefact(EXCHANGE_SET_ARTEFACT, xml)
-    return { xml, downloaded: true }
-  } catch (error) {
-    // Whatever went wrong (the network, the session, a page that is no set) the set is to be saved by hand, as in field
-    // behaviour: only a page that came back is worth keeping.
-    rt.portal.logger.warn('sii exchange set could not be downloaded', { reason: errorMessage(error) })
-    if (isDteError(error) && error.code === 'SII_PORTAL_UNEXPECTED_PAGE' && typeof error.details['page'] === 'string')
-      await rt.store.writeArtefact(artefact('pfe-download-error.html'), error.details['page'])
-    return null
-  }
+  const xml = await downloadSet(rt, companyRut)
+  if (xml === null) return null
+  // Keeping the set is the run's own work, not the download's: a store that fails here is an error of the run.
+  await rt.store.writeArtefact(EXCHANGE_SET_ARTEFACT, xml)
+  return { xml, downloaded: true }
 }
 
 /**
