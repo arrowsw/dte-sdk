@@ -333,12 +333,16 @@ present a client certificate.
 - **A grant can be smaller than asked.** `requestCaf` caps at `MAX_AUTOR` and, past the effective maximum with no
   `minQuantity`, asks for one folio, so read `granted`. `minQuantity` and `requestCafExact` are the strict forms.
 - **Annulling cannot be undone** and counts against the quota for six months. `annulFolios` needs `range`,
-  `withinDays` or `all: true`, and `requestCafExact` annuls only with `allowAnnul: true`. One call annuls at most
-  `maxRanges` ranges (50, or 20 in `requestCafExact`), and `exclude` protects a CAF still in use. Pass `knownAnnulled` back
-  between runs: the portal keeps listing annulled ranges forever.
+  `withinDays` or `all: true`, and `requestCafExact` annuls only with `allowAnnul: true`. Each pass tries at most
+  `maxRanges` ranges (50, or 20 in `requestCafExact`), there are up to four passes, every step is tried up to three
+  times, and `exclude` protects a CAF still in use. Pass `knownAnnulled` back between runs: the portal keeps listing
+  annulled ranges forever.
+- **Getting a range back asks the SII which folios are free.** `reobtainFolios` sends the requests the reference
+  sends (referers without a host, the forms picked by their exact opening tag, no session handling on the way in), and
+  a listing that fails for any reason reads as no ranges to get back.
 
 `createFolioRegistry`, `createMemoryFolioRegistry` and, from `dte-sdk/node`, `createDirectoryFolioRegistry` keep local track of the folios of
-each CAF: reserve, mark as sent or annulled, release. A service with its own database implements `FolioRegistry` with
+each CAF: reserve (the lowest folio of the range that is neither used nor annulled), mark as sent or annulled, release. A service with its own database implements `FolioRegistry` with
 its own transactions.
 
 A refusal of the SII is `SII_PORTAL_REJECTED`, with `details.rejection` and `portalRejectionMessage` saying what it means
@@ -530,6 +534,11 @@ and the runner makes it only with `declareCompliance: true`.
   without `TpoDespacho`. Run the process with `TZ=America/Santiago`.
 - **The declaration of compliance counts as made when the last page no longer shows its form.** That is the
   reference's reading; keep the page the store saves and check it.
+- **The folios of a run are checked against the SII.** Before a set is issued the SII is asked whether it already
+  holds the folios the run is about to use (as the company, up to 30 queries per CAF); one it holds is marked used. A
+  range obtained again is used only through the folios the SII showed free. A maximum that cannot be read counts as no
+  cap, a blocked type is not asked for but obtained again, and after annulling the maximum is read again. The ranges
+  the SII reported annulled are kept in the state (`annulledRanges`) and not tried again.
 - **The operator gives less.** Without `receiver` the documents go to the test receiver (`DEFAULT_CERTIFICATION_RECEIVER`);
   without `resolution` every envelope of the run carries number 0 and the UTC date of the day the run started, which
   is only right on the day the SII resolved the application, so give `resolution.date` on any other day; the issuer's

@@ -197,6 +197,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reference's own patterns; and a progress page that cannot be read before the simulation is declared no longer ends
   the run.
 
+- **The certification run keeps to the reference: folios and web services.** SOAP calls send an empty `SOAPAction`
+  and escape their parameters with `&`, `<` and `>` only (`escapeXmlMarkup` is internal); the REST status queries
+  send the upload `User-Agent`; `folioReceived` asks as the company and `queryDocumentStatus` takes `consultantRut`.
+  An authorised range is recovered with the UTC date. The reobtention sends referers without a host, picks its forms
+  by their exact opening tag, reads only inputs with a quoted name and value, does no session handling on the way in,
+  and a listing that fails for any reason is no ranges. `annulFolios` caps `maxRanges` per pass (up to four passes) and
+  tries each step up to three times. `prepareFolios` asks the SII for the folios it is about to use (30 queries per
+  CAF at the most) and marks the received ones used, reads a maximum it cannot read as no cap, obtains again with the
+  whole need, never asks for a blocked type, reads the maximum again after annulling, keeps a range obtained again
+  only through the folios the SII showed free, and remembers the annulled ranges in the new
+  `CertificationState.annulledRanges`. The folio ledger hands out the lowest folio of a range that is neither used nor
+  annulled.
+
 ### Fixed
 
 - A receipt (39, 41) with a reference was written with the invoice shape of `Referencia` (`FchRef`), which the receipts
