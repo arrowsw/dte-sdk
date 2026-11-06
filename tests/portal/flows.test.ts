@@ -358,6 +358,22 @@ describe('reobtainFolios', () => {
     })
   })
 
+  test('a failure that is not a refusal while listing reads as no ranges', async () => {
+    const harness = await signedIn([
+      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: page('form') } },
+      { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: new DteError('TRANSPORT_FAILED') },
+    ])
+    await expect(reobtainFolios(harness.portal, { type: 33, quantity: 2 })).resolves.toEqual({
+      complete: false,
+      cafs: [],
+      ranges: [],
+      expired: [],
+      available: 0,
+      reason: expect.any(String),
+      rejection: null,
+    })
+  })
+
   const listRoutes = (ranges: readonly (readonly [number, number])[], annulled: readonly number[] = []) => [
     { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: page('form') } },
     { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: { body: reobtainListPage(ranges) } },

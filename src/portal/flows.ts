@@ -1,7 +1,7 @@
 import { isCafExpired } from '../caf/validity'
 import type { DocumentType } from '../catalogs/document-types'
 import type { PortalRejection } from '../catalogs/portal'
-import { isDteError } from '../errors'
+import { errorMessage, isDteError } from '../errors'
 import type { CallOverrides } from '../sii/client'
 import { annulFoliosInSession } from './annulment'
 import type { PortalClient } from './client'
@@ -327,9 +327,13 @@ const usableRanges = async (
 
 const reobtainInSession = async (context: PortalContext, input: ReobtainFoliosInput): Promise<ReobtainResult> => {
   const company = input.companyRut === undefined ? {} : { companyRut: input.companyRut }
+  // Whatever fails while listing, a refusal or not, leaves the run with no ranges to use, as field behaviour does: the
+  // flow goes on by the normal way.
   const listed = await listReobtainableInSession(context, { type: input.type, ...company }).catch((error: unknown) =>
-    asRefusal(error),
+    isDteError(error) && error.code === 'SII_PORTAL_REJECTED' ? asRefusal(error) : { failed: errorMessage(error) },
   )
+  if ('failed' in listed)
+    return { complete: false, cafs: [], ranges: [], expired: [], available: 0, reason: listed.failed, rejection: null }
   if ('rejection' in listed)
     return {
       complete: false,
