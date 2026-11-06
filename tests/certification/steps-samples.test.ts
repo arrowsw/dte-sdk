@@ -7,6 +7,7 @@ import {
   REVIEW_TOKEN,
   reviewAnswer,
   SAMPLES_BLOCKED,
+  SESSION_CHECK_URL,
   SAMPLES_SERVICE_URL,
   SAMPLES_UPLOAD_URL,
   samplesRoutes,
@@ -69,6 +70,32 @@ describe('uploadPrintedSamples', () => {
       { step: 'MUESTRAS_DONE', success: true },
     ])
     expect(harness.urls().filter((url) => url.endsWith('nocache.js'))).toHaveLength(1)
+  })
+
+  test('the whole stage is one stage of the portal: one session check, one warm-up, one look at the hashes', async () => {
+    const harness = await certificationHarness(
+      samplesRoutes({
+        service: {
+          leeImpreso: (call) => ({ body: call === 1 ? EMPTY_OK : reviewAnswer('RECHAZADO') }),
+          creaLista: { body: CREATED_REVIEW },
+          muestraMail: { body: detailAnswer(DETAIL_ROWS) },
+        },
+      }),
+    )
+    await uploadPrintedSamples(harness.deps, atSamples(), { samples })
+    const base = SAMPLES_SERVICE_URL.replace('ServicePdfDte', '')
+    expect(harness.urls().map((url) => url.replace(base, '<pdf>/'))).toEqual([
+      SESSION_CHECK_URL,
+      '<pdf>/',
+      '<pdf>/pdfdte.nocache.js',
+      '<pdf>/ServicePdfDte',
+      '<pdf>/ServicePdfDte',
+      '<pdf>/upload',
+      '<pdf>/upload',
+      '<pdf>/ServicePdfDte',
+      '<pdf>/ServicePdfDte',
+      '<pdf>/ServicePdfDte',
+    ])
   })
 
   test('a review in INGRESO with a readable id is resumed; one without an id is replaced by a new review', async () => {
@@ -139,6 +166,54 @@ describe('uploadPrintedSamples', () => {
     expect(result).toMatchObject({ outcome: 'submitted', detail: 'submitted' })
     expect(result.state.samples).toMatchObject({ state: null, uploaded: ['muestra_33_1.pdf'] })
     expect(result.state.stage).toBe('compliance')
+  })
+
+  test('a state that cannot be read again after the submission is warned about, and the stage ends submitted with the state unknown', async () => {
+    const harness = await certificationHarness(
+      samplesRoutes({
+        service: {
+          leeImpreso: (call) => (call === 1 ? { body: EMPTY_OK } : new Error('socket hang up')),
+          creaLista: { body: CREATED_REVIEW },
+        },
+      }),
+    )
+    const result = await uploadPrintedSamples(harness.deps, atSamples(), { samples: samples.slice(0, 1) })
+    expect(result).toMatchObject({ outcome: 'submitted', detail: 'submitted' })
+    expect(result.state.stage).toBe('compliance')
+    expect(result.state.samples).toEqual({
+      revisionId: REVIEW_ID,
+      revisionToken: REVIEW_TOKEN,
+      state: null,
+      uploaded: ['muestra_33_1.pdf'],
+      submittedAt: '2026-11-15T18:30:00.000Z',
+    })
+    expect(harness.warnings()).toContain('sii samples state unreadable after the submission')
+    expect(await harness.store.readArtefact('muestras/pdfte-estado-post-envio.html')).toBeNull()
+    expect(await harness.store.readArtefact('muestras/pdfte-enviar-sii.html')).toBe(EMPTY_OK)
+    expect(harness.events[1]).toEqual({ step: 'MUESTRAS_DONE', success: true })
+  })
+
+  test('the re-reading after the submission is read for its state whatever its status, and kept', async () => {
+    const reread = async (second: { status: number; body: string }) => {
+      const harness = await certificationHarness(
+        samplesRoutes({
+          service: {
+            leeImpreso: (call) => (call === 1 ? { body: EMPTY_OK } : second),
+            creaLista: { body: CREATED_REVIEW },
+          },
+        }),
+      )
+      const result = await uploadPrintedSamples(harness.deps, atSamples(), { samples: samples.slice(0, 1) })
+      return { harness, result }
+    }
+    const busy = await reread({ status: 500, body: 'busy' })
+    expect(busy.result).toMatchObject({ outcome: 'submitted', detail: 'submitted' })
+    expect(busy.result.state.samples).toMatchObject({ state: null })
+    expect(busy.harness.warnings()).not.toContain('sii samples state unreadable after the submission')
+    expect(await busy.harness.store.readArtefact('muestras/pdfte-estado-post-envio.html')).toBe('busy')
+    const rejected = await reread({ status: 500, body: reviewAnswer('RECHAZADO') })
+    expect(rejected.result.outcome).toBe('rejected')
+    expect(methods(rejected.harness)).toContain('muestraMail')
   })
 
   test('blocked: the sentence of the portal, nothing uploaded, the stage kept', async () => {

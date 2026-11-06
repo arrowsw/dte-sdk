@@ -1,6 +1,12 @@
 import { EXCHANGE_ANSWER_KEYS } from '../catalogs/certification'
-import { isDteError } from '../errors'
-import { confirmExchange, downloadExchangeSet, uploadExchangeAnswers, validateExchangeUser } from '../portal/exchange'
+import { errorMessage, isDteError } from '../errors'
+import {
+  confirmExchange,
+  downloadExchangeSet,
+  uploadExchangeAnswers,
+  validateExchangeUser,
+  withExchangeStage,
+} from '../portal/exchange'
 import { createExchangeAnswers } from './exchange'
 import { runtime, saveState, type CertificationDependencies, type Runtime, type StepResult } from './runtime'
 import type { CertificationState, ExchangeState } from './state'
@@ -32,24 +38,37 @@ export type ExchangeOutcome = 'done' | 'alreadyDone' | 'setUnavailable' | 'notIn
 
 const artefact = (name: string): string => `${DIRECTORY}/${name}`
 
-const obtainSet = async (rt: Runtime, companyRut: string, given: string | undefined): Promise<string | null> => {
-  if (given !== undefined) {
-    await rt.store.writeArtefact(EXCHANGE_SET_ARTEFACT, given)
-    return given
-  }
-  const kept = await rt.store.readArtefact(EXCHANGE_SET_ARTEFACT)
-  if (kept !== null) return kept
+// `downloaded` says the portal was entered: the saved session was then checked once, and the run does not check it again.
+type ObtainedSet = { readonly xml: string; readonly downloaded: boolean }
+
+// The download and the copy of what it answered: whatever goes wrong here (the network, the session, a page that is
+// no set) leaves the set to be saved by hand, as in field behaviour; only a page that came back is worth keeping.
+const downloadSet = async (rt: Runtime, companyRut: string): Promise<string | null> => {
   try {
     const { xml } = await downloadExchangeSet(rt.portal, { companyRut })
     await rt.store.writeArtefact(artefact('pfe-download.html'), xml)
-    await rt.store.writeArtefact(EXCHANGE_SET_ARTEFACT, xml)
     return xml
   } catch (error) {
-    if (!isDteError(error) || error.code !== 'SII_PORTAL_UNEXPECTED_PAGE') throw error
-    // `downloadExchangeSet` always puts the page in its details.
-    await rt.store.writeArtefact(artefact('pfe-download-error.html'), String(error.details['page']))
+    rt.portal.logger.warn('sii exchange set could not be downloaded', { reason: errorMessage(error) })
+    // A page that cannot be kept changes nothing: the set is still to be saved by hand.
+    if (isDteError(error) && error.code === 'SII_PORTAL_UNEXPECTED_PAGE' && typeof error.details['page'] === 'string')
+      await rt.store.writeArtefact(artefact('pfe-download-error.html'), error.details['page']).catch(() => undefined)
     return null
   }
+}
+
+const obtainSet = async (rt: Runtime, companyRut: string, given: string | undefined): Promise<ObtainedSet | null> => {
+  if (given !== undefined) {
+    await rt.store.writeArtefact(EXCHANGE_SET_ARTEFACT, given)
+    return { xml: given, downloaded: false }
+  }
+  const kept = await rt.store.readArtefact(EXCHANGE_SET_ARTEFACT)
+  if (kept !== null) return { xml: kept, downloaded: false }
+  const xml = await downloadSet(rt, companyRut)
+  if (xml === null) return null
+  // Keeping the set is the run's own work, not the download's: a store that fails here is an error of the run.
+  await rt.store.writeArtefact(EXCHANGE_SET_ARTEFACT, xml)
+  return { xml, downloaded: true }
 }
 
 /**
@@ -74,10 +93,10 @@ export const runExchange = async (
   const rt = runtime(deps)
   if (state.exchange?.confirmed === true) return { state, outcome: 'alreadyDone', detail: 'confirmed' }
   rt.emit({ step: 'INTERCAMBIO_START' })
-  const setXml = await obtainSet(rt, state.companyRut, input.setXml)
-  if (setXml === null) return { state, outcome: 'setUnavailable', detail: EXCHANGE_SET_ARTEFACT }
+  const obtained = await obtainSet(rt, state.companyRut, input.setXml)
+  if (obtained === null) return { state, outcome: 'setUnavailable', detail: EXCHANGE_SET_ARTEFACT }
   rt.emit({ step: 'INTERCAMBIO_DESCARGADO' })
-  const answers = createExchangeAnswers(setXml, {
+  const answers = createExchangeAnswers(obtained.xml, {
     companyRut: state.companyRut,
     certificate: rt.certificate,
     ...(rt.contact === undefined ? {} : { contact: rt.contact }),
@@ -93,39 +112,49 @@ export const runExchange = async (
     uploaded: false,
     confirmed: false,
   }
-  const validation = await validateExchangeUser(rt.portal, { companyRut: state.companyRut })
-  await rt.store.writeArtefact(artefact('pfe-validar.html'), validation.body)
-  if (!validation.inExchange) {
-    // The company is out of the exchange only when the portal's sentence said so: the message is there.
-    const message = validation.message!
-    const portalState = validation.state === null ? {} : { portalState: validation.state }
-    if (validation.completed) {
-      const next = await saveState(rt, state, {
-        exchange: { ...exchange, portalState: COMPLETED_STATE },
-        stage: laterStage(state.stage, 'printedSamples'),
+  // The user validation, the uploads and the confirmations are one stage of the portal, with one warm-up, as in the field.
+  return withExchangeStage(
+    rt.portal,
+    'runExchange',
+    undefined,
+    async (stage): Promise<StepResult<ExchangeOutcome>> => {
+      const validation = await validateExchangeUser(rt.portal, { companyRut: state.companyRut, stage })
+      await rt.store.writeArtefact(artefact('pfe-validar.html'), validation.body)
+      if (!validation.inExchange) {
+        // The company is out of the exchange only when the portal's sentence said so: the message is there.
+        const message = validation.message!
+        const portalState = validation.state === null ? {} : { portalState: validation.state }
+        if (validation.completed) {
+          const next = await saveState(rt, state, {
+            exchange: { ...exchange, portalState: COMPLETED_STATE },
+            stage: laterStage(state.stage, 'printedSamples'),
+          })
+          return { state: next, outcome: 'alreadyDone', detail: message }
+        }
+        const next = await saveState(rt, state, { exchange: { ...exchange, ...portalState } })
+        return { state: next, outcome: 'notInExchange', detail: message }
+      }
+      const uploaded = await uploadExchangeAnswers(rt.portal, {
+        companyRut: state.companyRut,
+        stage,
+        reception: answers.reception.xml,
+        receipts: answers.receipts.xml,
+        approval: answers.approval.xml,
       })
-      return { state: next, outcome: 'alreadyDone', detail: message }
-    }
-    const next = await saveState(rt, state, { exchange: { ...exchange, ...portalState } })
-    return { state: next, outcome: 'notInExchange', detail: message }
-  }
-  const uploaded = await uploadExchangeAnswers(rt.portal, {
-    companyRut: state.companyRut,
-    reception: answers.reception.xml,
-    receipts: answers.receipts.xml,
-    approval: answers.approval.xml,
-  })
-  for (const [index, answer] of uploaded.answers.entries())
-    await rt.store.writeArtefact(artefact(`pfe-upload-${index + 1}.html`), answer.body)
-  const sent = await saveState(rt, state, { exchange: { ...exchange, uploaded: true } })
-  const confirmation = await confirmExchange(rt.portal, { companyRut: state.companyRut, gwt: validation.hashes })
-  await rt.store.writeArtefact(artefact('pfe-validarset.html'), confirmation.validation)
-  for (const { id, body } of confirmation.confirmations)
-    await rt.store.writeArtefact(artefact(`pfe-seguimiento-${id}.html`), body)
-  const next = await saveState(rt, sent, {
-    exchange: { ...exchange, uploaded: true, confirmed: true },
-    stage: laterStage(sent.stage, 'printedSamples'),
-  })
-  rt.emit({ step: 'INTERCAMBIO_DONE', uploaded: true })
-  return { state: next, outcome: 'done' }
+      for (const [index, answer] of uploaded.answers.entries())
+        await rt.store.writeArtefact(artefact(`pfe-upload-${index + 1}.html`), answer.body)
+      const sent = await saveState(rt, state, { exchange: { ...exchange, uploaded: true } })
+      const confirmation = await confirmExchange(rt.portal, { companyRut: state.companyRut, stage })
+      await rt.store.writeArtefact(artefact('pfe-validarset.html'), confirmation.validation)
+      for (const { id, body } of confirmation.confirmations)
+        await rt.store.writeArtefact(artefact(`pfe-seguimiento-${id}.html`), body)
+      const next = await saveState(rt, sent, {
+        exchange: { ...exchange, uploaded: true, confirmed: true },
+        stage: laterStage(sent.stage, 'printedSamples'),
+      })
+      rt.emit({ step: 'INTERCAMBIO_DONE', uploaded: true })
+      return { state: next, outcome: 'done' }
+    },
+    obtained.downloaded,
+  )
 }

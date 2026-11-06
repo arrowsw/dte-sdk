@@ -79,6 +79,8 @@ export type MultipartPartsInput = {
   readonly boundary: string
   /** EN: The parts, in the order they are sent. ES: Las partes, en el orden en que se envían. */
   readonly parts: readonly MultipartPart[]
+  /** EN: Write the part headers (names, file names) as UTF-8 instead of Latin-1; the file bytes are never touched. ES: Escribe las cabeceras de las partes (nombres, nombres de archivo) en UTF-8 en vez de Latin-1; los bytes del archivo nunca se tocan. */
+  readonly utf8Headers?: boolean
 }
 
 const isFile = (part: MultipartPart): part is MultipartFile => 'bytes' in part
@@ -97,7 +99,8 @@ const BREAKS_HEADER = /[\r\n"]/
  * archivo copiados tal cual. El límite no debe aparecer en ninguna parte, o el receptor cortaría el cuerpo ahí.
  * @throws {DteError} EN: `INVALID_OPTION { field: 'parts' }` when a name, file name or content type holds a CR, LF or quote; `INVALID_OPTION { field: 'boundary' }` when the boundary occurs in the content. ES: `INVALID_OPTION { field: 'parts' }` si un nombre, nombre de archivo o tipo de contenido trae CR, LF o comillas; `INVALID_OPTION { field: 'boundary' }` si el límite aparece en el contenido.
  */
-export const buildMultipartParts = ({ boundary, parts }: MultipartPartsInput): Uint8Array => {
+export const buildMultipartParts = ({ boundary, parts, utf8Headers = false }: MultipartPartsInput): Uint8Array => {
+  const encodeHeader = utf8Headers ? (text: string) => new TextEncoder().encode(text) : encodeLatin1
   if (parts.some((part) => headerTexts(part).some((text) => BREAKS_HEADER.test(text))))
     throw new DteError('INVALID_OPTION', { field: 'parts' })
   // Latin-1 decoding is one character per byte, so an ASCII boundary is in the string exactly when it is in the bytes.
@@ -107,13 +110,13 @@ export const buildMultipartParts = ({ boundary, parts }: MultipartPartsInput): U
   const encoded = parts.flatMap((part) =>
     isFile(part)
       ? [
-          encodeLatin1(
+          encodeHeader(
             `${delimiter}Content-Disposition: form-data; name="${part.name}"; filename="${part.fileName}"\r\nContent-Type: ${part.contentType}\r\n\r\n`,
           ),
           part.bytes,
           encodeLatin1('\r\n'),
         ]
-      : [encodeLatin1(`${delimiter}Content-Disposition: form-data; name="${part.name}"\r\n\r\n${part.value}\r\n`)],
+      : [encodeHeader(`${delimiter}Content-Disposition: form-data; name="${part.name}"\r\n\r\n${part.value}\r\n`)],
   )
   return concat([...encoded, encodeLatin1(`--${boundary}--\r\n`)])
 }

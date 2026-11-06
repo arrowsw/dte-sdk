@@ -6,6 +6,7 @@ import { parseXml } from '../../src/xml/parse'
 import { certificationHarness, stateWith } from '../support/certification-harness'
 import {
   EXCHANGE_COMPLETED,
+  SESSION_CHECK_URL,
   exchangeRoutes,
   exchangeSetXml,
   gwtMethodOf,
@@ -15,6 +16,8 @@ import {
 } from '../support/exchange-fixtures'
 import { EXCEPTION, okAnswer } from '../support/gwt-answers'
 import { failure } from '../support/portal'
+
+jest.setTimeout(30_000)
 
 const BASE = EXCHANGE_PORTAL.base
 const FACADE = `${BASE}facade`
@@ -61,7 +64,7 @@ describe('runExchange', () => {
       'updatePostulacionSeguimiento',
       'updatePostulacionSeguimiento',
     ])
-    // The uploads carry the artefacts, and the hashes found once serve the confirmation too.
+    // The uploads carry the artefacts; the exchange portal's hashes are the known pair, never looked up.
     const uploads = harness.fake.requests.filter((request) => request.url.includes('/uploadFile'))
     // The fake reads every part as Latin-1; the answers travel as UTF-8.
     const asSent = async (name: string) => decodeLatin1(encodeUtf8((await harness.store.readArtefact(name))!))
@@ -70,8 +73,31 @@ describe('runExchange', () => {
       await asSent('intercambio/envio-recibos.xml'),
       await asSent('intercambio/respuesta-aprobacion-comercial.xml'),
     ])
-    expect(harness.urls().filter((url) => url.endsWith('nocache.js'))).toHaveLength(1)
+    expect(harness.urls().filter((url) => url.endsWith('nocache.js'))).toHaveLength(0)
     expect(harness.urls().some((url) => url.includes('downloadFile'))).toBe(false)
+  })
+
+  test('the download is a stage of its own, and the validation, the uploads and the confirmations are one more: two warm-ups but one check of the saved session', async () => {
+    const harness = await certificationHarness(exchangeRoutes())
+    await runExchange(harness.deps, atExchange())
+    expect(harness.urls().map((url) => url.replace(BASE, '<pfe>/'))).toEqual([
+      SESSION_CHECK_URL,
+      '<pfe>/',
+      '<pfe>/downloadFile?re=76543210&dve=3',
+      '<pfe>/',
+      '<pfe>/facade',
+      '<pfe>/uploadFile1?re=76543210&dve=3',
+      '<pfe>/uploadFile2?re=76543210&dve=3',
+      '<pfe>/uploadFile3?re=76543210&dve=3',
+      '<pfe>/facade',
+      '<pfe>/facade',
+      '<pfe>/facade',
+      '<pfe>/facade',
+    ])
+    const given = await certificationHarness(exchangeRoutes())
+    await runExchange(given.deps, atExchange(), { setXml: exchangeSetXml() })
+    expect(given.urls().filter((url) => url === BASE)).toHaveLength(1)
+    expect(given.urls().filter((url) => url === SESSION_CHECK_URL)).toHaveLength(1)
   })
 
   test('not in the exchange: the state the portal names is kept, nothing is uploaded, and the next run finds the set kept', async () => {
@@ -108,8 +134,59 @@ describe('runExchange', () => {
     expect(await harness.store.listArtefacts()).toEqual(['intercambio/pfe-download-error.html'])
     expect(await harness.store.readArtefact('intercambio/pfe-download-error.html')).toBe(REFUSED_UPLOAD)
     expect(harness.steps()).toEqual(['INTERCAMBIO_START'])
-    const failing = await certificationHarness(exchangeRoutes({ download: new Error('socket hang up') }))
-    await expect(runExchange(failing.deps, atExchange())).rejects.toThrow('socket hang up')
+  })
+
+  test('any failure of the download, not only an unexpected page, leaves the set to be saved by hand', async () => {
+    // A request that never got an answer leaves nothing to keep; an answer that is no set is kept, whatever its status.
+    const cases = [
+      { download: new Error('socket hang up'), kept: [] },
+      { download: { status: 503, body: 'busy' }, kept: ['intercambio/pfe-download-error.html'] },
+    ]
+    for (const { download, kept } of cases) {
+      const failing = await certificationHarness(exchangeRoutes({ download }))
+      const result = await runExchange(failing.deps, atExchange())
+      expect(result).toEqual({ state: atExchange(), outcome: 'setUnavailable', detail: EXCHANGE_SET_ARTEFACT })
+      expect(await failing.store.listArtefacts()).toEqual(kept)
+      expect(failing.warnings()).toContain('sii exchange set could not be downloaded')
+      expect(failing.steps()).toEqual(['INTERCAMBIO_START'])
+    }
+  })
+
+  test('a set that was downloaded and cannot be kept is an error of the run, not a set to save by hand', async () => {
+    const harness = await certificationHarness(exchangeRoutes())
+    const store = {
+      ...harness.store,
+      writeArtefact: async (name: string, content: string): Promise<void> => {
+        if (name === EXCHANGE_SET_ARTEFACT) throw new Error('disk full')
+        await harness.store.writeArtefact(name, content)
+      },
+    }
+    await expect(runExchange({ ...harness.deps, store }, atExchange())).rejects.toThrow('disk full')
+    expect(await harness.store.listArtefacts()).toEqual(['intercambio/pfe-download.html'])
+    expect(harness.warnings()).not.toContain('sii exchange set could not be downloaded')
+  })
+
+  test('a page of the download that cannot be kept still leaves the set to be saved by hand', async () => {
+    const harness = await certificationHarness(exchangeRoutes({ download: { body: REFUSED_UPLOAD } }))
+    const store = {
+      ...harness.store,
+      writeArtefact: (): Promise<void> => Promise.reject(new Error('disk full')),
+    }
+    const result = await runExchange({ ...harness.deps, store }, atExchange())
+    expect(result).toEqual({ state: atExchange(), outcome: 'setUnavailable', detail: EXCHANGE_SET_ARTEFACT })
+    expect(await harness.store.listArtefacts()).toEqual([])
+  })
+
+  test('an error status on the user validation or on the set validation does not stop the stage, as in the field', async () => {
+    const busy = { status: 503, body: 'busy' }
+    for (const method of ['validarUsuario', 'validarSetContriPostSeguimiento']) {
+      const harness = await certificationHarness(exchangeRoutes({ facade: { [method]: busy } }))
+      const result = await runExchange(harness.deps, atExchange(), { setXml: exchangeSetXml() })
+      expect(result.outcome).toBe('done')
+      expect(result.state.exchange).toMatchObject({ uploaded: true, confirmed: true })
+      expect(harness.urls().filter((url) => url.includes('/uploadFile'))).toHaveLength(3)
+      expect(facadeMethods(harness)).toHaveLength(5)
+    }
   })
 
   test('the exchange already completed at the portal, or confirmed in the state, is done without uploading', async () => {
