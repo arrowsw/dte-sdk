@@ -1,8 +1,9 @@
 # dte-sdk — Certification runner: alignment with the reference (design)
 
 Date: 2026-11-06 · Status: **decided by Hans on 2026-11-05 ("the certification runner keeps to the reference, one
-hundred per cent"); written after the code of its five plans was run and gated. There are no plan documents: each
-plan goes from its commits to a pull request.**
+hundred per cent"); written after the code of its five plans was run and gated, and brought up to date with what
+their five pull requests found when the last one was opened. There are no plan documents: each plan goes from its
+commits to a pull request.**
 
 Starting point: the certification specs (5b-1 D57–D64, 5b-2 D65–D75, 5c-1 D76–D86, 5c-2 D87–D96) and a private
 parity audit of the runner against the implementation those phases were ported from, called here **the reference**.
@@ -46,16 +47,18 @@ that is the reference's behaviour is not fixed: it is recorded for the issue of 
 3. **The receipts declaration keeps Hans's two decisions**: the software provider is mandatory (D88) and the
    application's identifier must be read before declaring.
 4. **The session layer stays the one measured against the SII**: one login path, the logout, the firewall-block
-   check on every answer, the spacing of requests, and a token the SII refuses renewed once with the request sent
-   again. The reference differs here only when the SII is down or refuses a token.
+   check on every answer but those of the exact-header calls of sections 3.4 and 3.5, the spacing of requests, and a
+   token the SII refuses renewed once with the request sent again. The reference differs here only when the SII is
+   down or refuses a token.
 5. **No guard is added** that the reference does not have: the runner does not refuse a production client.
 
 ### D99. Earlier decisions this amends
 
 - **D60, D70, D92 (Chile dates).** The documents of the test sets and the receipts carry the UTC day; the test sets
-  are stamped in UTC with milliseconds; the simulation carries the local date of the process and UTC stamps to the
-  second; the base period of the books is the UTC month the set was read in. The declaration date stays today's Chile
-  date. Run the process with `TZ=America/Santiago`.
+  are stamped in UTC with milliseconds; the receipts and the simulation are stamped in UTC to the second, and the
+  simulation carries the local date of the process; the base period of the books is the UTC month the set was read
+  in. The date declared for the sets and the books stays today's Chile date; the receipts declaration carries the
+  local date of the process. Run the process with `TZ=America/Santiago`.
 - **D62, D73, D84, D94 (field defects not copied).** Copied wherever they are part of what the SII receives or of the
   flow: a page that shows none of the sets sent counts as approval; the request for the next stage does not wait for
   the books; the declaration is verified loosely; the exchange set is read loosely; the receipts portal's answers are
@@ -74,7 +77,9 @@ that is the reference's behaviour is not fixed: it is recorded for the issue of 
 5. The receipts.
 
 Each plan is a run of commits, one per task, with the full gates green at its tip, and each is merged before the next
-is brought onto `canary`. Plan documents were not written: the commits are the plan.
+is brought onto `canary`. Plan documents were not written: the commits are the plan. The session that takes a plan to
+its pull request verifies it against the reference first and corrects, in commits of its own, what still differs
+(section 5).
 
 ### D101. The run reads the web services its own way; the general clients keep theirs
 
@@ -88,6 +93,16 @@ eight attempts, 2 s growing by 1.8 up to 15 s; only `STATUS` 0 with a `TRACKID` 
 duplicate recovered by that element unless its first error line names a charset or schema refusal, `STATUS` 99 a
 failed send). `uploadEnvelope`, `queryUploadStatus` and the rest keep their own retry rule and their own reading.
 
+The same rule settled every general function the alignment touched: **what the reference's own general module does
+stays for every caller; what only its certification runner or one of its certification helpers does is given to the
+run through an option, and the general function stays as it was.** So the SOAP header and escaping, the reading of a
+folio check, the requests of the reobtention, the caps of an annulment and the pages of the stage advance and of the
+compliance wizard, which are no longer searched for a refusal, are what every caller gets. The lowest free folio of
+the registry (`ReserveOptions.lowestFree`), the exact-header request mode of the exchange and samples stages and of
+the receipts portal, a part header written in UTF-8 (`utf8Headers`), a string with a table entry of its own in a GWT
+body, the tolerant reader of the exchange set and a review state read whatever the status of its answer (`anyStatus`
+of `readSamplesReview`) are asked for by the run alone.
+
 ### D102. The chain between the phases is the closest copy
 
 The reference has no end-to-end runner: a script outside it calls its phase methods. The runner keeps chaining them
@@ -100,8 +115,8 @@ books, stops the run with its sentence; and the declaration of compliance is mad
 ### D103. Size
 
 `dte-sdk/portal` grows with every plan; its limit follows the D36 rule (the measured size rounded up to the next 2 kB)
-in the plan that crosses it: 70 kB in plan 1 (68.02 kB measured) and 72 kB in plan 4 (70.32 kB). At the tip of
-plan 5 it measures 71.06 kB.
+in the plan that crosses it: 70 kB in plan 1 (68.16 kB measured) and 72 kB in plan 3 (70.31 kB). At the tip of
+plan 5 it measures 71.6 kB.
 
 ### D104. What is given up is tracked, not applied
 
@@ -127,7 +142,8 @@ issue of D104.
   milliseconds; `PrcItem` has six decimals on the priced lines of the basic, exempt and purchase sets
   (`LineItemInput.unitPriceDecimals`); a note that only corrects a text carries `MntTotal` 0 and nothing else; the
   exempt notes take the unit `UN` on their default branch; the debit note of the purchase set takes the items of the
-  credit note before it; every case of the guide set is a guide.
+  credit note before it; every case of the guide set is a guide; a receiver's line of business is cut to 40
+  characters, in the sets and in the simulation.
 - **Uploading.** D101.
 - **Declaring.** The form is read by its quoted, upper-case attributes; the post goes even when no row has a field;
   the answer is classified on the page as it came (a lost session reads as "not processed yet"; "ENVIO CON ERRORES O
@@ -152,76 +168,95 @@ issue of D104.
   adjustment only on a duplicate without a track id or a schema rule on the first error line. Without the three
   mandatory books sent or approved the phase is `incomplete`.
 - **Before declaring**, the SOAP status of each book is read for a minute (15 s, then three rounds 15 s apart), with
-  a count of failures per book. Every book with a track id is declared with the four sets.
+  a count of failures per book. Every book with a track id is declared with the four sets, the sales book first.
 - **A period already held.** While every declared row comes back empty, up to 24 times, every book goes again: as an
   adjustment once per period when the totals of the sales or the purchase book are kept, else as a total submission in
   the next free period. A book the SOAP status rejects after a resend leaves the declaration and marks its period.
 - **The wait.** 40 polls 15 s apart, the SOAP status every second poll; the books the first SOAP look rejected or the
-  declaration named with content errors are not awaited and stand as closed. After a wait only the books the page shows
-  rejected, closed or declared and never reviewed go again, under their exact name; a declaration that does not stand
-  ends the search unless every row came back empty, an adjustment was tried or nothing was left to declare. No read of
-  the portal stops the phase.
+  declaration named with content errors are not awaited and stand as closed. After a wait every row the page shows
+  rejected, closed or declared and never reviewed keeps the search going and is awaited again, in the order of the
+  page, whether or not the run sends that book; the books of the run among them go again, under their exact name. A
+  declaration that does not stand ends the search unless every row came back empty, an adjustment was tried or nothing
+  was left to declare. No read of the portal stops the phase.
 - **The books themselves.** Any of the three can be an adjustment; without kept totals both summary sections repeat
   the lines' summary. The withheld VAT of a purchase invoice travels as rate `0.19` in `OtrosImp`; the common-use
   credit is rounded per document; the summaries carry no `TpoImp`; in the exempt purchase book every taxed line is
-  non-recoverable VAT with code 1 and the observations of the regular book are not read; the two purchase-book sets
-  are parsed with the reference's rules.
+  non-recoverable VAT with code 1 and the observations of the regular book are not read; a document flagged as common
+  use that carries no VAT is not counted as a common-use operation; the two purchase-book sets are parsed with the
+  reference's rules (a separator line ends the regular set only).
 - **The next stage.** D102: the progress page is read (30 tries 10 s apart while it cannot be read), the advance is
   asked for at once and the page read again; nothing throws for a portal answer.
 - **The simulation.** The local date of the process; `TSTED` and `TmstFirma` in UTC to the second; the envelope in
-  Chile time; plain unit prices; a guide without `TpoDespacho`; issuer and receiver with their basic fields only;
-  a bare zero total where the lines add up to nothing. It is declared unless the progress page names the exchange as
-  the current step; its wait reads the page 30 times 10 s apart without ever throwing, takes "RECHAZADO", "ERRORES"
-  or "REPARO" as a rejection, confirms the review by declaring once more, and asks the SOAP status once when the
-  polls run out.
-- **The closing.** `pe_avance4` and the two posts of the compliance wizard follow the retry policy; the wizard posts
-  every named input of the page; the declaration counts as made when the last page shows neither `OPC1` nor the
+  Chile time; plain unit prices; a guide without `TpoDespacho`; issuer and receiver with their basic fields only; a
+  bare zero total where the lines add up to nothing. It is declared unless the progress page names the exchange as the
+  current step (a progress page that cannot be read does not stop it); its wait reads the page 30 times 10 s apart
+  without ever throwing, takes "RECHAZADO", "ERRORES" or "REPARO" as a rejection, confirms the review by declaring
+  once more, and asks the SOAP status once when the polls run out.
+- **The closing.** `pe_avance4` and the two posts of the compliance wizard follow the retry policy; the wizard names
+  `pe_avance7` as the referer of its first post and posts every named input of the page, read with a reader of its
+  own as the reference reads them; the declaration counts as made when the last page shows neither `OPC1` nor the
   company's RUT field; the advance before it is asked for once and ignored when it fails.
 
 ### 3.3 Plan 3: folios and web services
 
 - **Web services.** `SOAPAction` is empty; SOAP parameters are escaped with `&`, `<` and `>` only; the REST status
-  queries send the upload `User-Agent`; `folioReceived` asks as the company.
+  queries send the upload `User-Agent`; `folioReceived` asks as the company and reads the answer by its code and the
+  words of its gloss.
 - **Preparing the folios of a run.** The SII is asked whether it holds the folios the run is about to use (30
   queries per CAF at the most) and those it holds are marked used; a query that fails counts as free. A maximum that
   cannot be read is no cap. A range is obtained again with the whole need, and kept only through the folios the SII
   showed free. A blocked type is not asked for. After annulling, the maximum is read again. The ranges reported
-  annulled are kept in the state.
+  annulled are kept in the state. New folios are asked for in as many batches as folios are missing, and the exact
+  request falls back to batches only when the maximum is short and not zero. Every CAF is saved as it arrives. A
+  reobtention that downloads nothing covers nothing, and the ranges it does bring take the place of the CAFs in hand
+  of that type. The annulment of the run leaves out every CAF the state holds, the expired ones included.
 - **The portal's folio pages.** The reobtention sends referers without a host, picks its forms by their exact opening
-  tag, reads only inputs with a quoted name and value and does no session handling on the way in; a listing that fails
-  for any reason is no ranges. Annulment caps its ranges per pass (four passes) and tries each step three times. An
-  authorised range is recovered with the UTC day.
-- **The ledger** hands out the lowest folio of a range that is neither used nor annulled.
+  tag, reads only inputs with a quoted name and value and does no session handling on the way in; a listing is read
+  for ranges and nothing else, and one that fails for any reason is no ranges. Annulment caps its ranges per pass
+  (four passes) and tries each step three times. An authorised range is recovered with the UTC day.
+- **The ledger.** The run takes the lowest folio of a range that is neither used nor annulled, through an option of
+  the registry (`ReserveOptions.lowestFree`); the registry itself keeps handing folios out from its pointer, as the
+  reference's own registry does (D101).
 
 ### 3.4 Plan 4: the exchange and the printed samples
 
 - **One stage, one warm-up.** Each portal is entered once per stage of work, the saved session is checked once per
   stage, and the cookies of the warm-up live in that stage only.
 - **The calls.** Sent once, with no time-out of their own, the headers the reference sends to each portal and the
-  answers read as UTF-8; only a PDF upload answered with a 5xx is repeated.
+  answers read as UTF-8; only a PDF upload answered with a 5xx is repeated. Inside a stage every call reads its own
+  answer whatever its HTTP status, and none is searched for the firewall's page.
 - **The exchange.** The known pair of hashes, without discovery; the fixed table of strings in the user validation;
-  any failure of the set download is "download it by hand"; the set is read loosely; the contact travels as given.
-- **The samples.** A PDF keeps its file name as given, written as UTF-8 in its part header; a re-read that fails
-  after submitting leaves the stage as submitted; when the warm-up fails the known hashes stand.
+  any failure of the set download is "download it by hand", while a downloaded set that cannot be kept is an error of
+  the run; the set is parsed with a tolerant reader of its own, without a well-formedness check, and read loosely; the
+  contact travels as given.
+- **The samples.** A PDF keeps its file name as given, written as UTF-8 in its part header; the re-read after
+  submitting takes the state from whatever answer comes back, and one that fails leaves the stage as submitted; when
+  the warm-up fails the known hashes stand.
 
 ### 3.5 Plan 5: the receipts
 
 - **The receipts set** is read by position: a line splits on tabs or on two or more spaces; the header and
   `OBSERVACION` match in exact case; a price loses every dot and its first comma; the unit is the last word after
   " en " at the end of the observation.
-- **The receipts** carry the UTC day, and the issuer and the resolution take the same defaults as the document runner.
+- **The receipts** carry the UTC day, and each is stamped and signed with the UTC instant to the second, read when
+  that receipt is made; only the envelope keeps the time of Chile. The issuer and the resolution take the same
+  defaults as the document runner.
 - **Sending.** The envelope and the folio consumption report go through D101. The envelope's status is asked once
   after 20 s and each report's after 30 s; a query that never got through counts as accepted; an answer without a
   state, or with one the table does not know, sends the next report, up to ten, starting at sequence 100; three
-  duplicates in a row mean today's report was already taken.
+  duplicates in a row mean today's report was already taken. A rejection is reported with the gloss the SII wrote. A
+  report sent again on its own is uploaded and read the same way.
 - **The receipts portal.** Every request carries only the headers the reference sends, is sent once, waits 30 s (20 s
-  on the production check) and its answer is read as UTF-8 whatever its status. The representative comes from the
-  session's cookies, with the portal's list as the fallback and `8` as the last resort for the check digit. The
-  states are searched in the raw answer (`P90`, `P91`). The posts that declare the track id and the compliance are
-  judged by `//OK` alone. The declaration is dated with the local date of the process.
+  on the production check) and its answer is read as UTF-8 whatever its status, without a search for the firewall's
+  page. The saved session is checked before each operation unless the caller says an earlier one already did
+  (`sessionChecked`). The representative comes from the session's cookies, with the portal's list as the fallback and
+  `8` as the last resort for the check digit. The states are searched in the raw answer (`P90`, `P91`). The posts that
+  declare the track id and the compliance are judged by `//OK` alone. The declaration is dated with the local date of
+  the process and writes the provider's name and mail and the business name as given; the track id is declared as
+  given.
 - **The authorisation check.** One read of the progress page in certification, with the reference's words
   (`conform`, `aprobad`, `autoriz`); in production the stamping form is posted with the company as the caller wrote
-  it and the options read from the page.
+  it (whole, with an empty check digit, when it has no hyphen) and the options read from the page.
 - **Found late and closed here:** the advance and the compliance wizard no longer search their pages for a refusal.
 
 ---
@@ -245,9 +280,13 @@ None of these leaves the runner unable to finish a run.
 **Because the layer was left alone on purpose** (D98)
 
 5. **Login, logout, token, request spacing and TLS.** A token the SII refuses is renewed once and the request sent
-   again; the firewall block is looked for on every answer; a redirect answered to a form post is followed; a 502, 503
-   or 504 throws in the request layer (so the warm-up of a portal counts as failed where the reference would go on).
-   The time-out of an upload is a wall-clock limit the operator can set; the reference's is an idle-socket one.
+   again; a redirect answered to a form post is followed; the firewall block is looked for on every answer, and a
+   502, 503 or 504 throws in the request layer, everywhere except in the calls of the exchange and samples stages and
+   of the receipts portal, which read every answer as the reference does. The saved session is checked with one read
+   of the company page at the start of an exchange or samples stage and of each receipts operation, on the session's
+   own cookies; the reference checks once per process, on a copy of them, and the rest of the SDK does not check. A
+   time-out is a wall-clock limit the operator can set; the reference's is an idle-socket one. The default transport
+   adds its own headers to the ones a request names.
 6. **Errors are `DteError`.** Where the reference returns a failure object the runner either returns an outcome or
    throws: a set or a simulation that cannot be uploaded throws after its state is saved; a compliance page that still
    shows its form throws `SII_PORTAL_UNEXPECTED_PAGE`.
@@ -269,7 +308,8 @@ None of these leaves the runner unable to finish a run.
 12. **The white space of a SOAP envelope** is this SDK's (no indentation).
 13. **A unit of measure longer than four characters**, read from an observation of the receipts set, is refused by the
     document builder (`UnmdItem` allows four). The reference would send it. This is the one place where not copying
-    could stop a run the reference would attempt; it waits for a real set text.
+    could stop a run the reference would attempt; it waits for a real set text. The builders refuse two more things
+    the reference would send: a folio report sequence above 999 and a RUT that is not valid.
 
 **Because the time zone makes them the same**
 
@@ -286,7 +326,25 @@ None of these leaves the runner unable to finish a run.
     needs one; the reference sets none.
 18. The order of the PDFs of the samples is the caller's.
 19. A status answer that carries an error code and no state counts as no answer; the reference reads it as a
-    rejection and looks at its gloss. The status client keeps no raw answer of a failed query.
+    rejection and looks at its gloss. The status client keeps no raw answer of a failed query, so a query error code
+    outside the documented ones has no gloss to judge either.
+
+**Found while the plans were verified**
+
+20. **A relative form action in the last post of the compliance wizard** is resolved against the page it came from,
+    as a browser resolves it. The reference resolves it against the host alone, which with a relative action would
+    post the sworn statement to an address that does not exist and then count it as made. With an absolute action
+    both post to the same address.
+21. **The folio registry keeps its pointer.** "The lowest free folio" is the rule of the reference's certification
+    helper, not of its registry, so only the run asks for it (D101).
+22. **The exchange set has a tolerant reader of its own.** The strict XML readers every other caller uses were not
+    loosened.
+23. **A file name with a carriage return, a line feed or a double quote** is refused by the multipart builder every
+    upload shares; the reference would write a broken part header.
+24. **A relative redirect of a portal's warm-up** is resolved as a browser resolves it.
+25. **Results in place of thrown errors, and the other way round.** A folio report that cannot be uploaded ends
+    `sendReceiptsSet` as `consumptionFailed` where the reference throws; a refused upload, track id or declaration
+    throws where the reference returns a failure.
 
 ---
 
@@ -295,6 +353,12 @@ None of these leaves the runner unable to finish a run.
 Each plan: one commit per task, tests first; at the tip `prettier --check`, `eslint`, `tsc` (the tests included),
 `npm run build`, Jest with the 100 % threshold on the four metrics, `size-limit` and `npm run scan`. The fakes of
 `tests/support/` script the portal and the web services; nothing calls the SII, and the reference is never run.
+
+Each pull request was verified on its own before it was opened. The changed tests of every commit were run against
+the source of the commit before it, where they fail, and against its own, where they pass; and every code commit was
+reviewed independently against the reference, request by request and read by read. Where the runner still differed
+it was corrected toward the reference in a further commit, with a test that failed first: five such corrections in
+plan 1, seven in plan 2, ten in plan 3, five in plan 4 and four in plan 5. They are part of what section 3 describes.
 
 What none of this proves is that the requests are the reference's byte for byte: the tests pin what this document
 says, not what the reference sends. The next step, before the first real run, is a differential against a synthetic
