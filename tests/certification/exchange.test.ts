@@ -87,20 +87,64 @@ describe('parseExchangeSet', () => {
     ])
   })
 
-  test('a set without documents, without an envelope root, or with a document that lacks its fields', () => {
+  test('a set without documents or without an envelope root is the only one refused', () => {
     expect(thrown(() => parseExchangeSet(envelope('EnvioDTE', ''))).code).toBe('ENVELOPE_EMPTY')
     expect(thrown(() => parseExchangeSet('<Other><SetDTE/></Other>')).details).toEqual({
       field: 'SetDTE',
       reason: 'no envelope root',
     })
+  })
+
+  test('a document that lacks its fields reads as zeros, empty RUTs and no date, never as an error', () => {
     const noType = envelope('EnvioDTE', document(33, 1, COMPANY).replace('<TipoDTE>33</TipoDTE>', ''))
-    expect(thrown(() => parseExchangeSet(noType)).details).toEqual({ field: 'TipoDTE' })
+    expect(parseExchangeSet(noType).documents[0]).toMatchObject({ type: 0, folio: 1 })
     const badFolio = envelope('EnvioDTE', document(33, 1, COMPANY).replace('<Folio>1</Folio>', '<Folio>A1</Folio>'))
-    expect(thrown(() => parseExchangeSet(badFolio)).details).toEqual({ field: 'Folio', reason: 'not a number' })
-    const noReceiver = envelope('EnvioDTE', document(33, 1)).replace(`<RutReceptor>${COMPANY}</RutReceptor>`, '')
-    expect(thrown(() => parseExchangeSet(noReceiver)).details).toEqual({ field: 'RUTRecep' })
+    expect(parseExchangeSet(badFolio).documents[0]).toMatchObject({ type: 33, folio: 0 })
+    const badTotal = envelope(
+      'EnvioDTE',
+      document(33, 1, COMPANY, 5).replace('<MntTotal>5</MntTotal>', '<MntTotal>x</MntTotal>'),
+    )
+    expect(parseExchangeSet(badTotal).documents[0].total).toBe(0)
+    const noDate = envelope('EnvioDTE', document(33, 1, COMPANY).replace('<FchEmis>2026-11-01</FchEmis>', ''))
+    expect(parseExchangeSet(noDate).documents[0].issueDate).toBeNull()
+    const emptyDate = envelope('EnvioDTE', document(33, 1, COMPANY).replace('2026-11-01', ''))
+    expect(parseExchangeSet(emptyDate).documents[0].issueDate).toBeNull()
+    const bare = envelope('EnvioDTE', '<DTE version="1.0"/>')
+      .replace(/<RutReceptor>.*?<\/RutReceptor>/, '')
+      .replace(/<RutEnvia>.*?<\/RutEnvia>/, '')
+    expect(parseExchangeSet(bare)).toMatchObject({ senderRut: null, receiverRut: null })
+    expect(parseExchangeSet(bare).documents).toEqual([
+      { type: 0, folio: 0, issueDate: null, issuerRut: SET_ISSUER, receiverRut: '', total: 0 },
+    ])
     const noIssuer = envelope('EnvioDTE', document(33, 1, COMPANY)).replace(`<RutEmisor>${SET_ISSUER}</RutEmisor>`, '')
-    expect(thrown(() => parseExchangeSet(noIssuer)).details).toEqual({ field: 'RutEmisor' })
+    expect(parseExchangeSet(noIssuer)).toMatchObject({
+      issuerRut: '',
+      documents: [{ type: 33, issuerRut: SET_ISSUER }],
+    })
+    const nothing = noIssuer.replace(`<RUTEmisor>${SET_ISSUER}</RUTEmisor>`, '')
+    expect(parseExchangeSet(nothing).documents[0].issuerRut).toBe('')
+  })
+
+  test('an empty element falls back to the cover as an absent one does, and a numeric prefix counts', () => {
+    const emptyReceiver = envelope('EnvioDTE', document(33, 1, '').replace('<RUTRecep></RUTRecep>', '<RUTRecep/>'))
+    expect(parseExchangeSet(emptyReceiver).documents[0].receiverRut).toBe(COMPANY)
+    const prefixed = envelope('EnvioDTE', document(33, 1, COMPANY).replace('<Folio>1</Folio>', '<Folio>12abc</Folio>'))
+    expect(parseExchangeSet(prefixed).documents[0].folio).toBe(12)
+    const emptyId = envelope('EnvioDTE', document(33, 1, COMPANY), ' ID=""')
+    expect(parseExchangeSet(emptyId).setId).toBe('SetDTE')
+  })
+
+  test('the RUTs of the set are not validated: only the dots go and the letter is upper-cased', () => {
+    const odd = envelope('EnvioDTE', document(33, 1, '14.625.621-k'))
+      .replace(`<RutEmisor>${SET_ISSUER}</RutEmisor>`, '<RutEmisor>9.999.999-x</RutEmisor>')
+      .replace(`<RutEnvia>${SET_ISSUER}</RutEnvia>`, '<RutEnvia>ab.c</RutEnvia>')
+      .replace(`<RUTEmisor>${SET_ISSUER}</RUTEmisor>`, '<RUTEmisor>1.1</RUTEmisor>')
+    expect(parseExchangeSet(odd)).toMatchObject({
+      issuerRut: '9999999-X',
+      senderRut: 'ABC',
+      receiverRut: COMPANY,
+      documents: [{ issuerRut: '11', receiverRut: '14625621-K' }],
+    })
   })
 })
 
@@ -319,6 +363,41 @@ describe('createExchangeAnswers', () => {
     const phoneOnly = createExchangeAnswers(SET, { ...input, contact: { phone: '123' } })
     expect(cover(phoneOnly.reception.xml, 'RespuestaDTE', 'Resultado')).not.toHaveProperty('FonoContacto')
     expect(cover(phoneOnly.receipts.xml, 'EnvioRecibos', 'SetRecibos')['FonoContacto']).toBe('123')
+  })
+
+  test('only the name of the contact goes through the text sanitizer; the mail and the phone travel as given', () => {
+    const odd = createExchangeAnswers(SET, {
+      ...input,
+      contact: { name: "O'Higgins", mail: " o'brien@example.test", phone: '+56 "2" 2345' },
+    })
+    const cover = (xml: string, root: string, set: string) => node(node(node(parseXml(xml)[root])[set])['Caratula'])
+    expect(cover(odd.reception.xml, 'RespuestaDTE', 'Resultado')).toMatchObject({
+      NmbContacto: 'OHiggins',
+      MailContacto: "o'brien@example.test",
+    })
+    expect(cover(odd.receipts.xml, 'EnvioRecibos', 'SetRecibos')).toMatchObject({
+      NmbContacto: 'OHiggins',
+      FonoContacto: '+56 "2" 2345',
+      MailContacto: "o'brien@example.test",
+    })
+  })
+
+  test('each contact field is written when it is not empty, whatever the sanitizer leaves of it', () => {
+    const quoted = createExchangeAnswers(SET, { ...input, contact: { name: "'", mail: '', phone: '' } })
+    expect(quoted.reception.xml).toContain('<NmbContacto></NmbContacto>')
+    expect(quoted.reception.xml).not.toContain('MailContacto')
+    expect(quoted.receipts.xml).not.toContain('FonoContacto')
+  })
+
+  test('a document the set leaves unreadable is answered with its empty fields, the date as an empty element', () => {
+    const bare = createExchangeAnswers(
+      envelope('EnvioDTE', '<DTE version="1.0"/>').replace(/<RutReceptor>.*?<\/RutReceptor>/, ''),
+      input,
+    )
+    expect(bare.reception.xml).toContain('<FchEmis/>')
+    expect(bare.reception.xml).toContain('<RUTRecep></RUTRecep>')
+    expect(bare.reception.xml).toContain('<EstadoRecepDTE>3</EstadoRecepDTE>')
+    expect(bare.approval.xml).toContain('<CodRchDsc>-1</CodRchDsc>')
   })
 
   test('the clock defaults to now, and the receipts are signed by the company when the certificate names no holder', () => {
