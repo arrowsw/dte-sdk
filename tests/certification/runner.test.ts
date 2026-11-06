@@ -316,7 +316,10 @@ test('the simulation: a refused declaration, a rejected wait, a confirmed one sk
 })
 
 test('an error of a step is reported and rethrown; the company comes from the issuer when the client names none', async () => {
-  const harness = await certificationHarness([get('pe_generar', NOT_ENROLLED, NOT_ENROLLED)])
+  const harness = await certificationHarness([
+    get('pe_generar', NOT_ENROLLED, NOT_ENROLLED),
+    post('pe_generar2', page('<p>nada</p>'), page('<p>nada</p>')),
+  ])
   const error = await failure(runCertification(harness.deps))
   expect(error.details).toMatchObject({ rejection: 'notEnrolled' })
   expect(harness.steps()).toEqual(['SETS_DOWNLOADING', 'CERT_ERROR'])

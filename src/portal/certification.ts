@@ -338,7 +338,8 @@ const progressPages = async (
  * page is read first, which logs in and lets the SII refresh the application; whatever that read answers, the
  * download goes on. Then: the landing page (asked once more with a fresh session when it says "no está inscrito"),
  * the company confirmed on `pe_generar1` when the page asks, and `pe_generar2` posted with the company, `AUTORIZADA`,
- * `TOTAL`, the optional sets ticked in page order and `SET01` last. No page on the way is searched for a refusal. A
+ * `TOTAL`, the optional sets ticked in page order and `SET01` last. No page on the way is searched for a refusal, and
+ * a generation page that says the company is not enrolled is posted all the same and refused only afterwards. A
  * session the portal drops on the download is forgotten and the sequence repeated once. Generating the set assigns
  * the cases anew: call it once per certification.
  * ES: Descarga el set de pruebas desde `pe_generar`, como lo hace la referencia. Sin sesión en la caché se lee primero
@@ -346,7 +347,8 @@ const progressPages = async (
  * lectura, la descarga sigue. Luego: la portada (pedida una vez más con sesión nueva si dice "no está inscrito"), la
  * empresa confirmada en `pe_generar1` cuando la página lo pide, y `pe_generar2` enviado con la empresa, `AUTORIZADA`,
  * `TOTAL`, los sets opcionales marcados en el orden de la página y `SET01` al final. En ninguna página del camino se
- * busca un rechazo. Una sesión que el portal suelta en la descarga se olvida y la secuencia se repite una vez. Generar
+ * busca un rechazo, y una página de generación que dice que la empresa no está inscrita se envía igual y se rechaza
+ * recién después. Una sesión que el portal suelta en la descarga se olvida y la secuencia se repite una vez. Generar
  * el set asigna los casos de nuevo: se llama una vez por certificación.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: the company, the optional sets, whether to download. ES: la empresa, los sets opcionales, si descargar.
@@ -380,12 +382,17 @@ export const downloadTestSet = (
             at('pe_generar'),
           )
         : landing
-      if (isNotEnrolled(generation.html))
-        throw rejected(context, 'notEnrolled', { portalMessage: portalMessageOf(generation.html) })
+      // A page that says "not enrolled" is believed only once the sequence is over: the set is asked for first.
+      const refuseNotEnrolled = (): void => {
+        if (isNotEnrolled(generation.html))
+          throw rejected(context, 'notEnrolled', { portalMessage: portalMessageOf(generation.html) })
+      }
       const page = parseSetGeneration(generation.html)
       const base = { states: page.states, optionalSets: page.optionalSets }
-      if (input.download === false)
+      if (input.download === false) {
+        refuseNotEnrolled()
         return { ...base, requested: [], text: null, attentionNumber: null, regenerated: false }
+      }
       const ticked = page.optionalSets.map((option) => option.code).filter((code) => wanted.includes(code))
       const sets = { ...Object.fromEntries(ticked.map((code) => [code, 'S'])), [BASIC_SET_FIELD]: 'S' }
       const downloaded = await submitForm(
@@ -396,6 +403,7 @@ export const downloadTestSet = (
         { ...company, AUTORIZADA: page.authorized, TOTAL: page.total, ...sets },
         at('pe_generar1'),
       )
+      refuseNotEnrolled()
       if (isSessionDropped(downloaded.html)) {
         if (isNotEnrolledDownload(downloaded.html))
           throw rejected(context, 'notEnrolled', { portalMessage: portalMessageOf(downloaded.html) })

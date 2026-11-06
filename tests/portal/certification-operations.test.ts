@@ -149,12 +149,33 @@ describe('downloadTestSet', () => {
     ])
     await expect(downloadTestSet(once.portal)).resolves.toMatchObject({ attentionNumber: ATTENTION })
     expect(once.urls().filter((url) => url.endsWith('pe_generar'))).toHaveLength(2)
-    const twice = await signedIn([get('pe_generar', plain, plain)])
+    const twice = await signedIn([get('pe_generar', plain, plain), post('pe_generar2', page('<p>nada</p>'))])
     expect((await failure(downloadTestSet(twice.portal))).details).toMatchObject({ rejection: 'notEnrolled' })
     // With the accent as an entity the page is not asked again, and is still notEnrolled.
-    const entity = await signedIn([get('pe_generar', NOT_ENROLLED)])
+    const entity = await signedIn([get('pe_generar', NOT_ENROLLED), post('pe_generar2', page('<p>nada</p>'))])
     expect((await failure(downloadTestSet(entity.portal))).details).toMatchObject({ rejection: 'notEnrolled' })
-    expect(entity.urls()).toHaveLength(1)
+    expect(entity.urls().filter((url) => url.endsWith('pe_generar'))).toHaveLength(1)
+  })
+
+  test('a generation page that says not enrolled is posted all the same, and only then refused', async () => {
+    const harness = await signedIn([get('pe_generar', NOT_ENROLLED), post('pe_generar2', setDownloadPage())])
+    expect((await failure(downloadTestSet(harness.portal))).details).toMatchObject({ rejection: 'notEnrolled' })
+    expect(harness.urls().map(lastSegment)).toEqual(['pe_generar', 'pe_generar2'])
+    expect(harness.fake.requests.find((request) => request.url.endsWith('/pe_generar2'))?.text).toBe(
+      'RUT_EMP=76543210&DV_EMP=3&AUTORIZADA=S&TOTAL=15&SET01=S',
+    )
+    // Without the download nothing is posted, and the page is refused as it is.
+    const reading = await signedIn([get('pe_generar', NOT_ENROLLED)])
+    expect((await failure(downloadTestSet(reading.portal, { download: false }))).details).toMatchObject({
+      rejection: 'notEnrolled',
+    })
+    expect(reading.urls().map(lastSegment)).toEqual(['pe_generar'])
+    // A post that fails is the failure of the download: the page is never judged.
+    const failing = await signedIn([
+      get('pe_generar', NOT_ENROLLED),
+      { url: `${MAULLIN}/pe_generar2`, method: 'POST' as const, reply: [{ status: 503, body: 'down' }] },
+    ])
+    expect((await failure(downloadTestSet(failing.portal))).code).toBe('SII_HTTP_ERROR')
   })
 
   test('a refusal on the way is not looked for: the set is asked for all the same', async () => {
@@ -173,7 +194,10 @@ describe('downloadTestSet', () => {
     ])
     await expect(downloadTestSet(blank.portal)).resolves.toMatchObject({ optionalSets: [], states: [] })
     // Any "no est&aacute;" on the page reads as not enrolled, whatever follows it.
-    const loose = await signedIn([get('pe_generar', REJECTION_PAGES.companyNotAuthorized)])
+    const loose = await signedIn([
+      get('pe_generar', REJECTION_PAGES.companyNotAuthorized),
+      post('pe_generar2', setDownloadPage()),
+    ])
     expect((await failure(downloadTestSet(loose.portal))).details).toMatchObject({ rejection: 'notEnrolled' })
   })
 
