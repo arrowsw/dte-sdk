@@ -5,7 +5,6 @@ import { DteError, errorMessage } from '../errors'
 import type { CallOverrides } from '../sii/client'
 import { resolvePortalCompany, type PortalClient } from './client'
 import { hasSessionCookie } from './cookies'
-import { hiddenInputs } from './html'
 import { portalMessageOf } from './pages/auth'
 import { parseCertificationSets, type CertificationSet } from './pages/certification'
 import { isHistoryUnauthorized, parseBookHistory, type BookHistoryEntry } from './pages/certification-books'
@@ -13,8 +12,8 @@ import {
   complianceBlock,
   complianceForm,
   complianceMessage,
+  continueFields,
   hasOkMessage,
-  isDeclared,
   isUnconfirmed,
 } from './pages/certification-compliance'
 import {
@@ -68,13 +67,6 @@ const UPL_URL = `https://${SII_HOSTS.certification}/cgi_dte/UPL/`
 const at = (page: string): string => cgiUrl('certification', page)
 
 type Company = ReturnType<typeof companyFields>
-
-// A post that changes the application (generating a set, moving the stage, declaring compliance) is sent once: a
-// retry after a timeout could repeat it. The declaration of progress is repeated safely, so it keeps the policy.
-const once = (context: PortalContext): PortalContext => ({
-  ...context,
-  overrides: { ...context.overrides, retry: false },
-})
 
 /**
  * EN: The certification state of a company.
@@ -280,8 +272,8 @@ const enter = async (context: PortalContext, company: Company): Promise<PortalPa
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: the company. ES: la empresa.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
- * @returns EN: the sets and whether the required ones are approved. ES: los sets y si los obligatorios están aprobados.
- * @throws {DteError} EN: `SII_PORTAL_REJECTED`, `SII_PORTAL_UNEXPECTED_PAGE`, session and transport codes. ES: los mismos códigos.
+ * @returns EN: the sets and whether the required ones are approved; a page without rows gives none. ES: los sets y si los obligatorios están aprobados; una página sin filas no da ninguno.
+ * @throws {DteError} EN: session and transport codes. ES: los códigos de sesión y de transporte.
  */
 export const queryCertificationSets = (
   portal: PortalClient,
@@ -290,8 +282,8 @@ export const queryCertificationSets = (
 ): Promise<CertificationSets> =>
   withPortalSession(portal, 'queryCertificationSets', overrides, async (context) => {
     const page = await enter(context, companyFields(resolvePortalCompany(portal, input.companyRut)))
+    // A page that lists nothing is still an answer: no set and no book, none approved.
     const sets = parseCertificationSets(page.html)
-    if (sets.length === 0) throw unexpectedPage(context, 'pe_avance2', page.html)
     return {
       sets,
       allSetsApproved: allApproved(sets, REQUIRED_SETS),
@@ -632,11 +624,11 @@ export const readProgress = (
 
 /**
  * EN: Asks the portal to move the application to its next stage: `pe_avance4` with `TOTREG` and `PASO` as `pe_avance2`
- * holds them (`PASO` changes with the stage; a fixed value makes the SII answer "ya se encuentra en el paso"). An
- * answer saying the stage was already there is `unchanged`, not a failure.
+ * holds them (`PASO` changes with the stage; a fixed value makes the SII answer "ya se encuentra en el paso"), with
+ * `pe_avance2` as referer. An answer saying the stage was already there is `unchanged`, not a failure.
  * ES: Pide al portal pasar la postulación a su siguiente etapa: `pe_avance4` con `TOTREG` y `PASO` tal como los trae
- * `pe_avance2` (`PASO` cambia con la etapa; un valor fijo hace que el SII responda "ya se encuentra en el paso"). Una
- * respuesta que diga que ya estaba en la etapa es `unchanged`, no una falla.
+ * `pe_avance2` (`PASO` cambia con la etapa; un valor fijo hace que el SII responda "ya se encuentra en el paso"), con
+ * `pe_avance2` de referer. Una respuesta que diga que ya estaba en la etapa es `unchanged`, no una falla.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: the company. ES: la empresa.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
@@ -651,19 +643,22 @@ export const advanceStage = (
   withPortalSession(portal, 'advanceStage', overrides, async (context) => {
     const company = companyFields(resolvePortalCompany(portal, input.companyRut))
     const formPage = await enter(context, company)
-    const hidden = hiddenInputs(formPage.html)
+    // Read as the reference reads them: the first tag of that name written with quotes and with the name before the
+    // value, whatever its type. A field the page does not carry in that shape takes its default.
+    const fieldOf = (name: string, fallback: string): string =>
+      new RegExp(`name="${name}"[^>]*value="([^"]*)"`, 'i').exec(formPage.html)?.[1] ?? fallback
     const page = await submitForm(
-      once(context),
+      context,
       'pe_avance4',
       at('pe_avance4'),
       formPage.url,
       {
         ...company,
-        TOTREG: hidden.TOTREG ?? '0',
-        PASO: hidden.PASO ?? DEFAULT_STEP,
+        TOTREG: fieldOf('TOTREG', '0'),
+        PASO: fieldOf('PASO', DEFAULT_STEP),
         ACEPTAR: 'Avanzar Siguiente Paso',
       },
-      formPage.url,
+      at('pe_avance2'),
     )
     assertNotRejected(context, page.html)
     return classifyAdvanceAnswer(page.html)
@@ -701,19 +696,24 @@ export const listBookHistory = (
   })
 
 /**
- * EN: The declaration of compliance: `pe_avance7`, `pe_avance8` with the company, once more with `OK_MSG` when the
- * portal asks to continue, then the `pe_avance9` form with every option at `S` and `CONFIRMAR`, never `Salir`. A
- * block ("no ha finalizado su certificación") at any screen is data. This is the sworn statement of the legal
- * representative and cannot be undone: call it when the samples are approved.
- * ES: La declaración de cumplimiento: `pe_avance7`, `pe_avance8` con la empresa, una vez más con `OK_MSG` cuando el
- * portal pide continuar, y luego el formulario de `pe_avance9` con cada opción en `S` y `CONFIRMAR`, nunca `Salir`.
- * Un bloqueo ("no ha finalizado su certificación") en cualquier pantalla es un dato. Es la declaración jurada del
- * representante legal y no se puede deshacer: se llama cuando las muestras están aprobadas.
+ * EN: The declaration of compliance, as the reference posts it: `pe_avance7`, `pe_avance8` with the company, once more
+ * with every input of the page when the portal asks to continue (`OK_MSG`), then the `pe_avance9` form with every input
+ * of the page, `Salir` apart, every `OPCn` at `S` and `CONFIRMAR`, both posts with `pe_avance8` as referer. A block ("no
+ * ha finalizado su certificación") at any screen is data. A last page with no `pe_avance9` form posts nothing more and
+ * is judged as it is: it is `declared` unless it still shows the first option or the company input. This is the sworn
+ * statement of the legal representative and cannot be undone: call it when the samples are approved.
+ * ES: La declaración de cumplimiento, como la envía la referencia: `pe_avance7`, `pe_avance8` con la empresa, una vez
+ * más con todos los inputs de la página cuando el portal pide continuar (`OK_MSG`), y luego el formulario de
+ * `pe_avance9` con todos los inputs de la página, salvo `Salir`, cada `OPCn` en `S` y `CONFIRMAR`, ambos envíos con
+ * `pe_avance8` de referer. Un bloqueo ("no ha finalizado su certificación") en cualquier pantalla es un dato. Una
+ * última página sin formulario de `pe_avance9` no envía nada más y se juzga tal como está: es `declared` salvo que aún
+ * muestre la primera opción o el campo de la empresa. Es la declaración jurada del representante legal y no se puede
+ * deshacer: se llama cuando las muestras están aprobadas.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: the company. ES: la empresa.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: declared, blocked or unconfirmed, with the sentence. ES: declarada, bloqueada o sin confirmar, con la frase.
- * @throws {DteError} EN: `SII_PORTAL_REJECTED`, `SII_PORTAL_UNEXPECTED_PAGE` without the `pe_avance9` form, session and transport codes. ES: los mismos códigos.
+ * @throws {DteError} EN: `SII_PORTAL_REJECTED`, session and transport codes. ES: los mismos códigos.
  */
 export const declareCompliance = (
   portal: PortalClient,
@@ -734,27 +734,29 @@ export const declareCompliance = (
       at('pe_avance8'),
       entry.url,
       { ...company, ACEPTAR: 'Continuar' },
-      entry.url,
+      at('pe_avance7'),
     )
     const blockedAtSecond = blockedOn(second)
     if (blockedAtSecond !== null) return blockedAtSecond
     const third = hasOkMessage(second.html)
       ? await submitForm(
-          once(context),
+          context,
           'pe_avance8.continue',
           at('pe_avance8'),
           second.url,
-          { ...hiddenInputs(second.html), Aceptar: 'Continuar con la Declaración' },
-          second.url,
+          continueFields(second.html),
+          at('pe_avance8'),
         )
       : second
     const blockedAtThird = blockedOn(third)
     if (blockedAtThird !== null) return blockedAtThird
     const form = complianceForm(third.html)
-    if (form === null) throw unexpectedPage(context, 'pe_avance9', third.html)
-    const final = await submitForm(once(context), 'pe_avance9', form.action, third.url, form.fields, third.url)
+    const final =
+      form === null
+        ? third
+        : await submitForm(context, 'pe_avance9', form.action, third.url, form.fields, at('pe_avance8'))
     const blockedAtFinal = blockedOn(final)
     if (blockedAtFinal !== null) return blockedAtFinal
     const message = complianceMessage(final.html)
-    return { outcome: isUnconfirmed(final.html) || !isDeclared(final.html) ? 'unconfirmed' : 'declared', message }
+    return { outcome: isUnconfirmed(final.html) ? 'unconfirmed' : 'declared', message }
   })

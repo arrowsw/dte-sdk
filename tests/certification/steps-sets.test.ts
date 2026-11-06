@@ -81,7 +81,8 @@ describe('obtainTestSet', () => {
     const harness = await certificationHarness(routes())
     const result = await obtainTestSet(harness.deps, stateWith(), { optionalSets: ['SET03'] })
     expect(result.outcome).toBe('loaded')
-    expect(result.state).toMatchObject({ attentionNumber: ATTENTION, stage: 'testSets' })
+    // The UTC day the set was read on: FIXED_NOW is 18:30 UTC.
+    expect(result.state).toMatchObject({ attentionNumber: ATTENTION, stage: 'testSets', setReadDate: TODAY })
     expect(result.state.plan?.basic?.kind).toBe('basic')
     expect(result.state.setText).toContain('SET BASICO')
     expect(await harness.store.listArtefacts()).toEqual(['estructuras.json', 'set-texto.txt'])
@@ -859,46 +860,105 @@ test('the runtime defaults: a real clock, a real sleep, no listener', async () =
 })
 
 describe('advanceToNextStage', () => {
-  const routes = (answer: string, stage: string) => [
+  const form = declarationFormPage(STANDARD_ROWS)
+  const before = progressPage('SET DE PRUEBAS', { 'LIBRO DE VENTAS': 'EN REVISION' })
+  // The page is read, the advance asked for, and the page read again: four posts of the company at the most.
+  const routes = (answer: string | FakeReply, after: string | FakeReply, first: string | FakeReply = before) => [
     entry,
-    post('pe_avance2', declarationFormPage(STANDARD_ROWS), declarationFormPage(STANDARD_ROWS)),
+    post('pe_avance2', ...repeat(form, 4)),
     post('pe_avance4', answer),
-    get('pe_avance5', page('p5')),
-    post('pe_avance6', progressPage(stage, { 'SET BASICO': 'REVISADO CONFORME' })),
+    get('pe_avance5', page('p5'), page('p5')),
+    post('pe_avance6', first, after),
   ]
+  const down = new DteError('TRANSPORT_FAILED', { reason: 'ECONNRESET' })
 
-  test('advanced, and the stage read from the portal', async () => {
-    const harness = await certificationHarness(routes(ADVANCE_ANSWERS.advanced, 'SIMULACION'))
+  test('the page is read, the advance asked for at once whatever the books show, and the stage read again', async () => {
+    const harness = await certificationHarness(
+      routes(ADVANCE_ANSWERS.advanced, progressPage('SIMULACION', { 'SET BASICO': 'REVISADO CONFORME' })),
+    )
     const result = await advanceToNextStage(harness.deps, stateWith({ stage: 'books' }))
     expect(result).toMatchObject({ outcome: 'advanced', detail: 'La empresa ha pasado al paso de SIMULACION' })
     expect(result.state.stage).toBe('simulation')
     expect(harness.steps()).toEqual(['ADVANCE_WAITING', 'ADVANCE_DONE'])
     expect(harness.events[1]).toEqual({ step: 'ADVANCE_DONE', stage: 'SIMULACION' })
+    expect(harness.sleeps).toEqual([])
+    const names = harness.urls().map((url) => url.slice(url.lastIndexOf('/') + 1))
+    expect(names.slice(0, 7)).toEqual([
+      'pe_avance1',
+      'pe_avance2',
+      'pe_avance5',
+      'pe_avance6',
+      'pe_avance1',
+      'pe_avance2',
+      'pe_avance4',
+    ])
+    expect(names.slice(7, 11)).toEqual(['pe_avance1', 'pe_avance2', 'pe_avance5', 'pe_avance6'])
   })
 
-  test('"already there" is fine and never moves the stage back', async () => {
-    const harness = await certificationHarness(routes(ADVANCE_ANSWERS.unchanged, 'SET DE PRUEBAS'))
+  test('"already there" never moves the stage back; a stage the page does not name is empty', async () => {
+    const harness = await certificationHarness(routes(ADVANCE_ANSWERS.unchanged, progressPage('SET DE PRUEBAS')))
     const result = await advanceToNextStage(harness.deps, stateWith({ stage: 'exchange' }))
     expect(result.outcome).toBe('unchanged')
     expect(result.state.stage).toBe('exchange')
-    const noStage = await certificationHarness([
-      entry,
-      post('pe_avance2', declarationFormPage(STANDARD_ROWS), declarationFormPage(STANDARD_ROWS)),
-      post('pe_avance4', ADVANCE_ANSWERS.advanced),
-      get('pe_avance5', page('p5')),
-      post('pe_avance6', page('<tr><td>SET BASICO</td><td><b>EN REVISION</b></td></tr>')),
-    ])
+    const noStage = await certificationHarness(
+      routes(ADVANCE_ANSWERS.advanced, page('<tr><td>SET BASICO</td><td><b>EN REVISION</b></td></tr>')),
+    )
     await advanceToNextStage(noStage.deps, stateWith())
     expect(noStage.events[1]).toEqual({ step: 'ADVANCE_DONE', stage: '' })
   })
 
-  test('a refusal throws with the portal sentence', async () => {
-    const harness = await certificationHarness(routes(ADVANCE_ANSWERS.failed, 'SIMULACION'))
-    const error = await failure(advanceToNextStage(harness.deps, stateWith()))
-    expect(error.code).toBe('SII_PORTAL_REJECTED')
-    expect(error.details).toMatchObject({
-      rejection: 'advanceRefused',
-      portalMessage: 'No es posible avanzar: faltan sets por revisar.',
-    })
+  test('a refusal, or an advance that could not be asked for, is `failed` with its sentence: nothing throws', async () => {
+    const refused = await certificationHarness(routes(ADVANCE_ANSWERS.failed, progressPage('SET DE PRUEBAS')))
+    const result = await advanceToNextStage(refused.deps, stateWith({ stage: 'books' }))
+    expect(result).toMatchObject({ outcome: 'failed', detail: 'No es posible avanzar: faltan sets por revisar.' })
+    expect(result.state.stage).toBe('books')
+    const unreachable = await certificationHarness(routes(down, progressPage('SET DE PRUEBAS')))
+    const failed = await advanceToNextStage(unreachable.deps, stateWith({ stage: 'books' }))
+    expect(failed.outcome).toBe('failed')
+    expect(failed.detail).toContain('before a response arrived')
+    expect(unreachable.steps()).toEqual(['ADVANCE_WAITING', 'ADVANCE_DONE'])
+  })
+
+  test('the stage that cannot be read again is left as it was', async () => {
+    const harness = await certificationHarness(routes(ADVANCE_ANSWERS.advanced, down))
+    const state = stateWith({ stage: 'books' })
+    const result = await advanceToNextStage(harness.deps, state)
+    expect(result.outcome).toBe('advanced')
+    expect(result.state).toBe(state)
+    expect(harness.events[1]).toEqual({ step: 'ADVANCE_DONE', stage: '' })
+    expect(harness.warnings()).toEqual(['certification progress after the advance failed'])
+  })
+
+  test('a page that cannot be read is asked again 10 s later, 30 times at the most', async () => {
+    const twice = await certificationHarness([
+      entry,
+      post('pe_avance2', ...repeat(form, 6)),
+      post('pe_avance4', ADVANCE_ANSWERS.advanced),
+      get('pe_avance5', ...repeat(page('p5'), 4)),
+      post('pe_avance6', down, down, before, progressPage('SIMULACION', {}, { confirm: true })),
+    ])
+    expect((await advanceToNextStage(twice.deps, stateWith({ stage: 'books' }))).outcome).toBe('advanced')
+    expect(twice.sleeps).toEqual([10000, 10000])
+    expect(twice.warnings()).toEqual(repeat('certification progress before the advance failed', 2))
+    const never = await certificationHarness([
+      entry,
+      post('pe_avance2', ...repeat(form, 30)),
+      get('pe_avance5', ...repeat(page('p5'), 30)),
+      post('pe_avance6', ...repeat(down, 30)),
+    ])
+    const state = stateWith({ stage: 'books' })
+    const result = await advanceToNextStage(never.deps, state)
+    expect(result).toEqual({ state, outcome: 'timedOut', detail: 'progress' })
+    expect(never.sleeps).toEqual(repeat(10000, 30))
+    expect(never.steps()).toEqual(['ADVANCE_WAITING'])
+    expect(never.urls().some((url) => url.endsWith('pe_avance4'))).toBe(false)
+  })
+
+  test('a failure that is no portal answer is thrown, from a read or from the advance', async () => {
+    const boom = new Error('boom')
+    const reading = await certificationHarness(routes(ADVANCE_ANSWERS.advanced, before, boom))
+    await expect(advanceToNextStage(reading.deps, stateWith())).rejects.toThrow('boom')
+    const advancing = await certificationHarness(routes(boom, before))
+    await expect(advanceToNextStage(advancing.deps, stateWith())).rejects.toThrow('boom')
   })
 })

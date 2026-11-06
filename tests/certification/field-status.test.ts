@@ -1,4 +1,4 @@
-import { classifyFieldUploadState, queryFieldUploadState } from '../../src/certification/field-status'
+import { classifyFieldUploadState, fieldDiagnosis, queryFieldUploadState } from '../../src/certification/field-status'
 import { DteError } from '../../src/errors'
 import { certificationHarness, EST_UP, estUp, estUpRoute, TRACK_ID } from '../support/certification-harness'
 import type { FakeReply } from '../support/fake-sii'
@@ -110,5 +110,22 @@ describe('queryFieldUploadState', () => {
   test('an SDK error that carries no state code passes through', async () => {
     const harness = await certificationHarness([])
     expect((await failure(queryFieldUploadState(harness.deps.sii, 'not-digits'))).code).toBe('INVALID_OPTION')
+  })
+})
+
+describe('fieldDiagnosis', () => {
+  test.each([
+    ['LNC', 'rejected'],
+    ['EPR', 'accepted'],
+    ['REC', 'pending'],
+    ['XYZ', 'unknown'],
+  ])('%s is kept as %s, with its gloss', async (code, status) => {
+    const { result } = await state(estUp(code))
+    expect(fieldDiagnosis(result)).toEqual({ code, status, message: 'Envio Procesado' })
+  })
+
+  test('a state without a gloss keeps an empty one', () => {
+    const base = { answered: true, code: 'LSO', raw: '', ...classifyFieldUploadState('LSO') }
+    expect(fieldDiagnosis({ ...base, message: null })).toEqual({ code: 'LSO', status: 'pending', message: '' })
   })
 })

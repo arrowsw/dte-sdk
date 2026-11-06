@@ -1,6 +1,7 @@
 import { isDteError } from '../errors'
 import type { SiiClient } from '../sii/client'
 import { queryUploadStatus } from '../sii/status'
+import type { EnvelopeDiagnosis } from './state'
 
 /**
  * EN: The state of an envelope as the certification run reads it from one status query: whether the SII answered with
@@ -97,3 +98,14 @@ export const queryFieldUploadState = async (sii: SiiClient, trackId: string): Pr
     return unanswered(error.message, null)
   }
 }
+
+/**
+ * EN: What the run keeps of a state the SII answered: its code, its class and its gloss. Internal.
+ * ES: Lo que la corrida guarda de un estado que respondió el SII: su código, su clase y su glosa. Interno.
+ */
+export const fieldDiagnosis = (state: FieldUploadState): EnvelopeDiagnosis => ({
+  // Only an answered state is diagnosed, so the code is there.
+  code: state.code!,
+  status: state.rejected ? 'rejected' : state.successful ? 'accepted' : state.intermediate ? 'pending' : 'unknown',
+  message: state.message ?? '',
+})

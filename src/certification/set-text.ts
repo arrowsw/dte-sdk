@@ -243,7 +243,9 @@ export const bookDocumentTypeOf = (documentText: string): number | null => {
   const upper = documentText.toUpperCase().trim()
   const electronic = upper.includes('ELECTRONICA') || upper.includes('ELECTRONICO')
   if (upper.includes('FACTURA DE COMPRA ELECTRONICA')) return 46
-  if (upper.includes('FACTURA EXENTA ELECTRONICA') || (upper.includes('NO AFECTA') && electronic)) return 34
+  // Only the feminine ELECTRONICA makes a not-affected invoice electronic; the masculine form leaves it on paper.
+  if (upper.includes('FACTURA EXENTA ELECTRONICA') || (upper.includes('NO AFECTA') && upper.includes('ELECTRONICA')))
+    return 34
   if (upper.includes('FACTURA ELECTRONICA')) return 33
   if (upper.includes('FACTURA EXENTA') || upper.includes('FACTURA NO AFECTA')) return 30
   if (upper === 'FACTURA') return 30
@@ -253,6 +255,9 @@ export const bookDocumentTypeOf = (documentText: string): number | null => {
 }
 
 const int = (value: string): number => parseInt(value, 10)
+
+// A column that is not a number, or is 0, counts as no amount.
+const amountOrNull = (value: string): number | null => int(value) || null
 
 const parseItemRow = (line: string, reasonText: string): TestCaseItem | null => {
   const parts = line
@@ -332,12 +337,12 @@ const isBookHeaderRow = (upper: string): boolean =>
   (upper.includes('TIPO DOCUMENTO') && upper.includes('FOLIO')) ||
   (upper.includes('MONTO EXENTO') && upper.includes('MONTO AFECTO'))
 
+// The observation lines are recognised without regard to case, but the words that flag them are read as written.
 const observe = (document: MutableBookDocument, observation: string): void => {
-  const upper = observation.toUpperCase()
   document.observation = observation
-  if (upper.includes('IVA USO COMUN')) document.commonUseVat = true
-  if (upper.includes('ENTREGA GRATUITA')) document.nonRecoverableVatCode = 4
-  if (upper.includes('RETENCION TOTAL')) document.totalWithholding = true
+  if (observation.includes('IVA USO COMUN')) document.commonUseVat = true
+  if (observation.includes('ENTREGA GRATUITA')) document.nonRecoverableVatCode = 4
+  if (observation.includes('RETENCION TOTAL')) document.totalWithholding = true
 }
 
 /**
@@ -357,6 +362,9 @@ export const parseTestSetText = (text: string): readonly TestSet[] => {
   let current: MutableCase | null = null
   let bookDocument: MutableBookDocument | null = null
   let awaitingAmounts = false
+  // The rows of a purchase-book set are read from its header until the first case header, or, in the regular book,
+  // the first separator line.
+  let booksOpen = false
 
   const closeCase = (): void => {
     if (set !== null && current !== null)
@@ -381,6 +389,7 @@ export const parseTestSetText = (text: string): readonly TestSet[] => {
     if (header !== null) {
       closeSet()
       const name = header[1].trim()
+      booksOpen = true
       set = {
         name,
         attentionNumber: header[2],
@@ -396,13 +405,17 @@ export const parseTestSetText = (text: string): readonly TestSet[] => {
     if (caseHeader !== null) {
       closeCase()
       closeBookDocument()
+      booksOpen = false
       current = newCase(caseHeader[1], int(caseHeader[2]))
       continue
     }
     if (EQUALS_LINE.test(line)) continue
-    if (DASH_LINE.test(line)) {
+    // An open exempt-book set takes every line as a row or as nothing, so a separator does not end it.
+    const exemptRows = booksOpen && current === null && set.kind === TEST_SET_KINDS.exemptPurchaseBook
+    if (DASH_LINE.test(line) && !exemptRows) {
       closeCase()
       closeBookDocument()
+      booksOpen = false
       continue
     }
     if (current !== null) {
@@ -410,6 +423,8 @@ export const parseTestSetText = (text: string): readonly TestSet[] => {
       parseCaseLine(current, line)
       continue
     }
+    if (!booksOpen && (set.kind === TEST_SET_KINDS.purchaseBook || set.kind === TEST_SET_KINDS.exemptPurchaseBook))
+      continue
     if (set.kind === TEST_SET_KINDS.purchaseBook) {
       const upper = line.toUpperCase()
       if (isBookHeaderRow(upper)) continue
@@ -464,11 +479,11 @@ export const parseTestSetText = (text: string): readonly TestSet[] => {
         closeBookDocument()
         bookDocument = newBookDocument(parts[0], int(parts[1]))
         if (parts.length >= 4) {
-          bookDocument.exemptAmount = int(parts[2])
-          bookDocument.affectedAmount = int(parts[3])
+          bookDocument.exemptAmount = amountOrNull(parts[2])
+          bookDocument.affectedAmount = amountOrNull(parts[3])
         } else if (parts.length === 3) {
-          if (EXEMPT_COLUMN.test(parts[0])) bookDocument.exemptAmount = int(parts[2])
-          else bookDocument.affectedAmount = int(parts[2])
+          if (EXEMPT_COLUMN.test(parts[0])) bookDocument.exemptAmount = amountOrNull(parts[2])
+          else bookDocument.affectedAmount = amountOrNull(parts[2])
         }
       }
       continue

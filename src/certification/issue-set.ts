@@ -8,6 +8,7 @@ import { createEnvelope } from '../envelope/create'
 import { signEnvelope, type SignedEnvelope } from '../envelope/sign'
 import { DteError } from '../errors'
 import type { DocumentInput, IssuerInput, LineItemInput, ReceiverInput, ReferenceInput } from '../model/document'
+import { sanitizeText } from '../text/sanitize'
 import { calculateLineAmount } from '../totals/calculate'
 import type { FolioSource } from './folios'
 import type {
@@ -128,6 +129,15 @@ type LineStyle = 'plain' | 'guide' | 'purchase'
 
 const compact = <T extends object>(value: T): T =>
   Object.fromEntries(Object.entries(value).filter(([, field]) => field !== undefined)) as T
+
+const RECEIVER_ACTIVITY_LENGTH = 40
+
+// The business activity of a receiver is cut at the 40 characters `GiroRecep` holds, as the reference cuts it: an
+// issuer's may be twice as long, and the issuer is the receiver of its own purchase documents and transfers.
+const withActivityCut = (receiver: ReceiverInput): ReceiverInput =>
+  receiver.businessActivity === undefined
+    ? receiver
+    : { ...receiver, businessActivity: sanitizeText(receiver.businessActivity).slice(0, RECEIVER_ACTIVITY_LENGTH) }
 
 /**
  * EN: The issuer written as the receiver of its own documents (purchase invoices, internal transfers).
@@ -344,7 +354,7 @@ export const issueCertificationDocument = async (
     folio,
     issueDate: context.date,
     issuer: context.options.issuer,
-    receiver: input.receiver ?? context.options.receiver,
+    receiver: withActivityCut(input.receiver ?? context.options.receiver),
     items: input.items.map((item) => line(item, input.style, input.priceDecimals)),
     references: input.references,
     globalAdjustments:

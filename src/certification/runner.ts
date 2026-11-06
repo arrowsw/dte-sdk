@@ -147,10 +147,16 @@ export const runCertification = async (
     if (state.stage === 'books') {
       const books = await runBooks(deps, state)
       state = books.state
-      if (books.outcome !== 'approved') return stop(books.outcome, books.detail)
-      state = (await advanceToNextStage(deps, state)).state
-      // A wording the page module does not know leaves the stage where it was: the field goes on to the simulation.
-      if (state.stage === 'books') state = await saveState(rt, state, { stage: 'simulation' })
+      // With the three mandatory books sent the next stage is asked for, approved or not: the portal decides.
+      if (books.outcome === 'incomplete') return stop('incomplete', books.detail)
+      const advance = await advanceToNextStage(deps, state)
+      state = advance.state
+      if (advance.outcome === 'timedOut') return stop('timedOut', advance.detail)
+      // An advance the portal made with a wording the page module does not know leaves the stage where it was.
+      if (advance.outcome === 'advanced' && state.stage === 'books')
+        state = await saveState(rt, state, { stage: 'simulation' })
+      // The portal did not move and does not stand past the books: the simulation would find no row to declare.
+      if (state.stage === 'books') return stop('rejected', advance.detail)
     }
     if (reachedUntil()) return stop('until')
     if (state.stage === 'simulation') {

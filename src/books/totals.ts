@@ -11,6 +11,7 @@ const OPTIONAL_FIELDS = [
   'fixedAssetVatAmount',
   'commonUseVatCount',
   'commonUseVat',
+  'commonUseCredit',
   'lateVat',
   'ownVatAmount',
   'thirdPartyVatAmount',

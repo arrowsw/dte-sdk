@@ -158,6 +158,8 @@ export type CertificationState = {
   readonly attentionNumber?: string
   /** EN: The plan of `planCertificationSets`. ES: El plan de `planCertificationSets`. */
   readonly plan?: CertificationPlan
+  /** EN: The UTC day the test set was read on, `YYYY-MM-DD`; its month is the base period of the books. ES: El día UTC en que se leyó el set de pruebas, `AAAA-MM-DD`; su mes es el período base de los libros. */
+  readonly setReadDate?: string
   /** EN: The CAF files the run holds; each holds a private key, so the store is a secret. ES: Los CAF que tiene la corrida; cada uno trae una llave privada, así que el almacén es un secreto. */
   readonly cafs: readonly string[]
   /** EN: Every folio used by this run. ES: Cada folio usado por esta corrida. */

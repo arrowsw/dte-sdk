@@ -289,7 +289,7 @@ const bookPlan = (set: TestSet, kind: PurchaseBookPlan['kind']): PurchaseBookPla
   kind,
   attentionNumber: set.attentionNumber,
   documents: set.bookDocuments,
-  proportionalityFactor: set.proportionalityFactor ?? DEFAULT_PROPORTIONALITY_FACTOR,
+  proportionalityFactor: set.proportionalityFactor || DEFAULT_PROPORTIONALITY_FACTOR,
 })
 
 /**

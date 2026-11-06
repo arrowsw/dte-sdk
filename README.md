@@ -438,7 +438,8 @@ folios each type needs; `issueTestSet` issues the basic, exempt, guide and purch
 with the `SET` reference (`CASO <id>`) and the rules the SII review expects (returned goods at the original price,
 cancellations taking the cancelled document's items, the issuer as receiver of purchase invoices and internal
 transfers); `issueSimulation` re-issues every case in one envelope; the three `createCertification*Book` functions
-build and sign the sales, purchase and guide books. Everything is data: sending, waiting for the status and declaring
+build and sign the sales, purchase and guide books, as total submissions or as adjustments of a period the SII already
+holds. Everything is data: sending, waiting for the status and declaring
 belong to the certification runner. No real test-set text was available while writing this: the grammar follows the
 sets the SII delivers in the field, and the first download should be kept as a fixture.
 
@@ -487,8 +488,9 @@ artefacts for the printed samples, declares the track ids on `pe_avance2` with e
 the page again to verify (a row left empty is asked again; "ENVIO CON ERRORES O REPAROS" is a state of an envelope,
 not a failure of the declaration), waits for the approval (a page that shows none of the sets sent counts as approved;
 a read that fails only uses up its attempt), runs the books (the history of books the SII holds marks the
-occupied periods; a closed book is resent as an adjustment or in the next free month, at most 24 times), advances the
-stage, sends and declares the simulation and confirms it, answers the exchange set and confirms the exchange, uploads
+occupied periods; a book the SII closes or never reviews is resent as an adjustment or in the next free month, at most
+24 times), asks for the next stage once the three mandatory books are sent, sends and declares the simulation and
+confirms it, answers the exchange set and confirms the exchange, uploads
 the printed samples when the `samples` option gives them (without them it stops at `printedSamples`), and stops at
 `compliance`: the declaration of compliance is the sworn statement of the legal representative, it cannot be undone,
 and the runner makes it only with `declareCompliance: true`.
@@ -511,10 +513,29 @@ and the runner makes it only with `declareCompliance: true`.
 - **The uploads of the run** are sent again only for a network failure that names a reset socket, a timed-out
   connection or an unresolved host: eight attempts, 2 s growing by 1.8 up to 15 s. Only `STATUS` 0 with a `TRACKID`
   element is a sent file; `STATUS` 7 is a duplicate recovered by that element; `STATUS` 99 is a failed send.
+- **The books start over on every run.** The period is the UTC month the test set was read in (the current UTC month
+  when the set brought no purchase book), or the first free month below it; which books stand approved is what the
+  portal shows, not what the state remembers, so a run resumed at the books sends again every book the portal does not
+  show as `REVISADO CONFORME`. When a period is taken every book goes again as an adjustment, the guide book and the
+  exempt purchase book too; the books the declaration names with "ENVIO CON ERRORES O REPAROS" or the SOAP status
+  rejects are not awaited but sent again; no portal read of the phase stops the run. A row the page leaves rejected,
+  closed or declared keeps that search going even when it is of a book this run does not send (an exempt purchase book
+  the test set did not bring): nothing is sent for it, but the books are declared again and that row is awaited, up
+  to 24 times.
+- **The portal decides the stage.** With the three mandatory books sent the runner asks for the next stage whether or
+  not the books were approved, as the reference does, and stops with the portal's sentence when the portal does not
+  move. `runBooks` ends `incomplete` only when a mandatory book could not be sent.
+- **The simulation is written as the reference writes it,** which is not how it writes the test sets: the local date
+  of the process, stamps in UTC to the second, the envelope stamped in Chile time, plain unit prices, and a guide
+  without `TpoDespacho`. Run the process with `TZ=America/Santiago`.
+- **The declaration of compliance counts as made when the last page no longer shows its form.** That is the
+  reference's reading; keep the page the store saves and check it.
 - **The operator gives less.** Without `receiver` the documents go to the test receiver (`DEFAULT_CERTIFICATION_RECEIVER`);
   without `resolution` every envelope of the run carries number 0 and the UTC date of the day the run started, which
   is only right on the day the SII resolved the application, so give `resolution.date` on any other day; the issuer's
-  line of business, activity code, commune and city fall back to `DEFAULT_CERTIFICATION_ISSUER`.
+  line of business, activity code, commune and city fall back to `DEFAULT_CERTIFICATION_ISSUER`. A receiver's line of
+  business is cut at its 40 characters instead of being refused, the issuer's too where the issuer is the receiver of
+  its own documents (the purchase set, internal transfers, the simulation); as issuer it keeps its 80.
 - **The waits are the field's:** 5 polls of 10 s for the sets, 40 of 15 s for the books, 30 of 10 s for the
   simulation, 10 declaration attempts 5 s apart after 10 s. Inject `sleep` and `now` to test without waiting.
 - **Nothing here has been run against the portal yet.** Every page shape comes from field behaviour; the first
