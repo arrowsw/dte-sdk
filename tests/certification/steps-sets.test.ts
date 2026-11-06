@@ -149,6 +149,8 @@ describe('folio needs', () => {
 })
 
 describe('prepareFolios', () => {
+  // With the stamping blocked the SII is asked for ranges to download before anything else; none are listed.
+  const noRanges = [get('rf_reobtencion1_folios', page('form')), post('rf_reobtencion2_folios', page('nothing listed'))]
   const quota = (...bodies: readonly string[]) => post('of_solicita_folios_dcto', ...bodies)
   const confirm = (...bodies: readonly string[]) => post('of_confirma_folio', ...bodies)
 
@@ -193,6 +195,31 @@ describe('prepareFolios', () => {
       expect(result.state.usedFolios).toEqual([])
     })
 
+    test('a received folio between free ones takes the folios below it out of use with it, and the count stays true', async () => {
+      const harness = await certificationHarness([answers(free, received, free, free)])
+      await prepareFolios(harness.deps, stateWith({ cafs: [held] }), { needs: { 33: 2 } })
+      expect(await harness.registry.remaining(scope)).toBe(3)
+      expect(await harness.registry.reserve(scope)).toBe(3)
+    })
+
+    test('a range the registry cannot reserve from any more ends the walk without failing', async () => {
+      const harness = await certificationHarness([answers(free, free, received)])
+      const small = cafXml(33, { from: 1, to: 3 })
+      const smallScope = { ...scope, range: { from: 1, to: 3 }, cafFingerprint: cafFingerprint(small) }
+      await harness.registry.markSent(smallScope, 3)
+      // The registry already went past the end, so nothing is reserved; the portal is asked and the fake has no page.
+      await expect(prepareFolios(harness.deps, stateWith({ cafs: [small] }), { needs: { 33: 3 } })).rejects.toThrow()
+      expect(await harness.registry.remaining(smallScope)).toBe(2)
+    })
+
+    test('a free folio the walk meets past the received one is given back', async () => {
+      const harness = await certificationHarness([answers(received, free, free)])
+      await harness.registry.markSent(scope, 1)
+      await prepareFolios(harness.deps, stateWith({ cafs: [held] }), { needs: { 33: 2 } })
+      expect(await harness.registry.remaining(scope)).toBe(4)
+      expect(await harness.registry.reserve(scope)).toBe(2)
+    })
+
     test('a received folio can leave the CAF short, and the portal is asked for the rest', async () => {
       const harness = await certificationHarness([
         answers(...repeat(received, 5)),
@@ -224,7 +251,7 @@ describe('prepareFolios', () => {
       expect(harness.urls()).toHaveLength(31)
       const folios = harness.fake.requests.map((request) => /<FolioDte>(\d+)<\/FolioDte>/.exec(request.text)?.[1])
       expect(folios.slice(0, 3)).toEqual(['1', '2', '3'])
-      expect(await harness.registry.remaining(bigScope)).toBe(70)
+      expect(await harness.registry.remaining(bigScope)).toBe(69)
     })
   })
 
@@ -333,26 +360,29 @@ describe('prepareFolios', () => {
   test('a refused listing of annullable ranges reads as an empty list: the run ends short, not with the refusal', async () => {
     const harness = await certificationHarness([
       stampEntry,
-      quota(REJECTION_PAGES.stampingBlocked, REJECTION_PAGES.stampingBlocked, quotaForm()),
+      quota(REJECTION_PAGES.stampingBlocked, quotaForm(), quotaForm()),
+      ...noRanges,
       get('af_anular1', refusedPage('ANULACION DE FOLIOS')),
     ])
     const error = await failure(prepareFolios(harness.deps, stateWith(), { needs: { 33: 2 } }))
     expect(error.code).toBe('FOLIO_OUT_OF_RANGE')
     expect(error.details).toMatchObject({ rejection: 'stampingBlocked' })
-    expect(harness.posted('of_solicita_folios_dcto')).toHaveLength(2)
+    // The blocked maximum asks for nothing.
+    expect(harness.posted('of_solicita_folios_dcto')).toHaveLength(1)
   })
 
   test('an annulment that annuls nothing does not ask again', async () => {
     const harness = await certificationHarness([
       stampEntry,
-      quota(REJECTION_PAGES.stampingBlocked, REJECTION_PAGES.stampingBlocked, quotaForm()),
+      quota(REJECTION_PAGES.stampingBlocked, quotaForm(), quotaForm()),
+      ...noRanges,
       get('af_anular1', ...repeat(ANNUL_ENTRY, 4)),
       post('af_anular2', ...repeat(unusedRangesPage([[1, 9, '01-11-2026']]), 4)),
       post('af_anular3', ...repeat(page('ya fue anulado'), 4)),
     ])
     const error = await failure(prepareFolios(harness.deps, stateWith(), { needs: { 33: 2 } }))
     expect(error.code).toBe('FOLIO_OUT_OF_RANGE')
-    expect(harness.posted('of_solicita_folios_dcto')).toHaveLength(2)
+    expect(harness.posted('of_solicita_folios_dcto')).toHaveLength(1)
     expect((await harness.store.load())?.annulledRanges).toEqual({ '33': ['1-9'] })
   })
 
@@ -384,7 +414,7 @@ describe('prepareFolios', () => {
     test('and only then the annulment, with the same condition, and the request again', async () => {
       const harness = await certificationHarness([
         stampEntry,
-        quota(quotaForm(), REJECTION_PAGES.personWithPendingIssues, quotaForm()),
+        quota(quotaForm(), REJECTION_PAGES.personWithPendingIssues, quotaForm(), quotaForm()),
         get('rf_reobtencion1_folios', page('form')),
         post('rf_reobtencion2_folios', page('nothing listed')),
         ...annulment,
@@ -410,10 +440,116 @@ describe('prepareFolios', () => {
     })
   })
 
+  describe('re-obtaining asks for the whole need of the type', () => {
+    const free = { body: siiFixture('soap-estdte-fau.xml') }
+    const received = { body: siiFixture('soap-estdte-dok.xml') }
+    const estDte = (...replies: readonly FakeReply[]) => ({
+      url: EST_DTE,
+      method: 'POST' as const,
+      reply: [...replies],
+    })
+    const reobtainRoutes = (range: readonly [number, number], archive: string) => [
+      get('rf_reobtencion1_folios', page('form')),
+      post('rf_reobtencion2_folios', reobtainListPage([[...range]])),
+      post('rf_reobtencion3_folios', reobtainDetailPage(range[0])),
+      post('rf_genera_folio', REOBTAIN_RESOLUTION),
+      post('rf_genera_archivo', archive),
+    ]
+
+    test('folios already in hand count as covered but do not lower what is asked: a whole answer ends it', async () => {
+      const held = cafXml(33, { from: 200, to: 200 })
+      const range = cafXml(33, { from: 10, to: 12 })
+      const harness = await certificationHarness([
+        stampEntry,
+        quota(quotaForm(1, 9)),
+        ...reobtainRoutes([10, 12], range),
+        estDte(free, free, free, free),
+      ])
+      const result = await prepareFolios(harness.deps, stateWith({ cafs: [held] }), { needs: { 33: 3 } })
+      expect(result.cafs).toEqual([held, range])
+      const asked = harness.fake.requests
+        .filter((request) => request.url === EST_DTE)
+        .map((request) => /<FolioDte>(\d+)<\/FolioDte>/.exec(request.text)?.[1])
+      expect(asked).toEqual(['200', '10', '11', '12'])
+      expect(harness.posted('of_confirma_folio')).toEqual([])
+    })
+
+    test('a short answer that covers no more than the run holds is dropped, and the rest is asked of the portal', async () => {
+      const held = cafXml(33, { from: 200, to: 201 })
+      const harness = await certificationHarness([
+        stampEntry,
+        quota(quotaForm(1, 9), quotaForm(1, 9)),
+        ...reobtainRoutes([10, 12], cafXml(33, { from: 12, to: 12 })),
+        estDte(free, free, received, received, free),
+        post('of_confirma_folio', cafXml(33, { from: 300, to: 300 })),
+      ])
+      const result = await prepareFolios(harness.deps, stateWith({ cafs: [held] }), { needs: { 33: 3 } })
+      expect(result.cafs).toEqual([held, cafXml(33, { from: 300, to: 300 })])
+      expect(harness.posted('rf_genera_archivo')).toHaveLength(1)
+      expect(harness.posted('of_solicita_folios_dcto')[1].CANTIDAD).toBe('1')
+    })
+
+    test('a short answer that covers more is kept, only its free folios can be issued, and the rest is asked', async () => {
+      const range = cafXml(33, { from: 10, to: 11 })
+      const harness = await certificationHarness([
+        stampEntry,
+        quota(quotaForm(1, 9), quotaForm(1, 9)),
+        ...reobtainRoutes([10, 11], range),
+        estDte(received, free),
+        post('of_confirma_folio', cafXml(33, { from: 300, to: 300 })),
+      ])
+      const result = await prepareFolios(harness.deps, stateWith(), { needs: { 33: 2 } })
+      expect(result.cafs).toEqual([range, cafXml(33, { from: 300, to: 300 })])
+      const scope = {
+        companyRut: '76543210-3',
+        type: 33,
+        range: { from: 10, to: 11 },
+        environment: 'certification' as const,
+        cafFingerprint: cafFingerprint(range),
+      }
+      expect(await harness.registry.remaining(scope)).toBe(1)
+      expect(await harness.registry.reserve(scope)).toBe(11)
+    })
+  })
+
+  test('a blocked maximum re-obtains first and, if that covers the need, asks the portal for nothing', async () => {
+    const harness = await certificationHarness([
+      stampEntry,
+      quota(REJECTION_PAGES.stampingBlocked),
+      get('rf_reobtencion1_folios', page('form')),
+      post('rf_reobtencion2_folios', reobtainListPage([[1, 100]])),
+      post('rf_reobtencion3_folios', reobtainDetailPage(1)),
+      post('rf_genera_folio', REOBTAIN_RESOLUTION),
+      post('rf_genera_archivo', CAF_XML),
+      estDteRoute(false, false),
+    ])
+    const result = await prepareFolios(harness.deps, stateWith(), { needs: { 33: 2 } })
+    expect(result.cafs).toEqual([CAF_XML])
+    expect(harness.posted('of_solicita_folios_dcto')).toHaveLength(1)
+    expect(harness.posted('of_confirma_folio')).toEqual([])
+  })
+
+  test('after annulling the maximum is read again and the request follows it, here in batches', async () => {
+    const harness = await certificationHarness([
+      stampEntry,
+      quota(REJECTION_PAGES.stampingBlocked, ...repeat(quotaForm(1, 0), 4)),
+      ...noRanges,
+      get('af_anular1', ...repeat(ANNUL_ENTRY, 4)),
+      post('af_anular2', ...repeat(unusedRangesPage([[500, 509, '01-11-2026']]), 4)),
+      post('af_anular3', ...repeat(ANNUL_FORM, 4)),
+      post('af_anular', ...repeat(ANNUL_OK, 4)),
+      confirm(cafXml(33, { from: 1, to: 1 }), cafXml(33, { from: 2, to: 2 })),
+    ])
+    const result = await prepareFolios(harness.deps, stateWith(), { needs: { 33: 2 } })
+    expect(result.cafs).toEqual([cafXml(33, { from: 1, to: 1 }), cafXml(33, { from: 2, to: 2 })])
+    expect(harness.posted('of_solicita_folios_dcto').some((form) => form.CANTIDAD === '2')).toBe(false)
+  })
+
   test('rationing with nothing else to do annuls the last 180 days and asks again', async () => {
     const harness = await certificationHarness([
       stampEntry,
-      quota(REJECTION_PAGES.stampingBlocked, REJECTION_PAGES.stampingBlocked, quotaForm()),
+      quota(REJECTION_PAGES.stampingBlocked, quotaForm(), quotaForm()),
+      ...noRanges,
       get('af_anular1', ...repeat(ANNUL_ENTRY, 4)),
       post('af_anular2', ...repeat(unusedRangesPage([[1, 9, '01-11-2026']]), 4)),
       post('af_anular3', ...repeat(ANNUL_FORM, 4)),
@@ -432,7 +568,8 @@ describe('prepareFolios', () => {
   test('the ranges the SII already gave as annulled in the state are not tried again', async () => {
     const harness = await certificationHarness([
       stampEntry,
-      quota(REJECTION_PAGES.stampingBlocked, REJECTION_PAGES.stampingBlocked, quotaForm()),
+      quota(REJECTION_PAGES.stampingBlocked, quotaForm(), quotaForm()),
+      ...noRanges,
       get('af_anular1', ...repeat(ANNUL_ENTRY, 4)),
       post('af_anular2', ...repeat(unusedRangesPage([[1, 9, '01-11-2026']]), 4)),
     ])
@@ -444,7 +581,8 @@ describe('prepareFolios', () => {
   test('annulling never touches a CAF the run holds, even when the simulation asks for fresh ones', async () => {
     const harness = await certificationHarness([
       stampEntry,
-      quota(REJECTION_PAGES.stampingBlocked, REJECTION_PAGES.stampingBlocked, quotaForm()),
+      quota(REJECTION_PAGES.stampingBlocked, quotaForm(), quotaForm()),
+      ...noRanges,
       get('af_anular1', ...repeat(ANNUL_ENTRY, 4)),
       post(
         'af_anular2',

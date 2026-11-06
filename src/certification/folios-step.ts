@@ -6,7 +6,13 @@ import { DteError } from '../errors'
 import type { FolioScope } from '../folios/ledger'
 import { cafFingerprint, type FolioRegistry } from '../folios/registry'
 import { annulFolios } from '../portal/annulment'
-import { reobtainFolios, requestCafExact, requestCafInBatches, type FolioFlowResult } from '../portal/flows'
+import {
+  reobtainFolios,
+  requestCafExact,
+  requestCafInBatches,
+  type FolioFlowResult,
+  type ReobtainResult,
+} from '../portal/flows'
 import { queryFolioQuota, type FolioQuota, type ObtainedCaf } from '../portal/stamping'
 import { folioReceived } from '../sii/status'
 import type { FolioSource } from './folios'
@@ -170,7 +176,7 @@ const recoverUnreceived = async (rt: Runtime, held: readonly HeldCaf[], used: Us
 
 // A CAF already in hand can hold folios the SII received in an earlier run or from other software, and a document issued
 // with one is rejected whole. Before issuing, the SII is asked for the folios the run is about to use, oldest CAF first,
-// until the need is covered and at most 30 per CAF; a received folio is marked used in the registry so it is skipped. A
+// until the need is covered and at most 30 per CAF; a received folio is taken out of use in the registry. A
 // folio the SII cannot answer for keeps the previous behaviour and is used.
 const skipReceivedFolios = async (
   rt: Runtime,
@@ -196,7 +202,36 @@ const skipReceivedFolios = async (
       else good += 1
     }
     pending -= good
-    for (const folio of received) await rt.registry.markSent(h.scope, folio, { extra: { receivedAtSii: true } })
+    if (received.length > 0) await burnUpTo(rt, h.scope, Math.max(...received))
+  }
+}
+
+// The registry hands folios out in order from a pointer that only moves forward: a folio cannot be taken out of use
+// while a free one below it stays reachable. So, to take a folio out of use, the registry reserves from the start of
+// the CAF up to that folio, as it would for issuing, and the folios on the way are given up with it. The count of
+// folios left stays true, which a folio marked used above free ones would not.
+const burnUpTo = async (rt: Runtime, scope: FolioScope, last: number): Promise<void> => {
+  // A range with nothing left to reserve ends the walk: the rest was already used.
+  const folio = await rt.registry.reserve(scope).catch(() => null)
+  if (folio === null) return
+  // Already past it: that folio was free and is given back.
+  if (folio > last) await rt.registry.release(scope, [folio])
+  else if (folio < last) await burnUpTo(rt, scope, last)
+}
+
+// A range obtained again is used only through the folios the SII showed free. Those it showed received or did not know
+// about, below the last free one, are taken out of use as soon as the CAF is kept. The folios above the last free one
+// were never looked at: they cannot be told apart in the registry without giving up the free ones, so they stay.
+const restrictToFree = async (rt: Runtime, reobtained: ReobtainResult): Promise<void> => {
+  for (const [index, range] of reobtained.ranges.entries()) {
+    const free = new Set(range.freeFolios)
+    const lastFree = Math.max(...range.freeFolios)
+    const skipped = Array.from({ length: lastFree - range.from + 1 }, (_, offset) => range.from + offset).filter(
+      (folio) => !free.has(folio),
+    )
+    if (skipped.length === 0) continue
+    const [held] = heldCafs([reobtained.cafs[index].xml], rt.now())
+    await burnUpTo(rt, held.scope, Math.max(...skipped))
   }
 }
 
@@ -215,21 +250,23 @@ const shortage = (type: number, required: number, available: number, result: Fol
  * EN: Makes sure the run holds the folios each type needs, as the field does it: the CAFs in hand first (an expired
  * one is skipped; folios of this run the SII never received are given back, and folios of the CAFs the SII already
  * received are marked used so they are skipped), then the quota (a refusal or a failure reading it is not a stop: the
- * run goes on with no maximum); a blocked or short quota with unused folios at the SII re-obtains them; then one exact
+ * run goes on with no maximum); a blocked quota, or a short one with unused folios at the SII, re-obtains them for the whole
+ * need of the type and, if the maximum is blocked, asks the portal for nothing; then one exact
  * request, or batches when the maximum is below the need, falling back to batches when the exact request falls short;
  * a block on the person tries the re-obtaining once, if it was not tried, before anything else; as a last resort, when
  * the refusal is rationing and the SII shows more unused folios than the run holds, unused ranges of the last 180 days
  * (at most 10 per pass, never the CAFs in hand, never the ranges kept in `annulledRanges`) are annulled and the request
- * repeated if any was; an annulment that fails counts as none. Still short throws `FOLIO_OUT_OF_RANGE` with the numbers.
+ * repeated if any was, after reading the maximum again and following it; an annulment that fails counts as none. Still short throws `FOLIO_OUT_OF_RANGE` with the numbers.
  * ES: Asegura que la corrida tenga los folios que necesita cada tipo, como lo hace el campo: primero los CAF en mano
  * (uno vencido se omite; los folios de esta corrida que el SII nunca recibió se devuelven, y los folios de los CAF que
  * el SII ya recibió se marcan como usados para saltarlos), luego el cupo (un rechazo o un fallo al leerlo no detiene:
- * la corrida sigue sin tope); un cupo bloqueado o corto con folios sin usar en el SII los reobtiene; luego una
+ * la corrida sigue sin tope); un cupo bloqueado, o corto con folios sin usar en el SII, los reobtiene para toda la necesidad del tipo y, si el máximo
+ * está bloqueado, no pide nada al portal; luego una
  * solicitud exacta, o por tandas cuando el máximo está bajo la necesidad, cayendo a tandas cuando la exacta queda
  * corta; un bloqueo de la persona intenta la reobtención una vez, si no se había intentado, antes que cualquier otra
  * cosa; como último recurso, cuando la negativa es racionamiento y el SII muestra más folios sin usar que los en mano,
  * se anulan rangos sin usar de los últimos 180 días (máximo 10 por pasada, nunca los CAF en mano ni los rangos de
- * `annulledRanges`) y se repite la solicitud si se anuló alguno; una anulación que falla cuenta como ninguna. Si aún
+ * `annulledRanges`) y se repite la solicitud si se anuló alguno, tras leer de nuevo el máximo y seguirlo; una anulación que falla cuenta como ninguna. Si aún
  * falta, lanza `FOLIO_OUT_OF_RANGE` con los números.
  * @throws {DteError} EN: `MISSING_FIELD { field: 'plan' }` without a plan and without `needs`; `FOLIO_OUT_OF_RANGE { type, required, available, maxAuthorized, availableFolios, rejection, reason }`; the portal codes. ES: los mismos códigos.
  */
@@ -271,11 +308,14 @@ export const prepareFolios = async (
     let missing = required - (await available())
     let last: FolioFlowResult | null = null
     let reobtainTried = false
+    // The SII is asked for the whole need of the type, as field behaviour does, and the folios already in hand count as
+    // covered. Whole: the run is done. Short: what was obtained is kept only if it covers more than the run already
+    // holds, and then the portal is asked for the rest.
     const reobtain = async (): Promise<void> => {
       reobtainTried = true
       const reobtained = await reobtainFolios(rt.portal, {
         type: type as DocumentType,
-        quantity: missing,
+        quantity: required,
         isIssued: async (range) =>
           (await rt.registry.stats({ companyRut: state.companyRut, type, environment: 'certification' })).ranges.some(
             (r) => r.from === range.from && r.to === range.to && r.sent > 0,
@@ -284,38 +324,60 @@ export const prepareFolios = async (
         isFolioFree: async (folio) =>
           (await folioReceived(rt.sii, { type: type as DocumentType, folio }).catch(() => null)) === false,
       })
-      add(reobtained.cafs)
-      missing = required - (await available())
+      if (reobtained.complete || reobtained.available > required - missing) {
+        add(reobtained.cafs)
+        await restrictToFree(rt, reobtained)
+        missing = reobtained.complete ? 0 : required - reobtained.available
+      }
     }
-    if (missing > 0) {
-      // A refusal or a failure reading the maximum is not a stop: the run goes on with no maximum, asking in one go.
-      const quota: FolioQuota | null = await queryFolioQuota(rt.portal, { type: type as DocumentType }).catch(
-        () => null,
-      )
-      // A quota that is not unrestricted always carries its maximum.
-      const short = quota !== null && (quota.blocked || (!quota.unrestricted && quota.maxAuthorized! < missing))
-      if (short && (quota.availableFolios ?? 0) > 0) await reobtain()
-      if (missing > 0) {
-        const exactFirst =
-          quota === null || quota.unrestricted || quota.maxAuthorized === null || quota.maxAuthorized >= missing
-        last = exactFirst
-          ? await requestCafExact(rt.portal, { type: type as DocumentType, quantity: missing })
-          : await requestCafInBatches(rt.portal, {
-              type: type as DocumentType,
-              quantity: missing,
-              initialQuota: quota,
-            })
-        add(last.cafs)
-        if (!last.complete && exactFirst && last.rejection !== null && BATCH_FALLBACK.has(last.rejection)) {
-          last = await requestCafInBatches(rt.portal, { type: type as DocumentType, quantity: missing - last.granted })
-          add(last.cafs)
+    // A blocked maximum asks for nothing: the portal is not even visited. Otherwise one exact request, or batches when
+    // the maximum is below the need, falling back to batches when the exact request falls short.
+    const ask = async (quota: FolioQuota | null, quantity: number): Promise<FolioFlowResult> => {
+      if (quota !== null && quota.blocked)
+        return {
+          complete: false,
+          cafs: [],
+          granted: 0,
+          maxAuthorized: null,
+          availableFolios: null,
+          rejection: 'stampingBlocked',
+          portalMessage: null,
         }
+      const exactFirst =
+        quota === null || quota.unrestricted || quota.maxAuthorized === null || quota.maxAuthorized >= quantity
+      const first = exactFirst
+        ? await requestCafExact(rt.portal, { type: type as DocumentType, quantity })
+        : await requestCafInBatches(rt.portal, { type: type as DocumentType, quantity, initialQuota: quota })
+      add(first.cafs)
+      if (!first.complete && exactFirst && first.rejection !== null && BATCH_FALLBACK.has(first.rejection)) {
+        const rest = await requestCafInBatches(rt.portal, {
+          type: type as DocumentType,
+          quantity: quantity - first.granted,
+        })
+        add(rest.cafs)
+        return rest
+      }
+      return first
+    }
+    // A refusal or a failure reading the maximum is not a stop: the run goes on with no maximum, asking in one go.
+    const readQuota = (): Promise<FolioQuota | null> =>
+      queryFolioQuota(rt.portal, { type: type as DocumentType }).catch(() => null)
+    if (missing > 0) {
+      const quota = await readQuota()
+      // A quota that is not unrestricted always carries its maximum.
+      const short =
+        quota !== null &&
+        (quota.blocked || (!quota.unrestricted && quota.maxAuthorized! < required && (quota.availableFolios ?? 0) > 0))
+      if (short) await reobtain()
+      if (missing > 0) {
+        last = await ask(quota, missing)
         missing = required - (await available())
       }
       // A block on the person is lifted by issuing with folios already authorized, and annulling makes it worse, so
       // the SII is asked for those folios once before any annulment.
-      if (missing > 0 && !reobtainTried && last !== null && last.rejection === 'personWithPendingIssues')
+      if (missing > 0 && !reobtainTried && last !== null && last.rejection === 'personWithPendingIssues') {
         await reobtain()
+      }
       if (missing > 0 && last !== null && last.rejection !== null && RATIONING.has(last.rejection)) {
         const unusedInHand = await available()
         if (last.availableFolios === null || last.availableFolios > unusedInHand) {
@@ -333,8 +395,8 @@ export const prepareFolios = async (
               current = await saveState(rt, current, { annulledRanges })
             }
             if (annulment.totalAnnulled > 0) {
-              last = await requestCafExact(rt.portal, { type: type as DocumentType, quantity: missing })
-              add(last.cafs)
+              // Annulling moves the maximum, so it is read again and the request follows the same rule as the first.
+              last = await ask(await readQuota(), missing)
               missing = required - (await available())
             }
           }
