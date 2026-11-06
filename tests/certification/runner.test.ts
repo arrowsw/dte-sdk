@@ -14,6 +14,7 @@ import {
   stateWith,
   TODAY,
   UPL,
+  UPLOAD,
   uploadRoute,
 } from '../support/certification-harness'
 import {
@@ -326,6 +327,34 @@ test('an error of a step is reported and rethrown; the company comes from the is
   expect(await harness.store.load()).toBeNull()
   const nameless = { ...harness.deps, portal: { ...harness.deps.portal, companyRut: null } }
   expect((await failure(runCertification(nameless))).details).toEqual({ field: 'companyRut' })
+})
+
+test('a resolution left out is dated once for the whole run, whatever day its later envelopes are made on', async () => {
+  const clock = { now: new Date('2026-11-15T23:59:30Z') }
+  const receptions = [reception('1'), reception('2')]
+  // The UTC day changes once the first set is in; the third upload fails and ends the run.
+  const harness = await seeded(
+    [
+      {
+        url: UPLOAD,
+        method: 'POST' as const,
+        reply: () => {
+          clock.now = new Date('2026-11-16T00:00:30Z')
+          return receptions.shift() ?? { body: 'down' }
+        },
+      },
+    ],
+    stateWith({ plan, cafs: certificationCafXmls() }),
+  )
+  const { resolution, ...rest } = harness.deps
+  void resolution
+  await failure(runCertification({ ...rest, now: () => clock.now }))
+  const basic = (await harness.store.readArtefact('sets-prueba/envio-set-basico.xml'))!
+  const guide = (await harness.store.readArtefact('sets-prueba/envio-set-guia.xml'))!
+  expect(basic).toContain('<FchResol>2026-11-15</FchResol>')
+  // Made after midnight UTC: its documents carry the new day, its resolution the day the run began.
+  expect(guide).toContain('<FchEmis>2026-11-16</FchEmis>')
+  expect(guide).toContain('<FchResol>2026-11-15</FchResol>')
 })
 
 test('a refusal without a sentence stops with the outcome itself; a run already done or at compliance', async () => {
