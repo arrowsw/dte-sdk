@@ -52,7 +52,7 @@ export const DEFAULT_PORTAL_SESSION_TTL_MS = 90 * 60 * 1000
  * EN: Timeout per portal request, ms.
  * ES: Timeout por petición al portal, en ms.
  */
-export const DEFAULT_PORTAL_TIMEOUT_MS = 30000
+export const DEFAULT_PORTAL_TIMEOUT_MS = 20000
 
 /**
  * EN: Options of `createPortalClient`.
@@ -75,7 +75,7 @@ export type PortalClientOptions = {
   readonly lock?: PortalLock
   /** EN: Retry policy overrides, or `false` to disable retries. ES: Ajustes de la política de reintentos, o `false` para desactivarlos. */
   readonly retry?: Partial<RetryPolicy> | false
-  /** EN: Timeout per request, ms; 30 000 by default. ES: Timeout por petición, en ms; 30 000 por defecto. */
+  /** EN: Timeout per request, ms; 20 000 by default. ES: Timeout por petición, en ms; 20 000 por defecto. */
   readonly timeoutMs?: number
   /** EN: Close earlier sessions when the SII reports the limit and offers it; true by default. ES: Cerrar sesiones anteriores cuando el SII informa el límite y lo ofrece; true por defecto. */
   readonly closePreviousSessions?: boolean

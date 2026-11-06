@@ -28,6 +28,7 @@ import {
 import type { BooksState, CertificationState, EnvelopeDiagnosis, SentBook } from './state'
 import {
   declareWithRetries,
+  entryOf,
   runtime,
   saveState,
   type CertificationDependencies,
@@ -257,18 +258,20 @@ const declareBooks = async (
 ): Promise<{
   readonly state: CertificationState
   readonly outcome: DeclarationOutcome
+  readonly success: boolean
   readonly detail: string | null
 }> => {
+  const today = rt.now()
   const entries: Record<string, { trackId: string; date: string }> = {}
   for (const key of sentKeys(state, wanted)) {
     const result = state.books.results[key]!
-    entries[key] = { trackId: result.trackId!, date: result.date! }
+    entries[key] = entryOf(result.trackId!, today)
   }
-  if (Object.keys(entries).length === 0) return { state, outcome: 'declined', detail: 'noBooks' }
+  if (Object.keys(entries).length === 0) return { state, outcome: 'declined', success: false, detail: 'noBooks' }
   // The four sets go with the books: the portal resets to S01 any row the declaration leaves empty.
   for (const key of SET_KEYS) {
     const set = state.sets[key]
-    if (set !== undefined) entries[key] = { trackId: set.trackId, date: set.date }
+    if (set !== undefined) entries[key] = entryOf(set.trackId, today)
   }
   rt.emit({ step: 'BOOKS_DECLARING' })
   const { result, diagnosis } = await declareWithRetries(rt, entries as DeclarationEntries, {
@@ -279,10 +282,8 @@ const declareBooks = async (
     lastDeclaration: { scope: 'books', outcome: result.outcome, detail: result.detail, at: rt.now().toISOString() },
     diagnosis: { ...state.diagnosis, ...diagnosis },
   })
-  return { state: next, outcome: result.outcome, detail: result.detail }
+  return { state: next, outcome: result.outcome, success: result.success, detail: result.detail }
 }
-
-const isGood = (outcome: DeclarationOutcome): boolean => outcome === 'accepted' || outcome === 'inReview'
 
 type Wait = {
   readonly state: CertificationState
@@ -476,9 +477,10 @@ export const runBooks = async (
     declaration = await declareBooks(rt, current, wanted)
     current = declaration.state
   }
-  if (!isGood(declaration.outcome)) {
+  if (!declaration.success) {
     rt.emit({ step: 'BOOKS_DONE', books: wanted, success: false })
-    return { state: current, outcome: 'rejected', detail: declaration.detail ?? declaration.outcome }
+    // A declaration that does not stand always says why.
+    return { state: current, outcome: 'rejected', detail: declaration.detail! }
   }
   let wait = await waitForBooksApproval(rt, current, wanted)
   current = wait.state
@@ -486,7 +488,7 @@ export const runBooks = async (
     current = await resendBooks(rt, current, wait.failed, retry)
     declaration = await declareBooks(rt, current, wanted)
     current = declaration.state
-    if (!isGood(declaration.outcome)) break
+    if (!declaration.success) break
     wait = await waitForBooksApproval(rt, current, wanted)
     current = wait.state
   }

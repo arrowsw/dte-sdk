@@ -5,6 +5,8 @@ import {
   parseDeclarationForm,
   parseProgressPage,
   portalStageOf,
+  saysNotProcessedYet,
+  saysRejection,
   verifyDeclaration,
 } from '../../src/portal/pages/certification-progress'
 import {
@@ -17,7 +19,7 @@ import {
 import { page } from '../support/portal-pages'
 
 describe('parseDeclarationForm', () => {
-  test('rows by label with their input index, hidden fields, current values and TOTREG', () => {
+  test('the hidden fields, the values already declared and the field index of each row found by its label', () => {
     const form = parseDeclarationForm(
       declarationFormPage(
         [
@@ -38,105 +40,161 @@ describe('parseDeclarationForm', () => {
         { totreg: 12, paso: 'P02' },
       ),
     )
-    expect(form.rows.map((row) => [row.key, row.index, row.value, row.state])).toEqual([
-      ['basic', null, null, 'REVISADO CONFORME'],
-      ['guide', 1, '77', 'S21'],
-      ['exempt', 2, '', 'S01'],
-      ['purchase', 3, '', 'EN REVISION'],
-      ['salesBook', 4, '', 'S01'],
-      ['purchaseBook', 5, '', 'S01'],
-      ['exemptPurchaseBook', 6, '', 'S01'],
-      ['guideBook', 7, '', 'S01'],
-      ['export1', 8, '', 'S01'],
-      ['export2', 9, '', 'S01'],
-      ['settlement', 10, '', 'S01'],
-      ['simulation', 11, '', 'S01'],
-    ])
+    expect(form.indexes).toEqual({
+      guide: 1,
+      exempt: 2,
+      purchase: 3,
+      salesBook: 4,
+      purchaseBook: 5,
+      exemptPurchaseBook: 6,
+      guideBook: 7,
+      export1: 8,
+      export2: 9,
+      settlement: 10,
+      simulation: 11,
+    })
     expect(form.hiddenFields).toMatchObject({ TOTREG: '12', PASO: 'P02', SET1: 'S01', EST1: 'S21' })
     expect(form.currentValues).toEqual({ NUM_ENV1: '77', FEC_ENV1: '04-11-2026' })
-    expect(form.totalRows).toBe(12)
-    expect(form.isStatusPage).toBe(false)
+    expect(form.hasForm).toBe(true)
     expect(form.hasErrorStates).toBe(false)
   })
 
-  test('a status page has no hidden field; error states are seen', () => {
+  test('a status page has no hidden field; its rows are read for errors or objections', () => {
     const status = parseDeclarationForm(STATUS_PAGE)
-    expect(status.isStatusPage).toBe(true)
-    expect(parseDeclarationForm(page('<p>nada</p>'))).toMatchObject({ rows: [], isStatusPage: true, totalRows: 10 })
-    expect(status.hasErrorStates).toBe(true)
-    expect(status.totalRows).toBe(10)
-    expect(status.rows[0]).toMatchObject({ key: 'basic', index: null, state: 'ENVIO CON ERRORES O REPAROS' })
+    expect(status).toMatchObject({ hasForm: false, hasErrorStates: true, indexes: {}, hiddenFields: {} })
+    expect(parseDeclarationForm(page('<p>nada</p>'))).toMatchObject({ hasForm: false, hasErrorStates: false })
+    const calm = page(
+      '<table><tr><td><font>SET BASICO</font></td><td><font><b>EN REVISION</b></font></td></tr></table>',
+    )
+    expect(parseDeclarationForm(calm).hasErrorStates).toBe(false)
   })
 
-  test('a row without state and without index reads null, and verifies as kept', () => {
-    const html = page('<input type=hidden name=TOTREG value=x><tr><td>LIBRO DE GUIAS</td></tr>')
-    const form = parseDeclarationForm(html)
-    expect(form.rows).toEqual([{ key: 'guideBook', label: 'LIBRO DE GUIAS', index: null, value: null, state: null }])
-    expect(form.totalRows).toBe(10)
-    expect(verifyDeclaration(html, { guideBook: '1' })).toEqual({ guideBook: 'kept' })
+  test('only quoted attributes count, and a row is found on the page as it came', () => {
+    // Unquoted names and values are not read: this page has no hidden field for the declaration.
+    const unquoted = page('<input type=hidden name=TOTREG value=7><tr><td>SET BASICO<input name=NUM_ENV1></td></tr>')
+    expect(parseDeclarationForm(unquoted)).toMatchObject({ hasForm: false, indexes: {}, hiddenFields: {} })
+    // A hidden field without a value reads empty; a text field without a value is not a current value; a field of
+    // another type is neither.
     const bare = parseDeclarationForm(
-      page('<input type=hidden name=X><tr><td>LIBRO DE GUIAS<input name=NUM_ENV3></td></tr>'),
+      page(
+        `<input type="hidden" name="X"><input type="text" name="NUM_ENV3"><input type="radio" name="OPC" value="S">` +
+          `<input type="hidden" value="sin nombre"><table><tr><td>LIBRO DE GUIAS<input type="text" NAME="NUM_ENV3"></td></tr>` +
+          `<tr><td>SET BASICO<input type="text" name='NUM_ENV4'></td></tr><tr><td>SET FACTURA EXENTA</table>`,
+      ),
     )
-    expect(bare.rows[0]).toMatchObject({ index: 3, value: '', state: null })
+    expect(bare.hiddenFields).toEqual({ X: '' })
+    expect(bare.currentValues).toEqual({})
+    // The field index needs double quotes; a row that never closes is not a row.
+    expect(bare.indexes).toEqual({ guideBook: 3 })
+    // The first row that names a label decides, even when it has no field.
+    const twice = parseDeclarationForm(
+      page(
+        `<input type="hidden" name="TOTREG" value="2"><table><tr><td>SET BASICO</td><td><b>EN REVISION</b></td></tr>` +
+          `<tr><td>SET BASICO<input type="text" NAME="NUM_ENV2" value=""></td></tr></table>`,
+      ),
+    )
+    expect(twice.indexes).toEqual({})
   })
 })
 
 describe('classifyDeclarationAnswer', () => {
   test.each([
-    ['success', { accepted: true, hasSuccess: true, hasError: false, notProcessed: false }],
-    ['updated', { accepted: true, hasSuccess: true, hasError: true }],
-    ['notProcessed', { accepted: true, notProcessed: true, hasError: false }],
-    ['sessionExpired', { accepted: false, sessionExpired: true }],
-    ['contentMismatch', { accepted: false, contentMismatch: true }],
-    ['plainError', { accepted: false, hasError: true, hasSuccess: false }],
+    ['success', { taken: true, error: null }],
+    ['updated', { taken: true, error: null }],
+    ['notProcessed', { taken: true, error: null }],
+    ['sessionExpired', { taken: false, sessionExpired: true, error: 'sessionExpired' }],
+    ['contentMismatch', { taken: false, contentMismatch: true, error: 'contentMismatch' }],
+    ['plainError', { taken: false, error: 'invalidAnswer' }],
   ] as const)('%s', (name, expected) => {
     expect(classifyDeclarationAnswer(DECLARATION_ANSWERS[name])).toMatchObject(expected)
   })
 
+  test('the answer is read as it came: the case and the accents the portal writes', () => {
+    // "Error de Sesión" with its accent is the session, and by itself does not count as an error of the post.
+    expect(classifyDeclarationAnswer('Error de Sesión')).toMatchObject({ sessionExpired: true, taken: false })
+    // The word "error" inside a script counts, unless a success wording stands next to it.
+    expect(classifyDeclarationAnswer('<script>var error = 1;</script>')).toMatchObject({ taken: false })
+    expect(classifyDeclarationAnswer('<script>var error = 1;</script> actualizado')).toMatchObject({ taken: true })
+    // A success wording in another case is not one.
+    expect(classifyDeclarationAnswer('Se produjo un error. EXITOSAMENTE.')).toMatchObject({ taken: false })
+    expect(classifyDeclarationAnswer('')).toMatchObject({ taken: true, error: 'emptyAnswer' })
+  })
+
   test('inconsistent data carries its sentence, and is definitive', () => {
     const answer = classifyDeclarationAnswer(DECLARATION_ANSWERS.inconsistent)
-    expect(answer.inconsistentData).toBe('LA FECHA DE ENVIO NO CORRESPONDE AL ENVIO 123')
-    expect(classifyDeclarationAnswer(page('EL RUT NO COINCIDE')).inconsistentData).toBe('EL RUT NO COINCIDE')
+    // The sentence starts at the word that names the datum and stops at a full stop or a tag.
+    expect(answer.inconsistentData).toBe('FECHA DE ENVIO NO CORRESPONDE AL ENVIO 123')
+    expect(classifyDeclarationAnswer(page('EL RUT NO COINCIDE')).inconsistentData).toBe('RUT NO COINCIDE')
+    expect(classifyDeclarationAnswer('<td>NÚMERO</td><td>NO   CORRESPONDE</td>').inconsistentData).toBe(
+      'NÚMERO NO CORRESPONDE',
+    )
     expect(classifyDeclarationAnswer(DECLARATION_ANSWERS.success).inconsistentData).toBeNull()
   })
 
   test('content errors name their rows; "errores o reparos" is a state, not an error', () => {
     const answer = classifyDeclarationAnswer(DECLARATION_ANSWERS.contentErrors)
-    expect(answer.contentErrors).toEqual(['exemptPurchaseBook', 'basic'])
-    expect(answer.hasError).toBe(false)
-    expect(answer.accepted).toBe(true)
+    // The purchase book is named too: its name still matches inside the exempt purchase book's, because the guard
+    // between the two asks for two runs of space.
+    expect(answer.contentErrors).toEqual(['exemptPurchaseBook', 'purchaseBook', 'basic'])
+    expect(
+      classifyDeclarationAnswer('LIBRO DE COMPRAS  PARA EXENTOS: ENVIO CON ERRORES O REPAROS').contentErrors,
+    ).toEqual(['exemptPurchaseBook'])
+    expect(answer.taken).toBe(true)
+    expect(answer.error).toBeNull()
+    // The name must stand within 200 characters of the wording, markup included.
+    const far = `SET BASICO${'<br>'.repeat(60)}ENVIO CON ERRORES O REPAROS`
+    expect(classifyDeclarationAnswer(far).contentErrors).toEqual([])
+    const near = `LIBRO  DE   COMPRAS${'<br>'.repeat(40)}ENVIO CON ERRORES O REPAROS`
+    expect(classifyDeclarationAnswer(near).contentErrors).toEqual(['purchaseBook'])
   })
 })
 
+test('"not processed yet" is looked for as the portal writes it, and a lost session reads that way', () => {
+  expect(saysNotProcessedYet(DECLARATION_ANSWERS.notProcessed)).toBe(true)
+  expect(saysNotProcessedYet('aún no está disponible')).toBe(true)
+  expect(saysNotProcessedYet('intente más tarde')).toBe(true)
+  expect(saysNotProcessedYet(DECLARATION_ANSWERS.sessionExpired)).toBe(true)
+  expect(saysNotProcessedYet('Intente Más Tarde')).toBe(false)
+  expect(saysNotProcessedYet(DECLARATION_ANSWERS.success)).toBe(false)
+})
+
 describe('verifyDeclaration', () => {
-  test('approved, in review, empty, kept and missing', () => {
+  test('in review and empty are told apart; approved, a kept value and a row that is nowhere are fine', () => {
     const html = declarationFormPage([
       { label: 'SET BASICO', state: 'REVISADO CONFORME' },
       { label: 'SET GUIA DE DESPACHO', state: 'EN REVISION' },
       { label: 'SET FACTURA EXENTA', index: 1 },
       { label: 'SET CASO GENERAL FACTURA COMPRA', index: 2, value: '0055' },
       { label: 'LIBRO DE VENTAS', state: 'POR REALIZAR' },
-      { label: 'LIBRO DE COMPRAS', index: 3, value: '77' },
+      { label: 'LIBRO DE COMPRAS', index: 3, value: '77', state: 'EN REVISION' },
+      { label: 'LIBRO DE COMPRAS PARA EXENTOS', index: 4, state: 'REVISADO CONFORME' },
     ])
     expect(
-      verifyDeclaration(html, {
-        basic: '1',
-        guide: '2',
-        exempt: '3',
-        purchase: '55',
-        salesBook: '5',
-        purchaseBook: '6',
-        guideBook: '7',
-      }),
-    ).toEqual({
-      basic: 'approved',
-      guide: 'inReview',
-      exempt: 'empty',
-      purchase: 'kept',
-      salesBook: 'kept',
-      purchaseBook: 'mismatch',
-      guideBook: 'missing',
-    })
+      verifyDeclaration(html, [
+        ['basic', 8],
+        ['guide', 9],
+        ['exempt', 1],
+        ['purchase', 2],
+        ['salesBook', 10],
+        ['purchaseBook', 3],
+        ['exemptPurchaseBook', 4],
+        ['guideBook', 7],
+      ]),
+    ).toEqual({ inReview: ['guide', 'purchaseBook'], empty: ['exempt'] })
+  })
+
+  test('the field is looked for by the index it had, with its closing quote', () => {
+    const html = declarationFormPage([
+      { label: 'SET BASICO', index: 1, value: '5' },
+      { label: 'SET GUIA DE DESPACHO', index: 10 },
+    ])
+    // Index 1 is not index 10: the first row decides for index 1, the second for index 10.
+    expect(verifyDeclaration(html, [['basic', 1]])).toEqual({ inReview: [], empty: [] })
+    expect(verifyDeclaration(html, [['guide', 10]])).toEqual({ inReview: [], empty: ['guide'] })
+    // A field written without a quoted value reads as empty.
+    const bare = page('<table><tr><td>SET BASICO<input NAME="NUM_ENV1"></td></tr></table>')
+    expect(verifyDeclaration(bare, [['basic', 1]])).toEqual({ inReview: [], empty: ['basic'] })
+    expect(verifyDeclaration(page('<p>nada</p>'), [['basic', 1]])).toEqual({ inReview: [], empty: [] })
   })
 })
 
@@ -148,6 +206,13 @@ describe('classifyAdvanceAnswer', () => {
     ['failed', 'failed', 'No es posible avanzar: faltan sets por revisar.'],
   ] as const)('%s', (name, outcome, message) => {
     expect(classifyAdvanceAnswer(ADVANCE_ANSWERS[name])).toEqual({ outcome, message })
+  })
+
+  test('a sentence without a full stop runs to the end of the text', () => {
+    expect(classifyAdvanceAnswer(page('<p>La empresa ya se encuentra en el paso SIMULACION</p>'))).toEqual({
+      outcome: 'unchanged',
+      message: 'La empresa ya se encuentra en el paso SIMULACION',
+    })
   })
 })
 
@@ -186,23 +251,42 @@ describe('parseProgressPage', () => {
     })
   })
 
-  test('a row without bold leaves no state; a label is read once; a label split by a tag still reads', () => {
+  test('the state is the first bold after the label anywhere on the page, so a row without one takes the next', () => {
     const parsed = parseProgressPage(
       page(
-        '<p>paso <b>INTERCAMBIO</b></p><tr><td>SET BASICO</td><td>x</td></tr><tr><td>SET BASICO</td><td><b>EN REVISION</b></td></tr><tr><td>LIBRO DE <i>GUIAS</i></td><td><b>POR REALIZAR</b></td></tr>',
+        '<p>paso <b>INTERCAMBIO</b></p><tr><td>SET BASICO</td><td>x</td></tr><tr><td>SET GUIA DE DESPACHO</td><td><b> EN REVISION </b></td></tr><tr><td>LIBRO DE <i>GUIAS</i></td><td><b>Por Realizar</b></td></tr><tr><td>LIBRO DE VENTAS</td><td>sin estado</td></tr>',
       ),
     )
     expect(parsed.states).toEqual({
+      // The basic set has no bold of its own: it reads the guide set's.
       basic: { text: 'EN REVISION', state: 'inReview' },
-      guideBook: { text: 'POR REALIZAR', state: 'pending' },
+      guide: { text: 'EN REVISION', state: 'inReview' },
+      // The text is kept as written, trimmed; its class does not depend on the case.
+      guideBook: { text: 'Por Realizar', state: 'pending' },
     })
     expect(parsed.simulationAwaitsConfirmation).toBe(false)
+  })
+
+  test('an offer to confirm the simulation without a state for it stands as a state in review', () => {
+    const offered = parseProgressPage(progressPage('SIMULACION', {}, { confirm: true }))
+    // The offer itself shows the simulation approved in bold, and that is the state read.
+    expect(offered.states.simulation).toEqual({ text: 'REVISADO CONFORME', state: 'approved' })
+    const bare = parseProgressPage(
+      page('<form action="/cvc_cgi/dte/pe_avance3">SET DE SIMULACION<input value="Confirmar Revisi&oacute;n"></form>'),
+    )
+    expect(bare.simulationAwaitsConfirmation).toBe(true)
+    expect(bare.states.simulation).toEqual({ text: 'PENDIENTE CONFIRMAR', state: 'inReview' })
+    // The offer is read as the portal writes it: another case is not it.
+    expect(parseProgressPage(page('pe_avance3 set de simulacion Confirmar Revisi')).simulationAwaitsConfirmation).toBe(
+      false,
+    )
   })
 
   test.each([
     ['etapa', 'INTERCAMBIO', 'exchange'],
     ['etapaColon', 'DOCUMENTOS IMPRESOS', 'printedSamples'],
     ['etapaDe', 'LIBROS', 'books'],
+    ['etapaDeLower', 'LIBROS', 'books'],
     ['paso', 'SET DE PRUEBAS', 'testSets'],
   ] as const)('the stage through the "%s" wording', (wording, stage, key) => {
     const parsed = parseProgressPage(progressPage(stage, {}, { wording }))
@@ -228,6 +312,24 @@ test('portalStageOf and classifyItemState on the wordings of the field', () => {
   expect(classifyItemState('revisado conforme')).toBe('approved')
   expect(classifyItemState('FECHA INV&Aacute;LIDA')).toBe('unknown')
   expect(classifyItemState('FECHA INVALIDA')).toBe('inconsistent')
+  expect(classifyItemState('Rut no coincide')).toBe('inconsistent')
+  expect(classifyItemState('ENVIO CON ERRORES O REPAROS')).toBe('rejected')
+  expect(classifyItemState('RECHAZADO')).toBe('rejected')
+  // Objections alone are not a rejection.
+  expect(classifyItemState('CON REPAROS')).toBe('objections')
+  expect(classifyItemState('EN REVISION')).toBe('inReview')
+  expect(classifyItemState('ANULADO')).toBe('annulled')
+})
+
+test('saysRejection reads a rejection in a wording whatever else it says', () => {
+  expect(saysRejection('Rechazado')).toBe(true)
+  expect(saysRejection('ENVIO CON ERRORES O REPAROS')).toBe(true)
+  expect(saysRejection('Fecha no corresponde al envio')).toBe(true)
+  // A wording that reads as approved can say it too: the class alone would miss it.
+  expect(classifyItemState('REVISADO CONFORME CON ERRORES')).toBe('approved')
+  expect(saysRejection('REVISADO CONFORME CON ERRORES')).toBe(true)
+  expect(saysRejection('CON REPAROS')).toBe(false)
+  expect(saysRejection('PENDIENTE CONFIRMAR')).toBe(false)
 })
 
 describe('the receipts row of the progress page', () => {

@@ -136,6 +136,21 @@ describe('signDocument / issueDocument', () => {
     expect(verifyDocumentSignature(signed.xml).valid).toBe(true)
   })
 
+  test('a timestamp given by the caller goes to the stamp and to the signature time as is', () => {
+    const signed = issueDocument({
+      document: invoiceInput,
+      caf: caf33,
+      certificate,
+      now: FIXED_NOW,
+      timestamp: '2026-11-15T18:30:00.123',
+    })
+    expect(signed.signedAt).toBe('2026-11-15T18:30:00.123')
+    expect(signed.ted.stampedAt).toBe('2026-11-15T18:30:00.123')
+    expect(signed.xml).toContain('<TSTED>2026-11-15T18:30:00.123</TSTED>')
+    expect(signed.xml).toContain('<TmstFirma>2026-11-15T18:30:00.123</TmstFirma>')
+    expect(verifyDocumentSignature(signed.xml).valid).toBe(true)
+  })
+
   test('issueDocument accepts raw input or a created document and is deterministic', () => {
     const fromInput = issueDocument({ document: invoiceInput, caf: caf33, certificate, now: FIXED_NOW })
     const fromDocument = issueDocument({

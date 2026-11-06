@@ -8,7 +8,7 @@ import { createEnvelope } from '../envelope/create'
 import { signEnvelope, type SignedEnvelope } from '../envelope/sign'
 import { DteError } from '../errors'
 import type { DocumentInput, IssuerInput, LineItemInput, ReceiverInput, ReferenceInput } from '../model/document'
-import { chileDate } from '../time/chile'
+import { calculateLineAmount } from '../totals/calculate'
 import type { FolioSource } from './folios'
 import type {
   BasicSetPlan,
@@ -35,7 +35,7 @@ export type IssueSetOptions = {
   readonly folios: FolioSource
   /** EN: The resolution of the certification environment: number 0 and its date. ES: La resolución del ambiente de certificación: número 0 y su fecha. */
   readonly resolution: { readonly number: number; readonly date: string }
-  /** EN: Clock; issue dates are Chile dates of it. ES: Reloj; las fechas de emisión son fechas de Chile de él. */
+  /** EN: Clock, read once per document and once for the envelope. ES: Reloj, leído una vez por documento y una vez para el sobre. */
   readonly now?: () => Date
 }
 
@@ -76,9 +76,16 @@ export type IssuableSetPlan = BasicSetPlan | ExemptSetPlan | GuideSetPlan | Purc
 export const TEST_SET_ENVELOPE_ID = 'DTE_SetDoc'
 
 const GLOBAL_DISCOUNT_DESCRIPTION = 'DESCUENTO GLOBAL ITEMES AFECTOS'
+
+// The test sets are dated and stamped on the UTC clock: the issue date is the UTC day of the run and every stamp is the
+// UTC instant with its milliseconds, without a zone.
+const utcDate = (at: Date): string => at.toISOString().slice(0, 10)
+const utcTimestamp = (at: Date): string => at.toISOString().replace('Z', '')
 const NO_AMOUNT_LINE: PlannedItem = { name: 'SIN MONTO', quantity: 1, unitPrice: 0 }
 const CORRECTION = 'CORRECCION'
 const PURCHASE_TAX_CODE = 15
+// The test sets write the price of a priced line with six decimals; guides and the simulation write the plain number.
+const SET_PRICE_DECIMALS = 6
 const INTERNAL_TRANSFER = 5
 
 /**
@@ -105,10 +112,12 @@ export type IssuedRecord = {
 export type IssueContext = {
   /** EN: The options of the run. ES: Las opciones de la corrida. */
   readonly options: IssueSetOptions
-  /** EN: The instant of the run, for signing. ES: El instante de la corrida, para firmar. */
-  readonly now: Date
-  /** EN: The Chile issue date of every document of the run. ES: La fecha de emisión en Chile de cada documento de la corrida. */
+  /** EN: The clock of the run, read once per document. ES: El reloj de la corrida, leído una vez por documento. */
+  readonly clock: () => Date
+  /** EN: The issue date of every document of the run. ES: `FchEmis` — La fecha de emisión de cada documento de la corrida. */
   readonly date: string
+  /** EN: How `TSTED` and `TmstFirma` are written from the instant of a document; the Chile time when absent. ES: Cómo se escriben `TSTED` y `TmstFirma` desde el instante de un documento; la hora de Chile si falta. */
+  readonly stamp?: (at: Date) => string
   /** EN: The records of issued cases, by case id. ES: Los registros de los casos emitidos, por id de caso. */
   readonly records: Map<string, IssuedRecord>
   /** EN: The documents issued so far. ES: Los documentos emitidos hasta ahora. */
@@ -133,14 +142,16 @@ export const issuerAsReceiver = (issuer: IssuerInput): ReceiverInput => ({
   city: issuer.city ?? issuer.commune,
 })
 
-const line = (item: PlannedItem, style: LineStyle): LineItemInput => {
+const line = (item: PlannedItem, style: LineStyle, priceDecimals: number | undefined): LineItemInput => {
   const priced = item.unitPrice > 0
+  const unitPriceDecimals = priced ? priceDecimals : undefined
   if (style === 'purchase')
     return compact({
       name: item.name,
       quantity: item.quantity,
       unit: item.unit ?? 'UN',
       unitPrice: item.unitPrice,
+      unitPriceDecimals,
       exempt: item.exempt,
       additionalTaxCodes: item.exempt ? undefined : [PURCHASE_TAX_CODE],
     })
@@ -157,6 +168,7 @@ const line = (item: PlannedItem, style: LineStyle): LineItemInput => {
     quantity: priced ? item.quantity : undefined,
     unit: priced ? item.unit : undefined,
     unitPrice: priced ? item.unitPrice : undefined,
+    unitPriceDecimals,
     discountPercent: priced ? item.discountPercent : undefined,
     exempt: item.exempt,
   })
@@ -195,6 +207,15 @@ export const sameName = (a: string, b: string): boolean => a.toUpperCase().trim(
 export const exemptAll = (items: readonly PlannedItem[]): readonly PlannedItem[] =>
   items.map((item) => ({ ...item, exempt: true }))
 
+// The items of an exempt note taken as the case gives them: every one exempt, with the unit `UN` when it has none.
+const exemptWithUnit = (items: readonly PlannedItem[]): readonly PlannedItem[] =>
+  items.map((item) => ({ ...item, unit: item.unit ?? 'UN', exempt: true }))
+
+// The totals of a document of the basic or the purchase set whose lines add up to nothing: the total alone, without a
+// VAT rate. The exempt set and the guides keep the rate next to a zero total.
+const zeroTotals = (items: readonly PlannedItem[]): DocumentInput['totals'] =>
+  items.every((item) => calculateLineAmount(item).amount === 0) ? { totalAmount: 0 } : undefined
+
 const basicCreditItems = (context: IssueContext, note: PlannedNote): readonly PlannedItem[] => {
   const referenced = referencedRecord(context, note)
   const base = note.itemsFromCase === null ? note.items : referenced.items
@@ -217,7 +238,7 @@ const basicDebitItems = (note: PlannedNote): readonly PlannedItem[] =>
 const newPriceItems = (note: PlannedNote, referenced: IssuedRecord): readonly PlannedItem[] =>
   note.items.map((item) => {
     const original = referenced.items.find((candidate) => sameName(candidate.name, item.name))
-    return original === undefined
+    return original === undefined || !original.quantity
       ? { ...item, exempt: true }
       : {
           name: item.name,
@@ -244,7 +265,7 @@ const exemptCreditItems = (context: IssueContext, note: PlannedNote): readonly P
       return exemptAll(referenced.items)
     if (upper.includes('MODIFICA MONTO') && note.items.length > 0 && referenced.items.length > 0)
       return newPriceItems(note, referenced)
-    return note.items.length > 0 ? exemptAll(note.items) : exemptAll(referenced.items)
+    return note.items.length > 0 ? exemptWithUnit(note.items) : exemptAll(referenced.items)
   }
   return exemptAll(referenced.items)
 }
@@ -254,7 +275,7 @@ const exemptDebitItems = (context: IssueContext, note: PlannedNote): readonly Pl
   if (note.items.length === 0) return exemptAll(referenced.items)
   if (note.referenceCode === 3 && note.reasonText.toUpperCase().includes('MODIFICA MONTO'))
     return newPriceItems(note, referenced)
-  return exemptAll(note.items)
+  return exemptWithUnit(note.items)
 }
 
 const purchaseNoteItems = (note: PlannedNote, referenced: IssuedRecord): readonly PlannedItem[] =>
@@ -262,7 +283,7 @@ const purchaseNoteItems = (note: PlannedNote, referenced: IssuedRecord): readonl
     const original = referenced.items.find((candidate) => candidate.name === item.name)
     return compact({
       name: item.name,
-      quantity: item.quantity,
+      quantity: item.quantity || 1,
       unitPrice: item.unitPrice || original?.unitPrice || 0,
       unit: item.unit ?? original?.unit,
     })
@@ -301,6 +322,8 @@ export type IssueDocumentSpec = {
   readonly options?: DocumentInput['options']
   /** EN: Totals given instead of computed. ES: `Totales` — Totales dados en vez de calculados. */
   readonly totals?: DocumentInput['totals']
+  /** EN: Decimals `PrcItem` is written with on a priced line; the plain number when omitted. ES: `PrcItem` — Decimales con que se escribe el precio de una línea con precio; el número tal cual si se omite. */
+  readonly priceDecimals?: number
   /** EN: Withhold the VAT (`ImptoReten`). ES: `ImptoReten` — Retener el IVA. */
   readonly withholdVat?: boolean
   /** EN: Keep a record of the document for the notes that reference it. ES: Guardar un registro del documento para las notas que lo refieren. */
@@ -322,7 +345,7 @@ export const issueCertificationDocument = async (
     issueDate: context.date,
     issuer: context.options.issuer,
     receiver: input.receiver ?? context.options.receiver,
-    items: input.items.map((item) => line(item, input.style)),
+    items: input.items.map((item) => line(item, input.style, input.priceDecimals)),
     references: input.references,
     globalAdjustments:
       input.globalDiscountPercent === undefined
@@ -339,7 +362,14 @@ export const issueCertificationDocument = async (
     totals: input.totals,
     withholdVat: input.withholdVat,
   })
-  const signed = issueDocument({ document, caf, certificate: context.options.certificate, now: context.now })
+  const at = context.clock()
+  const signed = issueDocument({
+    document,
+    caf,
+    certificate: context.options.certificate,
+    now: at,
+    timestamp: context.stamp?.(at),
+  })
   const issued: IssuedCase = { caseId: input.caseId, type: input.type, folio, document: signed }
   context.issued.push(issued)
   if (input.record)
@@ -358,6 +388,7 @@ const issueInvoicesAndNotes = async (
   const creditNotes = kind === 'purchase' ? (plan.creditNote === null ? [] : [plan.creditNote]) : plan.creditNotes
   const debitNotes = kind === 'purchase' ? (plan.debitNote === null ? [] : [plan.debitNote]) : plan.debitNotes
   const invoiceType: DocumentType = kind === 'basic' ? 33 : kind === 'exempt' ? 34 : 46
+  const bareZero = kind !== 'exempt'
   if (invoices.length === 0) throw new DteError('MISSING_FIELD', { field: 'invoices', kind })
 
   for (const invoice of invoices) {
@@ -370,6 +401,8 @@ const issueInvoicesAndNotes = async (
       references: [setReference(invoice.caseId, context.date)],
       globalDiscountPercent: invoice.globalDiscountPercent,
       options: kind === 'basic' ? { saleTransactionType: 1 } : undefined,
+      totals: bareZero ? zeroTotals(invoice.items) : undefined,
+      priceDecimals: SET_PRICE_DECIMALS,
       record: true,
     })
   }
@@ -384,6 +417,8 @@ const issueInvoicesAndNotes = async (
       receiver,
       references: [setReference(note.caseId, context.date), documentReference(referencedRecord(context, note), note)],
       withholdVat: kind === 'purchase' ? true : undefined,
+      totals: bareZero ? zeroTotals(items) : undefined,
+      priceDecimals: SET_PRICE_DECIMALS,
       record: true,
     })
   }
@@ -402,6 +437,8 @@ const issueInvoicesAndNotes = async (
       receiver,
       references: [setReference(note.caseId, context.date), documentReference(referencedRecord(context, note), note)],
       withholdVat: kind === 'purchase' ? true : undefined,
+      totals: bareZero ? zeroTotals(items) : undefined,
+      priceDecimals: SET_PRICE_DECIMALS,
       record: false,
     })
   }
@@ -449,6 +486,7 @@ export const signCertificationEnvelope = (
   options: IssueSetOptions,
   now: Date,
   setId: string | undefined,
+  signedAt?: string,
 ): SignedEnvelope =>
   signEnvelope(
     createEnvelope({
@@ -461,6 +499,7 @@ export const signCertificationEnvelope = (
         resolutionDate: options.resolution.date,
         resolutionNumber: options.resolution.number,
         setId,
+        signedAt,
       }),
       now,
     }),
@@ -472,26 +511,39 @@ export const signCertificationEnvelope = (
  * then debit notes, each with the SET reference (`SET`, folio 1, the issue date, `CASO <id>`) and, on notes, the
  * reference to the document of the referenced case with the code and reason of the set. Basic invoices carry
  * `TpoTranVenta` 1 and the global discount of the case; purchase documents name the issuer as receiver and carry the
- * withholding; an internal transfer names the issuer and totals 0.
+ * withholding; an internal transfer names the issuer and totals 0. The set is dated and stamped on the UTC clock: the
+ * issue date is the UTC day the run starts on, and `TSTED`, `TmstFirma` and `TmstFirmaEnv` are UTC instants with
+ * milliseconds. Late in the Chilean evening that is already the next day.
  * ES: Emite cada documento del plan de un set y firma su sobre. Primero las facturas (o guías), luego las notas de
  * crédito, luego las de débito, cada una con la referencia SET (`SET`, folio 1, la fecha de emisión, `CASO <id>`) y, en
- * las notas, la referencia al documento del caso referido con el código y la razón del set. Las facturas del set
- * básico llevan `TpoTranVenta` 1 y el descuento global del caso; los documentos de compra nombran al emisor como
- * receptor y llevan la retención; un traslado interno nombra al emisor y totaliza 0.
+ * las notas, la referencia al documento del caso referido con el código y la razón del set. Las facturas del set básico
+ * llevan `TpoTranVenta` 1 y el descuento global del caso; los documentos de compra nombran al emisor como receptor y
+ * llevan la retención; un traslado interno nombra al emisor y totaliza 0. El set se fecha y se marca con el reloj UTC:
+ * la fecha de emisión es el día UTC en que parte la corrida, y `TSTED`, `TmstFirma` y `TmstFirmaEnv` son instantes UTC
+ * con milisegundos. Tarde en la noche de Chile eso ya es el día siguiente.
  * @param plan EN: a set plan of `planCertificationSets`. ES: un plan de set de `planCertificationSets`.
  * @param options EN: issuer, receiver, certificate, folios, resolution, clock. ES: emisor, receptor, certificado, folios, resolución, reloj.
  * @throws {DteError} EN: `MISSING_FIELD` (`invoices` or `guides` on an empty plan, `referencedCase` on a note whose case was not issued before it), `FOLIO_OUT_OF_RANGE` from the folio source, and the phase 1 codes. ES: `MISSING_FIELD` (`invoices` o `guides` en un plan vacío, `referencedCase` en una nota cuyo caso no se emitió antes), `FOLIO_OUT_OF_RANGE` de la fuente de folios, y los códigos de la fase 1.
  */
 export const issueTestSet = async (plan: IssuableSetPlan, options: IssueSetOptions): Promise<IssuedSet> => {
-  const now = options.now?.() ?? new Date()
-  const context: IssueContext = { options, now, date: chileDate(now), records: new Map(), issued: [] }
+  const clock = options.now ?? (() => new Date())
+  const context: IssueContext = {
+    options,
+    clock,
+    date: utcDate(clock()),
+    stamp: utcTimestamp,
+    records: new Map(),
+    issued: [],
+  }
   if (plan.kind === 'guide') await issueGuides(context, plan)
   else await issueInvoicesAndNotes(context, plan)
+  const sealedAt = clock()
   const envelope = signCertificationEnvelope(
     context.issued.map((issued) => issued.document),
     options,
-    now,
+    sealedAt,
     TEST_SET_ENVELOPE_ID,
+    utcTimestamp(sealedAt),
   )
   return { kind: plan.kind, attentionNumber: plan.attentionNumber, cases: context.issued, envelope }
 }

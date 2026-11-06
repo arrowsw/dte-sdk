@@ -6,7 +6,6 @@ import { calculateTotals } from '../../src/totals/calculate'
 import { verifyDocumentSignature } from '../../src/document/sign'
 import { verifyEnvelopeSignature } from '../../src/envelope/sign'
 import { verifyTed } from '../../src/ted/build'
-import { chileDate } from '../../src/time/chile'
 import { ATTENTION } from '../support/test-set-samples'
 import type { DocumentType } from '../../src/catalogs/document-types'
 import { cafFor, certificationCafs, fullPlan, issueOptions, issuer } from '../support/certification-fixtures'
@@ -118,7 +117,8 @@ describe('the basic set', () => {
     expect(note.items.map((item) => [item.name, item.quantity, item.unitPrice, item.amount])).toEqual([
       ['CORRIGE GIRO DEL RECEPTOR', undefined, undefined, 0],
     ])
-    expect(note.header.totals).toEqual({ vatRate: 19, totalAmount: 0 })
+    expect(note.header.totals).toEqual({ totalAmount: 0 })
+    expect(note.xml).toContain('<Totales><MntTotal>0</MntTotal></Totales>')
     expect(note.references[1]).toMatchObject({
       documentType: 33,
       folio: '2',
@@ -154,6 +154,14 @@ describe('the basic set', () => {
       expect.objectContaining({ name: 'Cajon de manzanas', quantity: 1, unitPrice: 3100, amount: 3100 }),
     ])
     expect(price.references[1]).toMatchObject({ documentType: 33, folio: '1', code: 3, reason: 'MODIFICA MONTO' })
+  })
+
+  test('every priced line writes its price with six decimals, and the amounts stay whole', () => {
+    const prices = set.cases.flatMap((issued) => [...issued.document.xml.matchAll(/<PrcItem>([^<]+)<\/PrcItem>/g)])
+    expect(prices.length).toBeGreaterThanOrEqual(8)
+    expect(prices.every((match) => /^\d+\.\d{6}$/.test(match[1]))).toBe(true)
+    expect(byCase(set, 1).document.xml).toMatch(/<MontoItem>\d+<\/MontoItem>/)
+    expect(byCase(set, 1).document.items[0].unitPriceDecimals).toBe(6)
   })
 
   test('the envelope names the SII, carries DTE_SetDoc and every signature verifies', () => {
@@ -236,6 +244,7 @@ describe('the guide set', () => {
       amount: 70000,
     })
     expect(sale.header.totals).toMatchObject({ netAmount: 70000, vatAmount: 13300, totalAmount: 83300 })
+    expect(sale.xml).toContain('<PrcItem>2800</PrcItem>')
     expect(sale.references).toHaveLength(1)
     expect(byCase(set, 15).document.header.options.dispatchType).toBeUndefined()
   })
@@ -330,6 +339,22 @@ describe('the purchase set', () => {
     )
     expect(own.cases[1].document.items[0]).toMatchObject({ name: 'Otra cosa', quantity: 2, unitPrice: 0, amount: 0 })
     expect(own.cases[2].document.items[0]).toMatchObject({ name: 'Otra cosa', quantity: 2 })
+    // Lines that add up to nothing leave the total alone; a zero price is written plain, a real one with six decimals.
+    expect(own.cases[1].document.header.totals).toEqual({ totalAmount: 0 })
+    expect(own.cases[1].document.xml).toContain('<PrcItem>0</PrcItem>')
+    expect(own.cases[0].document.xml).toContain('<PrcItem>1200.000000</PrcItem>')
+    const noQuantity = await issueTestSet(
+      {
+        ...plan.purchase!,
+        creditNote: {
+          ...plan.purchase!.creditNote!,
+          items: [{ name: 'Chatarra de fierro', quantity: 0, unitPrice: 0 }],
+        },
+        debitNote: null,
+      },
+      issueOptions(),
+    )
+    expect(noQuantity.cases[1].document.items[0]).toMatchObject({ quantity: 1, unitPrice: 1200, amount: 1200 })
   })
 })
 
@@ -372,11 +397,35 @@ describe('errors and defaults', () => {
     expect((await failure(issueTestSet(basic, few))).code).toBe('FOLIO_OUT_OF_RANGE')
   })
 
-  test('without a clock the issue date is today in Chile, and a certificate without RUT sends as the issuer', async () => {
+  test('without a clock the issue date is the UTC day of now, and a certificate without RUT sends as the issuer', async () => {
     const options = { ...issueOptions(), now: undefined, certificate: { ...issueOptions().certificate, rut: null } }
+    const before = new Date().toISOString().slice(0, 10)
     const set = await issueTestSet(basic, options)
-    expect(set.cases[0].document.header.issueDate).toBe(chileDate(new Date()))
+    const after = new Date().toISOString().slice(0, 10)
+    expect([before, after]).toContain(set.cases[0].document.header.issueDate)
     expect(set.envelope.cover.senderRut).toBe(ISSUER_RUT)
+  })
+
+  test('the set is dated and stamped on the UTC clock, read once per document and once for the envelope', async () => {
+    // 22:30 of the 15th in Chile is already the 16th in UTC.
+    const start = Date.parse('2026-11-16T01:30:00.250Z')
+    const box = { reads: 0 }
+    const clock = () => new Date(start + 1000 * box.reads++)
+    const set = await issueTestSet(basic, { ...issueOptions(), now: clock })
+    expect(set.cases.every((issued) => issued.document.header.issueDate === '2026-11-16')).toBe(true)
+    expect(set.cases[0].document.references[0].date).toBe('2026-11-16')
+    // The first reading dates the set; each document then takes the next one, and the envelope the last.
+    expect(set.cases.map((issued) => issued.document.signedAt)).toEqual(
+      set.cases.map((_, index) => new Date(start + 1000 * (index + 1)).toISOString().replace('Z', '')),
+    )
+    expect(set.cases[0].document.signedAt).toBe('2026-11-16T01:30:01.250')
+    expect(set.cases[0].document.ted.stampedAt).toBe('2026-11-16T01:30:01.250')
+    expect(set.cases[0].document.xml).toContain('<TSTED>2026-11-16T01:30:01.250</TSTED>')
+    expect(set.cases[0].document.xml).toContain('<TmstFirma>2026-11-16T01:30:01.250</TmstFirma>')
+    expect(set.envelope.cover.signedAt).toBe('2026-11-16T01:30:09.250')
+    expect(set.envelope.xml).toContain('<TmstFirmaEnv>2026-11-16T01:30:09.250</TmstFirmaEnv>')
+    expect(box.reads).toBe(set.cases.length + 2)
+    expect(set.cases.every((issued) => verifyDocumentSignature(issued.document.xml).valid)).toBe(true)
   })
 
   test('basic notes that need no fill-in keep their items; items with a price are never overwritten', async () => {
@@ -459,6 +508,11 @@ describe('errors and defaults', () => {
     expect(names(6)).toEqual([['Asesoria tributaria', 2, 70000]])
     expect(names(7)).toEqual([['Libre', 1, 3]])
     expect(names(8)).toEqual([['Propio', 1, 7]])
+    // A note that takes the items of its own case writes the unit UN on them; a reason line still totals with the rate.
+    expect(set.cases[3].document.items[0].unit).toBe('UN')
+    expect(set.cases[7].document.items[0].unit).toBe('UN')
+    expect(set.cases[1].document.header.totals).toEqual({ vatRate: 19, totalAmount: 0 })
+    expect(set.cases[3].document.xml).toContain('<PrcItem>7.000000</PrcItem>')
     const noItemsAnywhere = {
       ...variants,
       creditNotes: [{ ...exempt.creditNotes[0], caseId: 'z-1', referenceCode: 2 as const, reasonText: '', items: [] }],
@@ -540,6 +594,42 @@ describe('errors and defaults', () => {
       unitPrice: 9,
       exemptIndicator: 1,
     })
+    const noQuantity = await issueTestSet(
+      {
+        ...exempt,
+        invoices: [{ ...exempt.invoices[0], items: [{ name: 'Arriendo', quantity: 0, unitPrice: 100, exempt: true }] }],
+        creditNotes: [
+          {
+            ...exempt.creditNotes[0],
+            referenceCode: 3 as const,
+            reasonText: 'MODIFICA MONTO',
+            items: [{ name: 'Arriendo', quantity: 4, unitPrice: 90 }],
+          },
+        ],
+        debitNotes: [],
+      },
+      issueOptions(),
+    )
+    // An original without a quantity cannot lend it: the note keeps its own.
+    expect(noQuantity.cases[1].document.items[0]).toMatchObject({ name: 'Arriendo', quantity: 4, unitPrice: 90 })
+    const noUnit = await issueTestSet(
+      {
+        ...exempt,
+        invoices: [{ ...exempt.invoices[0], items: [{ name: 'Arriendo', quantity: 2, unitPrice: 100, exempt: true }] }],
+        creditNotes: [
+          {
+            ...exempt.creditNotes[0],
+            referenceCode: 3 as const,
+            reasonText: 'MODIFICA MONTO',
+            items: [{ name: 'Arriendo', quantity: 4, unitPrice: 90 }],
+          },
+        ],
+        debitNotes: [],
+      },
+      issueOptions(),
+    )
+    // Neither the note nor the original names a unit: the line gets UN.
+    expect(noUnit.cases[1].document.items[0]).toMatchObject({ quantity: 2, unit: 'UN', unitPrice: 90 })
   })
 
   test('a folio source of the caller is used as given', async () => {
@@ -579,7 +669,9 @@ test("random quantities and prices keep every document's totals consistent with 
       }
       const issued = await issueTestSet(random, issueOptions())
       const document = issued.cases[0].document
-      expect(document.header.totals).toEqual(calculateTotals(document.items, { type: 33, vatRate: 19 }))
+      const computed = calculateTotals(document.items, { type: 33, vatRate: 19 })
+      // Lines that add up to nothing leave the total alone, without the VAT rate.
+      expect(document.header.totals).toEqual(computed.totalAmount === 0 ? { totalAmount: 0 } : computed)
     }),
     { numRuns: 10 },
   )

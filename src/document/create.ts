@@ -159,6 +159,9 @@ const normalizeItem = (input: LineItemInput, index: number, type: DocumentType):
   const quantity = finiteNumber(input.quantity, `${path}.quantity`)
   const unitPrice = finiteNumber(input.unitPrice, `${path}.unitPrice`)
   const discountPercent = finiteNumber(input.discountPercent, `${path}.discountPercent`)
+  const decimals = input.unitPriceDecimals
+  if (decimals !== undefined && !(Number.isInteger(decimals) && decimals >= 0 && decimals <= 6))
+    throw new DteError('INVALID_OPTION', { field: `${path}.unitPriceDecimals` })
   const surchargePercent = finiteNumber(input.surchargePercent, `${path}.surchargePercent`)
   const computed = calculateLineAmount({ quantity, unitPrice, discountPercent, surchargePercent })
   const settledDocumentType = text(input.settledDocumentType, 'TpoDocLiq')
@@ -178,6 +181,7 @@ const normalizeItem = (input: LineItemInput, index: number, type: DocumentType):
     quantity,
     unit: text(input.unit, 'UnmdItem'),
     unitPrice,
+    unitPriceDecimals: unitPrice === undefined ? undefined : decimals,
     discountPercent,
     discountAmount: computed.discountAmount > 0 ? computed.discountAmount : undefined,
     surchargePercent,

@@ -1,6 +1,8 @@
 import {
   attentionNumberOf,
   isNotEnrolled,
+  isNotEnrolledDownload,
+  isNotEnrolledPlain,
   isSessionDropped,
   isSetRegenerated,
   parseSetGeneration,
@@ -47,20 +49,34 @@ test('the entry page asks to confirm the company and defaults the hidden fields'
     asksCompanyConfirmation: true,
   })
   expect(parseSetGeneration(page('<p>Confirmar Empresa</p>')).asksCompanyConfirmation).toBe(true)
+  // The wording is read as written: another case is not the button.
+  expect(parseSetGeneration(page('<p>confirmar empresa</p>')).asksCompanyConfirmation).toBe(false)
 })
 
-test('"no está inscrito" with or without the accent, as an entity or a byte', () => {
+test('"no está inscrito": the plain wording, with or without the accent, and the accent as an entity', () => {
+  expect(isNotEnrolledPlain(page('no esta inscrito'))).toBe(true)
+  expect(isNotEnrolledPlain(page('no está inscrito'))).toBe(true)
+  expect(isNotEnrolledPlain(NOT_ENROLLED)).toBe(false)
   expect(isNotEnrolled(NOT_ENROLLED)).toBe(true)
   expect(isNotEnrolled(page('no esta inscrito'))).toBe(true)
-  expect(isNotEnrolled(page('no está inscrita'))).toBe(true)
+  expect(isNotEnrolled(page('No Está Inscrita'))).toBe(false)
   expect(isNotEnrolled(page('inscrito'))).toBe(false)
 })
 
-test('a dropped session: the authentication message, or the front page without a case', () => {
+test('a dropped session: the authentication message, or the unaccented front page without a case', () => {
   expect(isSessionDropped(SESSION_DROPPED)).toBe(true)
-  expect(isSessionDropped(FRONT_PAGE)).toBe(true)
-  expect(isSessionDropped(page('<h1>Postulaci&oacute;n Factura Electr&oacute;nica</h1><p>CASO 1</p>'))).toBe(false)
+  expect(isSessionDropped(page('<h1>POSTULACION FACTURA ELECTRONICA</h1><p>Bienvenido</p>'))).toBe(true)
+  expect(isSessionDropped(page('<h1>POSTULACION FACTURA ELECTRONICA</h1><p>CASO 1</p>'))).toBe(false)
+  // The title with entities is not the wording the run looks for.
+  expect(isSessionDropped(FRONT_PAGE)).toBe(false)
   expect(isSessionDropped(setDownloadPage())).toBe(false)
+})
+
+test('a dropped-session page that really says the company is not enrolled', () => {
+  expect(isNotEnrolledDownload(page('Contribuyente NO INSCRITO'))).toBe(true)
+  expect(isNotEnrolledDownload(NOT_ENROLLED)).toBe(true)
+  expect(isNotEnrolledDownload(SESSION_DROPPED)).toBe(false)
+  expect(isNotEnrolledDownload(page('no est'))).toBe(false)
 })
 
 test('the set text survives the trip through the page and parses as before', () => {

@@ -247,7 +247,8 @@ const basicPlan = (set: TestSet, kind: 'basic' | 'exempt'): BasicSetPlan | Exemp
 }
 
 const guidePlan = (set: TestSet): GuideSetPlan => {
-  const guides = ofType(set, 52).map(
+  // Every case of the guide set is a guide, whatever its text was read as.
+  const guides = set.cases.map(
     (testCase): PlannedGuide =>
       compact({
         caseId: testCase.id,
@@ -267,10 +268,13 @@ const purchasePlan = (set: TestSet): PurchaseSetPlan | undefined => {
   const creditCase = last(ofType(set, 61))
   const debitCase = last(ofType(set, 56))
   const creditNote = creditCase === undefined ? null : note(creditCase, creditCase.items.map(plainItem), null)
-  const debitNote =
+  // The debit note takes the items of the credit note the text gave before it, never its own; none when the text
+  // gives no credit note first.
+  const creditBefore =
     debitCase === undefined
-      ? null
-      : note(debitCase, debitCase.items.length > 0 ? debitCase.items.map(plainItem) : (creditNote?.items ?? []), null)
+      ? undefined
+      : last(ofType({ ...set, cases: set.cases.slice(0, set.cases.indexOf(debitCase)) }, 61))
+  const debitNote = debitCase === undefined ? null : note(debitCase, (creditBefore?.items ?? []).map(plainItem), null)
   return {
     kind: 'purchase',
     attentionNumber: set.attentionNumber,

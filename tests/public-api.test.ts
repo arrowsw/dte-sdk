@@ -213,6 +213,8 @@ const PORTAL_EXPORTS = [
   'createMemoryCertificationStore',
   'assertArtefactName',
   'createDirectoryCertificationStore',
+  'DEFAULT_CERTIFICATION_ISSUER',
+  'DEFAULT_CERTIFICATION_RECEIVER',
   'obtainTestSet',
   'sendTestSet',
   'declareTestSets',

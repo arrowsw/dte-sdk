@@ -255,8 +255,8 @@ export type SiiDetalle = {
   readonly QtyItem?: number
   /** EN: Unit of measure. ES: `UnmdItem` — Unidad de medida del ítem. */
   readonly UnmdItem?: string
-  /** EN: Unit price. ES: `PrcItem` — Precio unitario del ítem. */
-  readonly PrcItem?: number
+  /** EN: Unit price; a text when it is written with fixed decimals. ES: `PrcItem` — Precio unitario del ítem; un texto cuando se escribe con decimales fijos. */
+  readonly PrcItem?: number | string
   /** EN: Discount percent. ES: `DescuentoPct` — Porcentaje de descuento. */
   readonly DescuentoPct?: number
   /** EN: Discount amount. ES: `DescuentoMonto` — Monto del descuento. */

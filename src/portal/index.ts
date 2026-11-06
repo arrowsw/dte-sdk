@@ -153,10 +153,9 @@ export type {
 } from './certification'
 export type { SetGenerationState, OptionalSetOption, SetGenerationPage } from './pages/certification-set'
 export type {
-  DeclarationRow,
   DeclarationForm,
   DeclarationAnswer,
-  VerificationState,
+  DeclarationVerification,
   AdvanceAnswer,
   ItemState,
   ProgressPage,
@@ -177,8 +176,10 @@ export type {
 } from '../certification/state'
 export { createDirectoryCertificationStore } from '../certification/node-store'
 export type { DirectoryCertificationStoreOptions } from '../certification/node-store'
+export { DEFAULT_CERTIFICATION_ISSUER, DEFAULT_CERTIFICATION_RECEIVER } from '../certification/runtime'
 export type {
   CertificationDependencies,
+  CertificationIssuerInput,
   CertificationProgressEvent,
   PollingLabel,
   StepResult,

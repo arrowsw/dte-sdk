@@ -20,6 +20,8 @@ export type IssueDocumentInput = {
   readonly now?: Date
   /** EN: Check CAF expiry (default true). ES: Chequear vencimiento del CAF (por defecto true). */
   readonly checkCafExpiry?: boolean
+  /** EN: `TSTED` and `TmstFirma` as given, instead of the Chile time of `now`. ES: `TSTED` y `TmstFirma` tal como se entregan, en vez de la hora de Chile de `now`. */
+  readonly timestamp?: string
 }
 
 const isDocument = (value: DocumentInput | Document): value is Document => 'header' in value
@@ -34,7 +36,15 @@ export const issueDocument = ({
   certificate,
   now,
   checkCafExpiry,
+  timestamp,
 }: IssueDocumentInput): SignedDocument => {
   const doc = isDocument(document) ? document : createDocument(document, { now })
-  return signDocument(stampDocument(doc, caf, { now, checkExpiry: checkCafExpiry }), certificate, { now })
+  return signDocument(
+    stampDocument(doc, caf, { now, checkExpiry: checkCafExpiry, stampedAt: timestamp }),
+    certificate,
+    {
+      now,
+      signedAt: timestamp,
+    },
+  )
 }

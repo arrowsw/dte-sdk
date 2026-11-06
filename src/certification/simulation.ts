@@ -104,8 +104,8 @@ const purchaseItems = (note: PlannedNote, referenced: IssuedRecord | undefined):
  * @throws {DteError} EN: `MISSING_FIELD` (`cases`) when the plan has no case, `FOLIO_OUT_OF_RANGE` from the folio source, and the phase 1 codes. ES: `MISSING_FIELD` (`cases`) si el plan no tiene casos, `FOLIO_OUT_OF_RANGE` de la fuente de folios, y los códigos de la fase 1.
  */
 export const issueSimulation = async (plan: CertificationPlan, options: IssueSetOptions): Promise<IssuedSimulation> => {
-  const now = options.now?.() ?? new Date()
-  const context: IssueContext = { options, now, date: chileDate(now), records: new Map(), issued: [] }
+  const clock = options.now ?? (() => new Date())
+  const context: IssueContext = { options, clock, date: chileDate(clock()), records: new Map(), issued: [] }
   const issuer = issuerAsReceiver(options.issuer)
 
   for (const set of [plan.basic, plan.exempt]) {
@@ -183,7 +183,7 @@ export const issueSimulation = async (plan: CertificationPlan, options: IssueSet
   const envelope = signCertificationEnvelope(
     context.issued.map((issued) => issued.document),
     options,
-    now,
+    clock(),
     undefined,
   )
   const types = [...new Set(context.issued.map((issued) => issued.type))]

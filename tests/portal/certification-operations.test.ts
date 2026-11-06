@@ -29,7 +29,7 @@ import {
   STATUS_PAGE,
   type DeclarationRowSpec,
 } from '../support/certification-pages'
-import { failure, MAULLIN, signedIn, type PortalHarness } from '../support/portal'
+import { failure, MAULLIN, portalWith, signedIn, type PortalHarness } from '../support/portal'
 import { certificationPage, page, REJECTION_PAGES } from '../support/portal-pages'
 import { ATTENTION, FULL_SET_TEXT } from '../support/test-set-samples'
 
@@ -53,40 +53,76 @@ describe('downloadTestSet', () => {
     post('pe_generar1', setGenerationForm(), setGenerationForm()),
     post('pe_generar2', download, ...more),
   ]
+  const lastSegment = (url: string) => url.split('/').pop()
+  const referers = (harness: PortalHarness, name: string) =>
+    harness.fake.requests
+      .filter((request) => request.url.endsWith(`/${name}`))
+      .map((request) => request.headers.referer)
 
-  test('confirms the company, ticks the default optional sets the page offers, and returns the text', async () => {
+  test('confirms the company and posts the company, the hidden fields, the optional sets offered and SET01 last', async () => {
     const harness = await signedIn(routes())
     const result = await downloadTestSet(harness.portal)
     expect(harness.posted('pe_generar1')).toEqual([{ ...COMPANY, CODIGO: '8', ACEPTAR: 'Confirmar Empresa' }])
-    expect(harness.posted('pe_generar2')).toEqual([
-      {
-        AUTORIZADA: 'S',
-        TOTAL: '15',
-        SET01: 'S',
-        SET03: 'S',
-        SET06: 'S',
-        SET07: 'S',
-        SET08: 'S',
-        SET09: 'S',
-        SET15: 'S',
-        SET72: 'S',
-      },
-    ])
-    expect(result.requested).toEqual(['SET01', 'SET03', 'SET06', 'SET07', 'SET08', 'SET09', 'SET15', 'SET72'])
+    expect(harness.fake.requests.find((request) => request.url.endsWith('/pe_generar2'))?.text).toBe(
+      'RUT_EMP=76543210&DV_EMP=3&AUTORIZADA=S&TOTAL=15&SET03=S&SET06=S&SET07=S&SET08=S&SET09=S&SET15=S&SET72=S&SET01=S',
+    )
+    expect(referers(harness, 'pe_generar1')).toEqual([`${MAULLIN}/pe_generar`])
+    expect(referers(harness, 'pe_generar2')).toEqual([`${MAULLIN}/pe_generar1`])
+    expect(result.requested).toEqual(['SET03', 'SET06', 'SET07', 'SET08', 'SET09', 'SET15', 'SET72', 'SET01'])
     expect(result.states.map((state) => state.name)).toEqual(['SET BASICO', 'SET GUIA DE DESPACHO'])
     expect(result.optionalSets).toHaveLength(8)
     expect(result.attentionNumber).toBe(ATTENTION)
     expect(result.regenerated).toBe(false)
     expect(parseTestSetText(result.text!).length).toBe(parseTestSetText(FULL_SET_TEXT).length)
+    // A session in the cache: the progress page is not read first.
+    expect(harness.urls().map(lastSegment)).toEqual(['pe_generar', 'pe_generar1', 'pe_generar2'])
   })
 
-  test('custom optional sets, only those offered; a regenerated set is reported', async () => {
+  test('without a session in the cache the progress page is read first, and its failure does not stop the download', async () => {
+    const progress = [
+      get('pe_avance1', page('entry')),
+      post('pe_avance2', certificationPage()),
+      get('pe_avance5', page('p5')),
+      post('pe_avance6', progressPage('SET DE PRUEBAS')),
+    ]
+    const fresh = portalWith([...progress, ...routes()])
+    await expect(downloadTestSet(fresh.portal)).resolves.toMatchObject({ attentionNumber: ATTENTION })
+    expect(fresh.urls().map(lastSegment)).toEqual([
+      'pe_avance1',
+      'pe_avance2',
+      'pe_avance5',
+      'pe_avance6',
+      'pe_generar',
+      'pe_generar1',
+      'pe_generar2',
+    ])
+    expect(fresh.posted('pe_avance2')).toEqual([{ ...COMPANY, ACEPTAR: 'Continuar' }])
+    expect(referers(fresh, 'pe_avance2')).toEqual([`${MAULLIN}/pe_avance1`])
+    expect(referers(fresh, 'pe_avance6')).toEqual([`${MAULLIN}/pe_avance5`])
+    const failing = portalWith([
+      get('pe_avance1', page('entry')),
+      { url: `${MAULLIN}/pe_avance2`, method: 'POST' as const, reply: [new Error('socket hang up')] },
+      ...routes(),
+    ])
+    await expect(downloadTestSet(failing.portal)).resolves.toMatchObject({ attentionNumber: ATTENTION })
+    expect(failing.urls().map(lastSegment)).toEqual([
+      'pe_avance1',
+      'pe_avance2',
+      'pe_generar',
+      'pe_generar1',
+      'pe_generar2',
+    ])
+  })
+
+  test('custom optional sets, only those offered and in page order; a regenerated set is reported', async () => {
     const harness = await signedIn(routes(setDownloadPage(FULL_SET_TEXT, '<p>Set generado correctamente</p>')))
     const result = await downloadTestSet(harness.portal, {
-      optionalSets: ['SET11', 'SET99'],
+      optionalSets: ['SET99', 'SET11', 'SET03'],
       previousAttentionNumber: '1',
     })
-    expect(harness.posted('pe_generar2')).toEqual([{ AUTORIZADA: 'S', TOTAL: '15', SET01: 'S', SET11: 'S' }])
+    expect(harness.fake.requests.find((request) => request.url.endsWith('/pe_generar2'))?.text).toBe(
+      'RUT_EMP=76543210&DV_EMP=3&AUTORIZADA=S&TOTAL=15&SET03=S&SET11=S&SET01=S',
+    )
     expect(result.regenerated).toBe(true)
   })
 
@@ -101,34 +137,68 @@ describe('downloadTestSet', () => {
     const harness = await signedIn([get('pe_generar', setGenerationForm()), post('pe_generar2', setDownloadPage())])
     await downloadTestSet(harness.portal)
     expect(harness.posted('pe_generar1')).toEqual([])
+    expect(referers(harness, 'pe_generar2')).toEqual([`${MAULLIN}/pe_generar1`])
   })
 
-  test('"no está inscrito" once is retried with a fresh session; twice is notEnrolled', async () => {
+  test('"no está inscrito" in plain words once is asked again with a fresh session; twice is notEnrolled', async () => {
+    const plain = page('<p>El contribuyente no esta inscrito en Postulacion Factura Electronica</p>')
     const once = await signedIn([
-      get('pe_generar', NOT_ENROLLED, SET_ENTRY),
+      get('pe_generar', plain, SET_ENTRY),
       post('pe_generar1', setGenerationForm()),
       post('pe_generar2', setDownloadPage()),
     ])
     await expect(downloadTestSet(once.portal)).resolves.toMatchObject({ attentionNumber: ATTENTION })
     expect(once.urls().filter((url) => url.endsWith('pe_generar'))).toHaveLength(2)
-    const twice = await signedIn([get('pe_generar', NOT_ENROLLED, NOT_ENROLLED)])
+    const twice = await signedIn([get('pe_generar', plain, plain), post('pe_generar2', page('<p>nada</p>'))])
     expect((await failure(downloadTestSet(twice.portal))).details).toMatchObject({ rejection: 'notEnrolled' })
+    // With the accent as an entity the page is not asked again, and is still notEnrolled.
+    const entity = await signedIn([get('pe_generar', NOT_ENROLLED), post('pe_generar2', page('<p>nada</p>'))])
+    expect((await failure(downloadTestSet(entity.portal))).details).toMatchObject({ rejection: 'notEnrolled' })
+    expect(entity.urls().filter((url) => url.endsWith('pe_generar'))).toHaveLength(1)
   })
 
-  test('a refusal and an unreadable generation page', async () => {
-    const refused = await signedIn([get('pe_generar', REJECTION_PAGES.companyNotAuthorized)])
-    expect((await failure(downloadTestSet(refused.portal))).details).toMatchObject({
-      rejection: 'companyNotAuthorized',
+  test('a generation page that says not enrolled is posted all the same, and only then refused', async () => {
+    const harness = await signedIn([get('pe_generar', NOT_ENROLLED), post('pe_generar2', setDownloadPage())])
+    expect((await failure(downloadTestSet(harness.portal))).details).toMatchObject({ rejection: 'notEnrolled' })
+    expect(harness.urls().map(lastSegment)).toEqual(['pe_generar', 'pe_generar2'])
+    expect(harness.fake.requests.find((request) => request.url.endsWith('/pe_generar2'))?.text).toBe(
+      'RUT_EMP=76543210&DV_EMP=3&AUTORIZADA=S&TOTAL=15&SET01=S',
+    )
+    // Without the download nothing is posted, and the page is refused as it is.
+    const reading = await signedIn([get('pe_generar', NOT_ENROLLED)])
+    expect((await failure(downloadTestSet(reading.portal, { download: false }))).details).toMatchObject({
+      rejection: 'notEnrolled',
     })
-    const blank = await signedIn([get('pe_generar', SET_ENTRY), post('pe_generar1', page('<p>nada</p>'))])
-    expect((await failure(downloadTestSet(blank.portal))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
-    const refusedLater = await signedIn([
-      get('pe_generar', SET_ENTRY),
-      post('pe_generar1', REJECTION_PAGES.optionNotAuthorized),
+    expect(reading.urls().map(lastSegment)).toEqual(['pe_generar'])
+    // A post that fails is the failure of the download: the page is never judged.
+    const failing = await signedIn([
+      get('pe_generar', NOT_ENROLLED),
+      { url: `${MAULLIN}/pe_generar2`, method: 'POST' as const, reply: [{ status: 503, body: 'down' }] },
     ])
-    expect((await failure(downloadTestSet(refusedLater.portal))).details).toMatchObject({
-      rejection: 'optionNotAuthorized',
-    })
+    expect((await failure(downloadTestSet(failing.portal))).code).toBe('SII_HTTP_ERROR')
+  })
+
+  test('a refusal on the way is not looked for: the set is asked for all the same', async () => {
+    const refused = await signedIn([
+      get('pe_generar', REJECTION_PAGES.userWithoutPermission),
+      post('pe_generar2', setDownloadPage()),
+    ])
+    await expect(downloadTestSet(refused.portal)).resolves.toMatchObject({ attentionNumber: ATTENTION, states: [] })
+    expect(refused.fake.requests.find((request) => request.url.endsWith('/pe_generar2'))?.text).toBe(
+      'RUT_EMP=76543210&DV_EMP=3&AUTORIZADA=S&TOTAL=15&SET01=S',
+    )
+    const blank = await signedIn([
+      get('pe_generar', SET_ENTRY),
+      post('pe_generar1', page('<p>nada</p>')),
+      post('pe_generar2', setDownloadPage()),
+    ])
+    await expect(downloadTestSet(blank.portal)).resolves.toMatchObject({ optionalSets: [], states: [] })
+    // Any "no est&aacute;" on the page reads as not enrolled, whatever follows it.
+    const loose = await signedIn([
+      get('pe_generar', REJECTION_PAGES.companyNotAuthorized),
+      post('pe_generar2', setDownloadPage()),
+    ])
+    expect((await failure(downloadTestSet(loose.portal))).details).toMatchObject({ rejection: 'notEnrolled' })
   })
 
   test('a session dropped on the download is forgotten and the sequence repeated once', async () => {
@@ -141,15 +211,18 @@ describe('downloadTestSet', () => {
       post('pe_generar2', SESSION_DROPPED, SESSION_DROPPED),
     ])
     expect((await failure(downloadTestSet(twice.portal))).code).toBe('SII_PORTAL_SESSION_EXPIRED')
+    const notEnrolled = await signedIn(
+      routes(page('<p>Usted no se encuentra autenticado. Contribuyente no inscrito.</p>')),
+    )
+    expect((await failure(downloadTestSet(notEnrolled.portal))).details).toMatchObject({ rejection: 'notEnrolled' })
+    expect(notEnrolled.posted('pe_generar2')).toHaveLength(1)
   })
 
-  test('a downloaded page that is no set, a refused one, and one with cases but no attention number', async () => {
+  test('a downloaded page that is no set, and one with cases but no attention number', async () => {
     const empty = await signedIn(routes(page('<p>Sin contenido</p>')))
     expect((await failure(downloadTestSet(empty.portal))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
     const refused = await signedIn(routes(REJECTION_PAGES.userWithoutPermission))
-    expect((await failure(downloadTestSet(refused.portal))).details).toMatchObject({
-      rejection: 'userWithoutPermission',
-    })
+    expect((await failure(downloadTestSet(refused.portal))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
     const bare = await signedIn(routes(page('<pre>CASO 1\nDOCUMENTO FACTURA</pre>')))
     await expect(downloadTestSet(bare.portal)).resolves.toMatchObject({
       attentionNumber: null,
@@ -162,6 +235,8 @@ describe('declareProgress', () => {
   const declaring = (form: string, answer: string, reread: string = form) =>
     signedIn([entry, post('pe_avance2', form, reread), post('pe_avance3', answer)])
   const basic = { basic: { trackId: '0001234', date: '2026-11-04' } }
+  const requests = (harness: PortalHarness, name: string) =>
+    harness.fake.requests.filter((request) => request.url.endsWith(`/${name}`))
 
   test('posts every field in form order with the current values, the track id without zeros, the date reversed', async () => {
     const rows: DeclarationRowSpec[] = [
@@ -179,8 +254,18 @@ describe('declareProgress', () => {
         guideBook: undefined,
       },
     })
-    expect(result.outcome).toBe('accepted')
-    expect(result.declared).toEqual(['exempt'])
+    expect(result).toMatchObject({
+      success: true,
+      outcome: 'accepted',
+      declared: ['exempt'],
+      verified: true,
+      inReview: false,
+      emptyFields: [],
+      contentErrors: [],
+      allRejected: false,
+      detail: null,
+    })
+    expect(result.judgedHtml).toBe(DECLARATION_ANSWERS.success)
     const [posted] = harness.posted('pe_avance3')
     expect(Object.keys(posted)).toEqual([
       'NUM_ENV1',
@@ -226,51 +311,91 @@ describe('declareProgress', () => {
       TOTREG: '4',
       ACEPTAR: 'Confirmar Revisión',
     })
-    expect(result.verification).toEqual({ exempt: 'kept' })
+    // The entry is visited once: the re-read posts the company again without it.
+    expect(harness.urls().map((url) => url.split('/').pop())).toEqual([
+      'pe_avance1',
+      'pe_avance2',
+      'pe_avance3',
+      'pe_avance2',
+    ])
+    expect(requests(harness, 'pe_avance2').map((request) => request.headers.referer)).toEqual([
+      `${MAULLIN}/pe_avance1`,
+      `${MAULLIN}/pe_avance1`,
+    ])
+    expect(requests(harness, 'pe_avance3')[0].headers.referer).toBe(`${MAULLIN}/pe_avance2`)
+    expect(harness.posted('pe_avance2')[1]).toEqual({ ...COMPANY, ACEPTAR: 'Continuar' })
   })
 
-  test('TOTREG falls back to 10 without the hidden field', async () => {
-    const form = page(
-      '<input type=hidden name=PASO value=P01><tr><td>SET BASICO</td><td><input name=NUM_ENV1></td></tr>',
-    )
-    const harness = await declaring(form, DECLARATION_ANSWERS.success)
+  test('TOTREG falls back to 10 without the hidden field, or when it is not a number', async () => {
+    const form = (totreg: string) =>
+      page(
+        `<input type="hidden" name="PASO" value="P01">${totreg}<table><tr><td>SET BASICO</td><td><input type="text" NAME="NUM_ENV1" value=""></td></tr></table>`,
+      )
+    const harness = await declaring(form(''), DECLARATION_ANSWERS.success)
     await declareProgress(harness.portal, { entries: basic })
     const [posted] = harness.posted('pe_avance3')
     expect(posted.TOTREG).toBe('10')
     expect(Object.keys(posted)).toHaveLength(44)
+    const odd = await declaring(form('<input type="hidden" name="TOTREG" value="x">'), DECLARATION_ANSWERS.success)
+    await declareProgress(odd.portal, { entries: basic })
+    // The loop runs to 10, and the field goes as the page had it.
+    expect(odd.posted('pe_avance3')[0]).toMatchObject({ TOTREG: 'x', NUM_ENV10: '' })
   })
 
   test.each([
-    ['contentErrors', DECLARATION_ANSWERS.contentErrors, STANDARD_ROWS, ['exemptPurchaseBook', 'basic']],
-    ['notProcessed', DECLARATION_ANSWERS.notProcessed, STANDARD_ROWS, []],
-    ['allRejected', DECLARATION_ANSWERS.success, STANDARD_ROWS, []],
+    ['allRejected', false, DECLARATION_ANSWERS.success, STANDARD_ROWS, []],
+    ['allRejected', false, DECLARATION_ANSWERS.notProcessed, STANDARD_ROWS, []],
+    [
+      'contentErrors',
+      false,
+      DECLARATION_ANSWERS.contentErrors,
+      STANDARD_ROWS,
+      ['exemptPurchaseBook', 'purchaseBook', 'basic'],
+    ],
+    [
+      'contentErrors',
+      true,
+      DECLARATION_ANSWERS.contentErrors,
+      [{ label: 'SET BASICO', index: 1, value: '1234' }, ...STANDARD_ROWS.slice(1)],
+      ['exemptPurchaseBook', 'purchaseBook', 'basic'],
+    ],
     [
       'inReview',
+      true,
       DECLARATION_ANSWERS.success,
       [{ label: 'SET BASICO', state: 'EN REVISION' }, ...STANDARD_ROWS.slice(1)],
       [],
     ],
     [
       'accepted',
+      true,
       DECLARATION_ANSWERS.success,
       [{ label: 'SET BASICO', index: 1, value: '1234' }, ...STANDARD_ROWS.slice(1)],
       [],
     ],
-  ] as const)('outcome %s from the answer and the re-read', async (outcome, answer, reread, contentErrors) => {
-    const harness = await declaring(declarationFormPage(STANDARD_ROWS), answer, declarationFormPage(reread))
-    const result = await declareProgress(harness.portal, { entries: basic })
-    expect(result.outcome).toBe(outcome)
-    expect(result.contentErrors).toEqual(contentErrors)
-    expect(result.answerHtml).toBe(answer)
-    expect(harness.posted('pe_avance2')).toHaveLength(2)
-  })
+  ] as const)(
+    'outcome %s, standing %s, from the answer and the re-read',
+    async (outcome, success, answer, reread, contentErrors) => {
+      const harness = await declaring(declarationFormPage(STANDARD_ROWS), answer, declarationFormPage(reread))
+      const result = await declareProgress(harness.portal, { entries: basic })
+      expect(result).toMatchObject({ outcome, success, contentErrors })
+      expect(result.answerHtml).toBe(answer)
+      expect(result.judgedHtml).toBe(answer)
+      expect(harness.posted('pe_avance2')).toHaveLength(2)
+    },
+  )
 
   test('allRejected when every declared row came back empty; notSaved when only some did', async () => {
     const two = { basic: { trackId: '1', date: '2026-11-04' }, guide: { trackId: '2', date: '2026-11-04' } }
     const all = await declaring(declarationFormPage(STANDARD_ROWS), DECLARATION_ANSWERS.success)
-    const rejected = await declareProgress(all.portal, { entries: two })
-    expect(rejected.outcome).toBe('allRejected')
-    expect(rejected.verification).toEqual({ basic: 'empty', guide: 'empty' })
+    await expect(declareProgress(all.portal, { entries: two })).resolves.toMatchObject({
+      outcome: 'allRejected',
+      success: false,
+      verified: false,
+      allRejected: true,
+      emptyFields: ['basic', 'guide'],
+      detail: 'notSaved: basic, guide',
+    })
     const some = await declaring(
       declarationFormPage(STANDARD_ROWS),
       DECLARATION_ANSWERS.success,
@@ -278,63 +403,113 @@ describe('declareProgress', () => {
     )
     await expect(declareProgress(some.portal, { entries: two })).resolves.toMatchObject({
       outcome: 'notSaved',
-      verification: { basic: 'empty', guide: 'kept' },
+      success: false,
+      allRejected: false,
+      emptyFields: ['basic'],
+    })
+    // One row in review carries the declaration even with another field empty.
+    const mixed = await declaring(
+      declarationFormPage(STANDARD_ROWS),
+      DECLARATION_ANSWERS.success,
+      declarationFormPage([
+        STANDARD_ROWS[0],
+        { label: 'SET GUIA DE DESPACHO', state: 'EN REVISION' },
+        ...STANDARD_ROWS.slice(2),
+      ]),
+    )
+    await expect(declareProgress(mixed.portal, { entries: two })).resolves.toMatchObject({
+      outcome: 'inReview',
+      success: true,
+      verified: true,
+      emptyFields: ['basic'],
     })
   })
 
-  test('inconsistent data and failures stop before the re-read', async () => {
+  test('inconsistent data and a post the portal did not take end before the re-read', async () => {
     const inconsistent = await declaring(declarationFormPage(STANDARD_ROWS), DECLARATION_ANSWERS.inconsistent)
     await expect(declareProgress(inconsistent.portal, { entries: basic })).resolves.toMatchObject({
       outcome: 'inconsistent',
-      detail: 'LA FECHA DE ENVIO NO CORRESPONDE AL ENVIO 123',
+      success: false,
+      verified: null,
+      detail: 'FECHA DE ENVIO NO CORRESPONDE AL ENVIO 123',
     })
     expect(inconsistent.posted('pe_avance2')).toHaveLength(1)
     const mismatch = await declaring(declarationFormPage(STANDARD_ROWS), DECLARATION_ANSWERS.contentMismatch)
     await expect(declareProgress(mismatch.portal, { entries: basic })).resolves.toMatchObject({
       outcome: 'failed',
+      success: false,
       detail: 'contentMismatch',
     })
     const error = await declaring(declarationFormPage(STANDARD_ROWS), DECLARATION_ANSWERS.plainError)
     await expect(declareProgress(error.portal, { entries: basic })).resolves.toMatchObject({
       outcome: 'failed',
-      detail: 'SII Se produjo un error al registrar el avance.',
+      detail: 'invalidAnswer',
     })
+    expect(error.posted('pe_avance2')).toHaveLength(1)
   })
 
-  test('a re-read that holds another track id, lacks the row, or is no form at all', async () => {
+  test('a session the portal says is gone is a failed post whose page reads as "not yet"', async () => {
+    const harness = await declaring(declarationFormPage(STANDARD_ROWS), DECLARATION_ANSWERS.sessionExpired)
+    const result = await declareProgress(harness.portal, { entries: basic })
+    expect(result).toMatchObject({ outcome: 'failed', success: false, detail: 'sessionExpired' })
+    expect(result.judgedHtml).toContain('no se encuentra')
+  })
+
+  test('the re-read only looks for an empty field or a row in review', async () => {
     const other = await declaring(
       declarationFormPage(STANDARD_ROWS),
       DECLARATION_ANSWERS.success,
       declarationFormPage([{ label: 'SET BASICO', index: 1, value: '999' }, ...STANDARD_ROWS.slice(1)]),
     )
-    await expect(declareProgress(other.portal, { entries: basic })).resolves.toMatchObject({
-      outcome: 'notSaved',
-      verification: { basic: 'mismatch' },
-    })
+    await expect(declareProgress(other.portal, { entries: basic })).resolves.toMatchObject({ outcome: 'accepted' })
     const gone = await declaring(
       declarationFormPage(STANDARD_ROWS),
       DECLARATION_ANSWERS.success,
       declarationFormPage(STANDARD_ROWS.slice(1)),
     )
-    await expect(declareProgress(gone.portal, { entries: basic })).resolves.toMatchObject({
-      outcome: 'notSaved',
-      verification: { basic: 'missing' },
-    })
+    await expect(declareProgress(gone.portal, { entries: basic })).resolves.toMatchObject({ outcome: 'accepted' })
     const status = await declaring(declarationFormPage(STANDARD_ROWS), DECLARATION_ANSWERS.success, page('<p>nada</p>'))
-    expect((await failure(declareProgress(status.portal, { entries: basic }))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
-  })
-
-  test('an expired session is thrown and forgotten', async () => {
-    const harness = await declaring(declarationFormPage(STANDARD_ROWS), DECLARATION_ANSWERS.sessionExpired)
-    expect((await failure(declareProgress(harness.portal, { entries: basic }))).code).toBe('SII_PORTAL_SESSION_EXPIRED')
-  })
-
-  test('declined: a status page, error states, a missing simulation row, no row at all', async () => {
-    const status = await declaring(page('<p>nada</p>'), '')
     await expect(declareProgress(status.portal, { entries: basic })).resolves.toMatchObject({
-      outcome: 'declined',
-      detail: 'noForm',
+      outcome: 'accepted',
+      success: true,
+      verified: true,
     })
+  })
+
+  test('a re-read that fails leaves the declaration as verified', async () => {
+    const warnings: string[] = []
+    const logger = {
+      debug: () => undefined,
+      info: () => undefined,
+      warn: (m: string) => void warnings.push(m),
+      error: () => undefined,
+    }
+    const harness = await signedIn(
+      [
+        entry,
+        {
+          url: `${MAULLIN}/pe_avance2`,
+          method: 'POST' as const,
+          reply: [{ body: declarationFormPage(STANDARD_ROWS) }, new Error('socket hang up')],
+        },
+        post('pe_avance3', DECLARATION_ANSWERS.success),
+      ],
+      { logger },
+    )
+    await expect(declareProgress(harness.portal, { entries: basic })).resolves.toMatchObject({
+      outcome: 'accepted',
+      success: true,
+      verified: true,
+      emptyFields: [],
+    })
+    expect(warnings).toEqual(['certification declaration could not be verified'])
+  })
+
+  test('nothing is posted without a form, or without the simulation row when the simulation is declared', async () => {
+    const status = await declaring(page('<p>nada</p>'), '')
+    const none = await declareProgress(status.portal, { entries: basic })
+    expect(none).toMatchObject({ outcome: 'declined', success: false, detail: 'noForm', answerHtml: '' })
+    expect(none.judgedHtml).toBe(none.formHtml)
     const errors = await declaring(STATUS_PAGE, '')
     await expect(declareProgress(errors.portal, { entries: basic })).resolves.toMatchObject({
       outcome: 'declined',
@@ -346,12 +521,36 @@ describe('declareProgress', () => {
         entries: { simulation: { trackId: '1', date: '2026-11-04' }, basic: basic.basic },
       }),
     ).resolves.toMatchObject({ outcome: 'declined', detail: 'simulationUnavailable' })
-    const approved = await declaring(declarationFormPage([{ label: 'SET BASICO', state: 'REVISADO CONFORME' }]), '')
-    await expect(declareProgress(approved.portal, { entries: basic })).resolves.toMatchObject({
-      outcome: 'declined',
-      detail: 'noRows',
+    expect(simulation.posted('pe_avance3')).toEqual([])
+  })
+
+  test('a form whose rows have no field left is posted all the same, and stands', async () => {
+    const approved = declarationFormPage([
+      { label: 'SET BASICO', state: 'REVISADO CONFORME' },
+      { label: 'SET GUIA DE DESPACHO', state: 'EN REVISION' },
+    ])
+    const harness = await declaring(approved, DECLARATION_ANSWERS.success)
+    await expect(declareProgress(harness.portal, { entries: basic })).resolves.toMatchObject({
+      outcome: 'accepted',
+      success: true,
+      declared: [],
+      verified: true,
     })
-    expect(approved.posted('pe_avance3')).toEqual([])
+    expect(harness.posted('pe_avance3')).toEqual([
+      {
+        NUM_ENV1: '',
+        FEC_ENV1: '',
+        SET1: '',
+        EST1: '',
+        NUM_ENV2: '',
+        FEC_ENV2: '',
+        SET2: '',
+        EST2: '',
+        ...COMPANY,
+        TOTREG: '2',
+        ACEPTAR: 'Confirmar Revisión',
+      },
+    ])
   })
 
   test('invalid input is refused before any request', async () => {
@@ -373,7 +572,7 @@ describe('posts that change the application are never retried', () => {
   const unavailable = { status: 503, body: 'down' }
   const retrying = { retry: { maxAttempts: 2, jitterRatio: 0, baseDelayMs: 1 } }
 
-  test('pe_generar2 is sent once; pe_avance3 keeps the retry policy', async () => {
+  test('pe_generar2 and pe_avance3 follow the retry policy, as any other request', async () => {
     const generate = await signedIn(
       [
         get('pe_generar', SET_ENTRY),
@@ -382,8 +581,8 @@ describe('posts that change the application are never retried', () => {
       ],
       retrying,
     )
-    expect((await failure(downloadTestSet(generate.portal))).code).toBe('SII_HTTP_ERROR')
-    expect(generate.posted('pe_generar2')).toHaveLength(1)
+    await expect(downloadTestSet(generate.portal)).resolves.toMatchObject({ attentionNumber: ATTENTION })
+    expect(generate.posted('pe_generar2')).toHaveLength(2)
     const declare = await signedIn(
       [
         entry,
@@ -444,8 +643,9 @@ describe('posts that change the application are never retried', () => {
 })
 
 describe('readProgress', () => {
-  const reading = (form: string, progress: string): Promise<PortalHarness> =>
-    signedIn([entry, post('pe_avance2', form), get('pe_avance5', page('p5')), post('pe_avance6', progress)])
+  const reading = (form: string, progress: string, ...more: readonly string[]): Promise<PortalHarness> =>
+    signedIn([entry, post('pe_avance2', form, ...more), get('pe_avance5', page('p5')), post('pe_avance6', progress)])
+  const lastSegment = (url: string) => url.split('/').pop()
 
   test('the entry sequence, pe_avance5, pe_avance6 with the company, the rows on the way', async () => {
     const harness = await reading(
@@ -457,27 +657,58 @@ describe('readProgress', () => {
     expect(report.states.basic).toEqual({ text: 'REVISADO CONFORME', state: 'approved' })
     expect(report.rows).toHaveLength(7)
     expect(harness.posted('pe_avance6')).toEqual([{ ...COMPANY, ACEPTAR: 'Continuar' }])
-    expect(harness.urls().map((url) => url.split('/').pop())).toEqual([
+    expect(harness.urls().map(lastSegment)).toEqual(['pe_avance1', 'pe_avance2', 'pe_avance5', 'pe_avance6'])
+    const referer = (name: string) =>
+      harness.fake.requests.find((request) => request.url.endsWith(`/${name}`))?.headers.referer
+    expect(referer('pe_avance2')).toBe(`${MAULLIN}/pe_avance1`)
+    expect(referer('pe_avance6')).toBe(`${MAULLIN}/pe_avance5`)
+  })
+
+  test('while the stage reads SIMULACION and nothing offers to confirm, the declaration form is asked for once more', async () => {
+    const offer = progressPage('SIMULACION', {}, { confirm: true })
+    const onForm = await reading(certificationPage(), progressPage('SIMULACION', {}), offer)
+    await expect(readProgress(onForm.portal)).resolves.toMatchObject({
+      simulationAwaitsConfirmation: true,
+      // The form shows the simulation approved in bold; the progress page showed nothing for it.
+      states: { simulation: { text: 'PENDIENTE CONFIRMAR', state: 'inReview' } },
+    })
+    expect(onForm.urls().map(lastSegment)).toEqual([
       'pe_avance1',
       'pe_avance2',
       'pe_avance5',
       'pe_avance6',
+      'pe_avance1',
+      'pe_avance2',
     ])
-  })
-
-  test('in the simulation stage the confirmation offer is also looked for on pe_avance2', async () => {
-    const offer = progressPage('SIMULACION', {}, { confirm: true })
-    const onForm = await reading(offer, progressPage('SIMULACION', { 'SET SIMULACION': 'EN REVISION' }))
-    await expect(readProgress(onForm.portal)).resolves.toMatchObject({ simulationAwaitsConfirmation: true })
+    // A state on the progress page is kept as it is.
+    const stated = await reading(
+      certificationPage(),
+      progressPage('SIMULACION', { 'SET SIMULACION': 'EN REVISION' }),
+      offer,
+    )
+    await expect(readProgress(stated.portal)).resolves.toMatchObject({
+      simulationAwaitsConfirmation: true,
+      states: { simulation: { text: 'EN REVISION', state: 'inReview' } },
+    })
+    // No offer on the form either, or a form that cannot be read: nothing awaits.
+    const none = await reading(certificationPage(), progressPage('SIMULACION', {}), certificationPage())
+    await expect(readProgress(none.portal)).resolves.toMatchObject({ simulationAwaitsConfirmation: false })
+    const failing = await reading(certificationPage(), progressPage('SIMULACION', {}))
+    await expect(readProgress(failing.portal)).resolves.toMatchObject({ simulationAwaitsConfirmation: false })
+    // Another stage, or an offer on the progress page itself, asks for nothing more.
     const elsewhere = await reading(offer, progressPage('INTERCAMBIO', { 'SET SIMULACION': 'REVISADO CONFORME' }))
     await expect(readProgress(elsewhere.portal)).resolves.toMatchObject({ simulationAwaitsConfirmation: false })
+    expect(elsewhere.urls()).toHaveLength(4)
+    const offered = await reading(certificationPage(), offer)
+    await expect(readProgress(offered.portal)).resolves.toMatchObject({ simulationAwaitsConfirmation: true })
+    expect(offered.urls()).toHaveLength(4)
   })
 
-  test('a page with no stage and no state is unexpected; a refusal is a refusal', async () => {
+  test('a page with no stage and no state is still an answer, and a refusal is not looked for', async () => {
     const blank = await reading(certificationPage(), page('<p>nada</p>'))
-    expect((await failure(readProgress(blank.portal))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
-    const refused = await reading(certificationPage(), REJECTION_PAGES.optionNotAuthorized)
-    expect((await failure(readProgress(refused.portal))).details).toMatchObject({ rejection: 'optionNotAuthorized' })
+    await expect(readProgress(blank.portal)).resolves.toMatchObject({ stage: null, stageKey: 'testSets', states: {} })
+    const refused = await reading(REJECTION_PAGES.optionNotAuthorized, REJECTION_PAGES.optionNotAuthorized)
+    await expect(readProgress(refused.portal)).resolves.toMatchObject({ stage: null, states: {}, rows: [] })
   })
 })
 
