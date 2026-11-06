@@ -1,6 +1,7 @@
 import { issueSimulation, type IssuedSimulation } from '../../src/certification/simulation'
 import { verifyEnvelopeSignature } from '../../src/envelope/sign'
-import { cafFor, fullPlan, issueOptions, issuer } from '../support/certification-fixtures'
+import { chileTimestamp } from '../../src/time/chile'
+import { cafFor, fullPlan, issueOptions, issuer, receiver } from '../support/certification-fixtures'
 import { ISSUER_RUT, RECEIVER_RUT } from '../support/fixtures'
 import { failure } from '../support/portal'
 import { ATTENTION } from '../support/test-set-samples'
@@ -62,13 +63,14 @@ describe('the simulation of the whole plan', () => {
     expect(byCase(simulation, 6).document.items.map((item) => item.name)).toEqual(['Cemento'])
   })
 
-  test('a note without items gets a line named after its reason; exempt notes stay exempt', () => {
+  test('a note without items gets a line named after its reason; an exempt return takes the items of its invoice', () => {
     expect(byCase(simulation, 5).document.items.map((item) => [item.name, item.amount])).toEqual([
       ['CORRIGE GIRO DEL RECEPTOR', 0],
     ])
     const exemptNote = byCase(simulation, 10).document
     expect(exemptNote.items.map((item) => [item.name, item.exemptIndicator])).toEqual([
-      ['DEVOLUCION DE MERCADERIAS', 1],
+      ['Arriendo de oficina', 1],
+      ['Asesoria tributaria', 1],
     ])
     expect(byCase(simulation, 12).document.items[0]).toMatchObject({
       name: 'Asesoria tributaria',
@@ -82,7 +84,7 @@ describe('the simulation of the whole plan', () => {
     expect(byCase(simulation, 16).document.header.receiver.rut).toBe(ISSUER_RUT)
     expect(byCase(simulation, 14).document.header.receiver.rut).toBe(ISSUER_RUT)
     expect(byCase(simulation, 13).document.header.receiver.rut).toBe(RECEIVER_RUT)
-    expect(byCase(simulation, 14).document.header.options).toMatchObject({ transferType: 5, dispatchType: 1 })
+    expect(byCase(simulation, 14).document.header.options.transferType).toBe(5)
     const credit = byCase(simulation, 17).document
     expect(credit.items[0]).toMatchObject({
       name: 'Chatarra de fierro',
@@ -166,7 +168,7 @@ describe('edges', () => {
             {
               ...basic.creditNotes[2],
               caseId: 'c-3',
-              itemsFromCase: 'nope',
+              itemsFromCase: null,
               items: [{ name: 'Propio', quantity: 1, unitPrice: 2 }],
             },
             { ...basic.creditNotes[0], caseId: 'c-4', reasonText: '', items: [] },
@@ -204,5 +206,196 @@ describe('edges', () => {
     expect(guides.fewerThanRecommended).toBe(true)
     expect(guides.types).toEqual([52])
     expect(guides.cases[1].document.header.receiver.businessName).toBe(issuer.businessName)
+  })
+})
+
+describe('what the SII receives, as the field writes it', () => {
+  let simulation: IssuedSimulation
+  beforeAll(async () => {
+    simulation = await issueSimulation(plan, issueOptions())
+  })
+
+  test('a guide never carries the dispatch type, and a guide with no amounts totals 0 with the VAT rate', () => {
+    for (const n of [13, 14, 15]) expect(byCase(simulation, n).document.header.options.dispatchType).toBeUndefined()
+    expect(byCase(simulation, 14).document.header.totals).toEqual({ vatRate: 19, totalAmount: 0 })
+    expect(byCase(simulation, 14).document.items[0]).toMatchObject({ unit: 'UN', amount: 0 })
+  })
+
+  test('a note with a total of 0 carries the total alone, without the VAT rate', () => {
+    expect(byCase(simulation, 5).document.header.totals).toEqual({ totalAmount: 0 })
+  })
+
+  test('the totals are the sums of the lines, the global discount only on the net', () => {
+    expect(byCase(simulation, 2).document.header.totals).toEqual({
+      netAmount: 159960,
+      exemptAmount: 20000,
+      vatRate: 19,
+      vatAmount: 30392,
+      totalAmount: 210352,
+    })
+    expect(byCase(simulation, 9).document.header.totals).toEqual({ exemptAmount: 610000, totalAmount: 610000 })
+  })
+
+  test('the receiver and the issuer carry only the fields of the simulation, the receiver city is its commune', () => {
+    const { issuer: written, receiver: received } = byCase(simulation, 1).document.header
+    expect(received.city).toBe('Providencia')
+    expect(written.city).toBe('Ñuñoa')
+    expect(byCase(simulation, 16).document.header.receiver.city).toBe('Ñuñoa')
+  })
+
+  test('the debit note of the purchase set takes the price of the credit note it references', () => {
+    expect(byCase(simulation, 18).document.items[0]).toMatchObject({ unitPrice: 1200, quantity: 100 })
+  })
+})
+
+describe('the clocks of the simulation', () => {
+  test('dated on the local day, stamped on UTC seconds, enveloped on Chile time, named on the local clock', async () => {
+    const at = new Date(2026, 10, 5, 23, 30, 15, 123)
+    const simulation = await issueSimulation({ guide: plan.guide }, { ...issueOptions([cafFor(52)]), now: () => at })
+    const stamp = at.toISOString().slice(0, 19)
+    for (const issued of simulation.cases) {
+      expect(issued.document.header.issueDate).toBe('2026-11-05')
+      expect(issued.document.ted.stampedAt).toBe(stamp)
+      expect(issued.document.signedAt).toBe(stamp)
+    }
+    expect(simulation.envelope.cover.signedAt).toBe(chileTimestamp(at))
+    expect(simulation.envelope.setId).toBe('DTE_SetDoc_05_11_2026_23_30_15_123')
+  })
+})
+
+describe('the party fields', () => {
+  test('only the fields the simulation writes reach the documents', async () => {
+    const options = issueOptions([cafFor(52)])
+    const simulation = await issueSimulation(
+      { guide: { ...plan.guide!, guides: [plan.guide!.guides[0]] } },
+      {
+        ...options,
+        issuer: { ...issuer, city: 'Santiago', phone: '+56 2 2345 6789', email: 'ventas@example.cl', branch: 'Matriz' },
+        receiver: { ...receiver, city: 'Valparaiso', contact: 'Juan Perez', email: 'compras@example.cl' },
+      },
+    )
+    const header = simulation.cases[0].document.header
+    expect(header.issuer).toEqual({
+      rut: ISSUER_RUT,
+      businessName: issuer.businessName,
+      businessActivity: issuer.businessActivity,
+      activityCode: 620200,
+      address: issuer.address,
+      commune: issuer.commune,
+      city: 'Santiago',
+    })
+    expect(header.receiver).toEqual({
+      rut: RECEIVER_RUT,
+      businessName: receiver.businessName,
+      businessActivity: receiver.businessActivity,
+      address: receiver.address,
+      commune: receiver.commune,
+      city: 'Valparaiso',
+    })
+  })
+
+  test('an issuer without an activity code and a receiver without a line of business carry neither', async () => {
+    const options = issueOptions([cafFor(52)])
+    const { activityCode, ...bare } = issuer
+    void activityCode
+    const { businessActivity, ...nameless } = receiver
+    void businessActivity
+    const simulation = await issueSimulation(
+      { guide: { ...plan.guide!, guides: [plan.guide!.guides[0]] } },
+      { ...options, issuer: bare, receiver: nameless },
+    )
+    expect(simulation.cases[0].document.header.issuer.activityCode).toBeUndefined()
+    expect(simulation.cases[0].document.header.receiver.businessActivity).toBeUndefined()
+  })
+})
+
+describe('the items of the notes, as the field resolves them', () => {
+  const basic = plan.basic!
+  const run = (creditNotes: typeof basic.creditNotes, invoices = basic.invoices) =>
+    issueSimulation({ basic: { ...basic, invoices, creditNotes, debitNotes: [] } }, issueOptions())
+  const itemsOf = (simulation: IssuedSimulation, caseId: string) =>
+    simulation.cases
+      .find((issued) => issued.caseId === caseId)!
+      .document.items.map((item) => [item.name, item.quantity, item.unitPrice])
+
+  test('a return written with the accent, a cancellation, and a price change on an item with no quantity', async () => {
+    const [devolucion, , anula] = basic.creditNotes
+    const simulation = await run(
+      [
+        { ...devolucion, caseId: 'n-1', reasonText: 'DEVOLUCIÓN DE MERCADERIAS' },
+        { ...anula, caseId: 'n-2', items: [{ name: 'Otro', quantity: 3, unitPrice: 9 }] },
+        {
+          ...anula,
+          caseId: 'n-3',
+          reasonText: 'anula factura',
+          items: [{ name: 'Propio', quantity: 3, unitPrice: 9 }],
+        },
+      ],
+      [
+        { ...basic.invoices[0], items: [{ name: 'Cajon de manzanas', quantity: 0, unitPrice: 2800 }] },
+        basic.invoices[2],
+      ],
+    )
+    expect(itemsOf(simulation, 'n-1')).toEqual([['Cajon de manzanas', 0, 2800]])
+    expect(itemsOf(simulation, 'n-2')).toEqual([['Cemento', 10, 8000]])
+    expect(itemsOf(simulation, 'n-3')).toEqual([['Propio', 3, 9]])
+  })
+
+  test('a price change keeps its own quantity when the original has none', async () => {
+    const change = basic.debitNotes[1]
+    const simulation = await run(
+      [{ ...change, items: [{ name: 'Cajon de manzanas', quantity: 7, unitPrice: 3100 }] }],
+      [{ ...basic.invoices[0], items: [{ name: 'Cajon de manzanas', quantity: 0, unitPrice: 2800 }] }],
+    )
+    expect(itemsOf(simulation, change.caseId)).toEqual([['Cajon de manzanas', 7, 3100]])
+  })
+})
+
+describe('the purchase notes, as the field prices them', () => {
+  const purchase = plan.purchase!
+  const run = (creditNote: typeof purchase.creditNote) =>
+    issueSimulation({ purchase: { ...purchase, creditNote, debitNote: null } }, issueOptions())
+
+  test('a note whose invoice is not in the simulation keeps its own price, even when it is nothing', async () => {
+    const simulation = await run({
+      ...purchase.creditNote!,
+      referencedCase: 'nope',
+      items: [{ name: 'Chatarra de fierro', quantity: 100, unitPrice: 0 }],
+    })
+    const note = simulation.cases[1].document
+    expect(note.references).toEqual([])
+    expect(note.items[0]).toMatchObject({ unitPrice: 0, amount: 0 })
+    expect(note.header.totals).toEqual({ totalAmount: 0 })
+  })
+
+  test('the item is found by its name trimmed, as written', async () => {
+    const simulation = await run({
+      ...purchase.creditNote!,
+      items: [{ name: ' Chatarra de fierro ', quantity: 100, unitPrice: 0 }],
+    })
+    expect(simulation.cases[1].document.items[0]).toMatchObject({ quantity: 100, unitPrice: 1200 })
+    const upper = await run({
+      ...purchase.creditNote!,
+      items: [{ name: 'CHATARRA DE FIERRO', quantity: 100, unitPrice: 0 }],
+    })
+    expect(upper.cases[1].document.items[0]).toMatchObject({ unitPrice: 1 })
+  })
+})
+
+describe('the global discount', () => {
+  test('a discount of 0 is no discount', async () => {
+    const basic = plan.basic!
+    const simulation = await issueSimulation(
+      {
+        basic: {
+          ...basic,
+          invoices: [{ ...basic.invoices[1], globalDiscountPercent: 0 }],
+          creditNotes: [],
+          debitNotes: [],
+        },
+      },
+      issueOptions(),
+    )
+    expect(simulation.cases[0].document.globalAdjustments).toEqual([])
   })
 })
