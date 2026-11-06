@@ -41,7 +41,6 @@ import {
   type SetGenerationState,
 } from './pages/certification-set'
 import {
-  assertNotRejected,
   companyFields,
   ensurePage,
   forgetSession,
@@ -633,7 +632,7 @@ export const readProgress = (
  * @param input EN: the company. ES: la empresa.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: advanced, unchanged or failed, with the sentence. ES: avanzó, sin cambio o falló, con la frase.
- * @throws {DteError} EN: `SII_PORTAL_REJECTED`, session and transport codes. ES: los mismos códigos.
+ * @throws {DteError} EN: session and transport codes. ES: los códigos de sesión y de transporte.
  */
 export const advanceStage = (
   portal: PortalClient,
@@ -660,7 +659,7 @@ export const advanceStage = (
       },
       at('pe_avance2'),
     )
-    assertNotRejected(context, page.html)
+    // The answer is not searched for a refusal: a page that says neither "advanced" nor "already there" is `failed`.
     return classifyAdvanceAnswer(page.html)
   })
 
@@ -713,7 +712,7 @@ export const listBookHistory = (
  * @param input EN: the company. ES: la empresa.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: declared, blocked or unconfirmed, with the sentence. ES: declarada, bloqueada o sin confirmar, con la frase.
- * @throws {DteError} EN: `SII_PORTAL_REJECTED`, session and transport codes. ES: los mismos códigos.
+ * @throws {DteError} EN: session and transport codes. ES: los códigos de sesión y de transporte.
  */
 export const declareCompliance = (
   portal: PortalClient,
@@ -722,8 +721,8 @@ export const declareCompliance = (
 ): Promise<ComplianceResult> =>
   withPortalSession(portal, 'declareCompliance', overrides, async (context) => {
     const company = companyFields(resolvePortalCompany(portal, input.companyRut))
+    // No screen is searched for a refusal: only the wizard's own block stops it, and any other page is carried on.
     const blockedOn = (page: PortalPage): ComplianceResult | null => {
-      assertNotRejected(context, page.html)
       const block = complianceBlock(page.html)
       return block === null ? null : { outcome: 'blocked', message: block }
     }
