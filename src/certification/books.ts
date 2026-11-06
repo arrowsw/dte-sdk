@@ -304,13 +304,22 @@ const fieldSummary = (
   factor: number,
   previous: readonly BookTotals[],
 ): Pick<PurchaseSalesBook, 'segmentTotals' | 'periodTotals'> => {
-  const creditOf = (type: number): number =>
-    book.entries
-      .filter((entry) => entry.type === type && entry.commonUseVat)
-      .reduce((total, entry) => total + Math.round((entry.commonUseVat as number) * factor), 0)
-  const lines = sumBookEntries(book.entries).map(({ taxKind, ...row }) => {
+  // A document is a common-use operation only when it has common-use VAT: one flagged with none stays out of the count.
+  const commonUseOf = (type: number): readonly number[] =>
+    book.entries.flatMap((entry) => (entry.type === type && entry.commonUseVat ? [entry.commonUseVat] : []))
+  const lines = sumBookEntries(book.entries).map(({ taxKind, commonUseVatCount, commonUseVat, ...row }) => {
     void taxKind
-    return (row.commonUseVat ?? 0) > 0 ? { ...row, commonUseCredit: creditOf(row.type) } : row
+    void commonUseVatCount
+    void commonUseVat
+    const amounts = commonUseOf(row.type)
+    return amounts.length === 0
+      ? row
+      : {
+          ...row,
+          commonUseVatCount: amounts.length,
+          commonUseVat: amounts.reduce((total, amount) => total + amount, 0),
+          commonUseCredit: amounts.reduce((total, amount) => total + Math.round(amount * factor), 0),
+        }
   })
   const carried = previous.map(({ taxKind, ...row }) => {
     void taxKind

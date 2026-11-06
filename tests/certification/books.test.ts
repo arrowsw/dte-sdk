@@ -575,6 +575,43 @@ describe('the purchase book summaries, as the field writes them', () => {
     expect(section(adjusted.xml, 'ResumenSegmento')).not.toContain('TotCredIVAUsoComun')
   })
 
+  test('a common-use document with no VAT is not counted as a common-use operation', async () => {
+    const commonUse = (documentText: string, folio: number, affectedAmount?: number) =>
+      supplierDocument({
+        documentText,
+        folio,
+        observation: 'FACTURA CON IVA USO COMUN',
+        ...(affectedAmount === undefined ? {} : { affectedAmount }),
+        commonUseVat: true,
+      })
+    const book = createCertificationPurchaseBook(
+      {
+        kind: 'purchaseBook',
+        attentionNumber: '1',
+        documents: [commonUse('FACTURA', 1), commonUse('FACTURA', 2, 1000), commonUse('FACTURA ELECTRONICA', 3)],
+        proportionalityFactor: 0.6,
+      },
+      bookInput,
+    )
+    // The line keeps its tax kind and a common-use VAT of 0, with the rate and explicit zeros of a line with no net amount.
+    expect(book.entries[0]).toMatchObject({ taxKind: 'vat', commonUseVat: 0, taxRate: 19, netAmount: 0, vatAmount: 0 })
+    expect(book.xml).toContain('<IVAUsoComun>0</IVAUsoComun>')
+    // Only the document that has common-use VAT counts in the summary of its type; a type with none carries none.
+    expect(book.periodTotals?.[0]).toMatchObject({
+      type: 30,
+      documentCount: 2,
+      commonUseVatCount: 1,
+      commonUseVat: 190,
+    })
+    expect(book.periodTotals?.[0].commonUseCredit).toBe(114)
+    expect(book.periodTotals?.[1]).toMatchObject({ type: 33, documentCount: 1 })
+    expect(book.periodTotals?.[1]).not.toHaveProperty('commonUseVat')
+    expect(book.periodTotals?.[1]).not.toHaveProperty('commonUseVatCount')
+    expect(countOf(book.xml, 'TotOpIVAUsoComun')).toBe(1)
+    expect(book.xml).toContain('<TotOpIVAUsoComun>1</TotOpIVAUsoComun>\n<TotIVAUsoComun>190</TotIVAUsoComun>')
+    expect(await validateAgainstXsd(book.xml, 'LibroCV')).toEqual([])
+  })
+
   test('a plan with no documents has no summaries', () => {
     const book = createCertificationPurchaseBook(
       { kind: 'purchaseBook', attentionNumber: '1', documents: [], proportionalityFactor: 0.6 },
