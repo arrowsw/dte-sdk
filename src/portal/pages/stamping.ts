@@ -16,7 +16,7 @@ const REJECTIONS: readonly { readonly rejection: PortalRejection; readonly match
   },
   {
     rejection: 'companyNotAuthorized',
-    matches: (text) => /(empresa|contribuyente)\s+no\s+est.{0,8}\s*autorizad[oa]\s+para\s+operar/i.test(text),
+    matches: (text) => /empresa\s+no\s+est.{0,8}\s*autorizada\s+para\s+operar/i.test(text),
   },
   {
     rejection: 'optionNotAuthorized',
