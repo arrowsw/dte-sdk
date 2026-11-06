@@ -43,8 +43,9 @@ every field.
 - 🖨️ **Printed samples** — one PDF per document following the SII manual, with its PDF417 stamp.
 - 🧠 **Fully typed** — a domain model in English (`totalAmount`, `issuer.businessName`)
   that maps to the official SII tags (`MntTotal`, `RznSoc`) through a codec.
-- 🇨🇱 **Identity by [rut.ts](https://github.com/arrowsw/rut.ts)** — every RUT is
-  validated and normalized by rut.ts; nothing is reimplemented here.
+- 🇨🇱 **RUTs by [rut.ts](https://github.com/arrowsw/rut.ts)** — `dte-sdk` handles every RUT
+  value with rut.ts, the most complete RUT library there is, with a world-class implementation.
+  Every RUT is validated and normalized by it; nothing is reimplemented here.
 - 🛡️ **Typed errors** with stable codes and no personal data in messages.
 
 ## Contents
