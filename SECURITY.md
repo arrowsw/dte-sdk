@@ -43,7 +43,12 @@ the contact listed on the repository's GitHub organization page.
 ## Scope
 
 Out of scope: vulnerabilities in dependencies of the development toolchain that
-do not affect the published, zero-runtime-dependency package.
+do not affect the published package.
+
+In scope: a vulnerability in a runtime dependency that reaches `dte-sdk`. The
+package has four, pinned to exact versions (`@xmldom/xmldom`, `fast-xml-parser`,
+`node-forge` and `rut.ts`), and two optional peer dependencies used only by
+`dte-sdk/pdf` (`pdf-lib` and `bwip-js`).
 
 ## Supply chain
 
