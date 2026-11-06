@@ -27,6 +27,24 @@ test('page readers', () => {
   expect(reobtainDownloadFields(page('<form action="/rf_genera_archivo"></form>'))).toBeNull()
 })
 
+test('forms are chosen by the exact opening tag, with double quotes and the name first', () => {
+  const inputs = '<input name="FOLIO_INI" value="1"><input name="FOLIO_FIN" value="9">'
+  expect(parseReobtainList(page(`<form name=frm1>${inputs}</form>`))).toEqual([])
+  expect(parseReobtainList(page(`<form name='frm1'>${inputs}</form>`))).toEqual([])
+  expect(parseReobtainList(page(`<form action="x" name="frm1">${inputs}</form>`))).toEqual([])
+  expect(parseReobtainList(page(`<FORM NAME="frm12">${inputs}</FORM>`))).toHaveLength(1)
+  expect(reobtainFormFields(page(`<form name=form1>${inputs}</form>`))).toBeNull()
+  expect(reobtainFormFields(page(`<form action="x" name="form1">${inputs}</form>`))).toBeNull()
+  expect(reobtainFormFields(page(`<form name="form1">${inputs}</form>`))).toMatchObject({ FOLIO_INI: '1' })
+  expect(reobtainDownloadFields(page(`<form action='rf_genera_archivo'>${inputs}</form>`))).toBeNull()
+  expect(
+    reobtainDownloadFields(page(`<form method="post" action="/x/rf_genera_archivo">${inputs}</form>`)),
+  ).toMatchObject({
+    FOLIO_INI: '1',
+  })
+  expect(reobtainDownloadFields(page(`<form action="/x/rf_genera_archivo?a=1">${inputs}</form>`))).toBeNull()
+})
+
 test('only inputs with a double-quoted name followed by a double-quoted value are fields', () => {
   const frm = (inputs: string): string => page(`<form name="frm1">${inputs}</form>`)
   expect(
