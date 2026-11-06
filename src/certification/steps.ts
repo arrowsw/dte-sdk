@@ -1,5 +1,5 @@
 import { SET_KEYS, type CertificationStage, type DeclarationKey, type SetKey } from '../catalogs/certification'
-import { DteError, errorMessage } from '../errors'
+import { DteError, errorMessage, isDteError } from '../errors'
 import {
   advanceStage,
   declareCompliance,
@@ -10,9 +10,9 @@ import {
   type DeclarationEntry,
   type DeclarationOutcome,
   type DeclarationResult,
+  type ProgressReport,
 } from '../portal/certification'
 import { saysNotProcessedYet, saysRejection } from '../portal/pages/certification-progress'
-import { queryUploadStatus } from '../sii/status'
 import { uploadEnvelope } from '../sii/upload'
 import { chileDate } from '../time/chile'
 import {
@@ -23,7 +23,7 @@ import {
   simulationFolioNeeds,
   type HeldCaf,
 } from './folios-step'
-import { queryFieldUploadState, type FieldUploadState } from './field-status'
+import { fieldDiagnosis, queryFieldUploadState } from './field-status'
 import { uploadForTrackId } from './field-upload'
 import { issueTestSet, type IssuableSetPlan, type IssuedCase } from './issue-set'
 import { issueSimulation } from './simulation'
@@ -53,9 +53,16 @@ const DECLARATION_ATTEMPTS = 10
 const DECLARATION_INTERVAL_MS = 5000
 const SETS_APPROVAL_ATTEMPTS = 5
 const SETS_APPROVAL_INTERVAL_MS = 10000
+const ADVANCE_READ_ATTEMPTS = 30
+const ADVANCE_READ_INTERVAL_MS = 10000
 const SIMULATION_APPROVAL_ATTEMPTS = 30
 const SIMULATION_APPROVAL_INTERVAL_MS = 10000
 const SIMULATION_ARTEFACT = 'simulacion/envio-simulacion.xml'
+const SIMULATION_DIAGNOSIS_PREFIX = 'declaracion-simulacion'
+// How the simulation row of the progress page is read: by the wording, in capitals.
+const EXCHANGE_WORD = 'INTERCAMBIO'
+const APPROVED_WORDING = 'REVISADO CONFORME'
+const REJECTED_WORDING = /RECHAZADO|ERRORES|REPARO/
 const STAGE_ORDER: readonly CertificationStage[] = [
   'testSets',
   'books',
@@ -105,6 +112,7 @@ export const obtainTestSet = async (
     setText: text,
     attentionNumber: sets[0].attentionNumber,
     plan,
+    setReadDate: rt.now().toISOString().slice(0, 10),
     stage: 'testSets',
   })
   rt.emit({ step: 'SETS_LOADED' })
@@ -220,9 +228,6 @@ export const entryOf = (trackId: string, now: Date): { readonly trackId: string;
   date: chileDate(now),
 })
 
-const DIAGNOSIS_CLASS = (state: FieldUploadState): string =>
-  state.rejected ? 'rejected' : state.successful ? 'accepted' : state.intermediate ? 'pending' : 'unknown'
-
 /**
  * EN: The SOAP status of every declared envelope, asked once each, for the diagnosis of a content error: never fatal.
  * The answer as it came goes to the artefacts.
@@ -240,8 +245,7 @@ export const diagnose = async (
     try {
       const state = await queryFieldUploadState(rt.sii, entry.trackId)
       if (state.raw !== null) await rt.store.writeArtefact(`${prefix}-estado-${key}-${entry.trackId}.xml`, state.raw)
-      if (state.code !== null)
-        diagnosis[entry.trackId] = { code: state.code, status: DIAGNOSIS_CLASS(state), message: state.message ?? '' }
+      if (state.code !== null) diagnosis[entry.trackId] = fieldDiagnosis(state)
     } catch (error) {
       rt.portal.logger.warn('certification diagnosis failed', { trackId: entry.trackId, reason: errorMessage(error) })
     }
@@ -403,29 +407,52 @@ export const waitForTestSetsApproval = async (
 export const laterStage = (current: CertificationStage, portal: CertificationStage): CertificationStage =>
   STAGE_ORDER.indexOf(portal) > STAGE_ORDER.indexOf(current) ? portal : current
 
+// Reads the progress page, or null when it cannot be read.
+const progressOrNull = async (rt: Runtime, what: string): Promise<ProgressReport | null> => {
+  try {
+    return await readProgress(rt.portal)
+  } catch (error) {
+    if (!isDteError(error)) throw error
+    rt.portal.logger.warn(what, { reason: errorMessage(error) })
+    return null
+  }
+}
+
 /**
- * EN: Asks the portal to advance the application and reads where it stands. "Already in that step" is fine; a
- * refusal throws `SII_PORTAL_REJECTED` with `advanceRefused`.
- * ES: Pide al portal avanzar la postulación y lee dónde quedó. "Ya está en ese paso" está bien; una negativa lanza
- * `SII_PORTAL_REJECTED` con `advanceRefused`.
+ * EN: Asks the portal for the next stage after the books: the progress page is read, up to 30 times 10 s apart while it
+ * cannot be read; on the first page that reads the advance is asked for at once, whatever the page says of the books
+ * (the portal decides); then the page is read again for the stage, and the state's stage moves to the portal's when
+ * that is later. Nothing here throws for a portal answer: an advance the portal refuses, or that cannot be asked, is
+ * `failed` with its sentence; "already in that step" is `unchanged`; no page read in 30 tries is `timedOut`.
+ * ES: Pide al portal la etapa siguiente después de los libros: se lee la página de avance, hasta 30 veces cada 10 s
+ * mientras no se pueda leer; con la primera página que se lee se pide el avance de inmediato, diga lo que diga la
+ * página de los libros (decide el portal); luego se lee de nuevo la página para saber la etapa, y la etapa del estado
+ * pasa a la del portal cuando esa es posterior. Nada aquí lanza por una respuesta del portal: un avance que el portal
+ * niega, o que no se pudo pedir, es `failed` con su frase; "ya se encuentra en ese paso" es `unchanged`; ninguna página
+ * leída en 30 intentos es `timedOut`.
  */
 export const advanceToNextStage = async (
   deps: CertificationDependencies,
   state: CertificationState,
-): Promise<StepResult<'advanced' | 'unchanged'>> => {
+): Promise<StepResult<'advanced' | 'unchanged' | 'failed' | 'timedOut'>> => {
   const rt = runtime(deps)
   rt.emit({ step: 'ADVANCE_WAITING' })
-  const answer = await advanceStage(rt.portal)
-  if (answer.outcome === 'failed')
-    throw new DteError('SII_PORTAL_REJECTED', {
-      rejection: 'advanceRefused',
-      operation: 'advanceToNextStage',
-      portalMessage: answer.message,
+  for (let attempt = 1; attempt <= ADVANCE_READ_ATTEMPTS; attempt += 1) {
+    if ((await progressOrNull(rt, 'certification progress before the advance failed')) === null) {
+      await rt.sleep(ADVANCE_READ_INTERVAL_MS)
+      continue
+    }
+    const answer = await advanceStage(rt.portal).catch((error: unknown) => {
+      if (!isDteError(error)) throw error
+      return { outcome: 'failed' as const, message: errorMessage(error) }
     })
-  const report = await readProgress(rt.portal)
-  rt.emit({ step: 'ADVANCE_DONE', stage: report.stage ?? '' })
-  const next = await saveState(rt, state, { stage: laterStage(state.stage, report.stageKey) })
-  return { state: next, outcome: answer.outcome, detail: answer.message }
+    const report = await progressOrNull(rt, 'certification progress after the advance failed')
+    rt.emit({ step: 'ADVANCE_DONE', stage: report?.stage ?? '' })
+    const next =
+      report === null ? state : await saveState(rt, state, { stage: laterStage(state.stage, report.stageKey) })
+    return { state: next, outcome: answer.outcome, detail: answer.message }
+  }
+  return { state, outcome: 'timedOut', detail: 'progress' }
 }
 
 const atLeast = (stage: CertificationStage, floor: CertificationStage): boolean =>
@@ -486,10 +513,12 @@ export const sendSimulation = async (
 }
 
 /**
- * EN: Declares the simulation, unless the portal already stands at the exchange or later. "Every row empty" is
- * retried here: the portal shows the simulation as not declared while it still processes the track id.
- * ES: Declara la simulación, salvo que el portal ya esté en el intercambio o después. "Toda fila vacía" aquí se
- * reintenta: el portal muestra la simulación sin declarar mientras aún procesa el track id.
+ * EN: Declares the simulation, unless the progress page names the exchange as the step the application is at: a later
+ * step is declared like any other, and so is a page that cannot be read. "Every row empty" is retried here: the portal
+ * shows the simulation as not declared while it still processes the track id.
+ * ES: Declara la simulación, salvo que la página de avance nombre el intercambio como el paso en que está la
+ * postulación: un paso posterior se declara como cualquier otro, y también una página que no se puede leer. "Toda fila
+ * vacía" aquí se reintenta: el portal muestra la simulación sin declarar mientras aún procesa el track id.
  * @throws {DteError} EN: `MISSING_FIELD { field: 'simulation' }` before the send; the portal codes. ES: `MISSING_FIELD { field: 'simulation' }` antes del envío; los códigos del portal.
  */
 export const declareSimulation = async (
@@ -498,14 +527,13 @@ export const declareSimulation = async (
 ): Promise<DeclarationStepResult<DeclarationOutcome | 'skipped'>> => {
   const rt = runtime(deps)
   if (state.simulation === undefined) throw new DteError('MISSING_FIELD', { field: 'simulation' })
-  const report = await readProgress(rt.portal)
-  if (atLeast(report.stageKey, 'exchange'))
+  const report = await progressOrNull(rt, 'certification progress before the simulation failed')
+  if (report?.stage?.startsWith(EXCHANGE_WORD) === true)
     return {
       state: await saveState(rt, state, { stage: laterStage(state.stage, report.stageKey) }),
       outcome: 'skipped',
       success: true,
-      // A stage key at the exchange or past it always comes from a wording on the page.
-      detail: report.stage!,
+      detail: report.stage,
     }
   rt.emit({ step: 'SIM_DECLARING' })
   const { result, diagnosis } = await declareWithRetries(
@@ -531,14 +559,18 @@ export const declareSimulation = async (
 }
 
 /**
- * EN: Waits for the simulation: 30 polls 10 s apart of the progress page, polling first. The exchange or a later
- * stage is done; an approved simulation that awaits its confirmation is declared once more (the portal's "Confirmar
- * Revisión") and the page read again; an approved state is done; a rejected one stops. After the polls the SOAP
- * status decides: a rejected envelope is the answer (a time-out often hides one), else the wait timed out.
- * ES: Espera la simulación: 30 consultas cada 10 s a la página de avance, consultando primero. El intercambio o una
- * etapa posterior es listo; una simulación aprobada que espera su confirmación se declara una vez más (el "Confirmar
- * Revisión" del portal) y se relee la página; un estado aprobado es listo; uno rechazado detiene. Tras las consultas
- * decide el estado SOAP: un envío rechazado es la respuesta (un timeout suele esconder uno), si no, la espera venció.
+ * EN: Waits for the simulation: 30 polls 10 s apart of the progress page, polling first. A read that fails only uses up
+ * its attempt. The exchange or a later stage is done; an approved simulation that awaits its confirmation is declared
+ * once more (the portal's "Confirmar Revisión") and the page read again, and a declaration the portal did not take
+ * leaves the page to be judged as it is; a row saying "REVISADO CONFORME" is done, after one more read of the page; one
+ * saying "RECHAZADO", "ERRORES" or "REPARO" stops. After the polls the SOAP status decides: a rejected envelope is the
+ * answer (a time-out often hides one), else the wait timed out.
+ * ES: Espera la simulación: 30 consultas cada 10 s a la página de avance, consultando primero. Una lectura que falla
+ * solo gasta su intento. El intercambio o una etapa posterior es listo; una simulación aprobada que espera su
+ * confirmación se declara una vez más (el "Confirmar Revisión" del portal) y se relee la página, y una declaración que
+ * el portal no tomó deja la página para juzgarla tal como está; una fila que dice "REVISADO CONFORME" es listo, tras
+ * una lectura más de la página; una que dice "RECHAZADO", "ERRORES" o "REPARO" detiene. Tras las consultas decide el
+ * estado SOAP: un envío rechazado es la respuesta (un timeout suele esconder uno), si no, la espera venció.
  * @throws {DteError} EN: `MISSING_FIELD { field: 'simulation' }` before the send; the portal codes. ES: `MISSING_FIELD { field: 'simulation' }` antes del envío; los códigos del portal.
  */
 export const waitForSimulationApproval = async (
@@ -559,59 +591,88 @@ export const waitForSimulationApproval = async (
     rt.emit({ step: 'SIM_DONE' })
     return { state: next, outcome }
   }
+  // The stage the application stands at after a read that may have failed: the exchange is what a simulation that
+  // passed leads to.
+  const stageAfter = (after: ProgressReport | null): CertificationStage =>
+    after === null ? 'exchange' : laterStage('exchange', after.stageKey)
+  const reread = (): Promise<ProgressReport | null> => readProgress(rt.portal).catch(() => null)
+  const wording = (report: ProgressReport): string => report.states.simulation?.text.toUpperCase() ?? ''
   for (let attempt = 1; attempt <= SIMULATION_APPROVAL_ATTEMPTS; attempt += 1) {
     rt.emit({ step: 'POLLING', attempt, max: SIMULATION_APPROVAL_ATTEMPTS, label: 'simulation' })
-    const report = await readProgress(rt.portal)
+    const report = await readProgress(rt.portal).catch((error: unknown) => {
+      rt.portal.logger.warn('certification simulation read failed', { attempt, reason: errorMessage(error) })
+      return null
+    })
+    if (report === null) {
+      await rt.sleep(SIMULATION_APPROVAL_INTERVAL_MS)
+      continue
+    }
     if (atLeast(report.stageKey, 'exchange')) return finish('done', report.stageKey)
     if (report.simulationAwaitsConfirmation) {
-      await declareProgress(rt.portal, { entries: { simulation: entryOf(simulation.trackId, rt.now()) } })
-      const after = await readProgress(rt.portal)
-      if (
-        atLeast(after.stageKey, 'exchange') ||
-        after.states.simulation?.state === 'approved' ||
-        !after.simulationAwaitsConfirmation
-      )
-        return finish('confirmed', 'exchange')
-    } else {
-      const item = report.states.simulation
-      if (item?.state === 'approved') return finish('done', 'exchange')
-      if (item?.state === 'rejected') return { state, outcome: 'rejected', detail: item.text }
+      const confirmation = await declareProgress(rt.portal, {
+        entries: { simulation: entryOf(simulation.trackId, rt.now()) },
+      }).catch((error: unknown) => {
+        rt.portal.logger.warn('certification simulation confirmation failed', { reason: errorMessage(error) })
+        return null
+      })
+      if (confirmation?.success === true) {
+        const after = await reread()
+        if (
+          after === null ||
+          after.stage?.includes(EXCHANGE_WORD) === true ||
+          !after.simulationAwaitsConfirmation ||
+          wording(after).includes(APPROVED_WORDING)
+        )
+          return finish('confirmed', stageAfter(after))
+        await rt.sleep(SIMULATION_APPROVAL_INTERVAL_MS)
+        continue
+      }
     }
+    const upper = wording(report)
+    if (upper.includes(APPROVED_WORDING)) return finish('done', stageAfter(await reread()))
+    if (REJECTED_WORDING.test(upper)) return { state, outcome: 'rejected', detail: report.states.simulation!.text }
     await rt.sleep(SIMULATION_APPROVAL_INTERVAL_MS)
   }
-  const status = await queryUploadStatus(rt.sii, { trackId: simulation.trackId }).catch(() => null)
-  if (status?.status === 'rejected') {
-    const next = await saveState(rt, state, {
-      diagnosis: {
-        ...state.diagnosis,
-        [simulation.trackId]: { code: status.code, status: status.status, message: status.message },
-      },
-    })
-    return { state: next, outcome: 'rejected', detail: `${status.code}: ${status.message}` }
+  const found = (
+    await diagnose(rt, { simulation: entryOf(simulation.trackId, rt.now()) }, SIMULATION_DIAGNOSIS_PREFIX)
+  )[simulation.trackId]
+  if (found?.status === 'rejected') {
+    const next = await saveState(rt, state, { diagnosis: { ...state.diagnosis, [simulation.trackId]: found } })
+    return { state: next, outcome: 'rejected', detail: `${found.code}: ${found.message}` }
   }
   return { state, outcome: 'timedOut' }
 }
 
 /**
- * EN: The end of the certification: one more advance (an "already there" with the printed samples means they are
- * still under review), then the declaration of compliance. A block leaves its sentence in the state; a final page
- * that does not confirm throws; a declaration ends the run.
- * ES: El cierre de la certificación: un avance más (un "ya está ahí" con los documentos impresos significa que siguen
- * en revisión), luego la declaración de cumplimiento. Un bloqueo deja su frase en el estado; una página final que no
- * confirma lanza; una declaración termina la corrida.
- * @throws {DteError} EN: `SII_PORTAL_UNEXPECTED_PAGE` when the final page does not confirm; the portal codes. ES: `SII_PORTAL_UNEXPECTED_PAGE` si la página final no confirma; los códigos del portal.
+ * EN: The end of the certification: one more request to advance the stage, then the declaration of compliance. The
+ * advance is tried and nothing more: a refusal or an error only goes to the log and the declaration is made all the
+ * same, and the progress is not read afterwards (an "already there" with the printed samples means they are still under
+ * review, which the declaration then says). A block leaves its sentence in the state; a final page that does not
+ * confirm throws; a declaration ends the run.
+ * ES: El cierre de la certificación: una petición más para avanzar la etapa, luego la declaración de cumplimiento. El
+ * avance se intenta y nada más: una negativa o un error solo van al log y la declaración se hace igual, y el avance no
+ * se vuelve a leer (un "ya está ahí" con los documentos impresos significa que siguen en revisión, y eso lo dice la
+ * declaración). Un bloqueo deja su frase en el estado; una página final que no confirma lanza; una declaración termina
+ * la corrida.
+ * @throws {DteError} EN: `SII_PORTAL_UNEXPECTED_PAGE` when the final page does not confirm; the portal codes of the declaration. ES: `SII_PORTAL_UNEXPECTED_PAGE` si la página final no confirma; los códigos del portal de la declaración.
  */
 export const declareComplianceFinal = async (
   deps: CertificationDependencies,
   state: CertificationState,
 ): Promise<StepResult<'declared' | 'blocked'>> => {
   const rt = runtime(deps)
-  const advanced = await advanceToNextStage(deps, state)
+  // No stage is read here, so the advance of the closing emits no progress event.
+  const advance = await advanceStage(rt.portal).catch((error: unknown) => ({
+    outcome: 'failed' as const,
+    message: errorMessage(error),
+  }))
+  if (advance.outcome === 'failed')
+    rt.portal.logger.warn('certification final advance not applied', { reason: advance.message })
   const result = await declareCompliance(rt.portal)
   if (result.outcome === 'blocked') {
-    const next = await saveState(rt, advanced.state, {
+    const next = await saveState(rt, state, {
       blocked: result.message,
-      stage: laterStage(advanced.state.stage, 'compliance'),
+      stage: laterStage(state.stage, 'compliance'),
     })
     return { state: next, outcome: 'blocked', detail: result.message }
   }
@@ -621,7 +682,7 @@ export const declareComplianceFinal = async (
       step: 'pe_avance9',
       portalMessage: result.message,
     })
-  const { blocked, ...rest } = advanced.state
+  const { blocked, ...rest } = state
   void blocked
   const next = await saveState(rt, rest as CertificationState, { stage: 'done' })
   rt.emit({ step: 'CERT_DONE' })

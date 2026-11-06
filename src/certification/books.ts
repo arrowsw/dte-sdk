@@ -1,9 +1,10 @@
 import { createGuideBook, signGuideBook, type SignedGuideBook } from '../books/guide'
 import { createPurchaseSalesBook, signPurchaseSalesBook, type SignedPurchaseSalesBook } from '../books/purchase-sales'
+import { accumulateBookTotals, sumBookEntries } from '../books/totals'
 import { CERTIFICATION_COUNTERPARTY } from '../catalogs/certification'
 import type { Certificate } from '../certificate/certificate'
 import { DteError } from '../errors'
-import type { BookEntryInput, BookTotals, GuideEntryInput } from '../model/book'
+import type { BookEntryInput, BookTotals, GuideEntryInput, PurchaseSalesBook } from '../model/book'
 import type { IssuedSet } from './issue-set'
 import type { PurchaseBookPlan } from './set-plan'
 import { bookDocumentTypeOf, type TestBookDocument } from './set-text'
@@ -25,9 +26,9 @@ export type CertificationBookInput = {
   readonly certificate: Certificate
   /** EN: Clock for the book id and signature timestamp. ES: Reloj para el id del libro y la marca de la firma. */
   readonly now?: () => Date
-  /** EN: `total` (default) or `adjustment`, for a period the SII already holds; the guide book is always total. ES: `TipoEnvio` — `total` (por defecto) o `adjustment`, para un período que el SII ya tiene; el libro de guías siempre es total. */
+  /** EN: `total` (default) or `adjustment`, for a period the SII already holds; any of the three books can adjust. ES: `TipoEnvio` — `total` (por defecto) o `adjustment`, para un período que el SII ya tiene; cualquiera de los tres libros puede ajustar. */
   readonly submission?: 'total' | 'adjustment'
-  /** EN: Period totals of the earlier submissions, carried forward on an adjustment. ES: Totales del período de los envíos anteriores, arrastrados en un ajuste. */
+  /** EN: Period totals of the earlier submissions, carried forward on an adjustment of the sales or purchase book; the guide book ignores them. ES: Totales del período de los envíos anteriores, arrastrados en un ajuste del libro de ventas o de compras; el libro de guías los ignora. */
   readonly previousTotals?: readonly BookTotals[]
 }
 
@@ -187,22 +188,39 @@ export const createCertificationSalesBook = (
   return signPurchaseSalesBook(book, input.certificate)
 }
 
+// The retained VAT travels in `OtrosImp` as a fraction, as the field writes it, while every other rate is a percentage.
+const WITHHOLDING_RATE = 0.19
+const FREE_DELIVERY_CODE = 4 as const
+const EXEMPT_BOOK_NON_RECOVERABLE_CODE = 1 as const
+
+// The reference of a note is read with these patterns, in this order: the electronic invoice needs ELECTRONICA to come
+// after FACTURA, which `includes` on both words would not ask for.
 const referenceTypeOf = (observation: string, exemptBook: boolean): number | undefined => {
-  const upper = observation.toUpperCase()
-  if (upper.includes('FACTURA EXENTA ELECTRONICA')) return 34
-  if (upper.includes('FACTURA EXENTA')) return exemptBook ? PAPER_EXEMPT_INVOICE : 30
-  if (upper.includes('FACTURA') && upper.includes('ELECTRONICA')) return 33
-  if (upper.includes('FACTURA')) return 30
-  return undefined
+  if (/FACTURA EXENTA ELECTRONICA/i.test(observation)) return 34
+  if (/FACTURA EXENTA/i.test(observation)) return exemptBook ? PAPER_EXEMPT_INVOICE : 30
+  if (/FACTURA.*ELECTRONICA/i.test(observation)) return 33
+  return /FACTURA/i.test(observation) ? 30 : undefined
 }
 
-type PurchaseEntry = BookEntryInput & { readonly nonRecoverableAmount: number }
+const withoutKeys = (entry: BookEntryInput, keys: readonly (keyof BookEntryInput)[]): BookEntryInput =>
+  Object.fromEntries(
+    Object.entries(entry).filter(([key]) => !keys.includes(key as keyof BookEntryInput)),
+  ) as BookEntryInput
 
-const purchaseEntry = (document: TestBookDocument, period: string, exemptBook: boolean): PurchaseEntry => {
+const amountOf = (entry: BookEntryInput): number => entry.nonRecoverableVat?.[0].amount ?? 0
+
+// Net, VAT and exempt amounts, plus the non-recoverable VAT on the exempt book, where it was paid but is not deducted.
+const totalOf = (entry: BookEntryInput, exemptBook: boolean): number =>
+  (entry.netAmount ?? 0) + (entry.vatAmount ?? 0) + (entry.exemptAmount ?? 0) + (exemptBook ? amountOf(entry) : 0)
+
+// First pass, per document: what the supplier document says, the exempt book's rewrite of it and its total.
+const purchaseLine = (document: TestBookDocument, period: string, exemptBook: boolean): BookEntryInput => {
   const detected = bookDocumentTypeOf(document.documentText) ?? 0
   const exempt = document.exemptAmount ?? 0
   const affected = document.affectedAmount ?? 0
-  const type = exemptBook && detected === 30 && exempt > 0 && affected === 0 ? PAPER_EXEMPT_INVOICE : detected
+  const pureExempt = affected === 0 && exempt > 0
+  const paperExempt = exemptBook && detected === 30 && pureExempt
+  const type = paperExempt ? PAPER_EXEMPT_INVOICE : detected
   const vat = vatOf(affected)
   const trailingFolio = /(\d+)\s*$/.exec(document.observation ?? '')
   const reference =
@@ -212,8 +230,12 @@ const purchaseEntry = (document: TestBookDocument, period: string, exemptBook: b
           referenceType: referenceTypeOf(document.observation, exemptBook),
         }
       : {}
-
-  let entry: BookEntryInput = compact({
+  // The common-use, free-delivery and withholding observations are read for the regular book only: the lines of the
+  // exempt book never carry them, whatever their observation says.
+  const commonUse = !exemptBook && document.commonUseVat
+  const freeDelivery = !exemptBook && document.nonRecoverableVatCode !== null
+  const withheld = !exemptBook && document.totalWithholding && type === PURCHASE_INVOICE
+  const line: BookEntryInput = compact({
     type,
     folio: document.folio,
     date: documentDate(period),
@@ -223,72 +245,92 @@ const purchaseEntry = (document: TestBookDocument, period: string, exemptBook: b
     exemptAmount: exempt > 0 ? exempt : undefined,
     netAmount: affected > 0 ? affected : undefined,
     vatAmount: affected > 0 ? vat : undefined,
+    taxKind: commonUse ? ('vat' as const) : undefined,
+    commonUseVat: commonUse ? vat : undefined,
+    nonRecoverableVat: freeDelivery ? [{ code: FREE_DELIVERY_CODE, amount: vat }] : undefined,
+    otherTaxes: withheld ? [{ code: 15, rate: WITHHOLDING_RATE, amount: vat }] : undefined,
+    totalVatWithheld: withheld ? vat : undefined,
     ...reference,
   })
-  let nonRecoverableAmount = 0
-  if (document.commonUseVat) entry = { ...entry, commonUseVat: vat, taxKind: 'vat' }
-  if (document.nonRecoverableVatCode !== null) {
-    entry = { ...entry, nonRecoverableVat: [{ code: 4, amount: vat }] }
-    nonRecoverableAmount = vat
-  }
-  if (document.totalWithholding && type === PURCHASE_INVOICE)
-    entry = { ...entry, otherTaxes: [{ code: 15, rate: VAT_RATE, amount: vat }], totalVatWithheld: vat }
-  if (exemptBook) {
-    if (type !== PURCHASE_INVOICE && affected > 0) {
-      entry = { ...entry, nonRecoverableVat: [{ code: 1, amount: vat }], vatAmount: 0 }
-      nonRecoverableAmount = vat
-    } else if (type === PAPER_EXEMPT_INVOICE) {
-      const { taxRate, netAmount, vatAmount, nonRecoverableVat, ...rest } = entry
-      void taxRate
-      void netAmount
-      void vatAmount
-      void nonRecoverableVat
-      entry = rest
-    } else if (affected === 0) {
-      entry = { ...entry, taxRate: VAT_RATE, netAmount: 0, vatAmount: 0 }
+  let entry = line
+  if (exemptBook && type !== PURCHASE_INVOICE && !pureExempt)
+    entry = {
+      ...entry,
+      nonRecoverableVat: [{ code: EXEMPT_BOOK_NON_RECOVERABLE_CODE, amount: entry.vatAmount ?? 0 }],
+      vatAmount: 0,
+      netAmount: entry.netAmount ?? 0,
     }
-  }
-  const total =
-    document.totalWithholding && type === PURCHASE_INVOICE
-      ? (entry.netAmount ?? 0)
-      : (entry.netAmount ?? 0) +
-        (entry.vatAmount ?? 0) +
-        (entry.exemptAmount ?? 0) +
-        (exemptBook ? nonRecoverableAmount : 0)
-  return { ...entry, totalAmount: total, nonRecoverableAmount }
+  if (paperExempt) entry = withoutKeys(entry, ['taxRate', 'netAmount', 'vatAmount', 'nonRecoverableVat'])
+  else if (exemptBook && pureExempt) entry = { ...entry, taxRate: VAT_RATE, netAmount: 0, vatAmount: 0 }
+  return { ...entry, totalAmount: withheld ? (entry.netAmount ?? 0) : totalOf(entry, exemptBook) }
 }
 
-const inheritFromReferenced = (entries: readonly PurchaseEntry[]): readonly PurchaseEntry[] =>
-  entries.map((entry) => {
-    if (!NOTE_TYPES.includes(entry.type) || entry.netAmount || entry.exemptAmount || entry.referenceFolio === undefined)
-      return entry
-    const referenced = entries.find((candidate) => candidate.folio === entry.referenceFolio)
-    if (referenced === undefined) return entry
-    const nonRecoverable =
-      referenced.nonRecoverableVat === undefined
-        ? undefined
-        : [{ code: 1 as const, amount: referenced.nonRecoverableAmount }]
+// Second pass, exempt book only: a note with no amounts of its own takes the exempt and net amounts of the first document
+// with the folio it names, and that document's non-recoverable VAT when it has a net amount. Documents are read as they
+// stand when the note comes, so a note naming an earlier note sees what that note inherited.
+const inheritFromReferenced = (lines: readonly BookEntryInput[]): readonly BookEntryInput[] =>
+  lines.reduce<readonly BookEntryInput[]>((done, line, index) => {
+    if (!NOTE_TYPES.includes(line.type) || line.netAmount || line.exemptAmount || line.referenceFolio === undefined)
+      return [...done, line]
+    const referenced = [...done, ...lines.slice(index)].find((candidate) => candidate.folio === line.referenceFolio)
+    if (referenced === undefined) return [...done, line]
     const inherited = compact({
-      ...entry,
-      exemptAmount: referenced.exemptAmount,
-      netAmount: referenced.netAmount,
-      nonRecoverableVat: nonRecoverable,
-      nonRecoverableAmount: referenced.nonRecoverableAmount,
+      ...line,
+      exemptAmount: referenced.exemptAmount || undefined,
+      netAmount: referenced.netAmount || line.netAmount,
+      nonRecoverableVat:
+        referenced.netAmount && referenced.nonRecoverableVat !== undefined
+          ? [{ code: EXEMPT_BOOK_NON_RECOVERABLE_CODE, amount: amountOf(referenced) }]
+          : line.nonRecoverableVat,
     })
-    return {
-      ...inherited,
-      totalAmount: (inherited.netAmount ?? 0) + (inherited.exemptAmount ?? 0) + inherited.nonRecoverableAmount,
-    }
-  })
+    return [...done, { ...inherited, totalAmount: totalOf(inherited, true) }]
+  }, [])
 
-const settleRate = (entry: PurchaseEntry): BookEntryInput => {
-  const { nonRecoverableAmount, ...fields } = entry
-  void nonRecoverableAmount
-  if (fields.commonUseVat !== undefined) return { ...fields, taxRate: 0, vatAmount: 0 }
-  if (fields.nonRecoverableVat !== undefined)
-    return { ...fields, taxRate: 0, vatAmount: 0, netAmount: fields.netAmount ?? 0 }
-  if (fields.taxRate !== undefined && !((fields.netAmount ?? 0) > 0)) return { ...fields, netAmount: 0, vatAmount: 0 }
-  return fields
+// Last pass, the rules the SII applied to the lines the field sends: with common-use or non-recoverable VAT the rate and
+// the recoverable VAT are 0, and a rate with no net amount goes with explicit zeros (omitting them was refused with
+// `LBR-3`, zeros were accepted with `LBR-2`).
+const settleRate = (entry: BookEntryInput): BookEntryInput => {
+  if (entry.commonUseVat) return { ...entry, taxRate: 0, vatAmount: 0 }
+  if (entry.nonRecoverableVat !== undefined)
+    return { ...entry, taxRate: 0, vatAmount: 0, netAmount: entry.netAmount ?? 0 }
+  if (entry.taxRate !== undefined && !((entry.netAmount ?? 0) > 0)) return { ...entry, netAmount: 0, vatAmount: 0 }
+  return entry
+}
+
+// The summary rows as the field writes them: no tax kind (it stays on the line), and the credit of common-use VAT
+// rounded document by document and summed, also across the rows of earlier submissions.
+const fieldSummary = (
+  book: PurchaseSalesBook,
+  factor: number,
+  previous: readonly BookTotals[],
+): Pick<PurchaseSalesBook, 'segmentTotals' | 'periodTotals'> => {
+  // A document is a common-use operation only when it has common-use VAT: one flagged with none stays out of the count.
+  const commonUseOf = (type: number): readonly number[] =>
+    book.entries.flatMap((entry) => (entry.type === type && entry.commonUseVat ? [entry.commonUseVat] : []))
+  const lines = sumBookEntries(book.entries).map(({ taxKind, commonUseVatCount, commonUseVat, ...row }) => {
+    void taxKind
+    void commonUseVatCount
+    void commonUseVat
+    const amounts = commonUseOf(row.type)
+    return amounts.length === 0
+      ? row
+      : {
+          ...row,
+          commonUseVatCount: amounts.length,
+          commonUseVat: amounts.reduce((total, amount) => total + amount, 0),
+          commonUseCredit: amounts.reduce((total, amount) => total + Math.round(amount * factor), 0),
+        }
+  })
+  const carried = previous.map(({ taxKind, ...row }) => {
+    void taxKind
+    return row.commonUseCredit === undefined && (row.commonUseVat ?? 0) > 0
+      ? { ...row, commonUseCredit: Math.round((row.commonUseVat as number) * factor) }
+      : row
+  })
+  return {
+    segmentTotals: book.segmentTotals === null ? null : lines,
+    periodTotals: book.periodTotals === null ? null : accumulateBookTotals(carried, lines),
+  }
 }
 
 /**
@@ -311,8 +353,8 @@ export const createCertificationPurchaseBook = (
   input: CertificationBookInput,
 ): SignedPurchaseSalesBook => {
   const exemptBook = plan.kind === 'exemptPurchaseBook'
-  const raw = plan.documents.map((document) => purchaseEntry(document, input.period, exemptBook))
-  const entries = (exemptBook ? inheritFromReferenced(raw) : raw).map(settleRate)
+  const lines = plan.documents.map((document) => purchaseLine(document, input.period, exemptBook))
+  const entries = (exemptBook ? inheritFromReferenced(lines) : lines).map(settleRate)
   const book = createPurchaseSalesBook({
     cover: {
       issuerRut: input.issuerRut,
@@ -329,7 +371,10 @@ export const createCertificationPurchaseBook = (
     commonUseVatFactor: plan.proportionalityFactor,
     now: input.now?.(),
   })
-  return signPurchaseSalesBook(book, input.certificate)
+  return signPurchaseSalesBook(
+    { ...book, ...fieldSummary(book, plan.proportionalityFactor, input.previousTotals ?? []) },
+    input.certificate,
+  )
 }
 
 const defaultFlag = (index: number): GuideBookCaseFlag => (index === 1 ? 'modified' : index === 2 ? 'voided' : 'normal')
@@ -338,11 +383,13 @@ const defaultFlag = (index: number): GuideBookCaseFlag => (index === 1 ? 'modifi
  * EN: The guide book of the certification: only the guide set's guides, with their transfer reason and issue date;
  * by position the second guide carries `Operacion` 1 and the third is voided (`Anulado` 2, total 0 and nothing else),
  * unless `caseFlags` says otherwise; a sale carries the customer, the net, the VAT rate and the VAT; every guide its
- * total. Notification folio 3 by default, book `ESPECIAL`, submission `TOTAL`.
+ * total. Notification folio 3 by default, book `ESPECIAL`, submission `TOTAL` unless it adjusts; an adjustment marks
+ * only the modified guide with the operation and writes the line summary in both sections.
  * ES: El libro de guías de la certificación: solo las guías del set de guías, con su tipo de traslado y fecha de
  * emisión; por posición la segunda lleva `Operacion` 1 y la tercera va anulada (`Anulado` 2, total 0 y nada más), salvo
  * que `caseFlags` diga otra cosa; una venta lleva el cliente, el neto, la tasa y el IVA; toda guía su total. Folio de
- * notificación 3 por defecto, libro `ESPECIAL`, envío `TOTAL`.
+ * notificación 3 por defecto, libro `ESPECIAL`, envío `TOTAL` salvo que ajuste; un ajuste marca con la operación solo la
+ * guía modificada y escribe el resumen de las líneas en ambas secciones.
  * @throws {DteError} EN: `INVALID_OPTION` (field `set`) when the set is not the guide one; the phase 3 codes. ES: `INVALID_OPTION` (campo `set`) si el set no es el de guías; los códigos de la fase 3.
  */
 export const createCertificationGuideBook = (
@@ -383,10 +430,17 @@ export const createCertificationGuideBook = (
       resolutionDate: input.resolution.date,
       resolutionNumber: input.resolution.number,
       notificationFolio: input.notificationFolio ?? DEFAULT_NOTIFICATION_FOLIO,
-      submission: 'total',
+      submission: input.submission ?? 'total',
     },
     entries,
     now: input.now?.(),
   })
-  return signGuideBook(book, input.certificate)
+  // Phase 3 marks every line of an adjustment with the add operation; the field marks only the modified guide.
+  const marked = book.entries.map((entry, index) => {
+    if ((input.caseFlags?.[index] ?? defaultFlag(index)) === 'modified') return entry
+    const { adjustment, ...rest } = entry
+    void adjustment
+    return rest
+  })
+  return signGuideBook({ ...book, entries: marked }, input.certificate)
 }

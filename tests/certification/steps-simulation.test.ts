@@ -32,6 +32,8 @@ import {
   progressPage,
   STANDARD_ROWS,
 } from '../support/certification-pages'
+import { DteError } from '../../src/errors'
+import type { FakeRoute } from '../support/fake-sii'
 import { failure } from '../support/portal'
 import { page } from '../support/portal-pages'
 
@@ -98,6 +100,40 @@ describe('declareSimulation', () => {
     expect(result).toMatchObject({ outcome: 'skipped', detail: 'INTERCAMBIO' })
     expect(result.state.stage).toBe('exchange')
     expect(harness.steps()).toEqual([])
+  })
+
+  test('only the exchange is skipped: a later step is declared like any other', async () => {
+    const later = progressPage('DOCUMENTOS IMPRESOS', { 'SET SIMULACION': 'REVISADO CONFORME' })
+    const harness = await certificationHarness([
+      entry,
+      avance2([page('x')], () => SIM_KEPT),
+      avance5,
+      avance6([later], () => later),
+      post('pe_avance3', DECLARATION_ANSWERS.success),
+    ])
+    const result = await declareSimulation(harness.deps, stateWith({ simulation }))
+    expect(result.outcome).toBe('accepted')
+    expect(harness.steps()).toEqual(['SIM_DECLARING', 'POLLING'])
+    expect(harness.posted('pe_avance3')[0]).toMatchObject({ NUM_ENV1: '777' })
+  })
+
+  test('a progress page that cannot be read before the declaration does not stop it: the simulation is declared', async () => {
+    const harness = await certificationHarness([
+      entry,
+      avance2([page('x')], () => SIM_KEPT),
+      avance5,
+      {
+        url: `${MAULLIN}/pe_avance6`,
+        method: 'POST',
+        reply: [new DteError('TRANSPORT_FAILED', { reason: 'socket hang up' })],
+      },
+      post('pe_avance3', DECLARATION_ANSWERS.success),
+    ])
+    const result = await declareSimulation(harness.deps, stateWith({ simulation }))
+    expect(result.outcome).toBe('accepted')
+    expect(harness.steps()).toEqual(['SIM_DECLARING', 'POLLING'])
+    expect(harness.posted('pe_avance3')[0]).toMatchObject({ NUM_ENV1: '777' })
+    expect(harness.warnings()).toContain('certification progress before the simulation failed')
   })
 
   test('declared with the simulation flag: every row empty is retried', async () => {
@@ -187,6 +223,142 @@ describe('waitForSimulationApproval', () => {
     })
   })
 
+  test('an approved row reads the page once more for the stage it left the application in', async () => {
+    const approved = progressPage('SIMULACION', { 'SET SIMULACION': 'REVISADO CONFORME' })
+    const harness = await reading([approved], AT_EXCHANGE)
+    const result = await waitForSimulationApproval(harness.deps, stateWith({ simulation }))
+    expect(result).toMatchObject({ outcome: 'done', state: { stage: 'exchange' } })
+    expect(harness.urls().filter((url) => url.endsWith('pe_avance6'))).toHaveLength(2)
+    const unreadable = await certificationHarness([
+      entry,
+      avance2([page('x')], () => page('x')),
+      avance5,
+      {
+        url: `${MAULLIN}/pe_avance6`,
+        method: 'POST',
+        reply: [{ body: approved }, new DteError('TRANSPORT_FAILED', { reason: 'socket hang up' })],
+      },
+    ])
+    await expect(waitForSimulationApproval(unreadable.deps, stateWith({ simulation }))).resolves.toMatchObject({
+      outcome: 'done',
+      state: { stage: 'exchange' },
+    })
+  })
+
+  test('a read that fails only uses up its attempt', async () => {
+    const harness = await certificationHarness([
+      entry,
+      avance2([], () => page('x')),
+      avance5,
+      {
+        url: `${MAULLIN}/pe_avance6`,
+        method: 'POST',
+        reply: [new DteError('TRANSPORT_FAILED', { reason: 'socket hang up' }), { body: AT_EXCHANGE }],
+      },
+    ])
+    const result = await waitForSimulationApproval(harness.deps, stateWith({ simulation }))
+    expect(result.outcome).toBe('done')
+    expect(harness.sleeps).toEqual([10000])
+    expect(harness.steps()).toEqual(['POLLING', 'POLLING', 'SIM_DONE'])
+    expect(harness.warnings()).toContain('certification simulation read failed')
+  })
+
+  test('objections alone reject the simulation, a date that does not match keeps the wait going', async () => {
+    const objections = await reading([progressPage('SIMULACION', { 'SET SIMULACION': 'CON REPAROS' })], AT_EXCHANGE)
+    await expect(waitForSimulationApproval(objections.deps, stateWith({ simulation }))).resolves.toMatchObject({
+      outcome: 'rejected',
+      detail: 'CON REPAROS',
+    })
+    const mismatch = await reading(
+      [],
+      progressPage('SIMULACION', { 'SET SIMULACION': 'FECHA NO CORRESPONDE' }),
+      [],
+      [estUpRoute(estUp('LSO', '777'))],
+    )
+    await expect(waitForSimulationApproval(mismatch.deps, stateWith({ simulation }))).resolves.toMatchObject({
+      outcome: 'timedOut',
+    })
+    expect(mismatch.sleeps).toHaveLength(30)
+  })
+
+  test('a confirmation the portal does not take leaves the page to be judged as it is', async () => {
+    const offer = progressPage('SIMULACION', { 'SET SIMULACION': 'REVISADO CONFORME' }, { confirm: true })
+    const harness = await certificationHarness([
+      entry,
+      avance2([page('x'), SIM_FORM], () => page('x')),
+      avance5,
+      avance6([offer], () => AT_EXCHANGE),
+      post('pe_avance3', DECLARATION_ANSWERS.plainError),
+    ])
+    const result = await waitForSimulationApproval(harness.deps, stateWith({ simulation }))
+    expect(result.outcome).toBe('done')
+    expect(harness.sleeps).toEqual([])
+    const broken = await certificationHarness([
+      entry,
+      avance2([page('x'), SIM_FORM], () => page('x')),
+      avance5,
+      avance6([offer], () => AT_EXCHANGE),
+      {
+        url: `${MAULLIN}/pe_avance3`,
+        method: 'POST',
+        reply: [new DteError('TRANSPORT_FAILED', { reason: 'socket hang up' })],
+      },
+    ])
+    await expect(waitForSimulationApproval(broken.deps, stateWith({ simulation }))).resolves.toMatchObject({
+      outcome: 'done',
+    })
+  })
+
+  test('after a confirmation, the exchange, a row approved or no form left all count; none of them keeps waiting', async () => {
+    const offer = (state: string, stage = 'SIMULACION') =>
+      progressPage(stage, { 'SET SIMULACION': state }, { confirm: true })
+    const confirmed = async (after: string) => {
+      const harness = await certificationHarness([
+        entry,
+        avance2([page('x'), SIM_FORM, SIM_KEPT], () => page('x')),
+        avance5,
+        avance6([offer('EN REVISION'), after], () => after),
+        post('pe_avance3', DECLARATION_ANSWERS.success),
+      ])
+      return waitForSimulationApproval(harness.deps, stateWith({ simulation }))
+    }
+    await expect(confirmed(offer('EN REVISION', 'INTERCAMBIO'))).resolves.toMatchObject({ outcome: 'confirmed' })
+    await expect(confirmed(offer('REVISADO CONFORME'))).resolves.toMatchObject({ outcome: 'confirmed' })
+    await expect(confirmed(progressPage('SIMULACION', { 'SET SIMULACION': 'EN REVISION' }))).resolves.toMatchObject({
+      outcome: 'confirmed',
+    })
+  })
+
+  test('a page with no row for the simulation is waited on', async () => {
+    const rowless = await reading(
+      [progressPage('SIMULACION', {})],
+      progressPage('SIMULACION', {}),
+      [],
+      [estUpRoute(estUp('LSO', '777'))],
+    )
+    await expect(waitForSimulationApproval(rowless.deps, stateWith({ simulation }))).resolves.toMatchObject({
+      outcome: 'timedOut',
+    })
+    expect(rowless.sleeps).toHaveLength(30)
+  })
+
+  test('a confirmation followed by a read that fails counts as confirmed', async () => {
+    const offer = progressPage('SIMULACION', { 'SET SIMULACION': 'REVISADO CONFORME' }, { confirm: true })
+    const harness = await certificationHarness([
+      entry,
+      avance2([page('x'), SIM_FORM, SIM_KEPT], () => page('x')),
+      avance5,
+      {
+        url: `${MAULLIN}/pe_avance6`,
+        method: 'POST',
+        reply: [{ body: offer }, new DteError('TRANSPORT_FAILED', { reason: 'socket hang up' })],
+      },
+      post('pe_avance3', DECLARATION_ANSWERS.success),
+    ])
+    const result = await waitForSimulationApproval(harness.deps, stateWith({ simulation }))
+    expect(result).toMatchObject({ outcome: 'confirmed', state: { stage: 'exchange' } })
+  })
+
   test('thirty polls, then the SOAP status decides: rejected, pending, or unreachable', async () => {
     const rejected = await reading([], IN_SIMULATION, [], [estUpRoute(estUp('RFR', '777'))])
     const result = await waitForSimulationApproval(rejected.deps, stateWith({ simulation }))
@@ -207,12 +379,15 @@ describe('waitForSimulationApproval', () => {
 })
 
 describe('declareComplianceFinal', () => {
-  const routes = (second: string, third?: string, final?: string) => [
+  const routes = (
+    second: string,
+    third?: string,
+    final?: string,
+    advance: FakeRoute['reply'] = [{ body: ADVANCE_ANSWERS.unchanged }],
+  ) => [
     entry,
     avance2([], () => declarationFormPage(STANDARD_ROWS)),
-    post('pe_avance4', ADVANCE_ANSWERS.unchanged),
-    avance5,
-    avance6([], () => progressPage('DOCUMENTOS IMPRESOS', {})),
+    { url: `${MAULLIN}/pe_avance4`, method: 'POST' as const, reply: advance },
     get('pe_avance7', COMPLIANCE_ENTRY),
     post('pe_avance8', second, ...(third === undefined ? [] : [third])),
     ...(final === undefined ? [] : [post('pe_avance9', final)]),
@@ -224,8 +399,39 @@ describe('declareComplianceFinal', () => {
     expect(result).toMatchObject({ outcome: 'declared', detail: 'Su Declaración de Cumplimiento ha sido efectuada' })
     expect(result.state.stage).toBe('done')
     expect(result.state.blocked).toBeUndefined()
-    expect(harness.steps()).toEqual(['ADVANCE_WAITING', 'ADVANCE_DONE', 'CERT_DONE'])
+    // The advance of the closing reads no stage, so it emits no progress event.
+    expect(harness.steps()).toEqual(['CERT_DONE'])
     expect(await harness.store.load()).toEqual(result.state)
+  })
+
+  test('the advance is one post to pe_avance4 and no read of the progress after it', async () => {
+    const harness = await certificationHarness(routes(COMPLIANCE_FORM, undefined, COMPLIANCE_DECLARED))
+    await declareComplianceFinal(harness.deps, stateWith({ stage: 'printedSamples' }))
+    expect(harness.urls().map((url) => url.split('/').pop())).toEqual([
+      'pe_avance1',
+      'pe_avance2',
+      'pe_avance4',
+      'pe_avance7',
+      'pe_avance8',
+      'pe_avance9',
+    ])
+  })
+
+  test('an advance that fails or throws is only logged, and the compliance is declared all the same', async () => {
+    const refused = await certificationHarness(
+      routes(COMPLIANCE_FORM, undefined, COMPLIANCE_DECLARED, [{ body: ADVANCE_ANSWERS.failed }]),
+    )
+    const first = await declareComplianceFinal(refused.deps, stateWith({ stage: 'printedSamples' }))
+    expect(first.outcome).toBe('declared')
+    expect(refused.steps()).toEqual(['CERT_DONE'])
+    expect(refused.warnings()).toContain('certification final advance not applied')
+    const broken = await certificationHarness(
+      routes(COMPLIANCE_FORM, undefined, COMPLIANCE_DECLARED, [new DteError('TRANSPORT_FAILED', { reason: 'down' })]),
+    )
+    const second = await declareComplianceFinal(broken.deps, stateWith({ stage: 'printedSamples' }))
+    expect(second.outcome).toBe('declared')
+    expect(broken.warnings()).toContain('certification final advance not applied')
+    expect(broken.posted('pe_avance9')).toHaveLength(1)
   })
 
   test('blocked: the sentence stays in the state', async () => {

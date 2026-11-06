@@ -1,6 +1,6 @@
 import { queryCertificationSets } from '../../src/portal/certification'
 import { parseCertificationSets } from '../../src/portal/pages/certification'
-import { failure, MAULLIN, signedIn } from '../support/portal'
+import { MAULLIN, signedIn } from '../support/portal'
 import { certificationPage, page, REJECTION_PAGES } from '../support/portal-pages'
 
 const routes = (html: string) => [
@@ -39,9 +39,13 @@ test('a set not approved, or missing, says so', async () => {
   await expect(queryCertificationSets(missing.portal)).resolves.toMatchObject({ allSetsApproved: false })
 })
 
-test('a page with no rows does not pass for empty, whatever it says', async () => {
-  const rejected = await signedIn(routes(REJECTION_PAGES.companyNotAuthorized))
-  expect((await failure(queryCertificationSets(rejected.portal))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
-  const empty = await signedIn(routes(page('hola')))
-  expect((await failure(queryCertificationSets(empty.portal))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
+test('a page with no rows is still an answer: no set, no book, nothing approved', async () => {
+  for (const html of [REJECTION_PAGES.companyNotAuthorized, page('hola')]) {
+    const harness = await signedIn(routes(html))
+    await expect(queryCertificationSets(harness.portal)).resolves.toEqual({
+      sets: [],
+      allSetsApproved: false,
+      allBooksApproved: false,
+    })
+  }
 })

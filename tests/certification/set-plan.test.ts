@@ -165,6 +165,10 @@ test('the purchase-book sets carry their documents and factor, and a missing fac
   })
   expect(plan.purchaseBook!.documents).toHaveLength(6)
   expect(plan.exemptPurchaseBook).toMatchObject({ kind: 'exemptPurchaseBook', proportionalityFactor: 0.6 })
+  const zero = planCertificationSets(
+    parseTestSetText('SET LIBRO DE COMPRAS - NUMERO DE ATENCION: 1\nFACTURA 1\nFACTOR DE PROPORCIONALIDAD 0\n'),
+  )
+  expect(zero.purchaseBook?.proportionalityFactor).toBe(0.6)
   const noFactor = planCertificationSets(parseTestSetText('SET LIBRO DE COMPRAS - NUMERO DE ATENCION: 1\nFACTURA 1\n'))
   expect(noFactor.purchaseBook).toMatchObject({
     proportionalityFactor: 0.6,

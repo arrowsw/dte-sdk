@@ -1,4 +1,4 @@
-import { attribute, decodeEntities, formWithAction, inputValues, bodyText } from '../html'
+import { decodeEntities, bodyText } from '../html'
 
 /**
  * EN: The `pe_avance9` form, ready to post: its action and its fields.
@@ -7,14 +7,46 @@ import { attribute, decodeEntities, formWithAction, inputValues, bodyText } from
 export type ComplianceForm = {
   /** EN: The form action. ES: La acción del formulario. */
   readonly action: string
-  /** EN: Every field but `Salir`, with each `OPCn` set to `S` and `CONFIRMAR` added. ES: Todo campo salvo `Salir`, con cada `OPCn` en `S` y `CONFIRMAR` agregado. */
+  /** EN: Every input of the page but `Salir`, in page order, with each `OPCn` set to `S` and `CONFIRMAR` at its place (last when the page has none). ES: Todo input de la página salvo `Salir`, en el orden de la página, con cada `OPCn` en `S` y `CONFIRMAR` en su lugar (al final si la página no lo trae). */
   readonly fields: Readonly<Record<string, string>>
 }
 
 const CONFIRM_FIELD = 'CONFIRMAR'
 const CONFIRM_VALUE = 'Confirmar Declaración'
-const EXIT_FIELD = 'salir'
-const BUTTON_TYPES: ReadonlySet<string> = new Set(['submit', 'button', 'image', 'reset'])
+const CONTINUE_VALUE = 'Continuar con la Declaración'
+const EXIT_FIELD = 'Salir'
+const OPTION_FIELD = /^OPC\d+$/
+// The first form tag that writes its action between double quotes.
+const FORM_ACTION = /<form[^>]*action="([^"]+)"/i
+// What the field looks for on the final page to tell that nothing was confirmed: the first option written as the portal
+// writes it, or the company input written name first and type unquoted.
+const UNCONFIRMED = /NAME="OPC1"|name="RUT_EMP"[^>]*type=\s*text/i
+
+// How the field reads the name and the value of an input tag: the first written with double quotes, else with single
+// quotes, else bare after a separator. The quoted forms ask for no separator, and a name needs at least one character.
+const INPUT_NAME: readonly RegExp[] = [
+  /name\s*=\s*"([^"]+)"/i,
+  /name\s*=\s*'([^']+)'/i,
+  /(?:^|[\s<])name\s*=\s*([^\s>"']+)/i,
+]
+const INPUT_VALUE: readonly RegExp[] = [
+  /value\s*=\s*"([^"]*)"/i,
+  /value\s*=\s*'([^']*)'/i,
+  /(?:^|[\s<])value\s*=\s*([^\s>"']+)/i,
+]
+
+const firstMatch = (tag: string, patterns: readonly RegExp[]): string | undefined =>
+  patterns.map((pattern) => pattern.exec(tag)?.[1]).find((found) => found !== undefined)
+
+// Every named input of a compliance page, in page order; a repeated name keeps its first place and its last value. The
+// declaration is sworn and cannot be undone, so the page is read exactly as described above.
+const pageInputs = (html: string): Readonly<Record<string, string>> =>
+  Object.fromEntries(
+    (html.match(/<input[^>]+>/gi) ?? []).flatMap((tag) => {
+      const name = firstMatch(tag, INPUT_NAME)
+      return name === undefined ? [] : [[name, firstMatch(tag, INPUT_VALUE) ?? '']]
+    }),
+  )
 
 const sentenceAround = (text: string, pattern: RegExp): string | null => {
   const match = pattern.exec(text)
@@ -32,50 +64,46 @@ export const complianceBlock = (html: string): string | null =>
   sentenceAround(bodyText(html), /no ha finalizado su certificaci|no podr[aá] efectuar la Declaraci/i)
 
 /**
- * EN: The second screen carries a hidden `OK_MSG` and asks to continue.
- * ES: La segunda pantalla trae un `OK_MSG` oculto y pide continuar.
+ * EN: The second screen carries an `OK_MSG` field with a value and asks to continue.
+ * ES: La segunda pantalla trae un campo `OK_MSG` con valor y pide continuar.
  */
-export const hasOkMessage = (html: string): boolean => 'OK_MSG' in inputValues(html)
+export const hasOkMessage = (html: string): boolean => (pageInputs(html).OK_MSG ?? '') !== ''
 
 /**
- * EN: The form that posts to `pe_avance9`, without the `Salir` button (a browser sends only the clicked button, and
- * `Salir=No Confirmar` could read as cancelling), every `OPCn` set to `S`, plus `CONFIRMAR`. Null when the page has
- * no such form.
- * ES: El formulario que envía a `pe_avance9`, sin el botón `Salir` (un navegador manda solo el botón pulsado, y
- * `Salir=No Confirmar` podría leerse como cancelar), cada `OPCn` en `S`, más `CONFIRMAR`. Null si la página no lo trae.
+ * EN: The fields of the continue screen: every input of the second screen, in page order, with `Aceptar` set to the
+ * continue wording.
+ * ES: Los campos de la pantalla de continuar: todo input de la segunda pantalla, en el orden de la página, con
+ * `Aceptar` en el texto de continuar.
+ */
+export const continueFields = (html: string): Readonly<Record<string, string>> => ({
+  ...pageInputs(html),
+  Aceptar: CONTINUE_VALUE,
+})
+
+/**
+ * EN: The form that posts to `pe_avance9`: the first form tag that writes its action between double quotes must name
+ * `pe_avance9`. The fields are every named input of the whole page, `Salir` left out (a browser sends only the clicked
+ * button, and `Salir=No Confirmar` could read as cancelling), every `OPCn` set to `S` and `CONFIRMAR` set to its
+ * wording where the page has it, last otherwise. Null when the page has no such form.
+ * ES: El formulario que envía a `pe_avance9`: la primera etiqueta de formulario que escribe su acción entre comillas
+ * dobles debe nombrar `pe_avance9`. Los campos son todo input con nombre de la página entera, sin `Salir` (un navegador
+ * manda solo el botón pulsado, y `Salir=No Confirmar` podría leerse como cancelar), cada `OPCn` en `S` y `CONFIRMAR`
+ * con su texto donde la página lo trae, al final si no. Null si la página no lo trae.
  */
 export const complianceForm = (html: string): ComplianceForm | null => {
-  const block = formWithAction(html, 'pe_avance9')
-  if (block === null) return null
-  const action = attribute(/<form\b[^>]*>/i.exec(block)![0], 'action')!
-  const fields: Record<string, string> = {}
-  for (const tag of block.match(/<input\b[^>]*>/gi) ?? []) {
-    const name = attribute(tag, 'name')
-    const type = (attribute(tag, 'type') ?? 'text').toLowerCase()
-    if (name === null || name.toLowerCase() === EXIT_FIELD || BUTTON_TYPES.has(type)) continue
-    fields[name] = /^OPC\d+$/i.test(name) ? 'S' : (attribute(tag, 'value') ?? '')
-  }
-  return { action, fields: { ...fields, [CONFIRM_FIELD]: CONFIRM_VALUE } }
+  const action = FORM_ACTION.exec(html)?.[1]
+  if (action === undefined || !action.includes('pe_avance9')) return null
+  const fields = Object.entries(pageInputs(html))
+    .filter(([name]) => name !== EXIT_FIELD)
+    .map(([name, value]): [string, string] => [name, OPTION_FIELD.test(name) ? 'S' : value])
+  return { action, fields: { ...Object.fromEntries(fields), [CONFIRM_FIELD]: CONFIRM_VALUE } }
 }
 
 /**
- * EN: The final page still shows the options or the company input: nothing was confirmed.
- * ES: La página final aún muestra las opciones o el campo de la empresa: no se confirmó nada.
+ * EN: The final page still shows the first option or the company input: nothing was confirmed.
+ * ES: La página final aún muestra la primera opción o el campo de la empresa: no se confirmó nada.
  */
-export const isUnconfirmed = (html: string): boolean =>
-  /name\s*=\s*["']?OPC1\b/i.test(html) ||
-  /<input\b[^>]*type\s*=\s*["']?text["']?[^>]*name\s*=\s*["']?RUT_EMP/i.test(html)
-
-/**
- * EN: The final page says in so many words that the declaration was made. Only this wording turns an irreversible
- * post into `declared`; anything else stays `unconfirmed`.
- * ES: La página final dice con todas sus letras que la declaración se hizo. Solo este texto convierte un envío
- * irreversible en `declared`; cualquier otra cosa queda `unconfirmed`.
- */
-export const isDeclared = (html: string): boolean =>
-  /declaraci[oó]n de cumplimiento[^.]{0,80}?(efectuad|registrad|realizad|aceptad|recibid|exitos)|ha finalizado (?:con )?(?:el proceso de |su |la )?certificaci/i.test(
-    decodeEntities(bodyText(html)),
-  )
+export const isUnconfirmed = (html: string): boolean => UNCONFIRMED.test(html)
 
 /**
  * EN: The sentence that reports the declaration, or the page's first words.

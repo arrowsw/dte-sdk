@@ -7,16 +7,10 @@ import {
   TEST_SET_PORTAL_NAMES,
   type BookKey,
 } from '../catalogs/certification'
-import { DteError, errorMessage } from '../errors'
+import { DteError, errorMessage, isDteError } from '../errors'
 import type { BookTotals } from '../model/book'
-import {
-  listBookHistory,
-  queryCertificationSets,
-  type DeclarationEntries,
-  type DeclarationOutcome,
-} from '../portal/certification'
+import { listBookHistory, queryCertificationSets, type DeclarationEntries } from '../portal/certification'
 import type { CertificationSet } from '../portal/pages/certification'
-import { queryUploadStatus } from '../sii/status'
 import { uploadBook } from '../sii/upload'
 import { chileDate } from '../time/chile'
 import {
@@ -25,7 +19,9 @@ import {
   createCertificationSalesBook,
   type CertificationBookInput,
 } from './books'
-import type { BooksState, CertificationState, EnvelopeDiagnosis, SentBook } from './state'
+import { fieldDiagnosis, queryFieldUploadState, type FieldUploadState } from './field-status'
+import { uploadForTrackId } from './field-upload'
+import type { BooksState, CertificationState, SentBook } from './state'
 import {
   declareWithRetries,
   entryOf,
@@ -43,23 +39,31 @@ const MAX_PERIOD_SKIPS = 400
 const MAX_PERIOD_RETRIES = 24
 const SOAP_WAIT_MS = 15000
 const SOAP_PRECHECK_POLLS = 3
+const SOAP_PRECHECK_ERRORS = 10
 const SOAP_RESEND_POLLS = 20
-const SOAP_MAX_ERRORS = 10
+const SOAP_RESEND_ERRORS = 5
 const APPROVAL_ATTEMPTS = 40
 const APPROVAL_INTERVAL_MS = 15000
 const CROSS_CHECK_EVERY = 2
 // A purchase book the SII already holds for the period: "duplicado", or the schema error it answers instead.
 const DUPLICATE = /duplicado|cvc-/i
-const APPROVED = /REVISADO CONFORME|S25/
-const REJECTED = /LNC|LRH|RECHAZADO|ERROR/
+const CONFORMING = 'REVISADO CONFORME'
+const APPROVED: readonly string[] = [CONFORMING, 'S25']
+const DECLARED = 'S21'
 const CLOSED_BOOK = 'LNC'
+const NO_BOOKS = 'No hay libros para declarar'
 const ADJUSTABLE: readonly BookKey[] = ['purchaseBook', 'salesBook']
+// The order the books are declared and first awaited in, which is not the order they are sent in.
+const DECLARED_ORDER: readonly BookKey[] = ['salesBook', 'purchaseBook', 'guideBook', 'exemptPurchaseBook']
+const BOOK_NAMES = TEST_SET_PORTAL_NAMES as Readonly<Record<BookKey, string>>
 
 /**
- * EN: How the books phase ended: every wanted book approved; a mandatory book never sent; a declaration or a book the
- * SII refused; the approval wait exhausted.
+ * EN: How the books phase ended: every wanted book approved; a mandatory book never sent; a declaration the portal did
+ * not take or books the SII refused; the approval wait exhausted. Only `incomplete` keeps the run from asking for the
+ * next stage: with the three mandatory books sent, the portal decides.
  * ES: Cómo terminó la fase de libros: todos los libros pedidos aprobados; un libro obligatorio nunca enviado; una
- * declaración o un libro que el SII rechazó; la espera de aprobación agotada.
+ * declaración que el portal no tomó o libros que el SII rechazó; la espera de aprobación agotada. Solo `incomplete`
+ * impide que la corrida pida la etapa siguiente: con los tres libros obligatorios enviados, decide el portal.
  */
 export type BooksOutcome = 'approved' | 'incomplete' | 'rejected' | 'timedOut'
 
@@ -83,24 +87,50 @@ export const nextFreePeriod = (period: string, occupied: ReadonlySet<string>): s
   return candidate
 }
 
-const monthOf = (date: string): string => date.slice(0, 7)
+// The states of the rows of the portal by name, as an object keyed by name would hold them: a name that comes twice
+// keeps its first place and its last state.
+type Table = ReadonlyMap<string, string>
 
-const rowOf = (rows: readonly CertificationSet[], key: BookKey): CertificationSet | undefined => {
-  const name = TEST_SET_PORTAL_NAMES[key]
-  return rows.find((row) => row.name.toUpperCase().trim() === name)
+const tableOf = (rows: readonly CertificationSet[]): Table => new Map(rows.map((row) => [row.name, row.status]))
+
+// The state of a book: the first row whose name holds the book's name; the purchase book is not the exempt one's row.
+const bookState = (table: Table, key: BookKey): string | undefined => {
+  const found = [...table].find(([name]) => {
+    const upper = name.toUpperCase()
+    return upper.includes(BOOK_NAMES[key]) && (key !== 'purchaseBook' || !upper.includes('EXENTOS'))
+  })
+  return found?.[1]
+}
+
+const bookKeyOf = (name: string): BookKey | undefined => BOOK_KEYS.find((key) => BOOK_NAMES[key] === name)
+
+// The rows of the portal, or null when they cannot be read: no read of this phase stops the run.
+const readTable = async (rt: Runtime): Promise<Table | null> => {
+  try {
+    return tableOf((await queryCertificationSets(rt.portal)).sets)
+  } catch (error) {
+    if (!isDteError(error)) throw error
+    rt.portal.logger.warn('certification book states failed', { reason: errorMessage(error) })
+    return null
+  }
 }
 
 const withBooks = (state: CertificationState, patch: Partial<BooksState>): Partial<CertificationState> => ({
   books: { ...state.books, ...patch },
 })
 
-const sentKeys = (state: CertificationState, wanted: readonly BookKey[]): readonly BookKey[] =>
-  wanted.filter((key) => {
-    const result = state.books.results[key]
-    return result !== undefined && result.trackId !== null && result.approved !== true
-  })
+const without = (results: BooksState['results'], key: BookKey): Readonly<Partial<Record<BookKey, SentBook>>> => {
+  const { [key]: dropped, ...rest } = results
+  void dropped
+  return rest
+}
+
+const trackIdOf = (state: CertificationState, key: BookKey): string | null => state.books.results[key]?.trackId ?? null
 
 const operationOf = (key: BookKey): 'purchase' | 'sale' => (key === 'salesBook' ? 'sale' : 'purchase')
+
+const keptTotals = (state: CertificationState, period: string, key: BookKey): readonly BookTotals[] | undefined =>
+  ADJUSTABLE.includes(key) ? state.books.accumulated[period]?.[operationOf(key)] : undefined
 
 const buildBook = (
   rt: Runtime,
@@ -109,7 +139,8 @@ const buildBook = (
   period: string,
   submission: 'total' | 'adjustment',
 ): { readonly xml: string; readonly periodTotals: readonly BookTotals[] | null } => {
-  const previous = state.books.accumulated[period]?.[operationOf(key)]
+  // Only the sales and the purchase book carry the totals of their earlier total submission into an adjustment.
+  const previous = keptTotals(state, period, key)
   const input: CertificationBookInput = {
     period,
     issuerRut: rt.issuer.rut,
@@ -144,36 +175,43 @@ const buildBook = (
   }
 }
 
-const isDuplicate = (error: unknown): boolean =>
-  error instanceof DteError && (DUPLICATE.test(error.message) || DUPLICATE.test(JSON.stringify(error.details)))
+// The SII says it already holds the file: a duplicate it names no track id for, or a `STATUS` 7 refusal whose first
+// error line says "duplicado" or names a schema rule.
+const heldAlready = (error: unknown): boolean =>
+  isDteError(error) &&
+  error.code === 'SII_UPLOAD_REJECTED' &&
+  error.details.status === 7 &&
+  (error.details.duplicate === true || DUPLICATE.test(String((error.details.errors as readonly string[])[0])))
 
-// Builds, keeps, uploads and records one book. A purchase book the SII already holds for the period goes again as an
-// adjustment. A book that cannot be built or that the SII refuses is reported and left out of the results.
+// Builds, keeps, uploads and records one book. A book that cannot be built or that the SII does not take is reported
+// and leaves the results, so it is not declared. With `retryHeld`, a purchase book the SII already holds for the
+// period goes again as an adjustment.
 const sendBook = async (
   rt: Runtime,
   state: CertificationState,
   key: BookKey,
   period: string,
   submission: 'total' | 'adjustment',
+  retryHeld: boolean,
 ): Promise<CertificationState> => {
   rt.emit({ step: 'BOOK_SENDING', book: key })
+  const failed = (error: unknown): Promise<CertificationState> => {
+    rt.emit({ step: 'BOOK_ERROR', book: key, error: errorMessage(error) })
+    return saveState(rt, state, withBooks(state, { results: without(state.books.results, key) }))
+  }
   let built: ReturnType<typeof buildBook>
   try {
     built = buildBook(rt, state, key, period, submission)
   } catch (error) {
-    rt.emit({ step: 'BOOK_ERROR', book: key, error: errorMessage(error) })
-    return state
+    return failed(error)
   }
   await rt.store.writeArtefact(BOOK_ARTEFACT_NAMES[key], built.xml)
   try {
-    const receipt = await uploadBook(rt.sii, { xml: built.xml, fileName: BOOK_FILE_NAMES[key] })
-    const sent: SentBook = {
-      trackId: receipt.trackId,
-      date: chileDate(rt.now()),
-      sentAt: rt.now().toISOString(),
-      period,
-      submission,
-    }
+    const trackId = await uploadForTrackId(
+      (overrides) => uploadBook(rt.sii, { xml: built.xml, fileName: BOOK_FILE_NAMES[key] }, overrides),
+      'uploadBook',
+    )
+    const sent: SentBook = { trackId, date: chileDate(rt.now()), sentAt: rt.now().toISOString(), period, submission }
     // The totals of a total submission of the sales or purchase book are kept for an adjustment of the same period;
     // these two books always have entries, so their totals are never null.
     const accumulated =
@@ -188,92 +226,118 @@ const sendBook = async (
       state,
       withBooks(state, { results: { ...state.books.results, [key]: sent }, accumulated }),
     )
-    rt.emit({ step: 'BOOK_OK', book: key, trackId: receipt.trackId })
+    rt.emit({ step: 'BOOK_OK', book: key, trackId })
     return next
   } catch (error) {
-    if (key === 'purchaseBook' && submission === 'total' && isDuplicate(error))
-      return sendBook(rt, state, key, period, 'adjustment')
-    rt.emit({ step: 'BOOK_ERROR', book: key, error: errorMessage(error) })
-    const { [key]: dropped, ...rest } = state.books.results
-    void dropped
-    return saveState(rt, state, withBooks(state, { results: rest }))
+    if (retryHeld && submission === 'total' && heldAlready(error))
+      return sendBook(rt, state, key, period, 'adjustment', false)
+    return failed(error)
   }
 }
 
-// The SOAP status of the sent books: a wait, then polls 15 s apart. A terminal answer is kept as a diagnosis; with
-// `drop`, a rejection takes the book out of the results and, when it is a closed book, marks the period occupied. The
-// SII leaves books in LSO far longer than worth waiting, so nothing here blocks the declaration.
-const soapCheck = async (
+type StatePoll = {
+  readonly state: CertificationState
+  /** The books whose envelope reached a state that is not an intermediate one. */
+  readonly terminal: ReadonlyMap<BookKey, FieldUploadState>
+}
+
+// The SOAP status of sent books: a wait, then rounds 15 s apart, sleeping after every round that leaves a book
+// pending. An answer without a state, or a query that fails, counts against the book; at `maxErrors` in a row the
+// book is given up. A state that is not intermediate ends the book's poll and is kept as a diagnosis.
+const pollBookStates = async (
   rt: Runtime,
   state: CertificationState,
   keys: readonly BookKey[],
-  polls: number,
-  drop: boolean,
+  rounds: number,
+  maxErrors: number,
+): Promise<StatePoll> => {
+  let current = state
+  const terminal = new Map<BookKey, FieldUploadState>()
+  const errors = new Map<BookKey, number>()
+  const pending = new Set(keys)
+  await rt.sleep(SOAP_WAIT_MS)
+  for (let round = 0; round < rounds && pending.size > 0; round += 1) {
+    for (const key of keys) {
+      if (!pending.has(key)) continue
+      // Only sent books reach here, so each has a track id.
+      const trackId = trackIdOf(current, key)!
+      const status = await queryFieldUploadState(rt.sii, trackId).catch((error: unknown) => {
+        rt.portal.logger.warn('certification book status failed', { book: key, reason: errorMessage(error) })
+        return null
+      })
+      if (status === null || !status.answered) {
+        const count = (errors.get(key) ?? 0) + 1
+        errors.set(key, count)
+        if (count >= maxErrors) pending.delete(key)
+        continue
+      }
+      errors.set(key, 0)
+      if (status.intermediate) continue
+      pending.delete(key)
+      terminal.set(key, status)
+      current = await saveState(rt, current, {
+        diagnosis: { ...current.diagnosis, [trackId]: fieldDiagnosis(status) },
+      })
+    }
+    if (pending.size > 0) await rt.sleep(SOAP_WAIT_MS)
+  }
+  return { state: current, terminal }
+}
+
+// Sends books again in a period, then reads their SOAP status: a rejection marks the period occupied and takes the
+// book out of the results, so the next declaration leaves it out.
+const resendBooks = async (
+  rt: Runtime,
+  state: CertificationState,
+  keys: readonly BookKey[],
+  period: string,
+  submission: 'total' | 'adjustment',
+  occupied: Set<string>,
 ): Promise<CertificationState> => {
   let current = state
-  const terminal = new Map<BookKey, EnvelopeDiagnosis>()
-  let errors = 0
-  await rt.sleep(SOAP_WAIT_MS)
-  for (let poll = 1; poll <= polls && errors < SOAP_MAX_ERRORS; poll += 1) {
-    for (const key of keys) {
-      if (terminal.has(key) || errors >= SOAP_MAX_ERRORS) continue
-      // Only sent books reach here, so each has a track id.
-      const trackId = current.books.results[key]!.trackId!
-      try {
-        const status = await queryUploadStatus(rt.sii, { trackId })
-        errors = 0
-        if (status.status === 'pending' || status.status === 'queryError') continue
-        terminal.set(key, { code: status.code, status: status.status, message: status.message })
-      } catch (error) {
-        errors += 1
-        rt.portal.logger.warn('certification book status failed', { book: key, reason: errorMessage(error) })
-      }
-    }
-    if (keys.every((key) => terminal.has(key))) break
-    if (poll < polls) await rt.sleep(SOAP_WAIT_MS)
-  }
-  for (const [key, diagnosis] of terminal) {
-    const result = current.books.results[key]!
-    const rejected = drop && diagnosis.status === 'rejected'
-    const { [key]: dropped, ...rest } = current.books.results
-    void dropped
-    current = await saveState(rt, current, {
-      diagnosis: { ...current.diagnosis, [result.trackId!]: diagnosis },
-      ...withBooks(current, {
-        results: rejected ? rest : current.books.results,
-        occupiedPeriods:
-          rejected && diagnosis.code === CLOSED_BOOK && !current.books.occupiedPeriods.includes(result.period)
-            ? [...current.books.occupiedPeriods, result.period]
-            : current.books.occupiedPeriods,
-      }),
-    })
+  for (const key of keys) current = await sendBook(rt, current, key, period, submission, false)
+  const resent = keys.filter((key) => trackIdOf(current, key) !== null)
+  if (resent.length === 0) return current
+  const poll = await pollBookStates(rt, current, resent, SOAP_RESEND_POLLS, SOAP_RESEND_ERRORS)
+  current = poll.state
+  for (const [key, status] of poll.terminal) {
+    if (!status.rejected) continue
+    occupied.add(period)
+    current = await saveState(
+      rt,
+      current,
+      withBooks(current, { results: without(current.books.results, key), occupiedPeriods: [...occupied] }),
+    )
   }
   return current
 }
 
-const declareBooks = async (
-  rt: Runtime,
-  state: CertificationState,
-  wanted: readonly BookKey[],
-): Promise<{
+type BooksDeclaration = {
   readonly state: CertificationState
-  readonly outcome: DeclarationOutcome
+  /** The declaration stands. */
   readonly success: boolean
+  /** Every declared row came back empty: the period is one the SII already holds. */
+  readonly allRejected: boolean
+  /** The rows the answer names with content errors. */
+  readonly contentErrors: readonly string[]
   readonly detail: string | null
-}> => {
+}
+
+// Declares every book that has a track id together with the four sets: the portal resets to S01 any row the
+// declaration leaves empty. The order of the entries is the order a diagnosis asks for the ones the answer does not name.
+const declareBooks = async (rt: Runtime, state: CertificationState): Promise<BooksDeclaration> => {
   const today = rt.now()
   const entries: Record<string, { trackId: string; date: string }> = {}
-  for (const key of sentKeys(state, wanted)) {
-    const result = state.books.results[key]!
-    entries[key] = entryOf(result.trackId!, today)
-  }
-  if (Object.keys(entries).length === 0) return { state, outcome: 'declined', success: false, detail: 'noBooks' }
-  // The four sets go with the books: the portal resets to S01 any row the declaration leaves empty.
   for (const key of SET_KEYS) {
     const set = state.sets[key]
     if (set !== undefined) entries[key] = entryOf(set.trackId, today)
   }
-  rt.emit({ step: 'BOOKS_DECLARING' })
+  for (const key of DECLARED_ORDER) {
+    const trackId = trackIdOf(state, key)
+    if (trackId !== null) entries[key] = entryOf(trackId, today)
+  }
+  if (Object.keys(entries).length === 0)
+    return { state, success: false, allRejected: false, contentErrors: [], detail: NO_BOOKS }
   const { result, diagnosis } = await declareWithRetries(rt, entries as DeclarationEntries, {
     label: 'books',
     prefix: 'declaracion-libros',
@@ -282,135 +346,149 @@ const declareBooks = async (
     lastDeclaration: { scope: 'books', outcome: result.outcome, detail: result.detail, at: rt.now().toISOString() },
     diagnosis: { ...state.diagnosis, ...diagnosis },
   })
-  return { state: next, outcome: result.outcome, success: result.success, detail: result.detail }
+  return {
+    state: next,
+    success: result.success,
+    allRejected: result.allRejected,
+    contentErrors: result.contentErrors,
+    detail: result.detail,
+  }
 }
 
 type Wait = {
   readonly state: CertificationState
-  readonly approved: boolean
-  readonly failed: readonly BookKey[]
+  readonly ok: boolean
+  /** The rows of the last page that could be read. */
+  readonly table: Table
   readonly timedOut: boolean
 }
 
-// 40 polls of the portal 15 s apart, sleeping first; every second poll the SOAP status of the pending books, because
-// the portal shows S21 forever for a closed book. A rejection ends the wait; the books still pending after the last
-// poll count as rejected uploads.
+const isApproved = (table: Table, key: BookKey): boolean => APPROVED.includes(bookState(table, key) ?? '')
+
+const isRefused = (table: Table, key: BookKey): boolean => {
+  const status = bookState(table, key) ?? ''
+  return status === CLOSED_BOOK || status === 'LRH' || status.includes('RECHAZADO') || status.includes('ERROR')
+}
+
+// The books of a run: the exempt purchase book only when the test set brought one.
+const wantedBooks = (state: CertificationState): readonly BookKey[] =>
+  BOOK_KEYS.filter((key) => key !== 'exemptPurchaseBook' || state.plan?.exemptPurchaseBook !== undefined)
+
+// A book of the run the portal shows approved is recorded as approved, sent by this run or not.
+const markApproved = async (
+  rt: Runtime,
+  state: CertificationState,
+  table: Table,
+  verify: readonly BookKey[],
+): Promise<CertificationState> => {
+  const fresh = wantedBooks(state).filter(
+    (key) => verify.includes(key) && isApproved(table, key) && state.books.results[key]?.approved !== true,
+  )
+  if (fresh.length === 0) return state
+  const results = { ...state.books.results }
+  for (const key of fresh)
+    results[key] = {
+      // A state in this phase always has its period.
+      ...(results[key] ?? {
+        trackId: null,
+        date: null,
+        sentAt: null,
+        period: state.books.period!,
+        submission: 'total',
+      }),
+      approved: true,
+    }
+  return saveState(rt, state, withBooks(state, { results }))
+}
+
+// 40 polls of the portal 15 s apart, sleeping first; a page that cannot be read only uses up its poll. Every book
+// approved ends the wait well; a refused book ends it; every second poll the SOAP status of the books still pending is
+// asked, because the portal shows S21 forever for an envelope the SII rejected, and a rejection there ends the wait.
 const waitForBooksApproval = async (
   rt: Runtime,
   state: CertificationState,
-  wanted: readonly BookKey[],
+  verify: readonly BookKey[],
 ): Promise<Wait> => {
   let current = state
-  const pending = new Set(wanted.filter((key) => current.books.results[key]?.approved !== true))
-  const failed: BookKey[] = []
+  let table: Table = new Map()
   for (let attempt = 1; attempt <= APPROVAL_ATTEMPTS; attempt += 1) {
     await rt.sleep(APPROVAL_INTERVAL_MS)
     rt.emit({ step: 'POLLING', attempt, max: APPROVAL_ATTEMPTS, label: 'books' })
-    const rows = (await queryCertificationSets(rt.portal)).sets
-    for (const key of [...pending]) {
-      const status = rowOf(rows, key)?.status ?? ''
-      if (APPROVED.test(status)) {
-        pending.delete(key)
-        current = await saveState(
-          rt,
-          current,
-          withBooks(current, {
-            results: { ...current.books.results, [key]: { ...current.books.results[key]!, approved: true } },
-          }),
-        )
-      } else if (REJECTED.test(status)) {
-        pending.delete(key)
-        failed.push(key)
-      }
+    const read = await readTable(rt)
+    if (read === null) continue
+    table = read
+    current = await markApproved(rt, current, read, verify)
+    if (verify.every((key) => isApproved(read, key))) return { state: current, ok: true, table, timedOut: false }
+    if (verify.some((key) => isRefused(read, key))) return { state: current, ok: false, table, timedOut: false }
+    if (attempt % CROSS_CHECK_EVERY !== 0) continue
+    for (const key of verify) {
+      const trackId = trackIdOf(current, key)
+      if (isApproved(read, key) || trackId === null) continue
+      const status = await queryFieldUploadState(rt.sii, trackId).catch(() => null)
+      if (status === null || !status.answered || !status.rejected) continue
+      current = await saveState(rt, current, {
+        diagnosis: { ...current.diagnosis, [trackId]: fieldDiagnosis(status) },
+      })
+      return { state: current, ok: false, table, timedOut: false }
     }
-    if (attempt % CROSS_CHECK_EVERY === 0)
-      for (const key of [...pending]) {
-        const trackId = current.books.results[key]?.trackId
-        if (trackId === undefined || trackId === null) continue
-        const status = await queryUploadStatus(rt.sii, { trackId }).catch(() => null)
-        if (status?.status === 'rejected') {
-          pending.delete(key)
-          failed.push(key)
-          current = await saveState(rt, current, {
-            diagnosis: {
-              ...current.diagnosis,
-              [trackId]: { code: status.code, status: status.status, message: status.message },
-            },
-          })
-        }
-      }
-    if (failed.length > 0) return { state: current, approved: false, failed, timedOut: false }
-    if (pending.size === 0) return { state: current, approved: true, failed: [], timedOut: false }
   }
-  return { state: current, approved: false, failed: [...pending], timedOut: true }
+  return { state: current, ok: false, table, timedOut: true }
 }
 
-// Resends books in the period they failed as adjustments (the sales and purchase books, once per period, when their
-// totals are kept) or in the next free period as total submissions; then the SOAP status, which may close a period.
-const resendBooks = async (
-  rt: Runtime,
-  state: CertificationState,
-  keys: readonly BookKey[],
-  attempt: number,
-): Promise<CertificationState> => {
-  const period = state.books.period!
-  const totals = state.books.accumulated[period]
-  const adjust =
-    totals !== undefined &&
-    (totals.purchase !== undefined || totals.sale !== undefined) &&
-    !state.books.adjustmentTried.includes(period)
-  let current = state
-  if (adjust) {
-    rt.emit({ step: 'BOOK_PERIOD_RETRY', period, attempt })
-    current = await saveState(
-      rt,
-      current,
-      withBooks(current, { adjustmentTried: [...current.books.adjustmentTried, period] }),
+// The books a finished wait leaves to send again: the rows that name a book, exactly by its name, and stand rejected,
+// closed or declared and never reviewed.
+const failedBooks = (table: Table): readonly BookKey[] =>
+  [...table]
+    .filter(
+      ([name, status]) =>
+        name.toUpperCase().includes('LIBRO') &&
+        (status === CLOSED_BOOK || status === 'LRH' || status.includes('RECHAZADO') || status === DECLARED),
     )
-    for (const key of keys)
-      current = await sendBook(rt, current, key, period, ADJUSTABLE.includes(key) ? 'adjustment' : 'total')
-  } else {
-    const occupied = new Set([...current.books.occupiedPeriods, period])
-    const next = nextFreePeriod(previousPeriod(period), occupied)
-    rt.emit({ step: 'BOOK_PERIOD_RETRY', period: next, attempt })
-    current = await saveState(rt, current, withBooks(current, { period: next, occupiedPeriods: [...occupied] }))
-    for (const key of keys) current = await sendBook(rt, current, key, next, 'total')
-  }
-  return soapCheck(rt, current, sentKeys(current, keys), SOAP_RESEND_POLLS, true)
-}
+    .flatMap(([name]) => bookKeyOf(name) ?? [])
+
+const utcMonth = (at: Date): string => at.toISOString().slice(0, 7)
 
 /**
- * EN: The books phase, as the field runs it. The history of books the SII holds (year by year, until two empty
- * years) marks the occupied periods; the period is the month the sets were issued in, or the first free month below
- * it. A book the portal already shows approved is skipped. The purchase, sales, guide and (with a plan) exempt
- * purchase books are built from the plan and the sent sets, kept as artefacts and uploaded; a purchase book the SII
- * already holds goes again as an adjustment. With the three mandatory books sent or skipped: the SOAP status is read
- * for 45 s without blocking anything, the books are declared together with the four sets, and while every row comes
- * back empty (the wrong period) the books are resent, as adjustments with the totals kept or in the next free
- * period, at most 24 times. Then the approval wait: 40 polls 15 s apart with the SOAP status every second poll; the
- * books the SII refuses are resent the same way, at most 24 times. The result says whether every wanted book is
- * approved; each book's approval is in the state.
- * ES: La fase de libros, como la corre el campo. El historial de libros que tiene el SII (año a año, hasta dos años
- * vacíos) marca los períodos ocupados; el período es el mes en que se emitieron los sets, o el primer mes libre bajo
- * él. Un libro que el portal ya muestra aprobado se omite. Los libros de compras, ventas, guías y (con plan) compras
- * para exentos se arman desde el plan y los sets enviados, se guardan como artefactos y se suben; un libro de compras
- * que el SII ya tiene va de nuevo como ajuste. Con los tres libros obligatorios enviados u omitidos: se lee el estado
- * SOAP por 45 s sin bloquear nada, los libros se declaran junto con los cuatro sets, y mientras toda fila vuelva vacía
- * (el período equivocado) los libros se reenvían, como ajuste con los totales guardados o en el siguiente período
- * libre, a lo más 24 veces. Luego la espera de aprobación: 40 consultas cada 15 s con el estado SOAP cada dos; los
- * libros que el SII rechaza se reenvían del mismo modo, a lo más 24 veces. El resultado dice si todo libro pedido está
- * aprobado; la aprobación de cada libro queda en el estado.
- * @throws {DteError} EN: `MISSING_FIELD { field: 'plan' }` without a plan; the portal and upload codes that are not a book's refusal. ES: `MISSING_FIELD { field: 'plan' }` sin plan; los códigos del portal y de envío que no sean el rechazo de un libro.
+ * EN: The books phase. The history of books the SII holds (year by year, until two empty years) marks the occupied
+ * periods; the period is the UTC month the test set was read in when the set brought a purchase book, else the current
+ * UTC month, or the first free month below it, searched anew on every run. A book the portal shows as `REVISADO
+ * CONFORME` is skipped; the purchase, sales, guide and (with a plan) exempt purchase books are built, kept as artefacts
+ * and uploaded, and a purchase book the SII already holds goes again as an adjustment. Without the three mandatory
+ * books sent or skipped the phase ends `incomplete`. Then: the SOAP status of the books is read for a minute; the books
+ * are declared together with the four sets; while every declared row comes back empty, at most 24 times, every book
+ * goes again, as an adjustment once per period when the totals of the sales or the purchase book are kept, else as a
+ * total submission in the next free period. A declaration that stands is followed by the approval wait (40 polls 15 s
+ * apart, the SOAP status every second poll) for the books neither rejected by the SOAP status nor named with content
+ * errors by the declaration; those, and the books the wait leaves rejected, closed or declared and never reviewed, go
+ * again the same way and are declared and awaited again, at most 24 times. No portal read of this phase stops the run.
+ * The outcome says how the books stand; the run asks for the next stage with the three mandatory books sent, whatever
+ * the outcome.
+ * ES: La fase de libros. El historial de libros que tiene el SII (año a año, hasta dos años vacíos) marca los períodos
+ * ocupados; el período es el mes UTC en que se leyó el set de pruebas cuando el set trajo un libro de compras, si no el
+ * mes UTC actual, o el primer mes libre bajo él, buscado de nuevo en cada corrida. Un libro que el portal muestra como
+ * `REVISADO CONFORME` se omite; los libros de compras, ventas, guías y (con plan) compras para exentos se arman, se
+ * guardan como artefactos y se suben, y un libro de compras que el SII ya tiene va de nuevo como ajuste. Sin los tres
+ * libros obligatorios enviados u omitidos la fase termina `incomplete`. Luego: se lee el estado SOAP de los libros por
+ * un minuto; los libros se declaran junto con los cuatro sets; mientras toda fila declarada vuelva vacía, a lo más 24
+ * veces, todos los libros van de nuevo, como ajuste una vez por período cuando se guardan los totales del libro de
+ * ventas o del de compras, si no como envío total en el siguiente período libre. A una declaración que queda en pie le
+ * sigue la espera de aprobación (40 consultas cada 15 s, el estado SOAP cada dos) de los libros que ni el estado SOAP
+ * rechazó ni la declaración nombró con errores de contenido; esos, y los que la espera deja rechazados, cerrados o
+ * declarados y nunca revisados, van de nuevo del mismo modo y se declaran y se esperan otra vez, a lo más 24 veces.
+ * Ninguna lectura del portal de esta fase detiene la corrida. El resultado dice cómo quedaron los libros; la corrida
+ * pide la etapa siguiente con los tres libros obligatorios enviados, sea cual sea el resultado.
+ * @throws {DteError} EN: `MISSING_FIELD { field: 'plan' }` without a plan; the session and transport codes of the declaration. ES: `MISSING_FIELD { field: 'plan' }` sin plan; los códigos de sesión y de transporte de la declaración.
  */
 export const runBooks = async (
   deps: CertificationDependencies,
   state: CertificationState,
 ): Promise<StepResult<BooksOutcome>> => {
   const rt = runtime(deps)
-  if (state.plan === undefined) throw new DteError('MISSING_FIELD', { field: 'plan' })
+  const plan = state.plan
+  if (plan === undefined) throw new DteError('MISSING_FIELD', { field: 'plan' })
   rt.emit({ step: 'BOOKS_START' })
-  const wanted = BOOK_KEYS.filter((key) => key !== 'exemptPurchaseBook' || state.plan?.exemptPurchaseBook !== undefined)
-  const occupied = new Set(state.books.occupiedPeriods)
+  const wanted = wantedBooks(state)
+  const occupied = new Set<string>()
   const thisYear = Number(chileDate(rt.now()).slice(0, 4))
   let emptyYears = 0
   for (let year = thisYear; year >= HISTORY_FIRST_YEAR && emptyYears < HISTORY_EMPTY_YEARS; year -= 1) {
@@ -424,77 +502,130 @@ export const runBooks = async (
       emptyYears += 1
     }
   }
-  const base = state.books.period ?? monthOf(state.sets.basic?.date ?? chileDate(rt.now()))
-  const period = nextFreePeriod(base, occupied)
-  let current = await saveState(rt, state, withBooks(state, { period, occupiedPeriods: [...occupied] }))
-  const rows = (await queryCertificationSets(rt.portal)).sets
+  // The purchase books are dated with the day the set was read, and the period is taken from that date.
+  const dated = [plan.purchaseBook, plan.exemptPurchaseBook].some((book) => (book?.documents.length ?? 0) > 0)
+  const base = dated && state.setReadDate !== undefined ? state.setReadDate.slice(0, 7) : utcMonth(rt.now())
+  let period = nextFreePeriod(base, occupied)
+  // Every run starts over: the books of an earlier run are told by the portal, not by the state.
+  let current = await saveState(
+    rt,
+    state,
+    withBooks(state, { period, occupiedPeriods: [...occupied], adjustmentTried: [], results: {} }),
+  )
+  const initial = (await readTable(rt)) ?? new Map<string, string>()
+  const conforming = (key: BookKey): boolean => bookState(initial, key) === CONFORMING
+  const outstanding = wanted.filter((key) => !conforming(key))
   for (const key of wanted) {
-    if (!(rowOf(rows, key)?.status.includes('REVISADO CONFORME') ?? false)) continue
-    rt.emit({ step: 'BOOK_SKIPPED', book: key })
-    const kept = current.books.results[key] ?? {
-      trackId: null,
-      date: null,
-      sentAt: null,
-      period,
-      submission: 'total' as const,
+    if (!conforming(key)) {
+      current = await sendBook(rt, current, key, period, 'total', key === 'purchaseBook')
+      continue
     }
+    rt.emit({ step: 'BOOK_SKIPPED', book: key })
+    const skipped: SentBook = { trackId: null, date: null, sentAt: null, period, submission: 'total', approved: true }
     current = await saveState(
       rt,
       current,
-      withBooks(current, { results: { ...current.books.results, [key]: { ...kept, approved: true } } }),
+      withBooks(current, { results: { ...current.books.results, [key]: skipped } }),
     )
   }
-  for (const key of wanted) {
-    if (current.books.results[key]?.approved === true) continue
-    current = await sendBook(rt, current, key, period, 'total')
-  }
-  const covered = (key: BookKey): boolean => {
-    const result = current.books.results[key]
-    return result !== undefined && (result.approved === true || result.trackId !== null)
-  }
-  if (!MANDATORY_BOOK_KEYS.every(covered)) {
+  const missing = MANDATORY_BOOK_KEYS.filter((key) => current.books.results[key] === undefined)
+  if (missing.length > 0) {
     rt.emit({ step: 'BOOKS_DONE', books: wanted, success: false })
-    return {
-      state: current,
-      outcome: 'incomplete',
-      detail: MANDATORY_BOOK_KEYS.filter((key) => !covered(key)).join(', '),
+    return { state: current, outcome: 'incomplete', detail: missing.join(', ') }
+  }
+  const before = await pollBookStates(
+    rt,
+    current,
+    BOOK_KEYS.filter((key) => trackIdOf(current, key) !== null),
+    SOAP_PRECHECK_POLLS,
+    SOAP_PRECHECK_ERRORS,
+  )
+  current = before.state
+  rt.emit({ step: 'BOOKS_DECLARING' })
+  const declare = async (): Promise<BooksDeclaration> => {
+    const declaration = await declareBooks(rt, current)
+    current = declaration.state
+    return declaration
+  }
+  // Sends `keys` again: as an adjustment in the same period, once per period, when `adjust` says so; else as a total
+  // submission in the next free period, the one in use now counted as occupied.
+  const resend = async (
+    keys: readonly BookKey[],
+    adjust: boolean,
+    tried: Set<string>,
+    attempt: number,
+  ): Promise<void> => {
+    if (adjust && !tried.has(period)) {
+      rt.emit({ step: 'BOOK_PERIOD_RETRY', period, attempt })
+      tried.add(period)
+      current = await saveState(
+        rt,
+        current,
+        withBooks(current, { adjustmentTried: [...new Set([...current.books.adjustmentTried, period])] }),
+      )
+      current = await resendBooks(rt, current, keys, period, 'adjustment', occupied)
+      return
+    }
+    occupied.add(period)
+    period = nextFreePeriod(previousPeriod(period), occupied)
+    rt.emit({ step: 'BOOK_PERIOD_RETRY', period, attempt })
+    current = await saveState(rt, current, withBooks(current, { period, occupiedPeriods: [...occupied] }))
+    current = await resendBooks(rt, current, keys, period, 'total', occupied)
+  }
+  let declaration = await declare()
+  const triedEmpty = new Set<string>()
+  for (let retry = 1; retry <= MAX_PERIOD_RETRIES && declaration.allRejected; retry += 1) {
+    const totals = current.books.accumulated[period]
+    await resend(outstanding, totals?.purchase !== undefined || totals?.sale !== undefined, triedEmpty, retry)
+    declaration = await declare()
+  }
+  let wait: Wait | null = null
+  if (declaration.success) {
+    const refusedBySoap = [...before.terminal].filter(([, status]) => status.rejected).map(([key]) => key)
+    const excluded = new Set<string>([...refusedBySoap, ...declaration.contentErrors])
+    const awaited = DECLARED_ORDER.filter((key) => outstanding.includes(key) && !excluded.has(key))
+    wait =
+      awaited.length > 0
+        ? await waitForBooksApproval(rt, current, awaited)
+        : { state: current, ok: false, table: new Map(), timedOut: false }
+    current = wait.state
+    // The books left out of the wait stand as closed ones: the SOAP status rejected them, or the declaration named
+    // them, and the portal would show them declared forever.
+    const closed = new Map(wait.table)
+    for (const key of refusedBySoap) closed.set(BOOK_NAMES[key], CLOSED_BOOK)
+    // In the order the declaration names them, which is the order a book the page does not list is awaited in.
+    for (const key of declaration.contentErrors.flatMap((named) => BOOK_KEYS.filter((book) => book === named)))
+      if ((closed.get(BOOK_NAMES[key]) ?? '') === '') closed.set(BOOK_NAMES[key], CLOSED_BOOK)
+    wait = { ...wait, ok: wait.ok && excluded.size === 0, table: closed }
+    const triedFailed = new Set<string>()
+    for (let retry = 1; !wait.ok && retry <= MAX_PERIOD_RETRIES; retry += 1) {
+      // Every failed book of the page keeps the search going and is awaited, in the order of the page; only the ones
+      // this run sends go again, in the order they are sent.
+      const failed = failedBooks(wait.table)
+      if (failed.length === 0) break
+      const kept = failed.some((key) => keptTotals(current, period, key) !== undefined)
+      await resend(
+        BOOK_KEYS.filter((key) => failed.includes(key) && outstanding.includes(key)),
+        kept,
+        triedFailed,
+        retry,
+      )
+      declaration = await declare()
+      if (!declaration.success) {
+        // A declaration that does not stand ends the search, unless every row came back empty, an adjustment was
+        // tried (the next round moves to a free period) or no book was left to declare.
+        if (declaration.allRejected || triedFailed.size > 0 || declaration.detail === NO_BOOKS) continue
+        break
+      }
+      wait = await waitForBooksApproval(rt, current, failed)
+      current = wait.state
     }
   }
-  if (wanted.every((key) => current.books.results[key]?.approved === true)) {
-    rt.emit({ step: 'BOOKS_DONE', books: wanted, success: true })
+  rt.emit({ step: 'BOOKS_DONE', books: wanted, success: true })
+  if (wanted.every((key) => current.books.results[key]?.approved === true))
     return { state: current, outcome: 'approved' }
-  }
-  current = await soapCheck(rt, current, sentKeys(current, wanted), SOAP_PRECHECK_POLLS, false)
-  let declaration = await declareBooks(rt, current, wanted)
-  current = declaration.state
-  for (let retry = 1; declaration.outcome === 'allRejected' && retry <= MAX_PERIOD_RETRIES; retry += 1) {
-    current = await resendBooks(
-      rt,
-      current,
-      wanted.filter((key) => current.books.results[key]?.approved !== true),
-      retry,
-    )
-    declaration = await declareBooks(rt, current, wanted)
-    current = declaration.state
-  }
-  if (!declaration.success) {
-    rt.emit({ step: 'BOOKS_DONE', books: wanted, success: false })
-    // A declaration that does not stand always says why.
-    return { state: current, outcome: 'rejected', detail: declaration.detail! }
-  }
-  let wait = await waitForBooksApproval(rt, current, wanted)
-  current = wait.state
-  for (let retry = 1; !wait.approved && wait.failed.length > 0 && retry <= MAX_PERIOD_RETRIES; retry += 1) {
-    current = await resendBooks(rt, current, wait.failed, retry)
-    declaration = await declareBooks(rt, current, wanted)
-    current = declaration.state
-    if (!declaration.success) break
-    wait = await waitForBooksApproval(rt, current, wanted)
-    current = wait.state
-  }
-  const approved = wanted.every((key) => current.books.results[key]?.approved === true)
-  rt.emit({ step: 'BOOKS_DONE', books: wanted, success: approved })
-  if (approved) return { state: current, outcome: 'approved' }
-  // Not approved means the last wait named the books it gave up on.
-  return { state: current, outcome: wait.timedOut ? 'timedOut' : 'rejected', detail: wait.failed.join(', ') }
+  // A declaration that does not stand always says why.
+  if (!declaration.success || wait === null) return { state: current, outcome: 'rejected', detail: declaration.detail! }
+  const pending = wanted.filter((key) => current.books.results[key]?.approved !== true)
+  return { state: current, outcome: wait.timedOut ? 'timedOut' : 'rejected', detail: pending.join(', ') }
 }

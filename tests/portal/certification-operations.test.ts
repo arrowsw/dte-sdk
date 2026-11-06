@@ -568,7 +568,7 @@ describe('declareProgress', () => {
   })
 })
 
-describe('posts that change the application are never retried', () => {
+describe('the posts that change the application follow the retry policy', () => {
   const unavailable = { status: 503, body: 'down' }
   const retrying = { retry: { maxAttempts: 2, jitterRatio: 0, baseDelayMs: 1 } }
 
@@ -601,7 +601,7 @@ describe('posts that change the application are never retried', () => {
     expect(declare.posted('pe_avance3')).toHaveLength(2)
   })
 
-  test('pe_avance4, the OK_MSG continue and pe_avance9 are sent once', async () => {
+  test('pe_avance4, the OK_MSG continue and pe_avance9 follow it too', async () => {
     const advance = await signedIn(
       [
         entry,
@@ -614,8 +614,8 @@ describe('posts that change the application are never retried', () => {
       ],
       retrying,
     )
-    expect((await failure(advanceStage(advance.portal))).code).toBe('SII_HTTP_ERROR')
-    expect(advance.posted('pe_avance4')).toHaveLength(1)
+    await expect(advanceStage(advance.portal)).resolves.toMatchObject({ outcome: 'advanced' })
+    expect(advance.posted('pe_avance4')).toHaveLength(2)
     const cont = await signedIn(
       [
         get('pe_avance7', COMPLIANCE_ENTRY),
@@ -624,11 +624,12 @@ describe('posts that change the application are never retried', () => {
           method: 'POST' as const,
           reply: [{ body: COMPLIANCE_OK_MSG }, unavailable, { body: COMPLIANCE_FORM }],
         },
+        post('pe_avance9', COMPLIANCE_DECLARED),
       ],
       retrying,
     )
-    expect((await failure(declareCompliance(cont.portal))).code).toBe('SII_HTTP_ERROR')
-    expect(cont.posted('pe_avance8')).toHaveLength(2)
+    await expect(declareCompliance(cont.portal)).resolves.toMatchObject({ outcome: 'declared' })
+    expect(cont.posted('pe_avance8')).toHaveLength(3)
     const final = await signedIn(
       [
         get('pe_avance7', COMPLIANCE_ENTRY),
@@ -637,8 +638,8 @@ describe('posts that change the application are never retried', () => {
       ],
       retrying,
     )
-    expect((await failure(declareCompliance(final.portal))).code).toBe('SII_HTTP_ERROR')
-    expect(final.posted('pe_avance9')).toHaveLength(1)
+    await expect(declareCompliance(final.portal)).resolves.toMatchObject({ outcome: 'declared' })
+    expect(final.posted('pe_avance9')).toHaveLength(2)
   })
 })
 
@@ -747,6 +748,41 @@ describe('advanceStage', () => {
   })
 })
 
+describe('advanceStage', () => {
+  const advancing = (form: string, entryPage = form) =>
+    signedIn([entry, post('pe_avance2', entryPage), post('pe_avance4', ADVANCE_ANSWERS.advanced)])
+
+  test('TOTREG and PASO are taken from the first input that names them with quotes, name first, of any type', async () => {
+    const text = await advancing(
+      page('<INPUT TYPE="TEXT" NAME="TOTREG" VALUE="9"><INPUT TYPE="TEXT" NAME="PASO" VALUE="P05">'),
+    )
+    await advanceStage(text.portal)
+    expect(text.posted('pe_avance4')[0]).toMatchObject({ TOTREG: '9', PASO: 'P05' })
+    const reordered = await advancing(page('<input type=hidden value="7" name="TOTREG"><input name=PASO value=P03>'))
+    await advanceStage(reordered.portal)
+    expect(reordered.posted('pe_avance4')[0]).toMatchObject({ TOTREG: '0', PASO: 'P01' })
+    const emptied = await advancing(page('<input name="TOTREG" value=""><input name="PASO" value="">'))
+    await advanceStage(emptied.portal)
+    expect(emptied.posted('pe_avance4')[0]).toMatchObject({ TOTREG: '', PASO: '' })
+  })
+
+  test('the referer of pe_avance4 is pe_avance2, wherever the form came from', async () => {
+    const moved = await signedIn([
+      entry,
+      {
+        url: `${MAULLIN}/pe_avance2`,
+        method: 'POST' as const,
+        reply: { status: 302, headers: { location: 'pe_avance2x' } },
+      },
+      get('pe_avance2x', declarationFormPage(STANDARD_ROWS)),
+      post('pe_avance4', ADVANCE_ANSWERS.advanced),
+    ])
+    await advanceStage(moved.portal)
+    const [request] = moved.fake.requests.filter((item) => item.url.endsWith('/pe_avance4'))
+    expect(request.headers.referer).toBe(`${MAULLIN}/pe_avance2`)
+  })
+})
+
 describe('listBookHistory', () => {
   const history = (body: string) => [
     { url: `${UPL}/DTEauth?7`, reply: { body: page('auth') } },
@@ -817,19 +853,75 @@ describe('declareCompliance', () => {
     await expect(declareCompliance(final.portal)).resolves.toEqual({ outcome: 'blocked', message })
   })
 
-  test('no form, an unconfirmed final page, a refusal', async () => {
-    const noForm = await signedIn(wizard(COMPLIANCE_OK_MSG, page('<p>sin formulario</p>')))
-    expect((await failure(declareCompliance(noForm.portal))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
+  test('an unconfirmed final page, a vague one, a refusal', async () => {
     const unconfirmed = await signedIn(wizard(COMPLIANCE_FORM, undefined, COMPLIANCE_UNCONFIRMED))
     await expect(declareCompliance(unconfirmed.portal)).resolves.toMatchObject({ outcome: 'unconfirmed' })
     const vague = await signedIn(wizard(COMPLIANCE_FORM, undefined, page('<p>Gracias por su visita.</p>')))
     await expect(declareCompliance(vague.portal)).resolves.toEqual({
-      outcome: 'unconfirmed',
+      outcome: 'declared',
       message: 'Gracias por su visita.',
     })
     const refused = await signedIn(wizard(REJECTION_PAGES.personWithPendingIssues))
     expect((await failure(declareCompliance(refused.portal))).details).toMatchObject({
       rejection: 'personWithPendingIssues',
     })
+  })
+
+  test('a last page with no pe_avance9 form posts nothing more and is judged as it is', async () => {
+    const plain = await signedIn(wizard(COMPLIANCE_OK_MSG, page('<p>sin formulario</p>')))
+    await expect(declareCompliance(plain.portal)).resolves.toEqual({ outcome: 'declared', message: 'sin formulario' })
+    expect(plain.posted('pe_avance9')).toEqual([])
+    const asking = await signedIn(
+      wizard(page('<form action="/cvc_cgi/dte/pe_avance8"><input name="OPC1" type=radio></form>')),
+    )
+    await expect(declareCompliance(asking.portal)).resolves.toMatchObject({ outcome: 'unconfirmed' })
+    const blocked = await signedIn(wizard(COMPLIANCE_OK_MSG, COMPLIANCE_BLOCKED))
+    await expect(declareCompliance(blocked.portal)).resolves.toMatchObject({ outcome: 'blocked' })
+  })
+
+  test('the first post names pe_avance7 as its referer, wherever the entry page came from', async () => {
+    const moved = await signedIn([
+      { url: `${MAULLIN}/pe_avance7`, reply: { status: 302, headers: { location: 'pe_avance7x' } } },
+      get('pe_avance7x', COMPLIANCE_ENTRY),
+      post('pe_avance8', COMPLIANCE_DECLARED),
+    ])
+    await expect(declareCompliance(moved.portal)).resolves.toMatchObject({ outcome: 'declared' })
+    const [request] = moved.fake.requests.filter((item) => item.url.endsWith('/pe_avance8'))
+    expect(request.headers.referer).toBe(`${MAULLIN}/pe_avance7`)
+  })
+
+  test('the posts of the wizard carry every input of the page and pe_avance8 as referer', async () => {
+    const okMsg = page(
+      '<form action="/cvc_cgi/dte/pe_avance8"><input type=hidden name=OK_MSG value=S><input type=text name=Extra value=5>' +
+        '<input type=submit name=Aceptar value="Seguir"></form>',
+    )
+    const form = page(
+      '<form action="/cvc_cgi/dte/pe_avance9"><input type=hidden name=RUT_EMP value=76543210>' +
+        '<input type=checkbox name=OPC1 value=N><input type=button name=Ayuda value=Ayuda>' +
+        '<input type=submit name=CONFIRMAR value=x><input type=button name=Salir value="No Confirmar"></form>',
+    )
+    const harness = await signedIn(wizard(okMsg, form, COMPLIANCE_DECLARED))
+    await declareCompliance(harness.portal)
+    expect(harness.posted('pe_avance8')[1]).toEqual({
+      OK_MSG: 'S',
+      Extra: '5',
+      Aceptar: 'Continuar con la Declaración',
+    })
+    expect(harness.posted('pe_avance9')).toEqual([
+      { RUT_EMP: '76543210', OPC1: 'S', Ayuda: 'Ayuda', CONFIRMAR: 'Confirmar Declaración' },
+    ])
+    const referers = harness.fake.requests
+      .filter((request) => request.method === 'POST')
+      .map((request) => [request.url.split('/').pop(), request.headers.referer])
+    expect(referers).toEqual([
+      ['pe_avance8', `${MAULLIN}/pe_avance7`],
+      ['pe_avance8', `${MAULLIN}/pe_avance8`],
+      ['pe_avance9', `${MAULLIN}/pe_avance8`],
+    ])
+    const direct = await signedIn(wizard(form, undefined, COMPLIANCE_DECLARED))
+    await declareCompliance(direct.portal)
+    expect(direct.fake.requests.filter((request) => request.url.endsWith('pe_avance9'))[0].headers.referer).toBe(
+      `${MAULLIN}/pe_avance8`,
+    )
   })
 })

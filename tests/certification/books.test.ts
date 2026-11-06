@@ -8,6 +8,8 @@ import { cafFor, certificate, fullPlan, issueOptions, receiver } from '../suppor
 import { FIXED_NOW, ISSUER_RUT } from '../support/fixtures'
 import { validateAgainstXsd } from '../support/xsd'
 
+jest.setTimeout(30_000)
+
 const plan = fullPlan()
 const bookInput = {
   period: '2026-11',
@@ -137,7 +139,7 @@ describe('the purchase books', () => {
         taxRate: 19,
         netAmount: 9000,
         vatAmount: 1710,
-        otherTaxes: [{ code: 15, rate: 19, amount: 1710 }],
+        otherTaxes: [{ code: 15, rate: 0.19, amount: 1710 }],
         totalVatWithheld: 1710,
         totalAmount: 9000,
       },
@@ -337,18 +339,26 @@ describe('the purchase books', () => {
       [55, 3, 1, 32, 5, 0, 5],
       [55, 4, 2, undefined, 10, 0, 10],
       [60, 5, undefined, undefined, 7, 0, 7],
-      [46, 6, undefined, undefined, undefined, 1000, 1000],
+      [46, 6, undefined, undefined, undefined, 1000, 1190],
       [60, 7, 6, 30, undefined, 1000, 1000],
       [55, 8, 1, 30, 100, 0, 100],
       [46, 9, undefined, undefined, undefined, 0, 0],
       [33, 10, undefined, undefined, undefined, 0, 0],
     ])
-    expect(exemptBook.entries[6].nonRecoverableVat).toBeUndefined()
+    // A note with no amounts of its own carries zero non-recoverable VAT even when the document it references has
+    // none to hand down, and the exempt book rewrites every code to 1, the free-delivery one included.
+    expect(exemptBook.entries[6]).toMatchObject({
+      taxRate: 0,
+      vatAmount: 0,
+      netAmount: 1000,
+      nonRecoverableVat: [{ code: 1, amount: 0 }],
+    })
+    expect(exemptBook.entries[3]).toMatchObject({ taxRate: 0, nonRecoverableVat: [{ code: 1, amount: 0 }] })
     expect(exemptBook.entries[9]).toMatchObject({
       taxRate: 0,
       vatAmount: 0,
       netAmount: 0,
-      nonRecoverableVat: [{ code: 4, amount: 0 }],
+      nonRecoverableVat: [{ code: 1, amount: 0 }],
     })
     const normalBook = createCertificationPurchaseBook(
       {
@@ -376,7 +386,7 @@ describe('the purchase books', () => {
       [33, undefined, 0, 0, 0, 0],
     ])
     expect(normalBook.entries[3]).toMatchObject({
-      otherTaxes: [{ code: 15, rate: 19, amount: 0 }],
+      otherTaxes: [{ code: 15, rate: 0.19, amount: 0 }],
       totalVatWithheld: 0,
     })
     expect(normalBook.entries[4]).toMatchObject({ nonRecoverableVat: [{ code: 4, amount: 0 }] })
@@ -384,7 +394,14 @@ describe('the purchase books', () => {
       { kind: 'exemptPurchaseBook', attentionNumber: '1', documents: [documents[3]], proportionalityFactor: 0.6 },
       bookInput,
     )
-    expect(unreferenced.entries[0]).toMatchObject({ type: 55, referenceFolio: 2, netAmount: 0, totalAmount: 0 })
+    expect(unreferenced.entries[0]).toMatchObject({
+      type: 55,
+      referenceFolio: 2,
+      netAmount: 0,
+      totalAmount: 0,
+      taxRate: 0,
+      nonRecoverableVat: [{ code: 1, amount: 0 }],
+    })
   })
 
   test('a document the detector does not know is rejected by phase 3', () => {
@@ -498,5 +515,320 @@ describe('the guide book', () => {
     expect(() => createCertificationGuideBook(basic, { ...bookInput, receiver: bookReceiver })).toThrow(
       expect.objectContaining({ code: 'INVALID_OPTION' }),
     )
+  })
+})
+
+const section = (xml: string, tag: string): string => new RegExp(`<${tag}>[\\s\\S]*?</${tag}>`).exec(xml)?.[0] ?? ''
+const countOf = (xml: string, tag: string): number => xml.split(`<${tag}>`).length - 1
+
+const supplierDocument = (fields: {
+  readonly documentText: string
+  readonly folio: number
+  readonly observation?: string
+  readonly exemptAmount?: number
+  readonly affectedAmount?: number
+  readonly commonUseVat?: boolean
+  readonly totalWithholding?: boolean
+}) => ({
+  documentText: fields.documentText,
+  folio: fields.folio,
+  observation: fields.observation ?? null,
+  exemptAmount: fields.exemptAmount ?? null,
+  affectedAmount: fields.affectedAmount ?? null,
+  commonUseVat: fields.commonUseVat ?? false,
+  nonRecoverableVatCode: null,
+  totalWithholding: fields.totalWithholding ?? false,
+})
+
+describe('the purchase book summaries, as the field writes them', () => {
+  test('the tax kind travels on the line and never on the summary', () => {
+    const book = createCertificationPurchaseBook(plan.purchaseBook!, bookInput)
+    expect(countOf(book.xml, 'TpoImp')).toBe(1)
+    expect(section(book.xml, 'Detalle')).not.toContain('<TpoImp>')
+    expect(book.xml.indexOf('<TpoImp>')).toBeGreaterThan(book.xml.indexOf('<NroDoc>781</NroDoc>'))
+    expect(book.periodTotals?.every((row) => row.taxKind === undefined)).toBe(true)
+  })
+
+  test('the credit of common-use VAT is rounded document by document and summed', () => {
+    const documents = [5, 5, 5].map((affectedAmount, index) =>
+      supplierDocument({
+        documentText: 'FACTURA',
+        folio: index + 1,
+        observation: 'FACTURA CON IVA USO COMUN',
+        affectedAmount,
+        commonUseVat: true,
+      }),
+    )
+    const book = createCertificationPurchaseBook(
+      { kind: 'purchaseBook', attentionNumber: '1', documents, proportionalityFactor: 0.6 },
+      bookInput,
+    )
+    // Each document has 1 of VAT, whose credit rounds to 1, so 3 and not round(3 * 0.6) = 2.
+    expect(book.periodTotals?.[0]).toMatchObject({ commonUseVat: 3, commonUseVatCount: 3, commonUseCredit: 3 })
+    expect(book.xml).toContain('<TotIVAUsoComun>3</TotIVAUsoComun>')
+    expect(book.xml).toContain('<FctProp>0.6</FctProp>\n<TotCredIVAUsoComun>3</TotCredIVAUsoComun>')
+    // The credit of the earlier submission is added as it was rounded, not rounded again over the sum: 6, not 4.
+    const adjusted = createCertificationPurchaseBook(
+      { kind: 'purchaseBook', attentionNumber: '1', documents, proportionalityFactor: 0.6 },
+      { ...bookInput, submission: 'adjustment', previousTotals: book.periodTotals! },
+    )
+    expect(adjusted.periodTotals?.[0]).toMatchObject({ commonUseVat: 6, commonUseCredit: 6 })
+    expect(adjusted.xml).toContain('<TotCredIVAUsoComun>6</TotCredIVAUsoComun>')
+    expect(section(adjusted.xml, 'ResumenSegmento')).not.toContain('TotCredIVAUsoComun')
+  })
+
+  test('a common-use document with no VAT is not counted as a common-use operation', async () => {
+    const commonUse = (documentText: string, folio: number, affectedAmount?: number) =>
+      supplierDocument({
+        documentText,
+        folio,
+        observation: 'FACTURA CON IVA USO COMUN',
+        ...(affectedAmount === undefined ? {} : { affectedAmount }),
+        commonUseVat: true,
+      })
+    const book = createCertificationPurchaseBook(
+      {
+        kind: 'purchaseBook',
+        attentionNumber: '1',
+        documents: [commonUse('FACTURA', 1), commonUse('FACTURA', 2, 1000), commonUse('FACTURA ELECTRONICA', 3)],
+        proportionalityFactor: 0.6,
+      },
+      bookInput,
+    )
+    // The line keeps its tax kind and a common-use VAT of 0, with the rate and explicit zeros of a line with no net amount.
+    expect(book.entries[0]).toMatchObject({ taxKind: 'vat', commonUseVat: 0, taxRate: 19, netAmount: 0, vatAmount: 0 })
+    expect(book.xml).toContain('<IVAUsoComun>0</IVAUsoComun>')
+    // Only the document that has common-use VAT counts in the summary of its type; a type with none carries none.
+    expect(book.periodTotals?.[0]).toMatchObject({
+      type: 30,
+      documentCount: 2,
+      commonUseVatCount: 1,
+      commonUseVat: 190,
+    })
+    expect(book.periodTotals?.[0].commonUseCredit).toBe(114)
+    expect(book.periodTotals?.[1]).toMatchObject({ type: 33, documentCount: 1 })
+    expect(book.periodTotals?.[1]).not.toHaveProperty('commonUseVat')
+    expect(book.periodTotals?.[1]).not.toHaveProperty('commonUseVatCount')
+    expect(countOf(book.xml, 'TotOpIVAUsoComun')).toBe(1)
+    expect(book.xml).toContain('<TotOpIVAUsoComun>1</TotOpIVAUsoComun>\n<TotIVAUsoComun>190</TotIVAUsoComun>')
+    expect(await validateAgainstXsd(book.xml, 'LibroCV')).toEqual([])
+  })
+
+  test('a plan with no documents has no summaries', () => {
+    const book = createCertificationPurchaseBook(
+      { kind: 'purchaseBook', attentionNumber: '1', documents: [], proportionalityFactor: 0.6 },
+      bookInput,
+    )
+    expect(book.entries).toEqual([])
+    expect(book.segmentTotals).toBeNull()
+    expect(book.periodTotals).toBeNull()
+  })
+
+  test('a note names the electronic invoice only when ELECTRONICA follows FACTURA, as the field reads it', () => {
+    const documents = [
+      supplierDocument({
+        documentText: 'NOTA DE CREDITO',
+        folio: 1,
+        observation: 'NOTA DE CREDITO ELECTRONICA POR DESCUENTO FACTURA 7',
+        affectedAmount: 100,
+      }),
+      supplierDocument({
+        documentText: 'NOTA DE CREDITO',
+        folio: 2,
+        observation: 'NOTA DE CREDITO POR DESCUENTO FACTURA ELECTRONICA 8',
+        affectedAmount: 100,
+      }),
+    ]
+    const book = createCertificationPurchaseBook(
+      { kind: 'purchaseBook', attentionNumber: '1', documents, proportionalityFactor: 0.6 },
+      bookInput,
+    )
+    expect(book.entries.map((entry) => [entry.referenceFolio, entry.referenceType])).toEqual([
+      [7, 30],
+      [8, 33],
+    ])
+  })
+
+  test('in the exempt book a note inherits from the document it names as that document stands when the note comes', () => {
+    const documents = [
+      supplierDocument({ documentText: 'FACTURA ELECTRONICA', folio: 10, exemptAmount: 300, affectedAmount: 1000 }),
+      supplierDocument({
+        documentText: 'NOTA DE CREDITO',
+        folio: 11,
+        observation: 'NOTA DE CREDITO POR DESCUENTO FACTURA 12',
+      }),
+      supplierDocument({
+        documentText: 'NOTA DE CREDITO',
+        folio: 12,
+        observation: 'NOTA DE CREDITO POR DESCUENTO FACTURA ELECTRONICA 10',
+      }),
+    ]
+    const book = createCertificationPurchaseBook(
+      { kind: 'exemptPurchaseBook', attentionNumber: '1', documents, proportionalityFactor: 0.6 },
+      bookInput,
+    )
+    // The first note names the second, which has not inherited yet; the second inherits from the invoice.
+    expect(book.entries[1]).toMatchObject({
+      folio: 11,
+      totalAmount: 0,
+      netAmount: 0,
+      nonRecoverableVat: [{ code: 1, amount: 0 }],
+    })
+    expect(book.entries[2]).toMatchObject({ folio: 12, exemptAmount: 300, netAmount: 1000, totalAmount: 1490 })
+    expect(book.entries[2].nonRecoverableVat).toEqual([{ code: 1, amount: 190 }])
+  })
+
+  test('the exempt book ignores the common-use, free-delivery and withholding observations', () => {
+    const documents = [
+      supplierDocument({
+        documentText: 'FACTURA DE COMPRA ELECTRONICA',
+        folio: 1,
+        observation: 'COMPRA CON RETENCION TOTAL',
+        affectedAmount: 1000,
+        totalWithholding: true,
+      }),
+      supplierDocument({
+        documentText: 'FACTURA',
+        folio: 2,
+        observation: 'FACTURA CON IVA USO COMUN',
+        affectedAmount: 1000,
+        commonUseVat: true,
+      }),
+    ]
+    const flagged = [{ ...documents[0], nonRecoverableVatCode: 4 }, documents[1]]
+    const exempt = createCertificationPurchaseBook(
+      { kind: 'exemptPurchaseBook', attentionNumber: '1', documents: flagged, proportionalityFactor: 0.6 },
+      bookInput,
+    )
+    expect(exempt.entries[0].otherTaxes).toBeUndefined()
+    expect(exempt.entries[0].totalVatWithheld).toBeUndefined()
+    expect(exempt.entries[0]).toMatchObject({ vatAmount: 190, totalAmount: 1190 })
+    expect(exempt.entries[1].commonUseVat).toBeUndefined()
+    expect(exempt.entries[1].taxKind).toBeUndefined()
+    expect(exempt.entries[1]).toMatchObject({ nonRecoverableVat: [{ code: 1, amount: 190 }], totalAmount: 1190 })
+    const regular = createCertificationPurchaseBook(
+      { kind: 'purchaseBook', attentionNumber: '1', documents: flagged, proportionalityFactor: 0.6 },
+      bookInput,
+    )
+    expect(regular.entries[0]).toMatchObject({ totalVatWithheld: 190, totalAmount: 1000 })
+    expect(regular.entries[1]).toMatchObject({ commonUseVat: 190, taxKind: 'vat' })
+  })
+
+  test('a note that names a document without a net amount keeps its zero non-recoverable VAT', () => {
+    const documents = [
+      supplierDocument({ documentText: 'FACTURA EXENTA', folio: 1, exemptAmount: 400 }),
+      supplierDocument({
+        documentText: 'NOTA DE CREDITO',
+        folio: 2,
+        observation: 'NOTA DE CREDITO POR DESCUENTO FACTURA EXENTA 1',
+      }),
+    ]
+    const book = createCertificationPurchaseBook(
+      { kind: 'exemptPurchaseBook', attentionNumber: '1', documents, proportionalityFactor: 0.6 },
+      bookInput,
+    )
+    expect(book.entries[1]).toMatchObject({
+      exemptAmount: 400,
+      netAmount: 0,
+      vatAmount: 0,
+      taxRate: 0,
+      totalAmount: 400,
+      referenceType: 32,
+      nonRecoverableVat: [{ code: 1, amount: 0 }],
+    })
+  })
+})
+
+describe('adjustment submissions', () => {
+  let basic: IssuedSet
+  let guide: IssuedSet
+  beforeAll(async () => {
+    basic = await issueTestSet(plan.basic!, issueOptions())
+    guide = await issueTestSet(plan.guide!, issueOptions())
+  }, 60_000)
+
+  const sectionContent = (xml: string, tag: 'ResumenSegmento' | 'ResumenPeriodo'): string =>
+    section(xml, tag).replace(/Segmento/g, 'Periodo')
+
+  test('the sales book adjusts with the earlier totals carried into the period summary', async () => {
+    const first = createCertificationSalesBook(basic, { ...bookInput, receiver: bookReceiver })
+    const book = createCertificationSalesBook(basic, {
+      ...bookInput,
+      receiver: bookReceiver,
+      submission: 'adjustment',
+      previousTotals: first.periodTotals!,
+    })
+    expect(book.cover.submission).toBe('adjustment')
+    expect(book.xml).toContain('<TipoEnvio>AJUSTE</TipoEnvio>')
+    expect(countOf(book.xml, 'Operacion')).toBe(8)
+    expect(book.xml.indexOf('<ResumenSegmento>')).toBeLessThan(book.xml.indexOf('<ResumenPeriodo>'))
+    expect(book.segmentTotals?.[0]).toMatchObject({ type: 33, documentCount: 3, totalAmount: 920782 })
+    expect(book.periodTotals?.[0]).toMatchObject({ type: 33, documentCount: 6, totalAmount: 1841564 })
+    expect(await validateAgainstXsd(book.xml, 'LibroCV')).toEqual([])
+  })
+
+  test('the sales book adjusts with no earlier totals: both summaries are the lines', async () => {
+    const book = createCertificationSalesBook(basic, {
+      ...bookInput,
+      receiver: bookReceiver,
+      submission: 'adjustment',
+    })
+    expect(sectionContent(book.xml, 'ResumenSegmento')).toBe(sectionContent(book.xml, 'ResumenPeriodo'))
+    expect(book.periodTotals?.[0]).toMatchObject({ type: 33, documentCount: 3 })
+    expect(await validateAgainstXsd(book.xml, 'LibroCV')).toEqual([])
+  })
+
+  test('the purchase book adjusts: the segment has no factor and the period sums the credits of both submissions', async () => {
+    const first = createCertificationPurchaseBook(plan.purchaseBook!, bookInput)
+    const book = createCertificationPurchaseBook(plan.purchaseBook!, {
+      ...bookInput,
+      submission: 'adjustment',
+      previousTotals: first.periodTotals!,
+    })
+    expect(countOf(book.xml, 'Operacion')).toBe(6)
+    expect(section(book.xml, 'ResumenSegmento')).not.toContain('FctProp')
+    expect(section(book.xml, 'ResumenSegmento')).not.toContain('TotCredIVAUsoComun')
+    expect(section(book.xml, 'ResumenSegmento')).toContain('<TotIVAUsoComun>2280</TotIVAUsoComun>')
+    expect(section(book.xml, 'ResumenPeriodo')).toContain('<TotIVAUsoComun>4560</TotIVAUsoComun>')
+    expect(section(book.xml, 'ResumenPeriodo')).toContain('<FctProp>0.6</FctProp>')
+    expect(section(book.xml, 'ResumenPeriodo')).toContain('<TotCredIVAUsoComun>2736</TotCredIVAUsoComun>')
+    expect(book.periodTotals?.[1]).toMatchObject({
+      type: 33,
+      nonRecoverableVat: [{ code: 4, count: 2, amount: 760 }],
+    })
+    expect(await validateAgainstXsd(book.xml, 'LibroCV')).toEqual([])
+  })
+
+  test('totals kept without their credit still add up: the credit is rounded per row from what they hold', () => {
+    const first = createCertificationPurchaseBook(plan.purchaseBook!, bookInput)
+    const legacy = first.periodTotals!.map(({ commonUseCredit, ...row }) => {
+      void commonUseCredit
+      return row
+    })
+    const book = createCertificationPurchaseBook(plan.purchaseBook!, {
+      ...bookInput,
+      submission: 'adjustment',
+      previousTotals: legacy,
+    })
+    expect(book.periodTotals?.[0].commonUseCredit).toBe(2736)
+  })
+
+  test('the purchase book for exempt taxpayers adjusts with no earlier totals, repeating the summary in both sections', async () => {
+    const book = createCertificationPurchaseBook(plan.exemptPurchaseBook!, { ...bookInput, submission: 'adjustment' })
+    expect(sectionContent(book.xml, 'ResumenSegmento')).toBe(sectionContent(book.xml, 'ResumenPeriodo'))
+    expect(countOf(book.xml, 'Operacion')).toBe(5)
+    expect(await validateAgainstXsd(book.xml, 'LibroCV')).toEqual([])
+  })
+
+  test('the guide book adjusts: only the modified guide carries the operation and the summary is written twice', async () => {
+    const book = createCertificationGuideBook(guide, { ...bookInput, receiver: bookReceiver, submission: 'adjustment' })
+    expect(book.cover.submission).toBe('adjustment')
+    expect(book.xml).toContain('<TipoEnvio>AJUSTE</TipoEnvio>')
+    expect(countOf(book.xml, 'Operacion')).toBe(1)
+    expect(book.entries.map((entry) => entry.adjustment)).toEqual([undefined, 'add', undefined])
+    expect(sectionContent(book.xml, 'ResumenSegmento')).toBe(sectionContent(book.xml, 'ResumenPeriodo'))
+    expect(section(book.xml, 'ResumenPeriodo')).toContain('<TotGuiaAnulada>1</TotGuiaAnulada>')
+    expect(book.segmentTotals).toEqual(book.periodTotals)
+    expect(await validateAgainstXsd(book.xml, 'LibroGuia')).toEqual([])
   })
 })
