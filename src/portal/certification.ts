@@ -5,7 +5,6 @@ import { DteError, errorMessage } from '../errors'
 import type { CallOverrides } from '../sii/client'
 import { resolvePortalCompany, type PortalClient } from './client'
 import { hasSessionCookie } from './cookies'
-import { hiddenInputs } from './html'
 import { portalMessageOf } from './pages/auth'
 import { parseCertificationSets, type CertificationSet } from './pages/certification'
 import { isHistoryUnauthorized, parseBookHistory, type BookHistoryEntry } from './pages/certification-books'
@@ -13,8 +12,8 @@ import {
   complianceBlock,
   complianceForm,
   complianceMessage,
+  continueFields,
   hasOkMessage,
-  isDeclared,
   isUnconfirmed,
 } from './pages/certification-compliance'
 import {
@@ -697,19 +696,24 @@ export const listBookHistory = (
   })
 
 /**
- * EN: The declaration of compliance: `pe_avance7`, `pe_avance8` with the company, once more with `OK_MSG` when the
- * portal asks to continue, then the `pe_avance9` form with every option at `S` and `CONFIRMAR`, never `Salir`. A
- * block ("no ha finalizado su certificación") at any screen is data. This is the sworn statement of the legal
- * representative and cannot be undone: call it when the samples are approved.
- * ES: La declaración de cumplimiento: `pe_avance7`, `pe_avance8` con la empresa, una vez más con `OK_MSG` cuando el
- * portal pide continuar, y luego el formulario de `pe_avance9` con cada opción en `S` y `CONFIRMAR`, nunca `Salir`.
- * Un bloqueo ("no ha finalizado su certificación") en cualquier pantalla es un dato. Es la declaración jurada del
- * representante legal y no se puede deshacer: se llama cuando las muestras están aprobadas.
+ * EN: The declaration of compliance, as the reference posts it: `pe_avance7`, `pe_avance8` with the company, once more
+ * with every input of the page when the portal asks to continue (`OK_MSG`), then the `pe_avance9` form with every input
+ * of the page, `Salir` apart, every `OPCn` at `S` and `CONFIRMAR`, both posts with `pe_avance8` as referer. A block ("no
+ * ha finalizado su certificación") at any screen is data. A last page with no `pe_avance9` form posts nothing more and
+ * is judged as it is: it is `declared` unless it still shows the first option or the company input. This is the sworn
+ * statement of the legal representative and cannot be undone: call it when the samples are approved.
+ * ES: La declaración de cumplimiento, como la envía la referencia: `pe_avance7`, `pe_avance8` con la empresa, una vez
+ * más con todos los inputs de la página cuando el portal pide continuar (`OK_MSG`), y luego el formulario de
+ * `pe_avance9` con todos los inputs de la página, salvo `Salir`, cada `OPCn` en `S` y `CONFIRMAR`, ambos envíos con
+ * `pe_avance8` de referer. Un bloqueo ("no ha finalizado su certificación") en cualquier pantalla es un dato. Una
+ * última página sin formulario de `pe_avance9` no envía nada más y se juzga tal como está: es `declared` salvo que aún
+ * muestre la primera opción o el campo de la empresa. Es la declaración jurada del representante legal y no se puede
+ * deshacer: se llama cuando las muestras están aprobadas.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: the company. ES: la empresa.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: declared, blocked or unconfirmed, with the sentence. ES: declarada, bloqueada o sin confirmar, con la frase.
- * @throws {DteError} EN: `SII_PORTAL_REJECTED`, `SII_PORTAL_UNEXPECTED_PAGE` without the `pe_avance9` form, session and transport codes. ES: los mismos códigos.
+ * @throws {DteError} EN: `SII_PORTAL_REJECTED`, session and transport codes. ES: los mismos códigos.
  */
 export const declareCompliance = (
   portal: PortalClient,
@@ -740,17 +744,19 @@ export const declareCompliance = (
           'pe_avance8.continue',
           at('pe_avance8'),
           second.url,
-          { ...hiddenInputs(second.html), Aceptar: 'Continuar con la Declaración' },
-          second.url,
+          continueFields(second.html),
+          at('pe_avance8'),
         )
       : second
     const blockedAtThird = blockedOn(third)
     if (blockedAtThird !== null) return blockedAtThird
     const form = complianceForm(third.html)
-    if (form === null) throw unexpectedPage(context, 'pe_avance9', third.html)
-    const final = await submitForm(context, 'pe_avance9', form.action, third.url, form.fields, third.url)
+    const final =
+      form === null
+        ? third
+        : await submitForm(context, 'pe_avance9', form.action, third.url, form.fields, at('pe_avance8'))
     const blockedAtFinal = blockedOn(final)
     if (blockedAtFinal !== null) return blockedAtFinal
     const message = complianceMessage(final.html)
-    return { outcome: isUnconfirmed(final.html) || !isDeclared(final.html) ? 'unconfirmed' : 'declared', message }
+    return { outcome: isUnconfirmed(final.html) ? 'unconfirmed' : 'declared', message }
   })

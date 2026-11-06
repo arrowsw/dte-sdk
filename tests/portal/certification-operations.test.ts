@@ -853,19 +853,64 @@ describe('declareCompliance', () => {
     await expect(declareCompliance(final.portal)).resolves.toEqual({ outcome: 'blocked', message })
   })
 
-  test('no form, an unconfirmed final page, a refusal', async () => {
-    const noForm = await signedIn(wizard(COMPLIANCE_OK_MSG, page('<p>sin formulario</p>')))
-    expect((await failure(declareCompliance(noForm.portal))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
+  test('an unconfirmed final page, a vague one, a refusal', async () => {
     const unconfirmed = await signedIn(wizard(COMPLIANCE_FORM, undefined, COMPLIANCE_UNCONFIRMED))
     await expect(declareCompliance(unconfirmed.portal)).resolves.toMatchObject({ outcome: 'unconfirmed' })
     const vague = await signedIn(wizard(COMPLIANCE_FORM, undefined, page('<p>Gracias por su visita.</p>')))
     await expect(declareCompliance(vague.portal)).resolves.toEqual({
-      outcome: 'unconfirmed',
+      outcome: 'declared',
       message: 'Gracias por su visita.',
     })
     const refused = await signedIn(wizard(REJECTION_PAGES.personWithPendingIssues))
     expect((await failure(declareCompliance(refused.portal))).details).toMatchObject({
       rejection: 'personWithPendingIssues',
     })
+  })
+
+  test('a last page with no pe_avance9 form posts nothing more and is judged as it is', async () => {
+    const plain = await signedIn(wizard(COMPLIANCE_OK_MSG, page('<p>sin formulario</p>')))
+    await expect(declareCompliance(plain.portal)).resolves.toEqual({ outcome: 'declared', message: 'sin formulario' })
+    expect(plain.posted('pe_avance9')).toEqual([])
+    const asking = await signedIn(
+      wizard(page('<form action="/cvc_cgi/dte/pe_avance8"><input name="OPC1" type=radio></form>')),
+    )
+    await expect(declareCompliance(asking.portal)).resolves.toMatchObject({ outcome: 'unconfirmed' })
+    const blocked = await signedIn(wizard(COMPLIANCE_OK_MSG, COMPLIANCE_BLOCKED))
+    await expect(declareCompliance(blocked.portal)).resolves.toMatchObject({ outcome: 'blocked' })
+  })
+
+  test('the posts of the wizard carry every input of the page and pe_avance8 as referer', async () => {
+    const okMsg = page(
+      '<form action="/cvc_cgi/dte/pe_avance8"><input type=hidden name=OK_MSG value=S><input type=text name=Extra value=5>' +
+        '<input type=submit name=Aceptar value="Seguir"></form>',
+    )
+    const form = page(
+      '<form action="/cvc_cgi/dte/pe_avance9"><input type=hidden name=RUT_EMP value=76543210>' +
+        '<input type=checkbox name=OPC1 value=N><input type=button name=Ayuda value=Ayuda>' +
+        '<input type=submit name=CONFIRMAR value=x><input type=button name=Salir value="No Confirmar"></form>',
+    )
+    const harness = await signedIn(wizard(okMsg, form, COMPLIANCE_DECLARED))
+    await declareCompliance(harness.portal)
+    expect(harness.posted('pe_avance8')[1]).toEqual({
+      OK_MSG: 'S',
+      Extra: '5',
+      Aceptar: 'Continuar con la Declaración',
+    })
+    expect(harness.posted('pe_avance9')).toEqual([
+      { RUT_EMP: '76543210', OPC1: 'S', Ayuda: 'Ayuda', CONFIRMAR: 'Confirmar Declaración' },
+    ])
+    const referers = harness.fake.requests
+      .filter((request) => request.method === 'POST')
+      .map((request) => [request.url.split('/').pop(), request.headers.referer])
+    expect(referers).toEqual([
+      ['pe_avance8', `${MAULLIN}/pe_avance7`],
+      ['pe_avance8', `${MAULLIN}/pe_avance8`],
+      ['pe_avance9', `${MAULLIN}/pe_avance8`],
+    ])
+    const direct = await signedIn(wizard(form, undefined, COMPLIANCE_DECLARED))
+    await declareCompliance(direct.portal)
+    expect(direct.fake.requests.filter((request) => request.url.endsWith('pe_avance9'))[0].headers.referer).toBe(
+      `${MAULLIN}/pe_avance8`,
+    )
   })
 })
