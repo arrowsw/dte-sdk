@@ -19,14 +19,16 @@ export type SignedDocument = StampedDocument & {
 
 /**
  * EN: Signs a stamped document with the issuer certificate (enveloped XMLDSig over `Documento`/`Liquidacion`).
+ * `TmstFirma` is the Chile time of `now`, or `signedAt` as given.
  * ES: Firma un documento timbrado con el certificado del emisor (XMLDSig envuelta sobre `Documento`/`Liquidacion`).
+ * `TmstFirma` es la hora de Chile de `now`, o `signedAt` tal como se entrega.
  */
 export const signDocument = (
   doc: StampedDocument,
   certificate: Certificate,
-  options: { readonly now?: Date } = {},
+  options: { readonly now?: Date; readonly signedAt?: string } = {},
 ): SignedDocument => {
-  const signedAt = chileTimestamp(options.now)
+  const signedAt = options.signedAt ?? chileTimestamp(options.now)
   const unsigned = buildDocumentXml(doc, { ted: doc.ted, signedAt })
   const { xml, signature } = signEnveloped({
     xml: unsigned,

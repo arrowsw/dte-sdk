@@ -14,6 +14,7 @@ import {
   stateWith,
   TODAY,
   UPL,
+  UPLOAD,
   uploadRoute,
 } from '../support/certification-harness'
 import {
@@ -133,6 +134,8 @@ test('a fresh run: the set, the folios, four sets sent, declared and approved, t
   expect(steps.filter((step) => step === 'SET_OK')).toHaveLength(4)
   expect(steps.slice(-3)).toEqual(['SETS_DECLARED', 'POLLING', 'SETS_APPROVED'])
   expect(harness.posted('pe_generar2')[0]).toEqual({
+    RUT_EMP: '76543210',
+    DV_EMP: '3',
     AUTORIZADA: 'S',
     TOTAL: '15',
     SET01: 'S',
@@ -147,7 +150,8 @@ test('resumed at the books: approved books, the advance, the simulation sent, de
     [
       ...history(),
       entry,
-      avance2([BOOKS_APPROVED, page('x'), page('x'), page('x'), SIM_FORM, SIM_KEPT]),
+      // While the stage reads SIMULACION each progress read asks for the declaration form once more.
+      avance2([BOOKS_APPROVED, page('x'), page('x'), page('x'), page('x'), page('x'), SIM_FORM, SIM_KEPT]),
       post('pe_avance4', ADVANCE_ANSWERS.advanced),
       avance5,
       avance6([progressPage('SIMULACION', {}), IN_SIMULATION], () => AT_EXCHANGE),
@@ -267,7 +271,7 @@ test('the simulation: a refused declaration, a rejected wait, a confirmed one sk
   const refused = await seeded(
     [
       entry,
-      avance2([page('x'), SIM_FORM]),
+      avance2([page('x'), page('x'), SIM_FORM]),
       avance5,
       avance6([], () => IN_SIMULATION),
       post('pe_avance3', DECLARATION_ANSWERS.contentMismatch),
@@ -281,7 +285,7 @@ test('the simulation: a refused declaration, a rejected wait, a confirmed one sk
   const rejected = await seeded(
     [
       entry,
-      avance2([page('x'), SIM_FORM, SIM_KEPT]),
+      avance2([page('x'), page('x'), SIM_FORM, SIM_KEPT]),
       avance5,
       avance6([IN_SIMULATION], () => progressPage('SIMULACION', { 'SET SIMULACION': 'RECHAZADO' })),
       post('pe_avance3', DECLARATION_ANSWERS.success),
@@ -313,7 +317,10 @@ test('the simulation: a refused declaration, a rejected wait, a confirmed one sk
 })
 
 test('an error of a step is reported and rethrown; the company comes from the issuer when the client names none', async () => {
-  const harness = await certificationHarness([get('pe_generar', NOT_ENROLLED, NOT_ENROLLED)])
+  const harness = await certificationHarness([
+    get('pe_generar', NOT_ENROLLED, NOT_ENROLLED),
+    post('pe_generar2', page('<p>nada</p>'), page('<p>nada</p>')),
+  ])
   const error = await failure(runCertification(harness.deps))
   expect(error.details).toMatchObject({ rejection: 'notEnrolled' })
   expect(harness.steps()).toEqual(['SETS_DOWNLOADING', 'CERT_ERROR'])
@@ -322,13 +329,44 @@ test('an error of a step is reported and rethrown; the company comes from the is
   expect((await failure(runCertification(nameless))).details).toEqual({ field: 'companyRut' })
 })
 
+test('a resolution left out is dated once for the whole run, whatever day its later envelopes are made on', async () => {
+  const clock = { now: new Date('2026-11-15T23:59:30Z') }
+  const receptions = [reception('1'), reception('2')]
+  // The UTC day changes once the first set is in; the third upload fails and ends the run.
+  const harness = await seeded(
+    [
+      {
+        url: UPLOAD,
+        method: 'POST' as const,
+        reply: () => {
+          clock.now = new Date('2026-11-16T00:00:30Z')
+          return receptions.shift() ?? { body: 'down' }
+        },
+      },
+    ],
+    stateWith({ plan, cafs: certificationCafXmls() }),
+  )
+  const { resolution, ...rest } = harness.deps
+  void resolution
+  await failure(runCertification({ ...rest, now: () => clock.now }))
+  const basic = (await harness.store.readArtefact('sets-prueba/envio-set-basico.xml'))!
+  const guide = (await harness.store.readArtefact('sets-prueba/envio-set-guia.xml'))!
+  expect(basic).toContain('<FchResol>2026-11-15</FchResol>')
+  // Made after midnight UTC: its documents carry the new day, its resolution the day the run began.
+  expect(guide).toContain('<FchEmis>2026-11-16</FchEmis>')
+  expect(guide).toContain('<FchResol>2026-11-15</FchResol>')
+})
+
 test('a refusal without a sentence stops with the outcome itself; a run already done or at compliance', async () => {
   const sentState = stateWith({ plan, sets: allSets, cafs: certificationCafXmls() })
   const empty = await seeded(
     [entry, avance2([SETS_FORM, SETS_FORM]), post('pe_avance3', DECLARATION_ANSWERS.success)],
     sentState,
   )
-  await expect(runCertification(empty.deps)).resolves.toMatchObject({ stopped: 'rejected', detail: 'allRejected' })
+  await expect(runCertification(empty.deps)).resolves.toMatchObject({
+    stopped: 'rejected',
+    detail: 'notSaved: basic, guide, exempt, purchase',
+  })
   const simulated = stateWith({
     plan,
     sets: allSets,
@@ -345,7 +383,10 @@ test('a refusal without a sentence stops with the outcome itself; a run already 
     ],
     simulated,
   )
-  await expect(runCertification(never.deps)).resolves.toMatchObject({ stopped: 'rejected', detail: 'notProcessed' })
+  await expect(runCertification(never.deps)).resolves.toMatchObject({
+    stopped: 'rejected',
+    detail: 'notSaved: simulation',
+  })
   const confirmed = await seeded([entry, avance2([]), avance5, avance6([], () => AT_EXCHANGE)], {
     ...simulated,
     simulation: { ...simulated.simulation!, confirmed: true },

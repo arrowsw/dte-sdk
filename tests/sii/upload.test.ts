@@ -207,6 +207,16 @@ describe('uploadEnvelope through DTEUpload', () => {
     await expectCode(uploadEnvelope(sii, dte), 'SII_UPLOAD_REJECTED', { status: 7 })
   })
 
+  test('a refused reception carries the TRACKID element it read, or null', async () => {
+    const withTrack = receptionWith('reception-schema-error.xml', '<DETAIL>', '<TRACKID>9876543210</TRACKID>\n<DETAIL>')
+    const refused = await uploadEnvelope(cachedSii(cgi(withTrack)).sii, dte).catch((caught: unknown) => caught)
+    expect((refused as DteError).details.trackIdElement).toBe('9876543210')
+    const bare = await uploadEnvelope(cachedSii(cgi(reception('reception-schema-error.xml'))).sii, dte).catch(
+      (caught: unknown) => caught,
+    )
+    expect((bare as DteError).details.trackIdElement).toBeNull()
+  })
+
   test('a STATUS 7 without errors and without a TrackID is a rejection', async () => {
     const bare = receptionWith('reception-duplicate-7.xml', '<TRACKID>9876543210</TRACKID>', '')
     const { sii } = cachedSii(cgi(bare))

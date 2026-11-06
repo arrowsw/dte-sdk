@@ -460,10 +460,9 @@ const deps = {
   sii: createSiiClient({ environment: 'certification', certificate, companyRut }),
   store: createDirectoryCertificationStore({ dir: './certification' }), // state.json and the artefacts; holds CAF keys
   registry: createDirectoryFolioRegistry({ dir: './folios' }),
-  issuer,
-  receiver,
+  issuer, // rut, businessName and address; the activity, its code, the commune and the city have defaults
   certificate,
-  resolution: { number: 0, date: resolutionDate },
+  // receiver: the test receiver 66666666-6 by default; resolution: number 0 with today's UTC date by default
   onProgress: (event) => console.log(event.step),
 }
 
@@ -485,7 +484,9 @@ The runner does what the field does, in its order: it downloads the test set onc
 at the SII, so a run with a plan starts over), gets the folios through the registry (CAFs in hand first, then the
 quota, re-obtaining and annulling only as a last resort), sends each set and keeps its envelope and documents as
 artefacts for the printed samples, declares the track ids on `pe_avance2` with every field in form order and reads
-the page again to verify, waits for the approval, runs the books (the history of books the SII holds marks the
+the page again to verify (a row left empty is asked again; "ENVIO CON ERRORES O REPAROS" is a state of an envelope,
+not a failure of the declaration), waits for the approval (a page that shows none of the sets sent counts as approved;
+a read that fails only uses up its attempt), runs the books (the history of books the SII holds marks the
 occupied periods; a closed book is resent as an adjustment or in the next free month, at most 24 times), advances the
 stage, sends and declares the simulation and confirms it, answers the exchange set and confirms the exchange, uploads
 the printed samples when the `samples` option gives them (without them it stops at `printedSamples`), and stops at
@@ -500,8 +501,20 @@ and the runner makes it only with `declareCompliance: true`.
   section) are exported too.
 - **The state is a secret.** It holds the CAF files, each with a private key; the directory store writes them readable
   by the user only. A service may implement `CertificationStore` over its own storage.
-- **Dates are Chile dates.** The declaration date and the base book period come from the clock in `America/Santiago`;
-  a process in UTC once declared the next day and the SII answered that the date did not match.
+- **The run keeps to the reference.** Where this runner and the reference implementation it was ported from differed
+  in what the SII receives or in how the run flows, the runner now does what the reference does, including where a
+  stricter reading looked safer; the improvements set aside are tracked for after the first real certification.
+- **The test sets are written as the reference writes them.** Their documents carry the UTC day as issue date and UTC
+  stamps with milliseconds (a run after 21:00 in Chile, 20:00 in winter, dates them the next day), unit prices with
+  six decimals, notes that correct a text with a zero total and no VAT rate, and every case of the guide set as a
+  guide. The declaration carries today's Chile date for every track id, whatever day the envelope was sent on.
+- **The uploads of the run** are sent again only for a network failure that names a reset socket, a timed-out
+  connection or an unresolved host: eight attempts, 2 s growing by 1.8 up to 15 s. Only `STATUS` 0 with a `TRACKID`
+  element is a sent file; `STATUS` 7 is a duplicate recovered by that element; `STATUS` 99 is a failed send.
+- **The operator gives less.** Without `receiver` the documents go to the test receiver (`DEFAULT_CERTIFICATION_RECEIVER`);
+  without `resolution` every envelope of the run carries number 0 and the UTC date of the day the run started, which
+  is only right on the day the SII resolved the application, so give `resolution.date` on any other day; the issuer's
+  line of business, activity code, commune and city fall back to `DEFAULT_CERTIFICATION_ISSUER`.
 - **The waits are the field's:** 5 polls of 10 s for the sets, 40 of 15 s for the books, 30 of 10 s for the
   simulation, 10 declaration attempts 5 s apart after 10 s. Inject `sleep` and `now` to test without waiting.
 - **Nothing here has been run against the portal yet.** Every page shape comes from field behaviour; the first

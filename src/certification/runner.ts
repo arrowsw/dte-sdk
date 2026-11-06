@@ -100,16 +100,19 @@ const past = (stage: CertificationStage, other: CertificationStage): boolean =>
  * no se vuelve a enviar, un libro aprobado se omite, un intercambio confirmado no se responde de nuevo. Un rechazo, un
  * bloqueo o un timeout vuelven como datos con el estado guardado; un `DteError` del portal, del SII o de los folios se
  * propaga después de guardar el estado, con un evento `CERT_ERROR`.
- * @param deps EN: the dependencies. ES: las dependencias.
+ * @param dependencies EN: the dependencies. ES: las dependencias.
  * @param options EN: where to stop, which optional sets, the exchange set and the samples. ES: dónde detenerse, qué sets opcionales, el set de intercambio y las muestras.
  * @returns EN: the state and why it stopped. ES: el estado y por qué se detuvo.
  * @throws {DteError} EN: the codes of every step. ES: los códigos de cada paso.
  */
 export const runCertification = async (
-  deps: CertificationDependencies,
+  dependencies: CertificationDependencies,
   options: RunCertificationOptions = {},
 ): Promise<RunCertificationResult> => {
-  const rt = runtime(deps)
+  const rt = runtime(dependencies)
+  // A resolution left out is dated once, when the run starts: every envelope of the run carries that date, whatever
+  // day its step begins on.
+  const deps: CertificationDependencies = { ...dependencies, resolution: rt.resolution }
   const companyRut = rt.portal.companyRut ?? rt.issuer.rut
   let state = (await rt.store.load()) ?? createCertificationState(companyRut, rt.now())
   const stop = (stopped: RunStop, detail?: string): RunCertificationResult => ({
@@ -135,8 +138,7 @@ export const runCertification = async (
       }
       const declared = await declareTestSets(deps, state)
       state = declared.state
-      if (declared.outcome !== 'accepted' && declared.outcome !== 'inReview')
-        return stop('rejected', declared.detail ?? declared.outcome)
+      if (!declared.success) return stop('rejected', declared.detail)
       const approval = await waitForTestSetsApproval(deps, state)
       state = approval.state
       if (approval.outcome !== 'approved') return stop(approval.outcome, approval.detail)
@@ -156,8 +158,7 @@ export const runCertification = async (
       if (state.simulation!.confirmed !== true) {
         const declared = await declareSimulation(deps, state)
         state = declared.state
-        if (declared.outcome !== 'skipped' && declared.outcome !== 'accepted' && declared.outcome !== 'inReview')
-          return stop('rejected', declared.detail ?? declared.outcome)
+        if (!declared.success) return stop('rejected', declared.detail)
         const approval = await waitForSimulationApproval(deps, state)
         state = approval.state
         if (approval.outcome === 'rejected' || approval.outcome === 'timedOut')

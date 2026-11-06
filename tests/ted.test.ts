@@ -48,6 +48,13 @@ describe('tedText', () => {
 })
 
 describe('stampDocument', () => {
+  test('a stamp given by the caller is written as is', () => {
+    const { ted } = stampDocument(invoice(), caf, { now: FIXED_NOW, stampedAt: '2026-11-15T18:30:00.123' })
+    expect(ted.stampedAt).toBe('2026-11-15T18:30:00.123')
+    expect(ted.xml).toContain('<TSTED>2026-11-15T18:30:00.123</TSTED>')
+    expect(verifyTed(ted.xml, caf)).toBe(true)
+  })
+
   test('builds the exact DD, signs it and verifies with the CAF public key', () => {
     const stamped = stampDocument(invoice(), caf, { now: FIXED_NOW })
     const { ted } = stamped

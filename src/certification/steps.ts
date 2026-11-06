@@ -1,4 +1,4 @@
-import { SET_KEYS, type CertificationStage, type SetKey } from '../catalogs/certification'
+import { SET_KEYS, type CertificationStage, type DeclarationKey, type SetKey } from '../catalogs/certification'
 import { DteError, errorMessage } from '../errors'
 import {
   advanceStage,
@@ -11,6 +11,7 @@ import {
   type DeclarationOutcome,
   type DeclarationResult,
 } from '../portal/certification'
+import { saysNotProcessedYet, saysRejection } from '../portal/pages/certification-progress'
 import { queryUploadStatus } from '../sii/status'
 import { uploadEnvelope } from '../sii/upload'
 import { chileDate } from '../time/chile'
@@ -22,6 +23,8 @@ import {
   simulationFolioNeeds,
   type HeldCaf,
 } from './folios-step'
+import { queryFieldUploadState, type FieldUploadState } from './field-status'
+import { uploadForTrackId } from './field-upload'
 import { issueTestSet, type IssuableSetPlan, type IssuedCase } from './issue-set'
 import { issueSimulation } from './simulation'
 import { planCertificationSets } from './set-plan'
@@ -34,13 +37,7 @@ import {
   type Runtime,
   type StepResult,
 } from './runtime'
-import {
-  createCertificationState,
-  type CertificationState,
-  type EnvelopeDiagnosis,
-  type SentCase,
-  type SentEnvelope,
-} from './state'
+import { createCertificationState, type CertificationState, type EnvelopeDiagnosis, type SentCase } from './state'
 
 export type {
   CertificationDependencies,
@@ -189,11 +186,14 @@ export const sendTestSet = async (
   const sentAt = rt.now().toISOString()
   const usedFolios = [...state.usedFolios, ...issued.cases.map((c) => ({ type: c.type, folio: c.folio }))]
   try {
-    const receipt = await uploadEnvelope(rt.sii, { envelope: issued.envelope })
-    await markSent(rt, held, issued.cases, { trackId: receipt.trackId, sentAt })
-    const sent = { trackId: receipt.trackId, date: chileDate(rt.now()), sentAt, cases: issued.cases.map(sentCase) }
+    const trackId = await uploadForTrackId(
+      (overrides) => uploadEnvelope(rt.sii, { envelope: issued.envelope }, overrides),
+      'uploadEnvelope',
+    )
+    await markSent(rt, held, issued.cases, { trackId, sentAt })
+    const sent = { trackId, date: chileDate(rt.now()), sentAt, cases: issued.cases.map(sentCase) }
     const next = await saveState(rt, state, { usedFolios, sets: { ...state.sets, [options.kind]: sent } })
-    rt.emit({ step: 'SET_OK', set: options.kind, trackId: receipt.trackId })
+    rt.emit({ step: 'SET_OK', set: options.kind, trackId })
     return { state: next, outcome: 'sent' }
   } catch (error) {
     await markSent(rt, held, issued.cases, { sentAt })
@@ -210,14 +210,24 @@ const SET_FILE_NAMES: Readonly<Record<SetKey, string>> = {
   purchase: 'compra',
 }
 
-const entryOf = (sent: SentEnvelope): { readonly trackId: string; readonly date: string } => ({
-  trackId: sent.trackId,
-  date: sent.date,
+/**
+ * EN: The entry that declares an envelope: its track id with today's Chile date, whatever day it was sent on. Internal.
+ * ES: La entrada que declara un envío: su track id con la fecha de hoy en Chile, sea cual sea el día en que se envió.
+ * Interno.
+ */
+export const entryOf = (trackId: string, now: Date): { readonly trackId: string; readonly date: string } => ({
+  trackId,
+  date: chileDate(now),
 })
 
+const DIAGNOSIS_CLASS = (state: FieldUploadState): string =>
+  state.rejected ? 'rejected' : state.successful ? 'accepted' : state.intermediate ? 'pending' : 'unknown'
+
 /**
- * EN: The SOAP status of every declared envelope, for the diagnosis of a content error: never fatal.
- * ES: El estado SOAP de cada envío declarado, para el diagnóstico de un error de contenido: nunca fatal.
+ * EN: The SOAP status of every declared envelope, asked once each, for the diagnosis of a content error: never fatal.
+ * The answer as it came goes to the artefacts.
+ * ES: El estado SOAP de cada envío declarado, preguntado una vez por cada uno, para el diagnóstico de un error de
+ * contenido: nunca fatal. La respuesta tal como llegó va a los artefactos.
  */
 export const diagnose = async (
   rt: Runtime,
@@ -228,15 +238,25 @@ export const diagnose = async (
   // The steps build the entries without holes, so every value is an entry.
   for (const [key, entry] of Object.entries(entries) as [string, DeclarationEntry][]) {
     try {
-      const status = await queryUploadStatus(rt.sii, { trackId: entry.trackId })
-      await rt.store.writeArtefact(`${prefix}-estado-${key}-${entry.trackId}.xml`, status.raw)
-      diagnosis[entry.trackId] = { code: status.code, status: status.status, message: status.message }
+      const state = await queryFieldUploadState(rt.sii, entry.trackId)
+      if (state.raw !== null) await rt.store.writeArtefact(`${prefix}-estado-${key}-${entry.trackId}.xml`, state.raw)
+      if (state.code !== null)
+        diagnosis[entry.trackId] = { code: state.code, status: DIAGNOSIS_CLASS(state), message: state.message ?? '' }
     } catch (error) {
       rt.portal.logger.warn('certification diagnosis failed', { trackId: entry.trackId, reason: errorMessage(error) })
     }
   }
   return diagnosis
 }
+
+// The diagnosis asks first for the envelopes the answer named, in the order it names them, then for the others; a
+// row named without an envelope declared has nothing to ask for.
+const namedFirst = (entries: DeclarationEntries, named: readonly DeclarationKey[]): DeclarationEntries =>
+  Object.fromEntries(
+    [...new Set([...named, ...(Object.keys(entries) as DeclarationKey[])])].flatMap((key) =>
+      entries[key] === undefined ? [] : [[key, entries[key]]],
+    ),
+  )
 
 /**
  * EN: What the declaration loop ended with.
@@ -248,21 +268,21 @@ export type DeclarationLoopResult = {
   readonly diagnosis: Readonly<Record<string, EnvelopeDiagnosis>>
 }
 
-const hasEmpty = (result: DeclarationResult): boolean =>
-  Object.values(result.verification).some((state) => state === 'empty')
-
 /**
- * EN: Declares envelopes as the field does: 10 s first, then up to 10 attempts 5 s apart. "Not processed yet", an
- * unsaved declaration and content errors with empty fields (the SII has not seen the track ids yet) are retried;
- * every declared row empty (the wrong period) stops, unless `retryOnAllRejected` (the simulation, which the portal
- * shows as not declared while it processes); content errors with the fields present are diagnosed through the SOAP
- * status; inconsistent data, a declined or failed declaration stop at once. Every page goes to the artefacts.
- * ES: Declara envíos como lo hace el campo: 10 s primero, luego hasta 10 intentos cada 5 s. "Aún no procesado", una
- * declaración no guardada y errores de contenido con campos vacíos (el SII aún no vio los track id) se reintentan;
- * toda fila declarada vacía (el período equivocado) detiene, salvo `retryOnAllRejected` (la simulación, que el portal
- * muestra sin declarar mientras la procesa); errores de contenido con los campos presentes se diagnostican por el
- * estado SOAP; un dato inconsistente, una declaración declinada o fallida detienen de inmediato. Toda página va a los
- * artefactos.
+ * EN: Declares envelopes with the loop of the reference: 10 s first, then up to 10 attempts 5 s apart. A declaration
+ * that stands ends the loop, unless its answer says the SII has not processed the envelopes yet. "Not processed yet"
+ * is asked again (a lost session reads that way, and the next attempt logs in again). Content errors are asked again
+ * while the declared fields come back empty (the SII has not seen the track ids yet); with the fields in place they
+ * are diagnosed through the SOAP status and the loop ends. Every declared row empty ends the loop, unless
+ * `retryOnAllRejected`. A declaration that was not saved is asked again. Anything else that failed ends the loop. The
+ * last attempt returns whatever it got. Every page goes to the artefacts.
+ * ES: Declara envíos con el ciclo de la referencia: 10 s primero, luego hasta 10 intentos cada 5 s. Una declaración
+ * que queda en pie termina el ciclo, salvo que su respuesta diga que el SII aún no procesó los envíos. "Aún no
+ * procesado" se pregunta de nuevo (una sesión perdida se lee así, y el intento siguiente vuelve a iniciar sesión).
+ * Los errores de contenido se preguntan de nuevo mientras los campos declarados vuelvan vacíos (el SII aún no vio los
+ * track id); con los campos en su lugar se diagnostican por el estado SOAP y el ciclo termina. Toda fila declarada
+ * vacía termina el ciclo, salvo `retryOnAllRejected`. Una declaración que no se guardó se pregunta de nuevo. Cualquier
+ * otra cosa que falló termina el ciclo. El último intento devuelve lo que obtuvo. Toda página va a los artefactos.
  */
 export const declareWithRetries = async (
   rt: Runtime,
@@ -273,45 +293,51 @@ export const declareWithRetries = async (
   const attempt = async (n: number): Promise<DeclarationLoopResult> => {
     rt.emit({ step: 'POLLING', attempt: n, max: DECLARATION_ATTEMPTS, label: options.label })
     const result = await declareProgress(rt.portal, { entries })
-    await rt.store.writeArtefact(`${options.prefix}-${n}.html`, result.answerHtml)
+    await rt.store.writeArtefact(`${options.prefix}-${n}.html`, result.judgedHtml)
     await rt.store.writeArtefact(`${options.prefix}-pe_avance2-${n}.html`, result.formHtml)
+    const notProcessed = saysNotProcessedYet(result.judgedHtml)
+    const ended: DeclarationLoopResult = { result, attempts: n, diagnosis: {} }
+    if (result.success && !notProcessed) return ended
+    const more = n < DECLARATION_ATTEMPTS
     const again = async (): Promise<DeclarationLoopResult> => {
-      if (n >= DECLARATION_ATTEMPTS) return { result, attempts: n, diagnosis: {} }
       await rt.sleep(DECLARATION_INTERVAL_MS)
       return attempt(n + 1)
     }
-    switch (result.outcome) {
-      case 'notProcessed':
-      case 'notSaved':
-        return again()
-      case 'contentErrors':
-        return hasEmpty(result)
-          ? again()
-          : { result, attempts: n, diagnosis: await diagnose(rt, entries, options.prefix) }
-      case 'allRejected':
-        return options.retryOnAllRejected ? again() : { result, attempts: n, diagnosis: {} }
-      default:
-        return { result, attempts: n, diagnosis: {} }
-    }
+    if (notProcessed && more) return again()
+    if (result.contentErrors.length > 0)
+      return result.verified === false && more
+        ? again()
+        : { ...ended, diagnosis: await diagnose(rt, namedFirst(entries, result.contentErrors), options.prefix) }
+    if (result.allRejected) return options.retryOnAllRejected === true && more ? again() : ended
+    return result.verified === false && more ? again() : ended
   }
   return attempt(1)
 }
 
-const isGood = (outcome: DeclarationOutcome): boolean => outcome === 'accepted' || outcome === 'inReview'
+/**
+ * EN: What a declaration step returns: the state, the outcome in a word, and whether the declaration stands.
+ * ES: Lo que devuelve un paso de declaración: el estado, el resultado en una palabra, y si la declaración quedó en pie.
+ */
+export type DeclarationStepResult<Outcome extends string = DeclarationOutcome> = StepResult<Outcome> & {
+  /** EN: The declaration stands and the run goes on. ES: La declaración quedó en pie y la corrida sigue. */
+  readonly success: boolean
+}
 
 /**
- * EN: Declares the sets sent so far, with the declaration loop; the outcome and any diagnosis go to the state.
- * ES: Declara los sets enviados hasta ahora, con el ciclo de declaración; el resultado y cualquier diagnóstico van al
- * estado.
+ * EN: Declares the sets sent so far with today's date, with the declaration loop; the outcome and any diagnosis go to
+ * the state.
+ * ES: Declara los sets enviados hasta ahora con la fecha de hoy, con el ciclo de declaración; el resultado y cualquier
+ * diagnóstico van al estado.
  * @throws {DteError} EN: `MISSING_FIELD { field: 'sets' }` with nothing sent; the portal codes. ES: `MISSING_FIELD { field: 'sets' }` sin nada enviado; los códigos del portal.
  */
 export const declareTestSets = async (
   deps: CertificationDependencies,
   state: CertificationState,
-): Promise<StepResult<DeclarationOutcome>> => {
+): Promise<DeclarationStepResult> => {
   const rt = runtime(deps)
+  const today = rt.now()
   const entries: DeclarationEntries = Object.fromEntries(
-    SET_KEYS.flatMap((key) => (state.sets[key] === undefined ? [] : [[key, entryOf(state.sets[key]!)]])),
+    SET_KEYS.flatMap((key) => (state.sets[key] === undefined ? [] : [[key, entryOf(state.sets[key]!.trackId, today)]])),
   )
   if (Object.keys(entries).length === 0) throw new DteError('MISSING_FIELD', { field: 'sets' })
   rt.emit({ step: 'SETS_DECLARING' })
@@ -319,39 +345,52 @@ export const declareTestSets = async (
     label: 'declaration',
     prefix: 'declaracion-sets',
   })
-  if (isGood(result.outcome)) rt.emit({ step: 'SETS_DECLARED' })
+  if (result.success) rt.emit({ step: 'SETS_DECLARED' })
   const next = await saveState(rt, state, {
     lastDeclaration: { scope: 'sets', outcome: result.outcome, detail: result.detail, at: rt.now().toISOString() },
     diagnosis: { ...state.diagnosis, ...diagnosis },
   })
-  return { state: next, outcome: result.outcome, ...(result.detail === null ? {} : { detail: result.detail }) }
+  return {
+    state: next,
+    outcome: result.outcome,
+    success: result.success,
+    ...(result.detail === null ? {} : { detail: result.detail }),
+  }
 }
 
 /**
- * EN: Waits for the sent sets to be approved: 5 attempts 10 s apart, sleeping first, reading the progress page. Every
- * set approved is approval; a rejected or inconsistent one stops; no set at all is not approval.
- * ES: Espera la aprobación de los sets enviados: 5 intentos cada 10 s, durmiendo primero, leyendo la página de avance.
- * Todos los sets aprobados es aprobación; uno rechazado o inconsistente detiene; ningún set no es aprobación.
+ * EN: Waits for the sent sets to be approved, as the reference does: 5 attempts 10 s apart, sleeping first, reading
+ * the progress page. A read that fails only uses up its attempt. Of the states the page shows for the sets sent (or
+ * of every state, when no set was sent), all approved is approval, and so is a page that shows none of them; a
+ * rejected or inconsistent one stops with its wording.
+ * ES: Espera la aprobación de los sets enviados, como lo hace la referencia: 5 intentos cada 10 s, durmiendo primero,
+ * leyendo la página de avance. Una lectura que falla solo gasta su intento. De los estados que la página muestra para
+ * los sets enviados (o de todos los estados, si no se envió ninguno), todos aprobados es aprobación, y también lo es
+ * una página que no muestra ninguno; uno rechazado o inconsistente detiene con su texto.
  */
 export const waitForTestSetsApproval = async (
   deps: CertificationDependencies,
   state: CertificationState,
 ): Promise<StepResult<'approved' | 'rejected' | 'timedOut'>> => {
   const rt = runtime(deps)
-  const wanted = SET_KEYS.filter((key) => state.sets[key] !== undefined)
+  const wanted: readonly string[] = SET_KEYS.filter((key) => state.sets[key] !== undefined)
   for (let attempt = 1; attempt <= SETS_APPROVAL_ATTEMPTS; attempt += 1) {
     await rt.sleep(SETS_APPROVAL_INTERVAL_MS)
     rt.emit({ step: 'POLLING', attempt, max: SETS_APPROVAL_ATTEMPTS, label: 'sets' })
-    const report = await readProgress(rt.portal)
-    const states = wanted.map((key) => report.states[key])
-    const rejected = states.filter((item) => item?.state === 'rejected' || item?.state === 'inconsistent')
-    if (rejected.length > 0) {
-      rt.emit({ step: 'SETS_REJECTED' })
-      return { state, outcome: 'rejected', detail: rejected.map((item) => item!.text).join(' | ') }
-    }
-    if (wanted.length > 0 && states.every((item) => item?.state === 'approved')) {
+    const report = await readProgress(rt.portal).catch((error: unknown) => {
+      rt.portal.logger.warn('certification progress read failed', { attempt, reason: errorMessage(error) })
+      return null
+    })
+    if (report === null) continue
+    const relevant = Object.entries(report.states).filter(([key]) => wanted.length === 0 || wanted.includes(key))
+    if (relevant.every(([, item]) => item.state === 'approved')) {
       rt.emit({ step: 'SETS_APPROVED' })
       return { state: await saveState(rt, state, { setsApproved: true, stage: 'books' }), outcome: 'approved' }
+    }
+    const rejected = relevant.filter(([, item]) => saysRejection(item.text))
+    if (rejected.length > 0) {
+      rt.emit({ step: 'SETS_REJECTED' })
+      return { state, outcome: 'rejected', detail: rejected.map(([key, item]) => `${key}: ${item.text}`).join('; ') }
     }
   }
   return { state, outcome: 'timedOut' }
@@ -428,13 +467,16 @@ export const sendSimulation = async (
   const sentAt = rt.now().toISOString()
   const usedFolios = [...prepared.state.usedFolios, ...issued.cases.map((c) => ({ type: c.type, folio: c.folio }))]
   try {
-    const receipt = await uploadEnvelope(rt.sii, { envelope: issued.envelope })
-    await markSent(rt, held, issued.cases, { trackId: receipt.trackId, sentAt })
+    const trackId = await uploadForTrackId(
+      (overrides) => uploadEnvelope(rt.sii, { envelope: issued.envelope }, overrides),
+      'uploadEnvelope',
+    )
+    await markSent(rt, held, issued.cases, { trackId, sentAt })
     const next = await saveState(rt, prepared.state, {
       usedFolios,
-      simulation: { trackId: receipt.trackId, date: chileDate(rt.now()), sentAt },
+      simulation: { trackId, date: chileDate(rt.now()), sentAt },
     })
-    rt.emit({ step: 'SIM_OK', trackId: receipt.trackId })
+    rt.emit({ step: 'SIM_OK', trackId })
     return { state: next, outcome: 'sent' }
   } catch (error) {
     await markSent(rt, held, issued.cases, { sentAt })
@@ -453,7 +495,7 @@ export const sendSimulation = async (
 export const declareSimulation = async (
   deps: CertificationDependencies,
   state: CertificationState,
-): Promise<StepResult<DeclarationOutcome | 'skipped'>> => {
+): Promise<DeclarationStepResult<DeclarationOutcome | 'skipped'>> => {
   const rt = runtime(deps)
   if (state.simulation === undefined) throw new DteError('MISSING_FIELD', { field: 'simulation' })
   const report = await readProgress(rt.portal)
@@ -461,13 +503,14 @@ export const declareSimulation = async (
     return {
       state: await saveState(rt, state, { stage: laterStage(state.stage, report.stageKey) }),
       outcome: 'skipped',
+      success: true,
       // A stage key at the exchange or past it always comes from a wording on the page.
       detail: report.stage!,
     }
   rt.emit({ step: 'SIM_DECLARING' })
   const { result, diagnosis } = await declareWithRetries(
     rt,
-    { simulation: entryOf(state.simulation) },
+    { simulation: entryOf(state.simulation.trackId, rt.now()) },
     { label: 'simulation', prefix: 'declaracion-simulacion', retryOnAllRejected: true },
   )
   const next = await saveState(rt, state, {
@@ -479,7 +522,12 @@ export const declareSimulation = async (
     },
     diagnosis: { ...state.diagnosis, ...diagnosis },
   })
-  return { state: next, outcome: result.outcome, ...(result.detail === null ? {} : { detail: result.detail }) }
+  return {
+    state: next,
+    outcome: result.outcome,
+    success: result.success,
+    ...(result.detail === null ? {} : { detail: result.detail }),
+  }
 }
 
 /**
@@ -516,7 +564,7 @@ export const waitForSimulationApproval = async (
     const report = await readProgress(rt.portal)
     if (atLeast(report.stageKey, 'exchange')) return finish('done', report.stageKey)
     if (report.simulationAwaitsConfirmation) {
-      await declareProgress(rt.portal, { entries: { simulation: entryOf(simulation) } })
+      await declareProgress(rt.portal, { entries: { simulation: entryOf(simulation.trackId, rt.now()) } })
       const after = await readProgress(rt.portal)
       if (
         atLeast(after.stageKey, 'exchange') ||

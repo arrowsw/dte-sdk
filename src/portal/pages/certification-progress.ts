@@ -1,70 +1,52 @@
 import { PORTAL_STAGE_WORDS, type CertificationStage, type DeclarationKey } from '../../catalogs/certification'
-import { attribute, decodeEntities, stripTags, bodyText } from '../html'
+import { bodyText } from '../html'
 
 /**
- * EN: One row of the declaration form, mapped by its label.
- * ES: Una fila del formulario de declaración, identificada por su etiqueta.
- */
-export type DeclarationRow = {
-  /** EN: The row's key. ES: La clave de la fila. */
-  readonly key: DeclarationKey
-  /** EN: Label as the portal writes it. ES: Etiqueta tal como la escribe el portal. */
-  readonly label: string
-  /** EN: Index of its `NUM_ENV{n}` input, or null when the row has no input (already reviewed or in review). ES: Índice de su `NUM_ENV{n}`, o null si la fila no tiene campo (ya revisada o en revisión). */
-  readonly index: number | null
-  /** EN: Current value of `NUM_ENV{n}`, or null without an input. ES: Valor actual de `NUM_ENV{n}`, o null sin campo. */
-  readonly value: string | null
-  /** EN: The bold state, upper case, or the hidden `EST{n}` code, or null. ES: El estado en negrita, en mayúsculas, o el código oculto `EST{n}`, o null. */
-  readonly state: string | null
-}
-
-/**
- * EN: The `pe_avance2` form as the declaration needs it.
- * ES: El formulario de `pe_avance2` tal como lo necesita la declaración.
+ * EN: The `pe_avance2` form as the declaration reads it: only what a quoted attribute gives.
+ * ES: El formulario de `pe_avance2` tal como lo lee la declaración: solo lo que entrega un atributo entre comillas.
  */
 export type DeclarationForm = {
-  /** EN: The rows the page maps. ES: Las filas que la página identifica. */
-  readonly rows: readonly DeclarationRow[]
-  /** EN: Every hidden field. ES: Todos los campos ocultos. */
+  /** EN: Every hidden field with a quoted name. ES: Todos los campos ocultos con nombre entre comillas. */
   readonly hiddenFields: Readonly<Record<string, string>>
-  /** EN: `NUM_ENV`/`FEC_ENV` values already on the page. ES: Valores de `NUM_ENV`/`FEC_ENV` que ya trae la página. */
+  /** EN: The text fields that already hold a value. ES: Los campos de texto que ya traen un valor. */
   readonly currentValues: Readonly<Record<string, string>>
-  /** EN: Hidden `TOTREG`, 10 when absent. ES: `TOTREG` oculto, 10 si falta. */
-  readonly totalRows: number
-  /** EN: No hidden field at all: a status page, not a form. ES: Ningún campo oculto: una página de estado, no un formulario. */
-  readonly isStatusPage: boolean
-  /** EN: Some row says errors or objections. ES: Alguna fila dice errores o reparos. */
+  /** EN: Per row, the index of its `NUM_ENV{n}` field; a row without one is absent. ES: Por fila, el índice de su campo `NUM_ENV{n}`; una fila sin campo no aparece. */
+  readonly indexes: Readonly<Partial<Record<DeclarationKey, number>>>
+  /** EN: The page has hidden fields: it is a form, not a status page. ES: La página trae campos ocultos: es un formulario, no una página de estado. */
+  readonly hasForm: boolean
+  /** EN: A status page whose rows say errors or objections. ES: Una página de estado cuyas filas dicen errores o reparos. */
   readonly hasErrorStates: boolean
 }
 
 /**
- * EN: What a `pe_avance3` answer says.
- * ES: Lo que dice una respuesta de `pe_avance3`.
+ * EN: What a `pe_avance3` answer says, read on the page as it came.
+ * ES: Lo que dice una respuesta de `pe_avance3`, leída sobre la página tal como llegó.
  */
 export type DeclarationAnswer = {
   /** EN: The session is gone. ES: La sesión se perdió. */
   readonly sessionExpired: boolean
   /** EN: "contenido no corresponde". ES: "contenido no corresponde". */
   readonly contentMismatch: boolean
-  /** EN: The SII has not processed the envelope yet. ES: El SII aún no procesó el envío. */
-  readonly notProcessed: boolean
   /** EN: The sentence saying a date, RUT, folio or number does not match, or null. ES: La frase que dice que una fecha, RUT, folio o número no corresponde, o null. */
   readonly inconsistentData: string | null
-  /** EN: A success wording. ES: Una frase de éxito. */
-  readonly hasSuccess: boolean
-  /** EN: The word "error" outside "errores o reparos" and the session error. ES: La palabra "error" fuera de "errores o reparos" y del error de sesión. */
-  readonly hasError: boolean
+  /** EN: The portal took the post. ES: El portal aceptó el envío del formulario. */
+  readonly taken: boolean
+  /** EN: Why it did not, in a word, or null. ES: Por qué no, en una palabra, o null. */
+  readonly error: 'sessionExpired' | 'contentMismatch' | 'emptyAnswer' | 'invalidAnswer' | null
   /** EN: Rows named next to "ENVIO CON ERRORES O REPAROS". ES: Filas nombradas junto a "ENVIO CON ERRORES O REPAROS". */
   readonly contentErrors: readonly DeclarationKey[]
-  /** EN: The portal took the declaration. ES: El portal aceptó la declaración. */
-  readonly accepted: boolean
 }
 
 /**
- * EN: What the re-read form says of a row just declared.
- * ES: Lo que dice el formulario releído de una fila recién declarada.
+ * EN: What the re-read form says of the rows just declared.
+ * ES: Lo que dice el formulario releído de las filas recién declaradas.
  */
-export type VerificationState = 'approved' | 'inReview' | 'empty' | 'kept' | 'mismatch' | 'missing'
+export type DeclarationVerification = {
+  /** EN: Rows the portal shows in review. ES: Filas que el portal muestra en revisión. */
+  readonly inReview: readonly DeclarationKey[]
+  /** EN: Rows whose field came back empty. ES: Filas cuyo campo volvió vacío. */
+  readonly empty: readonly DeclarationKey[]
+}
 
 /**
  * EN: What `pe_avance4` answered.
@@ -81,7 +63,15 @@ export type AdvanceAnswer = {
  * EN: The state of one set or book on the progress page.
  * ES: El estado de un set o libro en la página de avance.
  */
-export type ItemState = 'approved' | 'inReview' | 'rejected' | 'pending' | 'annulled' | 'inconsistent' | 'unknown'
+export type ItemState =
+  | 'approved'
+  | 'inReview'
+  | 'rejected'
+  | 'objections'
+  | 'pending'
+  | 'annulled'
+  | 'inconsistent'
+  | 'unknown'
 
 /**
  * EN: The progress page (`pe_avance6`) read.
@@ -111,72 +101,68 @@ export type ReceiptsProgress = {
   readonly authorized: boolean
 }
 
-const DEFAULT_TOTAL_ROWS = 10
-
-// The labels of `pe_avance2`, matched on the row's text. The lookaheads keep "LIBRO DE COMPRAS" and "SET DOCUMENTOS DE
-// EXPORTACION" from matching inside their longer siblings.
+// The labels of `pe_avance2`, in the order they are looked for, matched on the row as it came. The lookaheads keep
+// "LIBRO DE COMPRAS" and the first export set from matching inside their longer siblings.
 const DECLARATION_LABELS: readonly { readonly key: DeclarationKey; readonly pattern: RegExp }[] = [
   { key: 'simulation', pattern: /SET DE SIMULACION/i },
   { key: 'salesBook', pattern: /LIBRO DE VENTAS/i },
-  { key: 'exemptPurchaseBook', pattern: /LIBRO DE COMPRAS PARA EXENTOS/i },
   { key: 'purchaseBook', pattern: /LIBRO DE COMPRAS(?!\s+PARA EXENTOS)/i },
+  { key: 'exemptPurchaseBook', pattern: /LIBRO DE COMPRAS PARA EXENTOS/i },
   { key: 'guideBook', pattern: /LIBRO DE GUIAS/i },
   { key: 'basic', pattern: /SET BASICO/i },
   { key: 'guide', pattern: /SET GUIA DE DESPACHO/i },
   { key: 'exempt', pattern: /SET FACTURA EXENTA/i },
-  { key: 'export2', pattern: /SET DOCUMENTOS DE EXPORTACION\s*\(2\)/i },
-  { key: 'export1', pattern: /SET DOCUMENTOS DE EXPORTACION(?!\s*\(2\))/i },
+  { key: 'export1', pattern: /SET DOCUMENTOS DE EXPORTACION(?!\(2\))/i },
+  { key: 'export2', pattern: /SET DOCUMENTOS DE EXPORTACION\(2\)/i },
   { key: 'purchase', pattern: /SET CASO GENERAL FACTURA COMPRA/i },
   { key: 'settlement', pattern: /SET LIQUIDACION FACTURA/i },
 ]
 
-// The labels of the progress page, looser: the portal abbreviates there.
-const PROGRESS_LABELS: readonly { readonly key: DeclarationKey; readonly pattern: RegExp }[] = [
-  { key: 'basic', pattern: /SET BASICO/i },
-  { key: 'guide', pattern: /SET GUIA[\s\S]*?DESP/i },
-  { key: 'exempt', pattern: /SET FACTURA EXENTA/i },
-  { key: 'purchase', pattern: /SET CASO GENERAL FACTURA COMPRA/i },
-  { key: 'simulation', pattern: /SET(?: DE)? SIMULACION/i },
-  { key: 'salesBook', pattern: /LIBRO[\s\S]*?VENTA/i },
-  { key: 'exemptPurchaseBook', pattern: /LIBRO DE COMPRAS PARA EXENTOS/i },
-  { key: 'purchaseBook', pattern: /LIBRO DE COMPRAS(?!\s+PARA EXENTOS)/i },
-  { key: 'guideBook', pattern: /LIBRO[\s\S]*?GUIA/i },
+// The state of each set and book on the progress page: the first bold text after its label, searched over the whole
+// page as it came. The labels are loose because the portal abbreviates there.
+const PROGRESS_STATES: readonly { readonly key: DeclarationKey; readonly pattern: RegExp }[] = [
+  { key: 'basic', pattern: /SET BASICO[\s\S]*?<b>([^<]+)<\/b>/i },
+  { key: 'guide', pattern: /SET GUIA[\s\S]*?DESP[\s\S]*?<b>([^<]+)<\/b>/i },
+  { key: 'exempt', pattern: /SET FACTURA EXENTA[\s\S]*?<b>([^<]+)<\/b>/i },
+  { key: 'purchase', pattern: /SET CASO GENERAL FACTURA COMPRA[\s\S]*?<b>([^<]+)<\/b>/i },
+  { key: 'simulation', pattern: /SET(?:\s+DE)?\s+SIMULACION[\s\S]*?<b>([^<]+)<\/b>/i },
+  { key: 'salesBook', pattern: /LIBRO[\s\S]*?VENTA[\s\S]*?<b>([^<]+)<\/b>/i },
+  { key: 'purchaseBook', pattern: /LIBRO DE COMPRAS(?!\s+PARA EXENTOS)[\s\S]*?<b>([^<]+)<\/b>/i },
+  { key: 'exemptPurchaseBook', pattern: /LIBRO DE COMPRAS PARA EXENTOS[\s\S]*?<b>([^<]+)<\/b>/i },
+  { key: 'guideBook', pattern: /LIBRO[\s\S]*?GUIA[\s\S]*?<b>([^<]+)<\/b>/i },
 ]
 
-const CONTENT_ERROR_LABELS: readonly { readonly key: DeclarationKey; readonly pattern: string }[] = [
-  { key: 'salesBook', pattern: 'LIBRO DE VENTAS' },
-  { key: 'exemptPurchaseBook', pattern: 'LIBRO DE COMPRAS PARA EXENTOS' },
-  { key: 'purchaseBook', pattern: 'LIBRO DE COMPRAS(?!\\s+PARA EXENTOS)' },
-  { key: 'guideBook', pattern: 'LIBRO DE GUIAS' },
-  { key: 'basic', pattern: 'SET BASICO' },
-  { key: 'guide', pattern: 'SET GUIA DE DESPACHO' },
-  { key: 'exempt', pattern: 'SET FACTURA EXENTA' },
-  { key: 'purchase', pattern: 'SET CASO GENERAL FACTURA COMPRA' },
-  { key: 'simulation', pattern: 'SET DE SIMULACION' },
+// The names the answer of `pe_avance3` is searched for next to "ENVIO CON ERRORES O REPAROS".
+const CONTENT_ERROR_NAMES: readonly { readonly key: DeclarationKey; readonly name: string }[] = [
+  { key: 'salesBook', name: 'LIBRO DE VENTAS' },
+  { key: 'exemptPurchaseBook', name: 'LIBRO DE COMPRAS PARA EXENTOS' },
+  { key: 'purchaseBook', name: 'LIBRO DE COMPRAS' },
+  { key: 'guideBook', name: 'LIBRO DE GUIAS' },
+  { key: 'basic', name: 'SET BASICO' },
+  { key: 'guide', name: 'SET GUIA DE DESPACHO' },
+  { key: 'exempt', name: 'SET FACTURA EXENTA' },
+  { key: 'purchase', name: 'SET CASO GENERAL FACTURA COMPRA' },
+  { key: 'simulation', name: 'SET DE SIMULACION' },
 ]
+
+const spaced = (name: string): string => name.replace(/ /g, '\\s+')
+
+// A name that begins a longer one must not be followed by what the longer one adds.
+const contentErrorPattern = (name: string): RegExp => {
+  const longer = CONTENT_ERROR_NAMES.map((entry) => entry.name).filter(
+    (other) => other !== name && other.startsWith(name),
+  )
+  const guard =
+    longer.length === 0 ? '' : `(?!\\s+(?:${longer.map((other) => spaced(other.slice(name.length)).trim()).join('|')}))`
+  return new RegExp(`${spaced(name)}${guard}[\\s\\S]{0,200}?ENVIO CON ERRORES O REPAROS`, 'i')
+}
 
 const STAGE_PATTERNS: readonly RegExp[] = [
   /paso\s*<b>\s*([^<]+)<\/b>/i,
   /etapa[:\s]+<b>([^<]+)<\/b>/i,
   /etapa\s*<b>\s*([^<]+)<\/b>/i,
-  /ETAPA\s+DE\s+([A-ZÁÉÍÓÚÑ\s]+)/,
+  /ETAPA\s+DE\s+([A-ZÁÉÍÓÚÑ\s]+)/i,
 ]
-
-const rowsOf = (html: string): readonly string[] => html.split(/<tr\b/i)
-
-const inputTagsWithType = (
-  html: string,
-): readonly { readonly type: string; readonly name: string; readonly value: string }[] =>
-  (html.match(/<input\b[^>]*>/gi) ?? []).flatMap((tag) => {
-    const name = attribute(tag, 'name')
-    if (name === null) return []
-    return [{ type: (attribute(tag, 'type') ?? 'text').toLowerCase(), name, value: attribute(tag, 'value') ?? '' }]
-  })
-
-const boldText = (fragment: string): string | null => {
-  const match = /<b>([^<]+)<\/b>/i.exec(fragment)
-  return match === null ? null : stripTags(match[1]).toUpperCase()
-}
 
 const sentenceAround = (text: string, pattern: RegExp): string | null => {
   const match = pattern.exec(text)
@@ -186,105 +172,138 @@ const sentenceAround = (text: string, pattern: RegExp): string | null => {
   return text.slice(start, end === -1 ? text.length : end).trim()
 }
 
+const STATUS_ROW =
+  /<tr[^>]*>\s*<td[^>]*>\s*<font[^>]*>([^<]+)<\/font>\s*<\/td>\s*<td[^>]*>\s*<font[^>]*><b>([^<]+)<\/b><\/font>/gi
+
 /**
- * EN: Reads the `pe_avance2` form: the rows by label, each with the index of its `NUM_ENV` input (the SII reorders
- * the indexes as sets are approved, so a row is never found by position), the hidden fields, the values already
- * declared and `TOTREG`.
- * ES: Lee el formulario de `pe_avance2`: las filas por etiqueta, cada una con el índice de su `NUM_ENV` (el SII
- * reordena los índices a medida que aprueba sets, así que una fila nunca se busca por posición), los campos ocultos,
- * los valores ya declarados y `TOTREG`.
+ * EN: Reads the `pe_avance2` form as the reference reads it. Only an input whose name is quoted counts: the hidden ones
+ * give the hidden fields, the text ones that hold a quoted value give the values already declared. Each row is found
+ * by its label on the row as it came (the SII reorders the indexes as sets are approved, so a row is never found by
+ * position) and gives the index of its `NAME="NUM_ENV{n}"` field when it has one. A page without hidden fields is a
+ * status page, read for rows that say errors or objections.
+ * ES: Lee el formulario de `pe_avance2` como lo lee la referencia. Solo cuenta un input cuyo nombre va entre comillas:
+ * los ocultos dan los campos ocultos, los de texto que traen un valor entre comillas dan los valores ya declarados.
+ * Cada fila se busca por su etiqueta sobre la fila tal como llegó (el SII reordena los índices a medida que aprueba
+ * sets, así que una fila nunca se busca por posición) y entrega el índice de su campo `NAME="NUM_ENV{n}"` cuando lo
+ * tiene. Una página sin campos ocultos es una página de estado, y se lee por filas que digan errores o reparos.
  */
 export const parseDeclarationForm = (html: string): DeclarationForm => {
-  const inputs = inputTagsWithType(html)
-  const hiddenFields = Object.fromEntries(
-    inputs.filter((input) => input.type === 'hidden').map((i) => [i.name, i.value]),
-  )
-  const currentValues = Object.fromEntries(
-    inputs
-      .filter((input) => input.type !== 'hidden' && /^(NUM_ENV|FEC_ENV)\d+$/i.test(input.name) && input.value !== '')
-      .map((input) => [input.name, input.value]),
-  )
-  const rows = rowsOf(html).flatMap((row) => {
-    const text = stripTags(row)
-    const label = DECLARATION_LABELS.find((candidate) => candidate.pattern.test(text))
-    if (label === undefined) return []
-    const input = /name\s*=\s*["']?NUM_ENV(\d+)/i.exec(row)
-    const index = input === null ? null : Number.parseInt(input[1], 10)
-    const value = index === null ? null : inputs.find((i) => i.name === `NUM_ENV${index}`)!.value
-    const state = boldText(row) ?? (index === null ? null : (hiddenFields[`EST${index}`] ?? null))
-    return [{ key: label.key, label: label.pattern.exec(text)![0].toUpperCase(), index, value, state }]
-  })
-  const total = Number.parseInt(hiddenFields.TOTREG ?? '', 10)
+  const hiddenFields: Record<string, string> = {}
+  const currentValues: Record<string, string> = {}
+  for (const tag of html.match(/<input[^>]+>/gi) ?? []) {
+    const name = /name\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1]
+    if (name === undefined) continue
+    const value = /value\s*=\s*["']([^"']*)["']/i.exec(tag)?.[1] ?? ''
+    if (/type\s*=\s*["']?HIDDEN["']?/i.test(tag)) hiddenFields[name] = value
+    else if (/type\s*=\s*["']?text["']?/i.test(tag) && value !== '') currentValues[name] = value
+  }
+  const rows = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)].map((match) => match[1])
+  const indexes: Partial<Record<DeclarationKey, number>> = {}
+  for (const label of DECLARATION_LABELS) {
+    const row = rows.find((candidate) => label.pattern.test(candidate))
+    const field = row === undefined ? null : /NAME="NUM_ENV(\d+)"/i.exec(row)
+    if (field !== null) indexes[label.key] = Number.parseInt(field[1], 10)
+  }
+  const hasForm = Object.keys(hiddenFields).length > 0
   return {
-    rows,
     hiddenFields,
     currentValues,
-    totalRows: Number.isNaN(total) ? DEFAULT_TOTAL_ROWS : total,
-    isStatusPage: Object.keys(hiddenFields).length === 0,
-    hasErrorStates: rows.some((row) => /REPAROS|ERRORES/i.test(row.state ?? '')),
+    indexes,
+    hasForm,
+    hasErrorStates: !hasForm && [...html.matchAll(STATUS_ROW)].some((row) => /REPAROS|ERRORES/i.test(row[2])),
   }
 }
 
 /**
- * EN: Classifies the body `pe_avance3` answers: the session, a content mismatch, "not processed yet", inconsistent
- * data (a date, RUT, folio or number that does not match: definitive), success, error, and the rows named with
- * "ENVIO CON ERRORES O REPAROS". That wording is a state, not an error.
- * ES: Clasifica el cuerpo que responde `pe_avance3`: la sesión, contenido que no corresponde, "aún no procesado", dato
- * inconsistente (fecha, RUT, folio o número que no corresponde: definitivo), éxito, error, y las filas nombradas con
- * "ENVIO CON ERRORES O REPAROS". Esa frase es un estado, no un error.
+ * EN: Classifies the body `pe_avance3` answers, on the page as it came and with the case the reference looks for: the
+ * session, a content mismatch, inconsistent data (a date, RUT, folio or number that does not match: definitive),
+ * whether the post was taken, and the rows named with "ENVIO CON ERRORES O REPAROS" within 200 characters. That
+ * wording is a state of an envelope, never an error of the post.
+ * ES: Clasifica el cuerpo que responde `pe_avance3`, sobre la página tal como llegó y con las mayúsculas que busca la
+ * referencia: la sesión, contenido que no corresponde, dato inconsistente (fecha, RUT, folio o número que no
+ * corresponde: definitivo), si el envío del formulario fue aceptado, y las filas nombradas con "ENVIO CON ERRORES O
+ * REPAROS" a no más de 200 caracteres. Esa frase es un estado de un envío, nunca un error del formulario.
  */
 export const classifyDeclarationAnswer = (html: string): DeclarationAnswer => {
-  const text = bodyText(html)
-  const lower = text.toLowerCase()
-  const sessionExpired = /no se encuentra autenticado|error de sesi/i.test(text)
-  const contentMismatch = /contenido no corresponde/i.test(text)
-  const inconsistentData = sentenceAround(text, /(FECHA|RUT|FOLIO|N[UÚ]MERO)[^.]{0,40}?NO\s+(CORRESPONDE|COINCIDE)/i)
-  const hasSuccess = /exitosamente|avance declarado|actualizado/i.test(text)
-  const hasError = lower
-    .replace(/errores o reparos/g, '')
-    .replace(/error de sesi[oó]n/g, '')
-    .includes('error')
-  const contentErrors = CONTENT_ERROR_LABELS.filter((label) =>
-    new RegExp(`${label.pattern}[\\s\\S]{0,200}?ENVIO CON ERRORES O REPAROS`, 'i').test(text),
-  ).map((label) => label.key)
+  const lower = html.toLowerCase()
+  const hasError =
+    lower.replace(/errores o reparos/g, 'reparos_estado').includes('error') && !html.includes('Error de Sesión')
+  const hasSuccess = html.includes('exitosamente') || html.includes('Avance declarado') || html.includes('actualizado')
+  const contentMismatch = lower.includes('contenido no corresponde')
+  const sessionExpired = lower.includes('no se encuentra autenticado') || lower.includes('error de sesi')
+  const inconsistent =
+    /((?:FECHA|RUT|FOLIO|NUMERO|N[UÚ]MERO)[^.<]{0,40}?NO\s+(?:CORRESPONDE|COINCIDE)[^.<]{0,40})/i.exec(
+      html.replace(/<[^>]*>/g, ' '),
+    )
+  const error = sessionExpired
+    ? 'sessionExpired'
+    : contentMismatch
+      ? 'contentMismatch'
+      : html === ''
+        ? 'emptyAnswer'
+        : hasError && !hasSuccess
+          ? 'invalidAnswer'
+          : null
   return {
     sessionExpired,
     contentMismatch,
-    notProcessed: /no ha sido procesado|a[uú]n no est[aá] disponible|intente m[aá]s tarde|no se encuentra/i.test(text),
-    inconsistentData,
-    hasSuccess,
-    hasError,
-    contentErrors,
-    accepted: (!hasError || hasSuccess) && !sessionExpired && !contentMismatch,
+    inconsistentData: inconsistent === null ? null : inconsistent[1].replace(/\s+/g, ' ').trim(),
+    taken: (!hasError || hasSuccess) && !sessionExpired && !contentMismatch,
+    error,
+    contentErrors: CONTENT_ERROR_NAMES.filter((entry) => contentErrorPattern(entry.name).test(html)).map(
+      (entry) => entry.key,
+    ),
   }
 }
 
 /**
- * EN: What the re-read `pe_avance2` says of each declared row: approved or in review when its input is gone, empty
- * when the input is still there and blank (the declaration was not saved), kept when it holds the track id declared,
- * mismatch when it holds another, missing when the row is not on the page.
- * ES: Lo que dice `pe_avance2` releído de cada fila declarada: aprobada o en revisión si su campo desapareció, vacía si
- * el campo sigue ahí en blanco (la declaración no se guardó), conservada si trae el track id declarado, distinta si
- * trae otro, ausente si la fila no está en la página.
+ * EN: The answer says the SII has not processed the envelopes yet, in the wordings the reference looks for on the page
+ * as it came. "No se encuentra" is one of them, so a lost session reads as "not yet" and is asked again.
+ * ES: La respuesta dice que el SII aún no procesó los envíos, con las frases que busca la referencia sobre la página
+ * tal como llegó. "No se encuentra" es una de ellas, así que una sesión perdida se lee como "todavía no" y se
+ * pregunta de nuevo.
+ */
+export const saysNotProcessedYet = (html: string): boolean =>
+  html.includes('no ha sido procesado') ||
+  html.includes('aún no está disponible') ||
+  html.includes('intente más tarde') ||
+  html.includes('no se encuentra')
+
+/**
+ * EN: What the re-read `pe_avance2` says of each row just declared, as the reference verifies it. For each row, the
+ * pieces of the page between `</tr>` are walked: the first one that holds the row's `NAME="NUM_ENV{n}"` field, or
+ * that names the row without a field and shows a state, decides. "REVISADO CONFORME" in bold is fine, "EN REVISION" is
+ * in review, a field with an empty value is empty; a field that holds any value, and a row that is nowhere, are fine.
+ * ES: Lo que dice `pe_avance2` releído de cada fila recién declarada, como lo verifica la referencia. Por cada fila se
+ * recorren los trozos de la página entre `</tr>`: decide el primero que trae el campo `NAME="NUM_ENV{n}"` de la fila,
+ * o que nombra la fila sin campo y muestra un estado. "REVISADO CONFORME" en negrita está bien, "EN REVISION" es en
+ * revisión, un campo con valor vacío es vacío; un campo que trae cualquier valor, y una fila que no está, están bien.
  */
 export const verifyDeclaration = (
   html: string,
-  declared: Readonly<Partial<Record<DeclarationKey, string>>>,
-): Readonly<Partial<Record<DeclarationKey, VerificationState>>> => {
-  const { rows } = parseDeclarationForm(html)
-  return Object.fromEntries(
-    Object.entries(declared).map(([key, trackId]) => {
-      const row = rows.find((candidate) => candidate.key === key)
-      if (row === undefined) return [key, 'missing']
-      if (row.index === null) {
-        if ((row.state ?? '').includes('REVISADO CONFORME')) return [key, 'approved']
-        if ((row.state ?? '').includes('EN REVISION')) return [key, 'inReview']
-        return [key, 'kept']
+  declared: readonly (readonly [DeclarationKey, number])[],
+): DeclarationVerification => {
+  const pieces = html.split(/<\/tr>/i)
+  const inReview: DeclarationKey[] = []
+  const empty: DeclarationKey[] = []
+  for (const [key, index] of declared) {
+    const field = new RegExp(`NAME="NUM_ENV${index}"`, 'i')
+    const label = DECLARATION_LABELS.find((candidate) => candidate.key === key)!.pattern
+    for (const piece of pieces) {
+      const hasField = field.test(piece)
+      if (!hasField && !label.test(piece)) continue
+      if (/<b>[^<]*REVISADO CONFORME[^<]*<\/b>/i.test(piece)) break
+      if (/EN REVISION/i.test(piece)) {
+        inReview.push(key)
+        break
       }
-      if (row.value === '') return [key, 'empty']
-      return [key, row.value!.replace(/^0+(?=\d)/, '') === trackId ? 'kept' : 'mismatch']
-    }),
-  )
+      if (!hasField) continue
+      const value = new RegExp(`NAME="NUM_ENV${index}"[^>]*value="([^"]*)"`, 'i').exec(piece)?.[1] ?? ''
+      if (value.trim() === '') empty.push(key)
+      break
+    }
+  }
+  return { inReview, empty }
 }
 
 /**
@@ -302,16 +321,32 @@ export const classifyAdvanceAnswer = (html: string): AdvanceAnswer => {
   return { outcome: 'failed', message: text.slice(0, 400) }
 }
 
+const INCONSISTENT_STATE = /NO CORRESPONDE|NO COINCIDE|FECHA INVALIDA/
+
 /**
- * EN: The class of a state wording.
- * ES: La clase de un texto de estado.
+ * EN: A state wording stops a wait, as the reference reads it: it says "RECHAZADO" or "ERRORES", or names a date or
+ * number that does not match, whatever else it says. A wording can read as approved and say this too.
+ * ES: Un texto de estado detiene una espera, como lo lee la referencia: dice "RECHAZADO" o "ERRORES", o nombra una
+ * fecha o número que no corresponde, diga lo que diga además. Un texto puede leerse como aprobado y decir esto también.
+ */
+export const saysRejection = (text: string): boolean => {
+  const upper = text.toUpperCase()
+  return upper.includes('RECHAZADO') || upper.includes('ERRORES') || INCONSISTENT_STATE.test(upper)
+}
+
+/**
+ * EN: The class of a state wording, as the reference reads it: "REVISADO CONFORME" is approved; a date or number that
+ * does not match is inconsistent; "RECHAZADO" or "ERRORES" is a rejection; "REPAROS" alone is only an objection.
+ * ES: La clase de un texto de estado, como lo lee la referencia: "REVISADO CONFORME" es aprobado; una fecha o número
+ * que no corresponde es inconsistente; "RECHAZADO" o "ERRORES" es un rechazo; "REPAROS" solo es apenas un reparo.
  */
 export const classifyItemState = (text: string): ItemState => {
-  const upper = decodeEntities(text).toUpperCase()
-  if (/NO CORRESPONDE|NO COINCIDE|FECHA INVALIDA/.test(upper)) return 'inconsistent'
+  const upper = text.toUpperCase()
   if (upper.includes('REVISADO CONFORME')) return 'approved'
+  if (INCONSISTENT_STATE.test(upper)) return 'inconsistent'
+  if (upper.includes('RECHAZADO') || upper.includes('ERRORES')) return 'rejected'
   if (upper.includes('EN REVISION')) return 'inReview'
-  if (/RECHAZADO|ERRORES|REPARO/.test(upper)) return 'rejected'
+  if (upper.includes('REPAROS')) return 'objections'
   if (upper.includes('POR REALIZAR')) return 'pending'
   if (upper.includes('ANULADO')) return 'annulled'
   return 'unknown'
@@ -340,33 +375,45 @@ const receiptsProgressOf = (html: string): ReceiptsProgress | null => {
 }
 
 /**
- * EN: Reads the progress page: the stage from the first pattern that matches, and per set or book the first bold text
- * after its label, row by row (a page-wide search once took the next row's state), plus whether an approved
- * simulation awaits its confirmation.
- * ES: Lee la página de avance: la etapa por el primer patrón que calza, y por set o libro el primer texto en negrita
- * después de su etiqueta, fila por fila (una búsqueda sobre toda la página ya tomó el estado de la fila siguiente),
- * más si una simulación aprobada espera su confirmación.
+ * EN: The page offers to confirm the review of an approved simulation: it posts to `pe_avance3`, names the simulation
+ * set and carries the button, each written as the portal writes it.
+ * ES: La página ofrece confirmar la revisión de una simulación aprobada: envía a `pe_avance3`, nombra el set de
+ * simulación y trae el botón, cada uno escrito como lo escribe el portal.
+ */
+export const offersSimulationConfirmation = (html: string): boolean =>
+  html.includes('pe_avance3') && html.includes('SET DE SIMULACION') && html.includes('Confirmar Revisi')
+
+/**
+ * EN: The state that stands for a simulation whose confirmation is offered while the page shows no state for it.
+ * ES: El estado que representa a una simulación cuya confirmación se ofrece mientras la página no le muestra estado.
+ */
+export const SIMULATION_AWAITS_CONFIRMATION = { text: 'PENDIENTE CONFIRMAR', state: 'inReview' } as const
+
+/**
+ * EN: Reads the progress page as the reference does: the stage from the first pattern that matches, and per set or
+ * book the first bold text after its label anywhere on the page (so a row without a state takes the next row's),
+ * plus whether an approved simulation awaits its confirmation.
+ * ES: Lee la página de avance como lo hace la referencia: la etapa por el primer patrón que calza, y por set o libro el
+ * primer texto en negrita después de su etiqueta en cualquier parte de la página (así una fila sin estado toma el de
+ * la fila siguiente), más si una simulación aprobada espera su confirmación.
  */
 export const parseProgressPage = (html: string): ProgressPage => {
   const stageMatch = STAGE_PATTERNS.map((pattern) => pattern.exec(html)).find((match) => match !== null)
-  const stage = stageMatch === undefined ? null : stripTags(stageMatch[1]).toUpperCase()
+  const stage = stageMatch === undefined ? null : stageMatch[1].trim().toUpperCase()
   const states: Partial<Record<DeclarationKey, { readonly text: string; readonly state: ItemState }>> = {}
-  for (const row of rowsOf(html)) {
-    const text = stripTags(row)
-    for (const label of PROGRESS_LABELS) {
-      if (label.key in states) continue
-      const at = label.pattern.exec(text)
-      if (at === null) continue
-      const bold = boldText(row.slice(Math.max(0, row.search(label.pattern))))
-      if (bold !== null) states[label.key] = { text: bold, state: classifyItemState(bold) }
-    }
+  for (const { key, pattern } of PROGRESS_STATES) {
+    const text = pattern.exec(html)?.[1].trim()
+    if (text !== undefined) states[key] = { text, state: classifyItemState(text) }
   }
+  const simulationAwaitsConfirmation = offersSimulationConfirmation(html)
   return {
     stage,
     stageKey: portalStageOf(stage),
-    states,
-    simulationAwaitsConfirmation:
-      html.includes('pe_avance3') && /SET DE SIMULACION/i.test(html) && /Confirmar Revisi/i.test(decodeEntities(html)),
+    states:
+      simulationAwaitsConfirmation && states.simulation === undefined
+        ? { ...states, simulation: SIMULATION_AWAITS_CONFIRMATION }
+        : states,
+    simulationAwaitsConfirmation,
     receipts: receiptsProgressOf(html),
   }
 }

@@ -16,7 +16,7 @@ test('defaults', () => {
   expect(Object.isFrozen(portal)).toBe(true)
   expect(portal.companyRut).toBeNull()
   expect(portal.sessionTtlMs).toBe(90 * 60 * 1000)
-  expect(portal.timeoutMs).toBe(30000)
+  expect(portal.timeoutMs).toBe(20000)
   expect(portal.closePreviousSessions).toBe(true)
   expect(portal.capture).toBeNull()
   expect(portal.retry).toEqual(DEFAULT_PORTAL_RETRY_POLICY)

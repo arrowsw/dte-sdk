@@ -111,6 +111,7 @@ export type ReceptionOutcome =
 const STATUS_PATTERN = /^\d{1,3}$/
 // A TrackID ends up in a file name (the directory archive) and in status URLs: nothing but digits gets through.
 const TRACK_ID_PATTERN = /^\d{1,20}$/
+const TRACK_ID_ELEMENT = /<TRACKID>(\d+)<\/TRACKID>/i
 const TRACK_ID_IN_TEXT = /\btrackid\b\s*[:=]?\s*(\S+)/i
 
 const invalidResponse = (operation: string, text: string): DteError =>
@@ -278,6 +279,8 @@ const readCgiAnswer = (job: UploadJob, response: HttpResponse, text: string): Ve
         : new DteError('SII_UPLOAD_REJECTED', {
             status: Number(reception.status),
             errors: reception.errors,
+            // The TRACKID element as the reply wrote it, for callers that read a refused STATUS 7 differently.
+            trackIdElement: TRACK_ID_ELEMENT.exec(text)?.[1] ?? null,
             fileName: job.fileName,
             operation: job.operation,
             message: receptionStatusMessage(reception.status),
