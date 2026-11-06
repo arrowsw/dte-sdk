@@ -70,7 +70,8 @@ every field.
 
 The version on npm (0.0.2) is a placeholder with no API. Everything in this README lives on the
 [`canary`](https://github.com/arrowsw/dte-sdk/tree/canary) branch and ships in 0.1.0, the first release with a public
-API. Version 1.0.0 will be the first one recommended for production.
+API. Every area planned for 0.1.0 is written; what is left before the release is running it against the real SII.
+Version 1.0.0 will be the first one recommended for production.
 
 Every area is tested against synthetic SII answers, with a 100 % coverage gate in CI. Those tests cannot show how the
 real SII answers, so this table says what has met it so far:
@@ -87,9 +88,14 @@ real SII answers, so this table says what has met it so far:
 | Certification of receipts (boletas)                            | `dte-sdk/portal` | Not run yet: it needs a company enrolled in the receipts application; the receipts envelope and the folio consumption report validate against the official schemas in the tests |
 | Printed samples                                                | `dte-sdk/pdf`    | Not reviewed by the SII yet                                                                                                                                                     |
 
-Still to come before 0.1.0: the live runs tracked in [issue 8](https://github.com/arrowsw/dte-sdk/issues/8). Out of
-scope: export documents (110, 111 and 112), fee receipts (boletas de honorarios), the assignment of invoices (AEC),
-forms F29 and F22, the exchange e-mail and full XSD validation.
+Still to come before 0.1.0: the live runs tracked in [issue 8](https://github.com/arrowsw/dte-sdk/issues/8). Also
+open: the detail calls of the purchase and sales register, to be compared against real answers
+([issue 14](https://github.com/arrowsw/dte-sdk/issues/14)), and the improvements of the certification runner set aside
+to keep it to the reference, to be weighed after the first real certification
+([issue 29](https://github.com/arrowsw/dte-sdk/issues/29)).
+
+Out of scope: export documents (110, 111 and 112), fee receipts (boletas de honorarios), the assignment of invoices
+(AEC), forms F29 and F22, the exchange e-mail and full XSD validation.
 
 ## Installation
 
@@ -260,8 +266,8 @@ Options worth knowing:
   `waitForUploadStatus` polls every `intervalMs` instead of following the retry policy, and its
   `timeoutMs` is a budget: each poll and each sleep is cut to the time that remains.
 - `capture: createDirectoryCapture({ dir })` from `dte-sdk/node` writes every HTTP exchange, redacted (tokens,
-  seeds, cookies, private keys), for SII support tickets. `archive:
-createDirectoryUploadArchive({ dir })` keeps the exact bytes of every upload the SII answered,
+  seeds, cookies, private keys), for SII support tickets.
+  `archive: createDirectoryUploadArchive({ dir })` keeps the exact bytes of every upload the SII answered,
   with its TrackID and the SII's reply (tokens redacted). A duplicate answer is kept as
   `<trackId>-<kind>-duplicate-<yyyymmddHHMMSS>` and never replaces the record of the original.
 - `logger`: silent by default; pass `console` or your own. Messages never carry tokens, RUTs
@@ -516,7 +522,9 @@ and the runner makes it only with `declareCompliance: true`.
   by the user only. A service may implement `CertificationStore` over its own storage.
 - **The run keeps to the reference.** Where this runner and the reference implementation it was ported from differed
   in what the SII receives or in how the run flows, the runner now does what the reference does, including where a
-  stricter reading looked safer; the improvements set aside are tracked for after the first real certification.
+  stricter reading looked safer. The [alignment design](./docs/superpowers/specs/2026-11-06-certification-alignment-design.md)
+  says what changed and what could not be copied, and the improvements set aside are listed in
+  [issue 29](https://github.com/arrowsw/dte-sdk/issues/29) for after the first real certification.
 - **The test sets are written as the reference writes them.** Their documents carry the UTC day as issue date and UTC
   stamps with milliseconds (a run after 21:00 in Chile, 20:00 in winter, dates them the next day), unit prices with
   six decimals, notes that correct a text with a zero total and no VAT rate, and every case of the guide set as a
@@ -617,7 +625,6 @@ to work; the samples portal's are discovered once on the way in, with the known 
 - **The exchange set is read loosely:** it is not checked for well-formedness, a number that does not parse is 0, a
   missing date or RUT is empty, and only a set without documents (or one the parser cannot read at all) fails. The
   names of the PDFs travel as given.
-
 - **Nothing here has been run against the two portals yet.** Every wire and wording comes from field behaviour; the
   first enrolled run should keep every artefact the store writes under `intercambio/` and `muestras/` as fixtures.
 - **The exchange answers are regenerated and uploaded on every run that reaches the portal;** only the set is kept.
