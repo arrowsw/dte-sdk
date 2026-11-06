@@ -6,7 +6,7 @@ import type { SiiClient } from '../sii/client'
 import { uploadEnvelope, uploadFolioConsumption } from '../sii/upload'
 import { parseXmlWithoutNamespaces } from '../xml/parse'
 import { queryFieldUploadState, type FieldUploadState } from './field-status'
-import { uploadAsField } from './field-upload'
+import { FIELD_UPLOAD_RETRY, uploadAsField } from './field-upload'
 
 const ENVELOPE_WAIT_MS = 20000
 const CONSUMPTION_WAIT_MS = 30000
@@ -26,7 +26,7 @@ export type ReceiptsProgressEvent = { readonly step: 'BOLETA_SOAP_CHECK' } | { r
  * ES: Opciones de `sendReceiptsSet`.
  */
 export type SendReceiptsSetOptions = {
-  /** EN: The sequence number of the first folio consumption report; 100 by default, and each attempt adds one. ES: `SecEnvio` — La secuencia del primer reporte de consumo de folios; 100 por defecto, y cada intento suma uno. */
+  /** EN: The sequence number of the first folio consumption report; 100 by default (also when it is 0), and each attempt adds one. ES: `SecEnvio` — La secuencia del primer reporte de consumo de folios; 100 por defecto (también si es 0), y cada intento suma uno. */
   readonly sequence?: number
   /** EN: Wait function; the client's by default. ES: Función de espera; por defecto la del cliente. */
   readonly sleep?: (ms: number) => Promise<void>
@@ -313,7 +313,7 @@ export const sendReceiptsSet = async (
       }
   }
   options.onProgress?.({ step: 'BOLETA_RCOF' })
-  return { ...sent, ...(await sendConsumption(sii, envelope, options.sequence ?? DEFAULT_SEQUENCE, sleep)) }
+  return { ...sent, ...(await sendConsumption(sii, envelope, options.sequence || DEFAULT_SEQUENCE, sleep)) }
 }
 
 /**
@@ -344,6 +344,6 @@ export const resendReceiptsConsumption = async (
   readonly duplicate: boolean
 }> => {
   const xml = consumptionXml(sii, readReceiptsEnvelope(input.envelopeXml), input.sequence)
-  const receipt = await uploadFolioConsumption(sii, { xml })
+  const receipt = await uploadFolioConsumption(sii, { xml }, { retry: FIELD_UPLOAD_RETRY })
   return { sequence: input.sequence, xml, trackId: receipt.trackId, duplicate: receipt.duplicate }
 }

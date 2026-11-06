@@ -410,6 +410,11 @@ describe('sendReceiptsSet', () => {
     expect(report.uploaded).toHaveLength(2)
   })
 
+  test('a sequence of 0 is no sequence: the reports start at 100', async () => {
+    const { result } = await run([reception('111'), reception('222')], [estUp('EPR', '111'), estUp('EPR', '222')], 0)
+    expect(result.consumptionSequence).toBe(100)
+  })
+
   test('the waits are the client’s by default, and an envelope without receipts is refused before any upload', async () => {
     const harness = await certificationHarness([
       uploadRoute(reception('111'), reception('222')),
@@ -432,6 +437,21 @@ describe('sendReceiptsSet', () => {
 })
 
 describe('resendReceiptsConsumption', () => {
+  test('a report lost to a network failure is sent again with the retries of the run, a refused connection is not', async () => {
+    const dropped = new DteError('TRANSPORT_FAILED', { reason: 'ECONNRESET' })
+    const harness = await certificationHarness([uploadRoute(dropped, reception('333'))])
+    const again = await resendReceiptsConsumption(harness.deps.sii, { envelopeXml: issued.envelope.xml, sequence: 105 })
+    expect(again).toMatchObject({ sequence: 105, trackId: '333' })
+    expect(harness.fake.requests).toHaveLength(2)
+    const refused = await certificationHarness([
+      uploadRoute(new DteError('TRANSPORT_FAILED', { reason: 'ECONNREFUSED' }), reception('333')),
+    ])
+    await expect(
+      resendReceiptsConsumption(refused.deps.sii, { envelopeXml: issued.envelope.xml, sequence: 105 }),
+    ).rejects.toMatchObject({ code: 'TRANSPORT_FAILED' })
+    expect(refused.fake.requests).toHaveLength(1)
+  })
+
   test('builds the report again from the envelope and uploads it once with the sequence given', async () => {
     const harness = await certificationHarness([uploadRoute(reception('333'))])
     const result = await resendReceiptsConsumption(harness.deps.sii, { envelopeXml: issued.envelope.xml, sequence: 5 })

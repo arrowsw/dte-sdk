@@ -9,6 +9,7 @@ import {
   verifyReceiptsAuthorization,
 } from '../../src/portal/receipts-certification'
 import type { Logger } from '../../src/sii/logger'
+import { FIXED_NOW } from '../support/fixtures'
 import { gwtMethodOf, SESSION_CHECK_URL, sessionCheckRoute as alive } from '../support/exchange-fixtures'
 import type { FakeReply, FakeRoute, RecordedRequest } from '../support/fake-sii'
 import { EMPTY_OK, EXCEPTION, okAnswer } from '../support/gwt-answers'
@@ -143,12 +144,18 @@ describe('downloadReceiptsTestSet', () => {
 describe('declareReceiptsTrackId', () => {
   test('posts ingresarTrackId with the company, the state 90 and the track id, once', async () => {
     const harness = await signed([facade()])
-    await expect(declareReceiptsTrackId(harness.portal, { trackId: ' 9876543210 ' })).resolves.toEqual({
+    await expect(declareReceiptsTrackId(harness.portal, { trackId: '9876543210' })).resolves.toEqual({
       body: EMPTY_OK,
     })
     expect(posts(harness).map((request) => request.text)).toEqual([
       `7|0|9|${HEAD}|ingresarTrackId|${INTEGER}|${STRING}|3|90|9876543210|1|2|3|4|7|5|6|6|6|5|6|6|5|76543210|7|0|8|0|0|9|`,
     ])
+  })
+
+  test('the track id travels exactly as the caller wrote it, spaces included', async () => {
+    const harness = await signed([facade()])
+    await declareReceiptsTrackId(harness.portal, { trackId: ' 9876543210 ' })
+    expect(posts(harness)[0].text).toContain('|3|90| 9876543210 |1|2|3|4|7|')
   })
 
   test('an answer that is not //OK is a refusal, an empty track id is refused before any request, and nothing is retried', async () => {
@@ -157,7 +164,7 @@ describe('declareReceiptsTrackId', () => {
     expect(error.code).toBe('SII_PORTAL_REJECTED')
     expect(error.details).toMatchObject({ rejection: 'receiptsTrackIdRefused', httpStatus: 200 })
     const quiet = await signed([])
-    expect((await failure(declareReceiptsTrackId(quiet.portal, { trackId: '  ' }))).details).toEqual({
+    expect((await failure(declareReceiptsTrackId(quiet.portal, { trackId: '' }))).details).toEqual({
       field: 'trackId',
     })
     expect(quiet.urls()).toEqual([])
@@ -301,6 +308,14 @@ describe('declareReceiptsCompliance', () => {
     const linked = await signed([ready()])
     await declareReceiptsCompliance(linked.portal, { ...input, link: 'consulta.example.test' })
     expect(posts(linked)[3].text).toContain('|consulta.example.test|')
+  })
+
+  test('the declaration is dated with the local date of the process clock, not with the date in Chile', async () => {
+    // An instant whose local calendar day, whatever the zone of the machine, is not its day in Chile or in UTC.
+    const clock = Object.assign(new Date(FIXED_NOW), { getDate: () => 3, getMonth: () => 0, getFullYear: () => 2027 })
+    const harness = await signed([ready()], { now: () => clock })
+    await declareReceiptsCompliance(harness.portal, input)
+    expect(posts(harness)[3].text.split('|')[16]).toBe('03-01-2027')
   })
 
   test('already declared, or not approved yet: an outcome, and nothing is sent', async () => {

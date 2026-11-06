@@ -5,7 +5,6 @@ import { splitSiiRut, toSiiRut, type SiiRut } from '../model/rut'
 import type { CallOverrides } from '../sii/client'
 import { bodyExcerpt } from '../sii/operation'
 import { encodeUtf8 } from '../sii/transport'
-import { chileDate } from '../time/chile'
 import { resolvePortalCompany, type PortalClient } from './client'
 import { declarationRepresentative, downloadRepresentative, type CookieRepresentative } from './cookies'
 import {
@@ -322,10 +321,11 @@ export const downloadReceiptsTestSet = async (
 }
 
 /**
- * EN: Declares the track id of the receipts envelope, so the SII validates the set (`ingresarTrackId`). Sent once. The
- * SII validates on its own and reports by mail; `readReceiptsStatus` tells when the declaration can be made.
- * ES: Declara el track id del sobre de boletas, para que el SII valide el set (`ingresarTrackId`). Se envía una vez. El
- * SII valida por su cuenta y avisa por correo; `readReceiptsStatus` dice cuándo se puede declarar.
+ * EN: Declares the track id of the receipts envelope, so the SII validates the set (`ingresarTrackId`), exactly as it
+ * is given. Sent once. The SII validates on its own and reports by mail; `readReceiptsStatus` tells when the
+ * declaration can be made.
+ * ES: Declara el track id del sobre de boletas, para que el SII valide el set (`ingresarTrackId`), tal como se da. Se
+ * envía una vez. El SII valida por su cuenta y avisa por correo; `readReceiptsStatus` dice cuándo se puede declarar.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: the track id, the company, the hashes. ES: el track id, la empresa, los hashes.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
@@ -337,7 +337,7 @@ export const declareReceiptsTrackId = async (
   input: ReceiptsPortalInput & { readonly trackId: string },
   overrides?: CallOverrides,
 ): Promise<{ readonly body: string }> => {
-  if (input.trackId.trim() === '') throw new DteError('MISSING_FIELD', { field: 'trackId' })
+  if (input.trackId === '') throw new DteError('MISSING_FIELD', { field: 'trackId' })
   const company = partyOf(resolvePortalCompany(portal, input.companyRut))
   return withFieldPortal(
     portal,
@@ -352,7 +352,7 @@ export const declareReceiptsTrackId = async (
         gwtString(String(READY_STATE)),
         gwtNull(GWT_INTEGER),
         gwtString(null),
-        gwtString(input.trackId.trim()),
+        gwtString(input.trackId),
       ])
       if (!answer.ok)
         throw rejected(context, 'receiptsTrackIdRefused', {
@@ -420,22 +420,23 @@ const requiredText = (value: string | undefined, field: string): string => {
   return text
 }
 
-const declarationDate = (now: Date): string => {
-  const [year, month, day] = chileDate(now).split('-')
-  return `${day}-${month}-${year}`
-}
+// The date of the process's own clock, `dd-mm-yyyy`, as the field writes it: in a process that is not on Chile's time
+// zone it is the date there.
+const declarationDate = (now: Date): string =>
+  [now.getDate(), now.getMonth() + 1, now.getFullYear()].map((part) => String(part).padStart(2, '0')).join('-')
 
 /**
  * EN: Makes the declaration of compliance of the receipts application, which authorises the company to issue receipts
  * in production (`autorizarEmpresaBolProd`). It cannot be undone. The status is read first: a declaration already made
  * and an application the SII has not approved yet are outcomes, and nothing is sent. The representative is the owner
  * of the session, from the `rutm`/`dvm` cookies before `rut`/`dv`, with the verifier 8 when none has one; the software provider is mandatory, because the SII refused some companies that declared
- * themselves as their own provider by default. Sent once.
+ * themselves as their own provider by default. The declaration is dated with the local date of the process clock.
+ * Sent once.
  * ES: Hace la declaración de cumplimiento de la postulación de boletas, que autoriza a la empresa a emitir boletas en
  * producción (`autorizarEmpresaBolProd`). No se puede deshacer. Primero se lee el estado: una declaración ya hecha y
  * una postulación que el SII aún no aprueba son resultados, y no se envía nada. El representante es el dueño de la
  * sesión, de las cookies `rutm`/`dvm` antes que `rut`/`dv`, con verificador 8 cuando ninguna lo trae; el proveedor de software es obligatorio, porque el SII rechazó a algunas empresas que se declararon por
- * defecto como su propio proveedor. Se envía una vez.
+ * defecto como su propio proveedor. La declaración lleva la fecha local del reloj del proceso. Se envía una vez.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: the provider, the business name, the link, the company, the hashes. ES: el proveedor, la razón social, el link, la empresa, los hashes.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
