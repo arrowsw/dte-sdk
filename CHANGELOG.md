@@ -237,6 +237,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   review is submitted its state is read again whatever the status of the answer (`readSamplesReview` takes
   `anyStatus`, off by default), and a re-read that gets no answer leaves the stage as submitted.
 
+- **The certification run keeps to the reference: the receipts.** `parseReceiptsTestSet` reads the set by position
+  (tabs or two or more spaces, the header and `OBSERVACION` in exact case, a price without its dots and first comma,
+  the unit as the last word after " en "). The receipts carry the UTC day; `issueReceiptsSet` takes an issuer without
+  activity, activity code, commune or city and a missing or partial resolution, with the defaults of the document
+  runner. `sendReceiptsSet` and `resendReceiptsConsumption` upload through the reading and the retries of the run
+  (`envelopeTrackId` is `string | null`: null for a duplicate the SII names no track id for), ask each status once, take
+  a query that never got through as accepted and an unanswered or unknown state as a rejection, name the report
+  `RCOF_<rut>_<clock>` and report a rejection with the SII's own gloss. Every request to the receipts portal and to
+  the production authorisation check carries only the reference's headers, is sent once, waits 30 s (20 s in
+  production) and is read as UTF-8 whatever its status; the operations take `sessionChecked`. The representative comes
+  from the session's cookies (the list is read again as the fallback, the check digit falls back to `8`); the states
+  `P90` and `P91` are searched in the raw answer; the posts of the track id and of the declaration are judged by
+  `//OK` alone; the declaration is dated with the local date; the track id is declared as given.
+  `verifyReceiptsAuthorization` reads the progress page with one request and the reference's words, and posts the
+  stamping form with the company as the caller wrote it. Also here: `advanceStage` and `declareCompliance` no longer
+  search their pages for a refusal.
+
 ### Fixed
 
 - A receipt (39, 41) with a reference was written with the invoice shape of `Referencia` (`FchRef`), which the receipts
