@@ -345,19 +345,21 @@ const REDIRECT_STATUS: ReadonlySet<number> = new Set([301, 302])
 /**
  * EN: The warm-up of a GWT portal: `GET` of its base with the session and one redirect (301 or 302) followed, so the
  * server opens the portal's context as it would for a browser; every cookie it sets joins the jar. A failure is logged
- * and ignored.
+ * and ignored; it returns whether the warm-up ended without failing.
  * ES: El calentamiento de un portal GWT: `GET` de su base con la sesión y una redirección (301 o 302) seguida, para que
  * el servidor abra el contexto del portal como lo haría para un navegador; cada cookie que fija entra a la bolsa. Una
- * falla se registra y se ignora.
+ * falla se registra y se ignora. Devuelve si el calentamiento terminó sin falla.
  */
-export const warmUpGwtPortal = async (context: PortalContext, portal: GwtPortal): Promise<void> => {
+export const warmUpGwtPortal = async (context: PortalContext, portal: GwtPortal): Promise<boolean> => {
   try {
     const first = await portalRequest(context, 'warm-up', 'GET', portal.base)
     const location = first.headers['location']
     if (location !== undefined && REDIRECT_STATUS.has(first.status))
       await portalRequest(context, 'warm-up', 'GET', new URL(location, portal.base).toString())
+    return true
   } catch (error) {
     context.portal.logger.warn('gwt portal warm-up failed', { module: portal.moduleName, reason: errorMessage(error) })
+    return false
   }
 }
 
@@ -459,12 +461,13 @@ export const withGwtStage = <T>(
       state: { cookies: session.state.cookies, loggedIn: session.state.loggedIn },
       verbatim: { headers: spec.headers, sealed: false },
     }
-    await warmUpGwtPortal(warming, spec.portal)
+    const warmedUp = await warmUpGwtPortal(warming, spec.portal)
     const context: PortalContext = { ...warming, verbatim: { headers: spec.headers, sealed: true } }
     const { portal: gwtPortal } = spec
     const used =
       hashes ??
-      (spec.discoverHashes
+      // The field looks the hashes up inside the warm-up's own guard: a warm-up that fails leaves the known pair.
+      (spec.discoverHashes && warmedUp
         ? await discoverGwtHashes(context, {
             moduleBase: gwtPortal.base,
             moduleName: gwtPortal.moduleName,

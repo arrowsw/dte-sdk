@@ -127,6 +127,18 @@ describe('readSamplesReview', () => {
     ])
   })
 
+  test('a warm-up that fails leaves the known hashes without looking them up', async () => {
+    const harness = await signedIn([
+      alive,
+      { method: 'GET', url: BASE, reply: new Error('socket hang up') },
+      nocache,
+      service({ body: reviewAnswer('INGRESO') }),
+    ])
+    const result = await readSamplesReview(harness.portal)
+    expect(result.hashes).toEqual(KNOWN)
+    expect(harness.urls()).toEqual([SESSION_CHECK_URL, BASE, SERVICE_URL])
+  })
+
   test('reads the sentence that blocks when the portal names no state', async () => {
     const message = "El estado de la postulacion NO es: 'DOCUMENTOS IMPRESOS'"
     const harness = await signedIn([
