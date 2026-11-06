@@ -16,7 +16,7 @@ export const RECEIPTS_SET_TEXT = [
   '',
   'CASO-3',
   '==========',
-  'ITEM\tCANTIDAD\tPRECIO UNITARIO',
+  'Item\tCantidad\tPrecio Unitario',
   'Clavo galvanizado 3/4"\t3,7\t1.190',
   'Item afecto sin columnas',
   'Tornillo\tmuchos\t100',

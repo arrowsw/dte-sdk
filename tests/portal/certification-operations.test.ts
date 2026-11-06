@@ -744,7 +744,8 @@ describe('advanceStage', () => {
       post('pe_avance2', certificationPage()),
       post('pe_avance4', REJECTION_PAGES.companyNotAuthorized),
     ])
-    expect((await failure(advanceStage(refused.portal))).details).toMatchObject({ rejection: 'companyNotAuthorized' })
+    // A refusal page is not looked for: it is an answer that did not advance.
+    await expect(advanceStage(refused.portal)).resolves.toMatchObject({ outcome: 'failed' })
   })
 })
 
@@ -861,10 +862,13 @@ describe('declareCompliance', () => {
       outcome: 'declared',
       message: 'Gracias por su visita.',
     })
+    // A refusal page is not looked for either: with no form to post it is judged as any last page is.
     const refused = await signedIn(wizard(REJECTION_PAGES.personWithPendingIssues))
-    expect((await failure(declareCompliance(refused.portal))).details).toMatchObject({
-      rejection: 'personWithPendingIssues',
+    await expect(declareCompliance(refused.portal)).resolves.toEqual({
+      outcome: 'declared',
+      message: 'tiene situaciones pendientes con el SII',
     })
+    expect(refused.posted('pe_avance9')).toEqual([])
   })
 
   test('a last page with no pe_avance9 form posts nothing more and is judged as it is', async () => {

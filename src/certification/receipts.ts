@@ -5,29 +5,33 @@ import type { SignedDocument } from '../document/sign'
 import { createEnvelope } from '../envelope/create'
 import { signEnvelope, type SignedEnvelope } from '../envelope/sign'
 import { DteError } from '../errors'
-import type { IssuerInput, LineItemInput } from '../model/document'
-import { chileDate } from '../time/chile'
+import type { LineItemInput } from '../model/document'
 import type { FolioSource } from './folios'
 import type { ReceiptsTestCase } from './receipts-set'
+import { completeIssuer, completeResolution, type CertificationIssuerInput } from './runtime'
 
 const RECEIPT_TYPE = 39
 const UNIT_OBSERVATION = /unidad de medida/i
-const UNIT_WORD = /\ben\s+(\w+)\.?$/i
+const UNIT_WORD = /en\s+(\w+)\.?$/i
+
+// The stamps of a receipt are the UTC instant to the second, without a zone, as the field writes them: three or four
+// hours ahead of the time of Chile the envelope carries.
+const utcSeconds = (at: Date): string => at.toISOString().slice(0, 19)
 
 /**
  * EN: What issuing the receipts set needs.
  * ES: Lo que necesita emitir el set de boletas.
  */
 export type IssueReceiptsSetOptions = {
-  /** EN: The issuer, as for phase 1. ES: El emisor, como en la fase 1. */
-  readonly issuer: IssuerInput
+  /** EN: The issuer, as for phase 1; what it leaves out takes the defaults of `DEFAULT_CERTIFICATION_ISSUER`. The RUT, the name and the address have none. ES: `Emisor` — El emisor, como en la fase 1; lo que omita toma los valores de `DEFAULT_CERTIFICATION_ISSUER`. El RUT, la razón social y la dirección no los tienen. */
+  readonly issuer: CertificationIssuerInput
   /** EN: The signing certificate; its holder is the sender of the envelope. ES: `RutEnvia` — El certificado de firma; su titular es quien envía el sobre. */
   readonly certificate: Certificate
   /** EN: Where the folios of type 39 and their CAFs come from. ES: De dónde salen los folios del tipo 39 y sus CAF. */
   readonly folios: FolioSource
-  /** EN: The resolution of the certification environment: number 0 and its date. ES: `NroResol`, `FchResol` — La resolución del ambiente de certificación: número 0 y su fecha. */
-  readonly resolution: { readonly number: number; readonly date: string }
-  /** EN: Clock; the issue date is the Chile date of it. ES: Reloj; la fecha de emisión es la fecha de Chile de él. */
+  /** EN: The resolution of the certification environment; number 0 and the UTC date of the instant by default, field by field. ES: `NroResol`, `FchResol` — La resolución del ambiente de certificación; por defecto número 0 y la fecha UTC del instante, campo por campo. */
+  readonly resolution?: { readonly number?: number; readonly date?: string }
+  /** EN: Clock, read once for the issue date (its UTC date), once per receipt for its stamps (the UTC instant to the second) and once for the envelope (the time of Chile). ES: `FchEmis`, `TSTED`, `TmstFirma`, `TmstFirmaEnv` — Reloj, leído una vez para la fecha de emisión (su fecha UTC), una vez por boleta para sus marcas (el instante UTC al segundo) y una vez para el sobre (la hora de Chile). */
   readonly now?: () => Date
 }
 
@@ -59,7 +63,8 @@ export type IssuedReceiptsSet = {
   readonly lastFolio: number
 }
 
-// "… unidad de medida en Kg." names the unit of the first item: the last word after `en`.
+// "… unidad de medida en Kg." names the unit of the first item: the word after the `en` that ends the text. No word
+// boundary is asked before `en`, as in the field, so the end of a longer word counts too.
 const unitOf = (testCase: ReceiptsTestCase): string | undefined => {
   const observation = testCase.observations.find((text) => UNIT_OBSERVATION.test(text))
   return observation === undefined ? undefined : UNIT_WORD.exec(observation.trim())?.[1]
@@ -81,12 +86,14 @@ const linesOf = (testCase: ReceiptsTestCase): readonly LineItemInput[] => {
  * the final consumer as receiver, the prices of the set taken as including VAT, the exemption of an exempt item, the
  * unit of measure an observation names on its first item, and one reference with the code `SET` and the reason
  * `CASO-<n>`; then signs the `EnvioBOLETA` that carries them, with the certificate holder as sender (the issuer when
- * the certificate names none) and the SII as receiver.
+ * the certificate names none) and the SII as receiver. The receipts are dated with the UTC day and each is stamped and
+ * signed with the UTC instant to the second, as the field does; only the envelope carries the time of Chile.
  * ES: Emite el set de pruebas de boletas: una boleta tipo 39 por caso, en orden, cada una con el siguiente folio de la
  * fuente, el consumidor final como receptor, los precios del set tomados con IVA incluido, la exención de un ítem
  * exento, la unidad de medida que nombra una observación en su primer ítem, y una referencia con el código `SET` y la
  * razón `CASO-<n>`; luego firma el `EnvioBOLETA` que las lleva, con el titular del certificado como enviador (el
- * emisor cuando el certificado no nombra ninguno) y el SII como receptor.
+ * emisor cuando el certificado no nombra ninguno) y el SII como receptor. Las boletas se fechan con el día UTC y cada
+ * una se timbra y se firma con el instante UTC al segundo, como lo hace el campo; solo el sobre lleva la hora de Chile.
  * @param cases EN: the cases of `parseReceiptsTestSet`. ES: los casos de `parseReceiptsTestSet`.
  * @param options EN: issuer, certificate, folios, resolution, clock. ES: emisor, certificado, folios, resolución, reloj.
  * @throws {DteError} EN: `MISSING_FIELD { field: 'cases' }` without cases, `FOLIO_OUT_OF_RANGE` from the folio source, and the phase 1 codes. ES: `MISSING_FIELD { field: 'cases' }` sin casos, `FOLIO_OUT_OF_RANGE` de la fuente de folios, y los códigos de la fase 1.
@@ -96,24 +103,31 @@ export const issueReceiptsSet = async (
   options: IssueReceiptsSetOptions,
 ): Promise<IssuedReceiptsSet> => {
   if (cases.length === 0) throw new DteError('MISSING_FIELD', { field: 'cases' })
-  const now = options.now?.() ?? new Date()
-  const issueDate = chileDate(now)
+  const clock = options.now ?? (() => new Date())
+  const now = clock()
+  // The UTC date of the instant, as the field issues them: late in the evening in Chile it is already tomorrow's.
+  const issueDate = now.toISOString().slice(0, 10)
+  const issuer = completeIssuer(options.issuer)
+  const resolution = completeResolution(options.resolution, now)
   const receipts: IssuedReceipt[] = []
   for (const testCase of cases) {
     const { caf, folio } = await options.folios.take(RECEIPT_TYPE)
+    // Each receipt is stamped and signed at its own reading of the clock, written as the field writes it.
+    const at = clock()
     const document = issueDocument({
       document: {
         type: RECEIPT_TYPE,
         folio,
         issueDate,
-        issuer: options.issuer,
+        issuer,
         items: linesOf(testCase),
         pricesIncludeVat: true,
         receiptReferences: [{ code: TEST_SET_REFERENCE_TYPE, reason: `CASO-${testCase.number}` }],
       },
       caf,
       certificate: options.certificate,
-      now,
+      now: at,
+      timestamp: utcSeconds(at),
     })
     receipts.push({ caseNumber: testCase.number, folio, document })
   }
@@ -122,12 +136,13 @@ export const issueReceiptsSet = async (
       kind: 'receipt',
       documents: receipts.map((receipt) => receipt.document),
       cover: {
-        issuerRut: options.issuer.rut,
-        senderRut: options.certificate.rut ?? options.issuer.rut,
-        resolutionDate: options.resolution.date,
-        resolutionNumber: options.resolution.number,
+        issuerRut: issuer.rut,
+        senderRut: options.certificate.rut ?? issuer.rut,
+        resolutionDate: resolution.date,
+        resolutionNumber: resolution.number,
       },
-      now,
+      // The envelope is sealed at a later reading, in the time of Chile.
+      now: clock(),
     }),
     options.certificate,
   )
