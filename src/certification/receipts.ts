@@ -5,9 +5,10 @@ import type { SignedDocument } from '../document/sign'
 import { createEnvelope } from '../envelope/create'
 import { signEnvelope, type SignedEnvelope } from '../envelope/sign'
 import { DteError } from '../errors'
-import type { IssuerInput, LineItemInput } from '../model/document'
+import type { LineItemInput } from '../model/document'
 import type { FolioSource } from './folios'
 import type { ReceiptsTestCase } from './receipts-set'
+import { completeIssuer, completeResolution, type CertificationIssuerInput } from './runtime'
 
 const RECEIPT_TYPE = 39
 const UNIT_OBSERVATION = /unidad de medida/i
@@ -18,14 +19,14 @@ const UNIT_WORD = /en\s+(\w+)\.?$/i
  * ES: Lo que necesita emitir el set de boletas.
  */
 export type IssueReceiptsSetOptions = {
-  /** EN: The issuer, as for phase 1. ES: El emisor, como en la fase 1. */
-  readonly issuer: IssuerInput
+  /** EN: The issuer, as for phase 1; what it leaves out takes the defaults of `DEFAULT_CERTIFICATION_ISSUER`. The RUT, the name and the address have none. ES: `Emisor` — El emisor, como en la fase 1; lo que omita toma los valores de `DEFAULT_CERTIFICATION_ISSUER`. El RUT, la razón social y la dirección no los tienen. */
+  readonly issuer: CertificationIssuerInput
   /** EN: The signing certificate; its holder is the sender of the envelope. ES: `RutEnvia` — El certificado de firma; su titular es quien envía el sobre. */
   readonly certificate: Certificate
   /** EN: Where the folios of type 39 and their CAFs come from. ES: De dónde salen los folios del tipo 39 y sus CAF. */
   readonly folios: FolioSource
-  /** EN: The resolution of the certification environment: number 0 and its date. ES: `NroResol`, `FchResol` — La resolución del ambiente de certificación: número 0 y su fecha. */
-  readonly resolution: { readonly number: number; readonly date: string }
+  /** EN: The resolution of the certification environment; number 0 and the UTC date of the instant by default, field by field. ES: `NroResol`, `FchResol` — La resolución del ambiente de certificación; por defecto número 0 y la fecha UTC del instante, campo por campo. */
+  readonly resolution?: { readonly number?: number; readonly date?: string }
   /** EN: Clock; the issue date is the UTC date of it. ES: `FchEmis` — Reloj; la fecha de emisión es la fecha UTC de él. */
   readonly now?: () => Date
 }
@@ -99,6 +100,8 @@ export const issueReceiptsSet = async (
   const now = options.now?.() ?? new Date()
   // The UTC date of the instant, as the field issues them: late in the evening in Chile it is already tomorrow's.
   const issueDate = now.toISOString().slice(0, 10)
+  const issuer = completeIssuer(options.issuer)
+  const resolution = completeResolution(options.resolution, now)
   const receipts: IssuedReceipt[] = []
   for (const testCase of cases) {
     const { caf, folio } = await options.folios.take(RECEIPT_TYPE)
@@ -107,7 +110,7 @@ export const issueReceiptsSet = async (
         type: RECEIPT_TYPE,
         folio,
         issueDate,
-        issuer: options.issuer,
+        issuer,
         items: linesOf(testCase),
         pricesIncludeVat: true,
         receiptReferences: [{ code: TEST_SET_REFERENCE_TYPE, reason: `CASO-${testCase.number}` }],
@@ -123,10 +126,10 @@ export const issueReceiptsSet = async (
       kind: 'receipt',
       documents: receipts.map((receipt) => receipt.document),
       cover: {
-        issuerRut: options.issuer.rut,
-        senderRut: options.certificate.rut ?? options.issuer.rut,
-        resolutionDate: options.resolution.date,
-        resolutionNumber: options.resolution.number,
+        issuerRut: issuer.rut,
+        senderRut: options.certificate.rut ?? issuer.rut,
+        resolutionDate: resolution.date,
+        resolutionNumber: resolution.number,
       },
       now,
     }),

@@ -109,4 +109,48 @@ describe('issueReceiptsSet', () => {
     const issued = await issueReceiptsSet(noted, options())
     expect(issued.receipts[0].document.items[0].unit).toBeUndefined()
   })
+
+  test('an issuer without line of business, activity code, commune or city takes the defaults of the run', async () => {
+    const { businessActivity: _a, activityCode: _c, commune: _m, ...bare } = issuer
+    for (const left of [bare, { ...bare, businessActivity: '', commune: '', city: '' }]) {
+      const issued = await issueReceiptsSet(cases.slice(0, 1), { ...options(), issuer: left })
+      const { xml, header } = issued.receipts[0].document
+      expect(header.issuer).toMatchObject({
+        businessActivity: 'ACTIVIDADES DE PROGRAMACION INFORMATICA',
+        activityCode: 620200,
+        commune: 'Santiago',
+        city: 'Santiago',
+      })
+      expect(xml).toContain('<GiroEmisor>ACTIVIDADES DE PROGRAMACION INFORMATICA</GiroEmisor>')
+      expect(xml).toContain('<CmnaOrigen>Santiago</CmnaOrigen>')
+      expect(xml).toContain('<CiudadOrigen>Santiago</CiudadOrigen>')
+      await expect(validateAgainstXsd(issued.envelope.xml, 'EnvioBOLETA')).resolves.toEqual([])
+    }
+  })
+
+  test('what the issuer does give is kept, and a city of its own is not replaced by the default', async () => {
+    const issued = await issueReceiptsSet(cases.slice(0, 1), { ...options(), issuer: { ...issuer, city: 'Valdivia' } })
+    expect(issued.receipts[0].document.header.issuer).toMatchObject({
+      businessActivity: 'Desarrollo de software',
+      commune: 'Ñuñoa',
+      city: 'Valdivia',
+    })
+  })
+
+  test('a resolution left out or partial takes number 0 and the UTC date of the instant', async () => {
+    const { resolution: _resolution, ...withoutResolution } = options()
+    const fresh = await issueReceiptsSet(cases.slice(0, 1), withoutResolution)
+    expect(fresh.envelope.cover).toMatchObject({ resolutionNumber: 0, resolutionDate: '2026-11-15' })
+    const evening = new Date('2026-11-16T01:00:00.000Z')
+    const numbered = await issueReceiptsSet(cases.slice(0, 1), {
+      ...options(),
+      now: () => evening,
+      resolution: { number: 77 },
+    })
+    expect(numbered.envelope.cover).toMatchObject({ resolutionNumber: 77, resolutionDate: '2026-11-16' })
+    const dated = await issueReceiptsSet(cases.slice(0, 1), { ...options(), resolution: { date: '2026-02-03' } })
+    expect(dated.envelope.cover).toMatchObject({ resolutionNumber: 0, resolutionDate: '2026-02-03' })
+    const blank = await issueReceiptsSet(cases.slice(0, 1), { ...options(), resolution: { number: 5, date: '' } })
+    expect(blank.envelope.cover).toMatchObject({ resolutionNumber: 5, resolutionDate: '2026-11-15' })
+  })
 })
