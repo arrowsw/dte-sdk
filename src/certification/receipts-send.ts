@@ -3,9 +3,10 @@ import type { SignedEnvelope } from '../envelope/sign'
 import { DteError, errorMessage } from '../errors'
 import type { FolioConsumptionEntry } from '../model/book'
 import type { SiiClient } from '../sii/client'
-import { queryUploadStatus, type UploadStatus } from '../sii/status'
 import { uploadEnvelope, uploadFolioConsumption } from '../sii/upload'
 import { parseXmlWithoutNamespaces } from '../xml/parse'
+import { queryFieldUploadState, type FieldUploadState } from './field-status'
+import { requireTrackId, uploadAsField } from './field-upload'
 
 const ENVELOPE_WAIT_MS = 20000
 const CONSUMPTION_WAIT_MS = 30000
@@ -25,7 +26,7 @@ export type ReceiptsProgressEvent = { readonly step: 'BOLETA_SOAP_CHECK' } | { r
  * ES: Opciones de `sendReceiptsSet`.
  */
 export type SendReceiptsSetOptions = {
-  /** EN: The sequence number of the first folio consumption report; 100 by default, and each attempt adds one. ES: `SecEnvio` — La secuencia del primer reporte de consumo de folios; 100 por defecto, y cada intento suma uno. */
+  /** EN: The sequence number of the first folio consumption report; 100 by default (also when it is 0), and each attempt adds one. ES: `SecEnvio` — La secuencia del primer reporte de consumo de folios; 100 por defecto (también si es 0), y cada intento suma uno. */
   readonly sequence?: number
   /** EN: Wait function; the client's by default. ES: Función de espera; por defecto la del cliente. */
   readonly sleep?: (ms: number) => Promise<void>
@@ -63,8 +64,8 @@ export type ReceiptsSendResult = {
   readonly outcome: 'sent' | 'envelopeRejected' | 'consumptionFailed'
   /** EN: The SII's gloss or the error speaks of authorisation or signing: the company cannot sign receipts yet. ES: La glosa del SII o el error habla de autorización o firma: la empresa aún no puede firmar boletas. */
   readonly notAuthorized: boolean
-  /** EN: The envelope's track id, to declare on the receipts portal. ES: El track id del sobre, para declararlo en el portal de boletas. */
-  readonly envelopeTrackId: string
+  /** EN: The envelope's track id, to declare on the receipts portal; null when the SII already had the envelope and named none. ES: `TrackId` — El track id del sobre, para declararlo en el portal de boletas; null cuando el SII ya tenía el sobre y no nombró ninguno. */
+  readonly envelopeTrackId: string | null
   /** EN: The SII already had the envelope. ES: El SII ya tenía el sobre. */
   readonly envelopeDuplicate: boolean
   /** EN: The accepted report's track id, or null. ES: El track id del reporte aceptado, o null. */
@@ -142,9 +143,12 @@ const readReceiptsEnvelope = (xml: string): ReceiptsEnvelope => {
   }
 }
 
-const consumptionXml = (sii: SiiClient, envelope: ReceiptsEnvelope, sequence: number): string =>
-  signFolioConsumption(
+// The id of a report is the issuer RUT without its hyphen and the milliseconds of the clock, as the field names it.
+const consumptionXml = (sii: SiiClient, envelope: ReceiptsEnvelope, sequence: number): string => {
+  const now = sii.now()
+  return signFolioConsumption(
     createFolioConsumption({
+      id: `RCOF_${envelope.issuerRut.replace('-', '')}_${now.getTime()}`,
       cover: {
         issuerRut: envelope.issuerRut,
         senderRut: envelope.senderRut,
@@ -153,22 +157,29 @@ const consumptionXml = (sii: SiiClient, envelope: ReceiptsEnvelope, sequence: nu
         sequence,
       },
       entries: envelope.entries,
-      now: sii.now(),
+      now,
     }),
     sii.certificate,
   ).xml
+}
 
-// A status query that does not answer blocks nothing: the field goes on as if the upload were fine.
-const statusOf = async (sii: SiiClient, trackId: string): Promise<UploadStatus | null> => {
+// A status query that never got through blocks nothing: the field goes on as if the upload were fine. An answer
+// without a state is not that: it is read by the caller as the field reads it.
+const stateOf = async (sii: SiiClient, trackId: string): Promise<FieldUploadState | null> => {
   try {
-    return await queryUploadStatus(sii, { trackId })
+    return await queryFieldUploadState(sii, trackId)
   } catch (error) {
     sii.logger.warn('receipts status query failed', { trackId, reason: errorMessage(error) })
     return null
   }
 }
 
-const glossOf = (status: UploadStatus): string => `${status.message} (${status.code})`
+// The gloss as the SII wrote it in its answer (not the catalog's text for the state), else the state code.
+const GLOSS_ELEMENT = /<GLOSA>([^<]+)<\/GLOSA>/i
+const glossOf = (state: FieldUploadState): string => GLOSS_ELEMENT.exec(state.raw ?? '')?.[1] ?? state.code ?? ''
+
+const detailOf = (state: FieldUploadState): string =>
+  state.answered ? `${glossOf(state)} (${state.code})` : `${state.message}`
 
 type ConsumptionPart = Pick<
   ReceiptsSendResult,
@@ -199,7 +210,10 @@ const sendConsumption = async (
   for (let attempt = 0; attempt < MAX_CONSUMPTION_ATTEMPTS; attempt += 1) {
     const sequence = start + attempt
     const xml = consumptionXml(sii, envelope, sequence)
-    const receipt = await uploadFolioConsumption(sii, { xml }).catch((error: unknown) => errorMessage(error))
+    const receipt = await uploadAsField(
+      (overrides) => uploadFolioConsumption(sii, { xml }, overrides),
+      'uploadFolioConsumption',
+    ).catch((error: unknown) => errorMessage(error))
     if (typeof receipt === 'string') {
       consumptions.push({ sequence, xml, trackId: null, outcome: 'failed', detail: receipt })
       return {
@@ -210,9 +224,9 @@ const sendConsumption = async (
         detail: receipt,
       }
     }
-    if (receipt.duplicate) {
+    if (receipt.trackId === null) {
       box.duplicates += 1
-      consumptions.push({ sequence, xml, trackId: receipt.trackId, outcome: 'duplicate' })
+      consumptions.push({ sequence, xml, trackId: null, outcome: 'duplicate' })
       // The certification environment takes one report per company per day: three in a row say it has today's.
       if (box.duplicates >= MAX_CONSECUTIVE_DUPLICATES)
         return { ...NO_CONSUMPTION, outcome: 'sent', consumptionAlreadySent: true, consumptions }
@@ -220,8 +234,10 @@ const sendConsumption = async (
     }
     box.duplicates = 0
     await sleep(CONSUMPTION_WAIT_MS)
-    const status = await statusOf(sii, receipt.trackId)
-    if (status === null || status.status !== 'rejected') {
+    const state = await stateOf(sii, receipt.trackId)
+    // A query that never got through counts as accepted; an answer without a state, or with one the table does not
+    // know, counts as a rejection, as the field reads it.
+    if (state === null || state.successful || state.intermediate) {
       consumptions.push({ sequence, xml, trackId: receipt.trackId, outcome: 'accepted' })
       return {
         ...NO_CONSUMPTION,
@@ -231,9 +247,9 @@ const sendConsumption = async (
         consumptions,
       }
     }
-    const detail = glossOf(status)
+    const detail = detailOf(state)
     consumptions.push({ sequence, xml, trackId: receipt.trackId, outcome: 'rejected', detail })
-    if (AUTHORIZATION_WORDS.test(status.message))
+    if (AUTHORIZATION_WORDS.test(glossOf(state)))
       return { ...NO_CONSUMPTION, outcome: 'consumptionFailed', notAuthorized: true, consumptions, detail }
   }
   sii.logger.warn('receipts folio consumption not accepted', { attempts: MAX_CONSUMPTION_ATTEMPTS })
@@ -241,18 +257,30 @@ const sendConsumption = async (
 }
 
 /**
- * EN: Sends the receipts set as the field does: uploads the envelope (one the SII already has carries on with the
- * track id the SII names), waits 20 s and reads its status (a rejection ends here; a status that does not answer is
- * logged), then sends the folio consumption report built from the envelope, with the sequence number `sequence` plus
- * the attempt, up to ten attempts: three duplicates in a row mean today's report was already accepted; an uploaded
- * report is given 30 s and its status read; a rejection tries the next sequence number, unless its gloss speaks of
- * authorisation or signing. Ten attempts without an accepted report still end in `sent`.
- * ES: Envía el set de boletas como lo hace el campo: sube el sobre (uno que el SII ya tiene sigue con el track id que
- * nombra el SII), espera 20 s y lee su estado (un rechazo termina aquí; un estado que no responde se registra), y luego
- * envía el reporte de consumo de folios armado desde el sobre, con la secuencia `sequence` más el intento, hasta diez
- * intentos: tres duplicados seguidos significan que el reporte de hoy ya se aceptó; a un reporte subido se le dan 30 s
- * y se lee su estado; un rechazo prueba la secuencia siguiente, salvo que su glosa hable de autorización o firma. Diez
- * intentos sin reporte aceptado terminan igual en `sent`.
+ * EN: Sends the receipts set as the field does: uploads the envelope and reads the reply as the field reads it
+ * (`STATUS` 0 with a track id is sent; `STATUS` 7 with a track id is also taken as sent, and without one it is a
+ * duplicate that skips to the report with no track id; `STATUS` 99 and any other reply is a failure and throws), waits
+ * 20 s and reads the status of a sent envelope once (a rejection ends here; a query that never got through is logged,
+ * and an answer without a state, or an unknown one, blocks nothing), then sends the folio consumption report built
+ * from the envelope, with the sequence number `sequence` plus the attempt, up to ten attempts: a `STATUS` 7 without a
+ * track id is a duplicate and three in a row mean today's report was already accepted; a `STATUS` 99 or another
+ * refusal ends it as `consumptionFailed`; an uploaded report is given 30 s and its status read once: a success or an
+ * intermediate state (a query error code or `0` too) accepts it, a query that never got through accepts it, and
+ * anything else (a rejection, no state, an unknown state) tries the next sequence number, unless its gloss speaks of
+ * authorisation or signing. Ten attempts without an accepted report still end in `sent`. Each upload is sent again
+ * when the network fails, with the retries of the certification run (`FIELD_UPLOAD_RETRY`), and only then.
+ * ES: Envía el set de boletas como lo hace el campo: sube el sobre y lee la respuesta como la lee el campo (`STATUS` 0
+ * con track id es enviado; `STATUS` 7 con track id también se toma como enviado, y sin él es un duplicado que salta al
+ * reporte sin track id; `STATUS` 99 y cualquier otra respuesta es una falla y lanza), espera 20 s y lee una vez el
+ * estado de un sobre enviado (un rechazo termina aquí; una consulta que nunca llegó se registra, y una respuesta sin
+ * estado, o con uno desconocido, no bloquea nada), y luego envía el reporte de consumo de folios armado desde el
+ * sobre, con la secuencia `sequence` más el intento, hasta diez intentos: un `STATUS` 7 sin track id es un duplicado y
+ * tres seguidos significan que el reporte de hoy ya se aceptó; un `STATUS` 99 u otro rechazo lo termina como
+ * `consumptionFailed`; a un reporte subido se le dan 30 s y se lee su estado una vez: un éxito o un estado intermedio
+ * (también un código de error de la consulta o `0`) lo acepta, una consulta que nunca llegó lo acepta, y cualquier
+ * otra cosa (un rechazo, ningún estado, un estado desconocido) prueba la secuencia siguiente, salvo que su glosa hable
+ * de autorización o firma. Diez intentos sin reporte aceptado terminan igual en `sent`. Cada subida se vuelve a enviar
+ * cuando la red falla, con los reintentos de la corrida de certificación (`FIELD_UPLOAD_RETRY`), y solo entonces.
  * @param sii EN: the phase 2 client on the certification environment. ES: el cliente de la fase 2 en el ambiente de certificación.
  * @param issued EN: the set of `issueReceiptsSet`, or anything with its signed envelope. ES: el set de `issueReceiptsSet`, o cualquier cosa con su sobre firmado.
  * @param options EN: the first sequence number, the wait function, the progress events. ES: la primera secuencia, la función de espera, los eventos de progreso.
@@ -265,24 +293,27 @@ export const sendReceiptsSet = async (
 ): Promise<ReceiptsSendResult> => {
   const sleep = options.sleep ?? ((ms: number) => sii.sleep(ms))
   const envelope = readReceiptsEnvelope(issued.envelope.xml)
-  const upload = await uploadEnvelope(sii, { envelope: issued.envelope })
+  const upload = await uploadAsField(
+    (overrides) => uploadEnvelope(sii, { envelope: issued.envelope, channel: 'soap' }, overrides),
+    'uploadEnvelope',
+  )
   const sent = { envelopeTrackId: upload.trackId, envelopeDuplicate: upload.duplicate }
-  if (!upload.duplicate) {
+  if (upload.trackId !== null) {
     options.onProgress?.({ step: 'BOLETA_SOAP_CHECK' })
     await sleep(ENVELOPE_WAIT_MS)
-    const status = await statusOf(sii, upload.trackId)
-    if (status !== null && status.status === 'rejected')
+    const state = await stateOf(sii, upload.trackId)
+    if (state !== null && state.rejected)
       return {
         ...NO_CONSUMPTION,
         ...sent,
         outcome: 'envelopeRejected',
-        notAuthorized: AUTHORIZATION_WORDS.test(status.message),
+        notAuthorized: AUTHORIZATION_WORDS.test(glossOf(state)),
         consumptions: [],
-        detail: glossOf(status),
+        detail: detailOf(state),
       }
   }
   options.onProgress?.({ step: 'BOLETA_RCOF' })
-  return { ...sent, ...(await sendConsumption(sii, envelope, options.sequence ?? DEFAULT_SEQUENCE, sleep)) }
+  return { ...sent, ...(await sendConsumption(sii, envelope, options.sequence || DEFAULT_SEQUENCE, sleep)) }
 }
 
 /**
@@ -298,10 +329,14 @@ export type ResendReceiptsConsumptionInput = {
 
 /**
  * EN: Builds the folio consumption report again from a receipts envelope already sent and uploads it once, with the
- * sequence number given.
+ * sequence number given. The upload is sent again only when the network fails and its reply is read as
+ * `sendReceiptsSet` reads it: `STATUS` 0 or 7 with a `TRACKID` element is a sent report; a `STATUS` 7 that names no
+ * track id, a `STATUS` 99 and any other reply are refusals.
  * ES: Arma de nuevo el reporte de consumo de folios desde un sobre de boletas ya enviado y lo sube una vez, con la
- * secuencia dada.
- * @throws {DteError} EN: `ENVELOPE_EMPTY`, `MISSING_FIELD` for an incomplete cover; the phase 2 codes of the upload. ES: `ENVELOPE_EMPTY`, `MISSING_FIELD` por una carátula incompleta; los códigos de la fase 2 de la subida.
+ * secuencia dada. La subida se vuelve a enviar solo cuando falla la red y su respuesta se lee como la lee
+ * `sendReceiptsSet`: `STATUS` 0 o 7 con un elemento `TRACKID` es un reporte enviado; un `STATUS` 7 que no nombra track
+ * id, un `STATUS` 99 y cualquier otra respuesta son rechazos.
+ * @throws {DteError} EN: `ENVELOPE_EMPTY`, `MISSING_FIELD` for an incomplete cover; `SII_UPLOAD_REJECTED` for a refusal; the phase 2 codes of the upload. ES: `ENVELOPE_EMPTY`, `MISSING_FIELD` por una carátula incompleta; `SII_UPLOAD_REJECTED` por un rechazo; los códigos de la fase 2 de la subida.
  */
 export const resendReceiptsConsumption = async (
   sii: SiiClient,
@@ -313,6 +348,12 @@ export const resendReceiptsConsumption = async (
   readonly duplicate: boolean
 }> => {
   const xml = consumptionXml(sii, readReceiptsEnvelope(input.envelopeXml), input.sequence)
-  const receipt = await uploadFolioConsumption(sii, { xml })
-  return { sequence: input.sequence, xml, trackId: receipt.trackId, duplicate: receipt.duplicate }
+  const operation = 'uploadFolioConsumption'
+  const reception = await uploadAsField((overrides) => uploadFolioConsumption(sii, { xml }, overrides), operation)
+  return {
+    sequence: input.sequence,
+    xml,
+    trackId: requireTrackId(reception, operation),
+    duplicate: reception.duplicate,
+  }
 }

@@ -56,6 +56,43 @@ export const sessionRut = (jar: CookieJar): SiiRut | null => {
   return isSiiRut(rut) ? rut : null
 }
 
+// The first of these cookies that holds a value: an empty one does not count, as in the field.
+const firstValue = (jar: CookieJar, names: readonly string[]): string =>
+  names.map((name) => jar[name]).find((value) => value !== undefined && value !== '') ?? ''
+
+/**
+ * EN: A representative as the receipts portal takes it: the digits of the RUT and the verifier, each possibly empty.
+ * ES: Un representante como lo toma el portal de boletas: los dígitos del RUT y el verificador, cada uno posiblemente vacío.
+ */
+export type CookieRepresentative = {
+  /** EN: The RUT digits. ES: Los dígitos del RUT. */
+  readonly digits: string
+  /** EN: The verifier. ES: El dígito verificador. */
+  readonly verifier: string
+}
+
+/**
+ * EN: The representative the receipts set download names: `NETSCAPE_LIVEWIRE.rut` and `.dv`, with `RUT_NS` and `DV_NS`
+ * behind them; each one is empty when no cookie has it. The verifier goes as the cookie has it.
+ * ES: El representante que nombra la descarga del set de boletas: `NETSCAPE_LIVEWIRE.rut` y `.dv`, con `RUT_NS` y
+ * `DV_NS` detrás; cada uno es vacío cuando ninguna cookie lo tiene. El verificador va como lo trae la cookie.
+ */
+export const downloadRepresentative = (jar: CookieJar): CookieRepresentative => ({
+  digits: firstValue(jar, ['NETSCAPE_LIVEWIRE.rut', 'RUT_NS']),
+  verifier: firstValue(jar, ['NETSCAPE_LIVEWIRE.dv', 'DV_NS']),
+})
+
+/**
+ * EN: The representative the receipts declaration names: `NETSCAPE_LIVEWIRE.rutm` before `.rut` for the digits (empty
+ * when neither is there) and `.dvm` before `.dv` for the verifier, in capitals, `8` when neither is there.
+ * ES: El representante que nombra la declaración de boletas: `NETSCAPE_LIVEWIRE.rutm` antes que `.rut` para los dígitos
+ * (vacío cuando no está ninguna) y `.dvm` antes que `.dv` para el verificador, en mayúsculas, `8` cuando no está ninguno.
+ */
+export const declarationRepresentative = (jar: CookieJar): CookieRepresentative => ({
+  digits: firstValue(jar, ['NETSCAPE_LIVEWIRE.rutm', 'NETSCAPE_LIVEWIRE.rut']),
+  verifier: (firstValue(jar, ['NETSCAPE_LIVEWIRE.dvm', 'NETSCAPE_LIVEWIRE.dv']) || '8').toUpperCase(),
+})
+
 /**
  * EN: The jar as stored in the session cache.
  * ES: La bolsa tal como se guarda en la caché de sesiones.

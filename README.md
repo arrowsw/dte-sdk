@@ -646,13 +646,14 @@ const sii = createSiiClient({ environment: 'certification', certificate, company
 // The receipts application is its own: its portal, its test set, its declaration. The pieces, in the order to chain them
 const { text } = await downloadReceiptsTestSet(portal, { providerMail })
 const issued = await issueReceiptsSet(parseReceiptsTestSet(text), {
-  issuer,
+  issuer, // rut, businessName and address; the rest has the defaults of the document runner
   certificate,
   folios: createFolioAllocator([caf39]),
-  resolution,
+  resolution, // number 0 and today's UTC date when left out
 })
 const sent = await sendReceiptsSet(sii, issued) // the envelope, 20 s, its status, then the folio consumption report
-await declareReceiptsTrackId(portal, { trackId: sent.envelopeTrackId })
+// envelopeTrackId is null when the SII said it already had the envelope and named no track id
+if (sent.envelopeTrackId !== null) await declareReceiptsTrackId(portal, { trackId: sent.envelopeTrackId })
 
 // The SII validates the set on its own and answers by mail. Later:
 const status = await readReceiptsStatus(portal) // readyToDeclare once the set is approved (P90); declared after (P91)
@@ -665,10 +666,13 @@ The receipts test set is a plain text of cases; each case is one receipt of type
 that include VAT and a reference `SET` / `CASO-<n>`. `sendReceiptsSet` uploads the `EnvioBOLETA`, waits 20 s and reads
 its status, then sends the folio consumption report (RCOF) built from the envelope, starting at sequence number 100 and
 trying the next one after a rejection, up to ten times; three duplicates in a row mean today's report was already
-accepted (the certification environment takes one per company per day). The SII's objections to the report are
-expected in certification and block nothing: ten attempts without an accepted report still end in `sent`. The other
+accepted (the certification environment takes one per company per day). Both uploads are read as the uploads of the
+document runner are: only `STATUS` 0 with a `TRACKID` element is a sent file, `STATUS` 7 is a duplicate, `STATUS` 99
+is a failure, and only a network failure is sent again. Each status is asked once: a query that never got through
+counts as accepted, an answer without a state or with an unknown one as a rejection. The SII's objections to the
+report are expected in certification and block nothing: ten attempts without an accepted report still end in `sent`. The other
 outcomes are `envelopeRejected`, and `consumptionFailed` when the report could not be uploaded or was refused for lack
-of authorisation (`notAuthorized`); the envelope's track id is in the result either way. The XMLs come back in the
+of authorisation (`notAuthorized`); the envelope's track id, when the SII named one, is in the result either way. The XMLs come back in the
 result. There is no runner here: the SII's validation of the set takes its own time, and the caller reads the status
 again later.
 
@@ -678,8 +682,16 @@ again later.
   authorisation date is declared with the date empty.
 - **The software provider is mandatory** (`provider`): the SII answered some companies with a bare HTTP 500 when they
   were declared as their own provider by default. A company that is its own provider passes itself.
-- **The representative is the owner of the session**, the person whose certificate logged in; the portal's list is
-  only the fallback. With two people enrolled for a company, any other choice is refused.
+- **The representative is the owner of the session**, read from the session's cookies; the portal's list is only the
+  fallback, and when no cookie gives the check digit the declaration sends `8`. With two people enrolled for a
+  company, any other choice is refused.
+- **The receipts keep to the reference too.** The set is read by position (tabs or two or more spaces; the header and
+  `OBSERVACION` in exact case); the receipts carry the UTC day and each is stamped with the UTC instant to the second,
+  while the envelope keeps the time of Chile; every request to the receipts portal carries only the headers the
+  reference sends, is sent once, waits 30 s and is read as UTF-8 whatever its status, the firewall's page included;
+  `P90` and `P91` are searched in the raw answer; the posts that declare are judged by `//OK` alone.
+  `verifyReceiptsAuthorization` reads a row as authorised when its state contains `conform`, `aprobad` or `autoriz`:
+  read the state it returns yourself.
 - **A receipt has its own reference.** The receipts schema gives `Referencia` no date and a free-text code, so a
   receipt takes `receiptReferences` (`{ code, reason, documentType?, folio? }`) and refuses `references`.
 - **`verifyReceiptsAuthorization` never throws.** A stamping form the portal does not serve is `queryFailed`, not "not

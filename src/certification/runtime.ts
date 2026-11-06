@@ -148,6 +148,30 @@ const given = <T extends object>(value: T): T =>
   Object.fromEntries(Object.entries(value).filter(([, field]) => field !== undefined && field !== '')) as T
 
 /**
+ * EN: The issuer with what it leaves out (or empty) taken from `DEFAULT_CERTIFICATION_ISSUER`. Internal.
+ * ES: El emisor con lo que omite (o deja vacío) tomado de `DEFAULT_CERTIFICATION_ISSUER`. Interno.
+ */
+export const completeIssuer = (issuer: CertificationIssuerInput): IssuerInput => ({
+  ...DEFAULT_CERTIFICATION_ISSUER,
+  ...given(issuer),
+})
+
+/**
+ * EN: The resolution of the certification environment with what it leaves out (or empty) taken as number 0 and the
+ * UTC date of `now`. Internal.
+ * ES: `NroResol`, `FchResol` — La resolución del ambiente de certificación con lo que omite (o deja vacío) tomado como
+ * número 0 y la fecha UTC de `now`. Interno.
+ */
+export const completeResolution = (
+  resolution: { readonly number?: number; readonly date?: string } | undefined,
+  now: Date,
+): { readonly number: number; readonly date: string } => ({
+  number: 0,
+  date: now.toISOString().slice(0, 10),
+  ...given(resolution ?? {}),
+})
+
+/**
  * EN: Resolves the defaults of the dependencies.
  * ES: Resuelve los valores por defecto de las dependencias.
  */
@@ -155,10 +179,10 @@ export const runtime = (deps: CertificationDependencies): Runtime => {
   const now = deps.now ?? (() => new Date())
   return {
     ...deps,
-    issuer: { ...DEFAULT_CERTIFICATION_ISSUER, ...given(deps.issuer) },
+    issuer: completeIssuer(deps.issuer),
     receiver: { ...DEFAULT_CERTIFICATION_RECEIVER, ...given(deps.receiver ?? {}) },
     // The date of a resolution left out is the UTC day of the moment the step starts.
-    resolution: { number: 0, date: now().toISOString().slice(0, 10), ...given(deps.resolution ?? {}) },
+    resolution: completeResolution(deps.resolution, now()),
     now,
     sleep: deps.sleep ?? defaultSleep,
     emit: (event) => deps.onProgress?.(event),
