@@ -438,6 +438,7 @@ export type GwtStage = {
  * `run` se envía una sola vez, sin reintento y con el mayor timeout que admite un timer, con las cabeceras propias del
  * portal y sus respuestas leídas como UTF-8.
  * @param hashes EN: a pair that wins over the known one and over any lookup. ES: un par que gana sobre el conocido y sobre cualquier búsqueda.
+ * @param sessionChecked EN: true when an earlier stage of the same run already checked the saved session, as the field does once per process. ES: true cuando una etapa anterior de la misma corrida ya comprobó la sesión guardada, como hace el campo una vez por proceso.
  * @throws {DteError} EN: the session codes of `ensureSession`; whatever `run` throws. ES: los códigos de sesión de `ensureSession`; lo que lance `run`.
  */
 export const withGwtStage = <T>(
@@ -447,9 +448,10 @@ export const withGwtStage = <T>(
   spec: GwtStageSpec,
   hashes: GwtHashes | undefined,
   run: (stage: GwtStage) => Promise<T>,
+  sessionChecked = false,
 ): Promise<T> =>
   withPortalSession(portal, operation, overrides, async (session) => {
-    await ensureLiveSession(session)
+    await ensureLiveSession(session, sessionChecked)
     const warming: PortalContext = {
       ...session,
       overrides: { ...overrides, retry: false, timeoutMs: overrides?.timeoutMs ?? LONGEST_TIMEOUT_MS },

@@ -89,7 +89,8 @@ export const withExchangeStage = <T>(
   operation: string,
   overrides: CallOverrides | undefined,
   run: (stage: GwtStage) => Promise<T>,
-): Promise<T> => withGwtStage(portal, operation, overrides, EXCHANGE_STAGE, undefined, run)
+  sessionChecked = false,
+): Promise<T> => withGwtStage(portal, operation, overrides, EXCHANGE_STAGE, undefined, run, sessionChecked)
 
 /**
  * EN: Input of the exchange operations that only name the company.

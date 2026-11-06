@@ -75,14 +75,13 @@ describe('runExchange', () => {
     expect(harness.urls().some((url) => url.includes('downloadFile'))).toBe(false)
   })
 
-  test('the download is a stage of its own, and the validation, the uploads and the confirmations are one more: two warm-ups in all', async () => {
+  test('the download is a stage of its own, and the validation, the uploads and the confirmations are one more: two warm-ups but one check of the saved session', async () => {
     const harness = await certificationHarness(exchangeRoutes())
     await runExchange(harness.deps, atExchange())
     expect(harness.urls().map((url) => url.replace(BASE, '<pfe>/'))).toEqual([
       SESSION_CHECK_URL,
       '<pfe>/',
       '<pfe>/downloadFile?re=76543210&dve=3',
-      SESSION_CHECK_URL,
       '<pfe>/',
       '<pfe>/facade',
       '<pfe>/uploadFile1?re=76543210&dve=3',
@@ -96,6 +95,7 @@ describe('runExchange', () => {
     const given = await certificationHarness(exchangeRoutes())
     await runExchange(given.deps, atExchange(), { setXml: exchangeSetXml() })
     expect(given.urls().filter((url) => url === BASE)).toHaveLength(1)
+    expect(given.urls().filter((url) => url === SESSION_CHECK_URL)).toHaveLength(1)
   })
 
   test('not in the exchange: the state the portal names is kept, nothing is uploaded, and the next run finds the set kept', async () => {

@@ -599,13 +599,16 @@ export const ensureSession = async (context: PortalContext): Promise<void> => {
 
 /**
  * EN: Makes sure the jar holds a session that is alive: a session it already holds is checked with a read of the
- * company page and dropped when the SII no longer answers for it, then `ensureSession` logs in when there is none.
+ * company page and dropped when the SII no longer answers for it, then `ensureSession` logs in when there is none. With
+ * `checked` the session was already checked in this run and the company page is not read again.
  * ES: Se asegura de que la bolsa tenga una sesión viva: una sesión que ya tiene se comprueba con una lectura de la
  * página de empresa y se descarta cuando el SII ya no responde por ella; luego `ensureSession` inicia sesión si no hay.
+ * Con `checked` la sesión ya se comprobó en esta corrida y no se vuelve a leer la página de empresa.
  * @throws {DteError} EN: the codes of `ensureSession`. ES: los códigos de `ensureSession`.
  */
-export const ensureLiveSession = async (context: PortalContext): Promise<void> => {
-  if (hasSessionCookie(context.state.cookies) && !(await cachedSessionAlive(context))) forgetSession(context)
+export const ensureLiveSession = async (context: PortalContext, checked: boolean): Promise<void> => {
+  if (!checked && hasSessionCookie(context.state.cookies) && !(await cachedSessionAlive(context)))
+    forgetSession(context)
   await ensureSession(context)
 }
 
