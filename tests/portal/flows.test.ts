@@ -342,7 +342,7 @@ describe('requestCafInBatches', () => {
 })
 
 describe('reobtainFolios', () => {
-  test('a refused listing comes back as data', async () => {
+  test('a listing that states a refusal reads as no ranges, with no refusal to report', async () => {
     const harness = await signedIn([
       { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: page('form') } },
       { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: { body: refusedPage('REOBTENCION DE FOLIOS') } },
@@ -353,9 +353,16 @@ describe('reobtainFolios', () => {
       ranges: [],
       expired: [],
       available: 0,
-      reason: expect.stringContaining('autorizado'),
-      rejection: 'optionNotAuthorized',
+      reason: 'usable ranges do not reach the quantity: 0 of 2',
     })
+  })
+
+  test('a call the caller aborts while listing is not read as no ranges', async () => {
+    const harness = await signedIn([
+      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: page('form') } },
+      { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: new DteError('REQUEST_ABORTED') },
+    ])
+    expect((await failure(reobtainFolios(harness.portal, { type: 33, quantity: 2 }))).code).toBe('REQUEST_ABORTED')
   })
 
   test('a failure that is not a refusal while listing reads as no ranges', async () => {
@@ -370,7 +377,6 @@ describe('reobtainFolios', () => {
       expired: [],
       available: 0,
       reason: expect.any(String),
-      rejection: null,
     })
   })
 

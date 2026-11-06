@@ -64,14 +64,23 @@ test('only inputs with a double-quoted name followed by a double-quoted value ar
 })
 
 describe('listReobtainableRanges', () => {
-  test('a refused listing is a refusal, not an empty list', async () => {
-    const refusal = { code: 'SII_PORTAL_REJECTED', details: { rejection: 'optionNotAuthorized' } }
+  test('a listing that states a refusal is read like any other: with no forms it is an empty list', async () => {
     const refused = refusedPage('REOBTENCION DE FOLIOS')
     const atList = await signedIn([
       { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: page('form') } },
       { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: { body: refused } },
     ])
-    expect(await failure(listReobtainableRanges(atList.portal, { type: 33 }))).toMatchObject(refusal)
+    expect(await listReobtainableRanges(atList.portal, { type: 33 })).toEqual([])
+  })
+
+  test('a listing that states a refusal and still lists ranges gives its ranges', async () => {
+    const listed = reobtainListPage([[1, 9]]).replace('<form', `${refusedPage('REOBTENCION DE FOLIOS')}<form`)
+    const harness = await signedIn([
+      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: page('form') } },
+      { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: { body: listed } },
+      { url: `${MAULLIN}/rf_reobtencion3_folios`, reply: { body: reobtainDetailPage(1) } },
+    ])
+    expect(await listReobtainableRanges(harness.portal, { type: 33 })).toMatchObject([{ from: 1, to: 9 }])
   })
 
   test('opens each range, because only its detail says it is annulled', async () => {

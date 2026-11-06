@@ -6,15 +6,7 @@ import type { CallOverrides } from '../sii/client'
 import { resolvePortalCompany, type PortalClient } from './client'
 import { isRangeAnnulled, parseReobtainList, reobtainDownloadFields, reobtainFormFields } from './pages/reobtain'
 import { hasCaf } from './pages/stamping'
-import {
-  assertNotRejected,
-  companyFields,
-  portalRequest,
-  rejected,
-  submitForm,
-  withPortalSession,
-  type PortalContext,
-} from './session'
+import { companyFields, portalRequest, rejected, submitForm, withPortalSession, type PortalContext } from './session'
 import type { ObtainedCaf } from './stamping'
 
 /**
@@ -57,8 +49,9 @@ export const listReobtainableInSession = async (
 ): Promise<readonly ReobtainableRange[]> => {
   assertDocumentType(input.type)
   const company = companyFields(resolvePortalCompany(context.portal, input.companyRut))
-  // A plain request: no login on demand, no representation flow and no check for a refusal. With an expired session
-  // the next page has no forms and the list comes back empty, as field behaviour does.
+  // A plain request: no login on demand, no representation flow and no check for a refusal, here or on the listing
+  // that follows. With an expired session, or a page that states a refusal, the listing has no forms and the list
+  // comes back empty, as field behaviour does; a page that lists ranges gives them whatever else it says.
   const entry = await portalRequest(context, 'rf_reobtencion1', 'GET', at(context, 'rf_reobtencion1_folios'))
   const list = await submitForm(
     context,
@@ -68,7 +61,6 @@ export const listReobtainableInSession = async (
     { ...company, PAGINA: '1', COD_DOCTO: String(input.type), ACEPTAR: 'Consultar' },
     refererOf(context, 'rf_reobtencion1_folios'),
   )
-  assertNotRejected(context, list.html)
   const ranges: ReobtainableRange[] = []
   for (const formFields of parseReobtainList(list.html)) {
     const detail = await submitForm(
@@ -138,14 +130,18 @@ export const reobtainCafInSession = async (
 
 /**
  * EN: Lists the authorized ranges the SII lets download again. Annulled ranges appear there unmarked, so learning which
- * are costs one request per range.
+ * are costs one request per range. The requests are the reference's: the listing is asked for with no session handling
+ * on the way in (no login on demand, no choice of the company to represent) and its answer is read for ranges and
+ * nothing else, so a session that expired, or a page that states a refusal, gives an empty list and not an error.
  * ES: Lista los rangos autorizados que el SII deja volver a descargar. Los rangos anulados aparecen sin marcar, así que
- * saber cuáles lo son cuesta una petición por rango.
+ * saber cuáles lo son cuesta una petición por rango. Las peticiones son las de la referencia: el listado se pide sin
+ * manejo de sesión al entrar (sin login a pedido, sin elegir la empresa a representar) y su respuesta se lee buscando
+ * rangos y nada más, así que una sesión vencida, o una página que declara un rechazo, da una lista vacía y no un error.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: document type and company. ES: tipo de documento y empresa.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: the ranges. ES: los rangos.
- * @throws {DteError} EN: `SII_PORTAL_REJECTED`, session and transport codes. ES: `SII_PORTAL_REJECTED`, códigos de sesión y de transporte.
+ * @throws {DteError} EN: block and transport codes. ES: códigos de bloqueo y de transporte.
  */
 export const listReobtainableRanges = (
   portal: PortalClient,
