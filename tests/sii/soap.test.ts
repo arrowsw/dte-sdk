@@ -38,10 +38,11 @@ describe('buildSoapEnvelope', () => {
       '<getToken><item><Semilla>000000000078</Semilla></item><Signature xmlns="http://www.w3.org/2000/09/xmldsig#"><SignatureValue>a&b\'c</SignatureValue></Signature></getToken>'
     const xml = buildSoapEnvelope({ method: 'getToken', params: [{ name: 'pszXml', value: signedSeed }] })
     const carried = /<pszXml>([^]*)<\/pszXml>/.exec(xml)?.[1] ?? ''
-    expect(carried).not.toMatch(/[<>"']/)
+    expect(carried).not.toMatch(/[<>]/)
     expect(carried).toContain('&lt;getToken&gt;&lt;item&gt;&lt;Semilla&gt;000000000078')
-    expect(carried).toContain('xmlns=&quot;http://www.w3.org/2000/09/xmldsig#&quot;')
-    expect(carried).toContain('a&amp;b&apos;c')
+    // Quotes and apostrophes stay as they are: only `&`, `<` and `>` are escaped, as field behaviour does.
+    expect(carried).toContain('xmlns="http://www.w3.org/2000/09/xmldsig#"')
+    expect(carried).toContain("a&amp;b'c")
     expect(decodeXmlEntities(carried)).toBe(signedSeed)
   })
 
@@ -58,9 +59,8 @@ describe('buildSoapEnvelope', () => {
   })
 
   test('headers', () => {
-    // The header value is two literal quote characters, as the WSDL's empty soapAction goes on the wire.
-    expect(SOAP_HEADERS).toEqual({ 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: '""' })
-    expect(SOAP_HEADERS.SOAPAction).toHaveLength(2)
+    // An empty soapAction goes on the wire as an empty header value, as the reference sends it.
+    expect(SOAP_HEADERS).toEqual({ 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: '' })
   })
 })
 

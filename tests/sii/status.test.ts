@@ -1,5 +1,6 @@
 import { DteError } from '../../src/errors'
 import type { SleepFn } from '../../src/sii/client'
+import { UPLOAD_USER_AGENT } from '../../src/catalogs/endpoints'
 import { folioReceived, queryDocumentStatus, queryUploadStatus, waitForUploadStatus } from '../../src/sii/status'
 import type { FakeReply, FakeRoute } from '../support/fake-sii'
 import {
@@ -251,6 +252,7 @@ describe('queryUploadStatus (REST)', () => {
     expect(fake.requests[0]).toMatchObject({ method: 'GET', url: REST_STATUS })
     expect(fake.requests[0].headers.cookie).toBe(`TOKEN=${REST_TOKEN}`)
     expect(fake.requests[0].headers.accept).toBe('application/json')
+    expect(fake.requests[0].headers['user-agent']).toBe(UPLOAD_USER_AGENT)
     expect(status).toEqual({
       code: 'RCH',
       status: 'rejected',
@@ -791,6 +793,17 @@ describe('queryDocumentStatus', () => {
     ])
   })
 
+  test('an explicit consultant replaces the sender', async () => {
+    const { sii, fake } = cachedSii(route(EST_DTE, fx('soap-estdte-dok.xml')))
+    await queryDocumentStatus(sii, { ...document, consultantRut: '12345678-5' })
+    expect(params(fake.requests[0].text).slice(0, 4)).toEqual([
+      ['RutConsultante', '12345678'],
+      ['DvConsultante', '5'],
+      ['RutCompania', '10000004'],
+      ['DvCompania', '0'],
+    ])
+  })
+
   test.each([
     [0.4, '0'],
     [1499.5, '1500'],
@@ -938,6 +951,7 @@ describe('queryDocumentStatus', () => {
     expect(fake.requests[0]).toMatchObject({ method: 'GET', url: REST_DOC })
     expect(fake.requests[0].headers.cookie).toBe(`TOKEN=${REST_TOKEN}`)
     expect(fake.requests[0].headers.accept).toBe('application/json')
+    expect(fake.requests[0].headers['user-agent']).toBe(UPLOAD_USER_AGENT)
     expect(status).toEqual({
       code: 'DOK',
       status: 'received',
@@ -1037,13 +1051,13 @@ describe('folioReceived', () => {
       .replace(/&lt;GLOSA_ESTADO&gt;[^&]*&lt;\/GLOSA_ESTADO&gt;/, `&lt;GLOSA_ESTADO&gt;${gloss}&lt;/GLOSA_ESTADO&gt;`),
   })
 
-  test('asks QueryEstDte as the sender with the generic receiver, today and amount 1', async () => {
+  test('asks QueryEstDte as the company with the generic receiver, today and amount 1', async () => {
     const { sii, fake } = cachedSii(route(EST_DTE, fx('soap-estdte-dok.xml')))
     expect(await folioReceived(sii, { type: 33, folio: 45 })).toBe(true)
     expect(fake.requests).toHaveLength(1)
     expect(params(fake.requests[0].text)).toEqual([
-      ['RutConsultante', '76543210'],
-      ['DvConsultante', '3'],
+      ['RutConsultante', '10000004'],
+      ['DvConsultante', '0'],
       ['RutCompania', '10000004'],
       ['DvCompania', '0'],
       ['RutReceptor', '66666666'],
@@ -1053,6 +1067,17 @@ describe('folioReceived', () => {
       ['FechaEmisionDte', '15112026'],
       ['MontoDte', '1'],
       ['Token', SOAP_TOKEN],
+    ])
+  })
+
+  test('asks as the company, not as the sender, when they differ', async () => {
+    const { sii, fake } = cachedSii(route(EST_DTE, fx('soap-estdte-dok.xml')), { senderRut: '12345678-5' })
+    await folioReceived(sii, { type: 33, folio: 45 })
+    expect(params(fake.requests[0].text).slice(0, 4)).toEqual([
+      ['RutConsultante', '10000004'],
+      ['DvConsultante', '0'],
+      ['RutCompania', '10000004'],
+      ['DvCompania', '0'],
     ])
   })
 

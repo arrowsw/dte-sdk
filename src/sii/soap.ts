@@ -1,4 +1,4 @@
-import { escapeXmlText } from '../xml/escape'
+import { escapeXmlMarkup } from '../xml/escape'
 
 const SOAP_ENVELOPE_NS = 'http://schemas.xmlsoap.org/soap/envelope/'
 
@@ -20,21 +20,20 @@ export type SoapParam = {
 export type SoapEnvelopeInput = {
   /** EN: Operation name (`getSeed`, `getEstUp`, `ingresarAceptacionReclamoDoc`…). ES: Nombre de la operación. */
   readonly method: string
-  /** EN: Parameters; text is XML-escaped. ES: Parámetros; el texto se escapa como XML. */
+  /** EN: Parameters; text is escaped with `&`, `<` and `>` only. ES: Parámetros; el texto se escapa como XML. */
   readonly params?: readonly SoapParam[]
   /** EN: Operation namespace (WSRECLAMO, prefix `ws`); omitted for DTEWS, which accepts unqualified operations. ES: Namespace de la operación (WSRECLAMO, prefijo `ws`); se omite en DTEWS, que acepta operaciones sin calificar. */
   readonly namespace?: string
 }
 
 /**
- * EN: Headers of every SOAP 1.1 call to the SII. SOAP 1.1 writes an empty `soapAction` as `SOAPAction: ""`, two literal
- * quote characters, which is what the value holds.
- * ES: Cabeceras de toda llamada SOAP 1.1 al SII. SOAP 1.1 escribe un `soapAction` vacío como `SOAPAction: ""`, dos
- * comillas literales, que es lo que contiene el valor.
+ * EN: Headers of every SOAP 1.1 call to the SII. The `SOAPAction` value is empty, as field behaviour sends it.
+ * ES: Cabeceras de toda llamada SOAP 1.1 al SII. El valor de `SOAPAction` va vacío, como lo manda el comportamiento
+ * de campo.
  */
 export const SOAP_HEADERS: Readonly<Record<string, string>> = {
   'Content-Type': 'text/xml; charset=utf-8',
-  SOAPAction: '""',
+  SOAPAction: '',
 }
 
 /**
@@ -42,7 +41,7 @@ export const SOAP_HEADERS: Readonly<Record<string, string>> = {
  * ES: Arma un sobre SOAP 1.1 (texto UTF-8) con una operación rpc y sus parámetros como hijos sin calificar.
  */
 export const buildSoapEnvelope = ({ method, params = [], namespace }: SoapEnvelopeInput): string => {
-  const body = params.map(({ name, value }) => `<${name}>${escapeXmlText(value)}</${name}>`).join('')
+  const body = params.map(({ name, value }) => `<${name}>${escapeXmlMarkup(value)}</${name}>`).join('')
   const tag = namespace === undefined ? method : `ws:${method}`
   const declaration = namespace === undefined ? '' : ` xmlns:ws="${namespace}"`
   return (

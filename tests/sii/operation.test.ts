@@ -145,7 +145,7 @@ describe('soapCall', () => {
     expect(await soapCall(sii, input)).toBe('Acción &lt; señal')
     expect(fake.requests[0].method).toBe('POST')
     expect(fake.requests[0].headers['content-type']).toBe('text/xml; charset=utf-8')
-    expect(fake.requests[0].headers.soapaction).toBe('""')
+    expect(fake.requests[0].headers.soapaction).toBe('')
     // `ñ` is the two bytes C3 B1 on the wire (UTF-8), not the single byte F1 the replies use.
     expect(Array.from(fake.requests[0].body!)).toEqual(Array.from(encodeUtf8(buildSoapEnvelope(input))))
     expect(Array.from(fake.requests[0].body!)).toContain(0xc3)

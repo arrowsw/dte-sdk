@@ -1,4 +1,5 @@
 import { FINAL_CONSUMER_RUT } from '../catalogs/codes'
+import { UPLOAD_USER_AGENT } from '../catalogs/endpoints'
 import { isDocumentType, isReceipt, type DocumentType } from '../catalogs/document-types'
 import {
   classifyDocumentStatus,
@@ -152,6 +153,8 @@ export type QueryDocumentStatusInput = {
   readonly companyRut?: string
   /** EN: Receiver RUT. ES: `RutReceptor` / `rut_receptor` — RUT del receptor. */
   readonly receiverRut: string
+  /** EN: RUT that asks (SOAP only); defaults to the client's sender. ES: `RutConsultante` — RUT que consulta (solo SOAP); por defecto el remitente del cliente. */
+  readonly consultantRut?: string
   /** EN: Document type. ES: `TipoDte` / `tipo` — Tipo de documento. */
   readonly type: DocumentType
   /** EN: Folio. ES: `FolioDte` / `folio` — Folio del documento. */
@@ -322,6 +325,7 @@ const soapUploadStatus = async (
 const restHeaders = (token: string): Readonly<Record<string, string>> => ({
   Cookie: `TOKEN=${token}`,
   Accept: 'application/json',
+  'User-Agent': UPLOAD_USER_AGENT,
 })
 
 const restJson = async (
@@ -474,6 +478,7 @@ export const waitForUploadStatus = async (
 }
 
 type DocumentQuery = {
+  readonly consultantRut: SiiRut
   readonly companyRut: SiiRut
   readonly receiverRut: SiiRut
   readonly type: DocumentType
@@ -496,7 +501,9 @@ const buildDocumentQuery = (sii: SiiClient, input: QueryDocumentStatusInput): Do
   if (!Number.isSafeInteger(input.folio) || input.folio <= 0) throw new DteError('INVALID_FOLIO', { field: 'folio' })
   const amount = Math.round(input.totalAmount)
   if (!Number.isSafeInteger(amount) || amount < 0) throw new DteError('INVALID_AMOUNT', { field: 'totalAmount' })
-  return { companyRut, receiverRut, type: input.type, folio: input.folio, issueDate, amount }
+  const consultantRut =
+    input.consultantRut === undefined ? sii.senderRut : toSiiRut(input.consultantRut, 'consultantRut')
+  return { consultantRut, companyRut, receiverRut, type: input.type, folio: input.folio, issueDate, amount }
 }
 
 const soapDocumentStatus = async (
@@ -506,8 +513,8 @@ const soapDocumentStatus = async (
   attempt: number,
   overrides?: CallOverrides,
 ): Promise<DocumentStatus> => {
-  // The consultant is whoever authenticates, i.e. the sender, not the company the document belongs to.
-  const consultant = splitSiiRut(sii.senderRut)
+  // By default the consultant is whoever authenticates, i.e. the sender, not the company the document belongs to.
+  const consultant = splitSiiRut(query.consultantRut)
   const company = splitSiiRut(query.companyRut)
   const receiver = splitSiiRut(query.receiverRut)
   const { day, month, year } = dateParts(query.issueDate)
@@ -606,13 +613,13 @@ export const queryDocumentStatus = async (
 }
 
 /**
- * EN: Whether the SII already holds a document with this type and folio: `QueryEstDte` (always SOAP) with the
- * final-consumer receiver, today's date in Chile and amount 1 answers by folio existence first. `FAU` is `false`
+ * EN: Whether the SII already holds a document with this type and folio: `QueryEstDte` (always SOAP), asked as the
+ * company itself, with the final-consumer receiver, today's date in Chile and amount 1 answers by folio existence first. `FAU` is `false`
  * (the folio is free); `DOK` and `DNK`, or a gloss that says "recibido" (and not "no recibido"), are `true` (the
  * folio is used); anything else is `null`: undetermined, the caller decides. Prevents reusing a folio obtained again
  * from a CAF, which the SII rejects.
- * ES: Si el SII ya tiene un documento con este tipo y folio: `QueryEstDte` (siempre SOAP) con el receptor consumidor
- * final, la fecha de hoy en Chile y monto 1 responde primero por existencia del folio. `FAU` es `false` (el folio
+ * ES: Si el SII ya tiene un documento con este tipo y folio: `QueryEstDte` (siempre SOAP), consultando como la propia
+ * empresa (`RutConsultante`), con el receptor consumidor final, la fecha de hoy en Chile y monto 1 responde primero por existencia del folio. `FAU` es `false` (el folio
  * está libre); `DOK` y `DNK`, o una glosa que diga "recibido" (y no "no recibido"), son `true` (el folio está usado);
  * todo lo demás es `null`: indeterminado, decide el llamador. Evita reutilizar un folio reobtenido de un CAF, que el
  * SII rechaza.
@@ -627,6 +634,8 @@ export const folioReceived = async (
     sii,
     {
       companyRut: input.companyRut,
+      // The company asks about its own folio, as field behaviour does, whoever signs in.
+      consultantRut: resolveCompanyRut(sii, input.companyRut),
       receiverRut: FINAL_CONSUMER_RUT,
       type: input.type,
       folio: input.folio,
