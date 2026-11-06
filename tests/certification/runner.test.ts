@@ -1,3 +1,4 @@
+import { DteError } from '../../src/errors'
 import { runCertification } from '../../src/certification/runner'
 import type { CertificationState } from '../../src/certification/state'
 import { fullPlan } from '../support/certification-fixtures'
@@ -150,11 +151,13 @@ test('resumed at the books: approved books, the advance, the simulation sent, de
     [
       ...history(),
       entry,
-      // While the stage reads SIMULACION each progress read asks for the declaration form once more.
-      avance2([BOOKS_APPROVED, page('x'), page('x'), page('x'), page('x'), page('x'), SIM_FORM, SIM_KEPT]),
+      // The books are read, and the sets declared again with them (the page that answers is no form); the progress is
+      // read before the advance and after it, and while the stage reads SIMULACION each progress read asks for the
+      // declaration form once more.
+      avance2([BOOKS_APPROVED, ...repeat(page('x'), 7), SIM_FORM, SIM_KEPT]),
       post('pe_avance4', ADVANCE_ANSWERS.advanced),
       avance5,
-      avance6([progressPage('SIMULACION', {}), IN_SIMULATION], () => AT_EXCHANGE),
+      avance6([progressPage('SET DE PRUEBAS', {}), progressPage('SIMULACION', {}), IN_SIMULATION], () => AT_EXCHANGE),
       ...stampingRoutes(),
       uploadRoute(reception('777')),
       post('pe_avance3', DECLARATION_ANSWERS.success),
@@ -314,6 +317,61 @@ test('the simulation: a refused declaration, a rejected wait, a confirmed one sk
   const forced = await runCertification(unknown.deps, { until: 'books' })
   expect(forced).toMatchObject({ stopped: 'until' })
   expect(forced.state.stage).toBe('simulation')
+})
+
+test('after the books the next stage is asked for whatever their outcome; a portal that does not move stops the run', async () => {
+  const state = stateWith({ plan, sets: allSets, stage: 'books' })
+  // The three mandatory books approved, the exempt one neither approved nor sent: the books phase ends rejected.
+  const exemptLeft = BOOKS_APPROVED.replace(
+    '<tr><td><font>LIBRO DE COMPRAS PARA EXENTOS</font></td><td><b>REVISADO CONFORME</b></td></tr>',
+    '',
+  )
+  // Built anew for each run: a route keeps count of its calls.
+  const books = () => [
+    ...history(),
+    entry,
+    avance2([exemptLeft]),
+    uploadRoute({ status: 500, body: 'down' }),
+    get('pe_avance5', ...repeat(page('p5'), 100)),
+  ]
+  const refused = await seeded(
+    [...books(), post('pe_avance4', ADVANCE_ANSWERS.failed), avance6([], () => progressPage('SET DE PRUEBAS', {}))],
+    state,
+  )
+  const stopped = await runCertification(refused.deps)
+  expect(stopped).toMatchObject({
+    stopped: 'rejected',
+    detail: 'No es posible avanzar: faltan sets por revisar.',
+    state: { stage: 'books' },
+  })
+  expect(refused.steps().slice(-3)).toEqual(['BOOKS_DONE', 'ADVANCE_WAITING', 'ADVANCE_DONE'])
+  // The portal already stands at the simulation: "already there" moves the run on.
+  const there = await seeded(
+    [
+      ...books(),
+      post('pe_avance4', ADVANCE_ANSWERS.unchanged),
+      avance6([], () => progressPage('SIMULACION', {}, { confirm: true })),
+    ],
+    state,
+  )
+  await expect(runCertification(there.deps, { until: 'books' })).resolves.toMatchObject({
+    stopped: 'until',
+    state: { stage: 'simulation' },
+  })
+  // A progress page that never reads: the advance is never asked for.
+  const down = await seeded(
+    [
+      ...books(),
+      {
+        url: `${MAULLIN}/pe_avance6`,
+        method: 'POST' as const,
+        reply: () => new DteError('TRANSPORT_FAILED', { reason: 'ECONNRESET' }),
+      },
+    ],
+    state,
+  )
+  await expect(runCertification(down.deps)).resolves.toMatchObject({ stopped: 'timedOut', detail: 'progress' })
+  expect(down.urls().some((url) => url.endsWith('pe_avance4'))).toBe(false)
 })
 
 test('an error of a step is reported and rethrown; the company comes from the issuer when the client names none', async () => {

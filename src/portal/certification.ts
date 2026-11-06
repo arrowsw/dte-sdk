@@ -280,8 +280,8 @@ const enter = async (context: PortalContext, company: Company): Promise<PortalPa
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: the company. ES: la empresa.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
- * @returns EN: the sets and whether the required ones are approved. ES: los sets y si los obligatorios están aprobados.
- * @throws {DteError} EN: `SII_PORTAL_REJECTED`, `SII_PORTAL_UNEXPECTED_PAGE`, session and transport codes. ES: los mismos códigos.
+ * @returns EN: the sets and whether the required ones are approved; a page without rows gives none. ES: los sets y si los obligatorios están aprobados; una página sin filas no da ninguno.
+ * @throws {DteError} EN: session and transport codes. ES: los códigos de sesión y de transporte.
  */
 export const queryCertificationSets = (
   portal: PortalClient,
@@ -290,8 +290,8 @@ export const queryCertificationSets = (
 ): Promise<CertificationSets> =>
   withPortalSession(portal, 'queryCertificationSets', overrides, async (context) => {
     const page = await enter(context, companyFields(resolvePortalCompany(portal, input.companyRut)))
+    // A page that lists nothing is still an answer: no set and no book, none approved.
     const sets = parseCertificationSets(page.html)
-    if (sets.length === 0) throw unexpectedPage(context, 'pe_avance2', page.html)
     return {
       sets,
       allSetsApproved: allApproved(sets, REQUIRED_SETS),

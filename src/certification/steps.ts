@@ -1,5 +1,5 @@
 import { SET_KEYS, type CertificationStage, type DeclarationKey, type SetKey } from '../catalogs/certification'
-import { DteError, errorMessage } from '../errors'
+import { DteError, errorMessage, isDteError } from '../errors'
 import {
   advanceStage,
   declareCompliance,
@@ -10,6 +10,7 @@ import {
   type DeclarationEntry,
   type DeclarationOutcome,
   type DeclarationResult,
+  type ProgressReport,
 } from '../portal/certification'
 import { saysNotProcessedYet, saysRejection } from '../portal/pages/certification-progress'
 import { queryUploadStatus } from '../sii/status'
@@ -23,7 +24,7 @@ import {
   simulationFolioNeeds,
   type HeldCaf,
 } from './folios-step'
-import { queryFieldUploadState, type FieldUploadState } from './field-status'
+import { fieldDiagnosis, queryFieldUploadState } from './field-status'
 import { uploadForTrackId } from './field-upload'
 import { issueTestSet, type IssuableSetPlan, type IssuedCase } from './issue-set'
 import { issueSimulation } from './simulation'
@@ -53,6 +54,8 @@ const DECLARATION_ATTEMPTS = 10
 const DECLARATION_INTERVAL_MS = 5000
 const SETS_APPROVAL_ATTEMPTS = 5
 const SETS_APPROVAL_INTERVAL_MS = 10000
+const ADVANCE_READ_ATTEMPTS = 30
+const ADVANCE_READ_INTERVAL_MS = 10000
 const SIMULATION_APPROVAL_ATTEMPTS = 30
 const SIMULATION_APPROVAL_INTERVAL_MS = 10000
 const SIMULATION_ARTEFACT = 'simulacion/envio-simulacion.xml'
@@ -105,6 +108,7 @@ export const obtainTestSet = async (
     setText: text,
     attentionNumber: sets[0].attentionNumber,
     plan,
+    setReadDate: rt.now().toISOString().slice(0, 10),
     stage: 'testSets',
   })
   rt.emit({ step: 'SETS_LOADED' })
@@ -220,9 +224,6 @@ export const entryOf = (trackId: string, now: Date): { readonly trackId: string;
   date: chileDate(now),
 })
 
-const DIAGNOSIS_CLASS = (state: FieldUploadState): string =>
-  state.rejected ? 'rejected' : state.successful ? 'accepted' : state.intermediate ? 'pending' : 'unknown'
-
 /**
  * EN: The SOAP status of every declared envelope, asked once each, for the diagnosis of a content error: never fatal.
  * The answer as it came goes to the artefacts.
@@ -240,8 +241,7 @@ export const diagnose = async (
     try {
       const state = await queryFieldUploadState(rt.sii, entry.trackId)
       if (state.raw !== null) await rt.store.writeArtefact(`${prefix}-estado-${key}-${entry.trackId}.xml`, state.raw)
-      if (state.code !== null)
-        diagnosis[entry.trackId] = { code: state.code, status: DIAGNOSIS_CLASS(state), message: state.message ?? '' }
+      if (state.code !== null) diagnosis[entry.trackId] = fieldDiagnosis(state)
     } catch (error) {
       rt.portal.logger.warn('certification diagnosis failed', { trackId: entry.trackId, reason: errorMessage(error) })
     }
@@ -403,29 +403,53 @@ export const waitForTestSetsApproval = async (
 export const laterStage = (current: CertificationStage, portal: CertificationStage): CertificationStage =>
   STAGE_ORDER.indexOf(portal) > STAGE_ORDER.indexOf(current) ? portal : current
 
+// Reads the progress page, or null when it cannot be read.
+const progressOrNull = async (rt: Runtime, what: string): Promise<ProgressReport | null> => {
+  try {
+    return await readProgress(rt.portal)
+  } catch (error) {
+    if (!isDteError(error)) throw error
+    rt.portal.logger.warn(what, { reason: errorMessage(error) })
+    return null
+  }
+}
+
 /**
- * EN: Asks the portal to advance the application and reads where it stands. "Already in that step" is fine; a
- * refusal throws `SII_PORTAL_REJECTED` with `advanceRefused`.
- * ES: Pide al portal avanzar la postulación y lee dónde quedó. "Ya está en ese paso" está bien; una negativa lanza
- * `SII_PORTAL_REJECTED` con `advanceRefused`.
+ * EN: Asks the portal for the next stage after the books, as the reference does: the progress page is read, up to 30
+ * times 10 s apart while it cannot be read; on the first page that reads the advance is asked for at once, whatever
+ * the page says of the books (the portal decides); then the page is read again for the stage, and the state's stage
+ * moves to the portal's when that is later. Nothing here throws for a portal answer: an advance the portal refuses, or
+ * that cannot be asked, is `failed` with its sentence; "already in that step" is `unchanged`; no page read in 30 tries
+ * is `timedOut`.
+ * ES: Pide al portal la etapa siguiente después de los libros, como lo hace la referencia: se lee la página de avance,
+ * hasta 30 veces cada 10 s mientras no se pueda leer; con la primera página que se lee se pide el avance de inmediato,
+ * diga lo que diga la página de los libros (decide el portal); luego se lee de nuevo la página para saber la etapa, y
+ * la etapa del estado pasa a la del portal cuando esa es posterior. Nada aquí lanza por una respuesta del portal: un
+ * avance que el portal niega, o que no se pudo pedir, es `failed` con su frase; "ya se encuentra en ese paso" es
+ * `unchanged`; ninguna página leída en 30 intentos es `timedOut`.
  */
 export const advanceToNextStage = async (
   deps: CertificationDependencies,
   state: CertificationState,
-): Promise<StepResult<'advanced' | 'unchanged'>> => {
+): Promise<StepResult<'advanced' | 'unchanged' | 'failed' | 'timedOut'>> => {
   const rt = runtime(deps)
   rt.emit({ step: 'ADVANCE_WAITING' })
-  const answer = await advanceStage(rt.portal)
-  if (answer.outcome === 'failed')
-    throw new DteError('SII_PORTAL_REJECTED', {
-      rejection: 'advanceRefused',
-      operation: 'advanceToNextStage',
-      portalMessage: answer.message,
+  for (let attempt = 1; attempt <= ADVANCE_READ_ATTEMPTS; attempt += 1) {
+    if ((await progressOrNull(rt, 'certification progress before the advance failed')) === null) {
+      await rt.sleep(ADVANCE_READ_INTERVAL_MS)
+      continue
+    }
+    const answer = await advanceStage(rt.portal).catch((error: unknown) => {
+      if (!isDteError(error)) throw error
+      return { outcome: 'failed' as const, message: errorMessage(error) }
     })
-  const report = await readProgress(rt.portal)
-  rt.emit({ step: 'ADVANCE_DONE', stage: report.stage ?? '' })
-  const next = await saveState(rt, state, { stage: laterStage(state.stage, report.stageKey) })
-  return { state: next, outcome: answer.outcome, detail: answer.message }
+    const report = await progressOrNull(rt, 'certification progress after the advance failed')
+    rt.emit({ step: 'ADVANCE_DONE', stage: report?.stage ?? '' })
+    const next =
+      report === null ? state : await saveState(rt, state, { stage: laterStage(state.stage, report.stageKey) })
+    return { state: next, outcome: answer.outcome, detail: answer.message }
+  }
+  return { state, outcome: 'timedOut', detail: 'progress' }
 }
 
 const atLeast = (stage: CertificationStage, floor: CertificationStage): boolean =>
