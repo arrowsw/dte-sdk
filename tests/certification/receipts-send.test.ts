@@ -6,6 +6,7 @@ import {
   type ReceiptsProgressEvent,
 } from '../../src/certification/receipts-send'
 import { parseReceiptsTestSet } from '../../src/certification/receipts-set'
+import { DteError } from '../../src/errors'
 import { cafFor, certificate, issuer, resolution } from '../support/certification-fixtures'
 import {
   certificationHarness,
@@ -377,6 +378,36 @@ describe('sendReceiptsSet', () => {
     ])
     expect(sleeps).toEqual([20000, ...repeat(30000, 10)])
     expect(harness.warnings()).toContain('receipts folio consumption not accepted')
+  })
+
+  test('an upload lost to a network failure is sent again with the retries of the run, for the envelope and for the report', async () => {
+    const dropped = new DteError('TRANSPORT_FAILED', { reason: 'ECONNRESET' })
+    const envelope = await run(
+      [dropped, dropped, reception('111'), reception('222')],
+      [estUp('EPR', '111'), estUp('EPR', '222')],
+    )
+    expect(envelope.result).toMatchObject({ outcome: 'sent', envelopeTrackId: '111', consumptionTrackId: '222' })
+    expect(envelope.uploaded).toHaveLength(4)
+    const report = await run([reception('111'), dropped, reception('222')], [estUp('EPR', '111'), estUp('EPR', '222')])
+    expect(report.result).toMatchObject({ outcome: 'sent', consumptionTrackId: '222', consumptionSequence: 100 })
+    expect(report.uploaded).toHaveLength(3)
+    const gone = new DteError('TRANSPORT_FAILED', { reason: 'ECONNRESET' })
+    const hopeless = await run([reception('111'), ...Array.from({ length: 8 }, () => gone)], [estUp('EPR', '111')])
+    expect(hopeless.result.outcome).toBe('consumptionFailed')
+    expect(hopeless.uploaded).toHaveLength(1 + 8)
+  })
+
+  test('a refused connection is not sent again, for the envelope or for the report', async () => {
+    const refusedConnection = new DteError('TRANSPORT_FAILED', { reason: 'ECONNREFUSED' })
+    const harness = await certificationHarness([uploadRoute(refusedConnection, reception('111'))])
+    await expect(sendReceiptsSet(harness.deps.sii, issued, { sleep: async () => undefined })).rejects.toMatchObject({
+      code: 'TRANSPORT_FAILED',
+      details: { reason: 'ECONNREFUSED' },
+    })
+    expect(harness.fake.requests.filter((request) => request.url.endsWith('DTEUpload'))).toHaveLength(1)
+    const report = await run([reception('111'), refusedConnection, reception('222')], [estUp('EPR', '111')])
+    expect(report.result).toMatchObject({ outcome: 'consumptionFailed', envelopeTrackId: '111' })
+    expect(report.uploaded).toHaveLength(2)
   })
 
   test('the waits are the client’s by default, and an envelope without receipts is refused before any upload', async () => {

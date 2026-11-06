@@ -1,12 +1,12 @@
 import { createFolioConsumption, signFolioConsumption } from '../books/folio-consumption'
 import type { SignedEnvelope } from '../envelope/sign'
-import { receptionStatusMessage } from '../catalogs/reception-status'
-import { DteError, errorMessage, isDteError } from '../errors'
+import { DteError, errorMessage } from '../errors'
 import type { FolioConsumptionEntry } from '../model/book'
 import type { SiiClient } from '../sii/client'
-import { parseReceptionResponse, uploadEnvelope, uploadFolioConsumption, type UploadReceipt } from '../sii/upload'
+import { uploadEnvelope, uploadFolioConsumption } from '../sii/upload'
 import { parseXmlWithoutNamespaces } from '../xml/parse'
 import { queryFieldUploadState, type FieldUploadState } from './field-status'
+import { uploadAsField } from './field-upload'
 
 const ENVELOPE_WAIT_MS = 20000
 const CONSUMPTION_WAIT_MS = 30000
@@ -181,58 +181,6 @@ const glossOf = (state: FieldUploadState): string => GLOSS_ELEMENT.exec(state.ra
 const detailOf = (state: FieldUploadState): string =>
   state.answered ? `${glossOf(state)} (${state.code})` : `${state.message}`
 
-// What the field makes of the reception of a file: it has a track id, or it is a duplicate the SII names no track id
-// for. `duplicate` also marks a track id taken from a duplicate reply.
-type FieldReception = { readonly trackId: string | null; readonly duplicate: boolean }
-
-const TRACK_ID_ELEMENT = /<TRACKID>(\d+)<\/TRACKID>/i
-// The first error line of a `STATUS` 7 says whether it is a real charset or schema refusal.
-const REFUSAL_DETAIL = /CHR-00001|SCH-00001|cvc-/
-
-// `STATUS` 7 is a duplicate unless its first error line names a refusal; with a `TRACKID` element the track id is
-// recovered and the upload goes on as a sent one, without it the SII named none.
-const readStatusSeven = (errors: readonly string[], trackId: string | undefined): FieldReception | null =>
-  REFUSAL_DETAIL.test(errors[0] ?? '') ? null : { trackId: trackId ?? null, duplicate: true }
-
-// The upload client reads more replies as duplicates than the field does, so the reply is read again as the field
-// reads it: only `STATUS` 0 with a `TRACKID` element is a sent file, `STATUS` 7 a duplicate, and `STATUS` 99 and
-// anything else a refusal.
-const fieldReception = async (upload: () => Promise<UploadReceipt>, operation: string): Promise<FieldReception> => {
-  let receipt: UploadReceipt
-  try {
-    receipt = await upload()
-  } catch (error) {
-    // A `STATUS` 7 the client refused is still a duplicate, or a sent file, for the field, which reads only the first
-    // error line and the `TRACKID` element.
-    const reading =
-      isDteError(error) && error.code === 'SII_UPLOAD_REJECTED' && error.details.status === 7
-        ? readStatusSeven(
-            error.details.errors as readonly string[],
-            (error.details.trackIdElement as string | null) ?? undefined,
-          )
-        : null
-    if (reading === null) throw error
-    return reading
-  }
-  const { status, errors } = parseReceptionResponse(receipt.raw, operation)
-  const trackId = TRACK_ID_ELEMENT.exec(receipt.raw)?.[1]
-  const reading =
-    status === '7'
-      ? readStatusSeven(errors, trackId)
-      : status === '0' && trackId !== undefined
-        ? { trackId, duplicate: false }
-        : null
-  if (reading === null)
-    throw new DteError('SII_UPLOAD_REJECTED', {
-      status: Number(status),
-      errors,
-      fileName: receipt.fileName,
-      operation,
-      message: receptionStatusMessage(status),
-    })
-  return reading
-}
-
 type ConsumptionPart = Pick<
   ReceiptsSendResult,
   | 'outcome'
@@ -262,9 +210,10 @@ const sendConsumption = async (
   for (let attempt = 0; attempt < MAX_CONSUMPTION_ATTEMPTS; attempt += 1) {
     const sequence = start + attempt
     const xml = consumptionXml(sii, envelope, sequence)
-    const receipt = await fieldReception(() => uploadFolioConsumption(sii, { xml }), 'uploadFolioConsumption').catch(
-      (error: unknown) => errorMessage(error),
-    )
+    const receipt = await uploadAsField(
+      (overrides) => uploadFolioConsumption(sii, { xml }, overrides),
+      'uploadFolioConsumption',
+    ).catch((error: unknown) => errorMessage(error))
     if (typeof receipt === 'string') {
       consumptions.push({ sequence, xml, trackId: null, outcome: 'failed', detail: receipt })
       return {
@@ -318,7 +267,8 @@ const sendConsumption = async (
  * refusal ends it as `consumptionFailed`; an uploaded report is given 30 s and its status read once: a success or an
  * intermediate state (a query error code or `0` too) accepts it, a query that never got through accepts it, and
  * anything else (a rejection, no state, an unknown state) tries the next sequence number, unless its gloss speaks of
- * authorisation or signing. Ten attempts without an accepted report still end in `sent`.
+ * authorisation or signing. Ten attempts without an accepted report still end in `sent`. Each upload is sent again
+ * when the network fails, with the retries of the certification run (`FIELD_UPLOAD_RETRY`), and only then.
  * ES: Envía el set de boletas como lo hace el campo: sube el sobre y lee la respuesta como la lee el campo (`STATUS` 0
  * con track id es enviado; `STATUS` 7 con track id también se toma como enviado, y sin él es un duplicado que salta al
  * reporte sin track id; `STATUS` 99 y cualquier otra respuesta es una falla y lanza), espera 20 s y lee una vez el
@@ -329,7 +279,8 @@ const sendConsumption = async (
  * `consumptionFailed`; a un reporte subido se le dan 30 s y se lee su estado una vez: un éxito o un estado intermedio
  * (también un código de error de la consulta o `0`) lo acepta, una consulta que nunca llegó lo acepta, y cualquier
  * otra cosa (un rechazo, ningún estado, un estado desconocido) prueba la secuencia siguiente, salvo que su glosa hable
- * de autorización o firma. Diez intentos sin reporte aceptado terminan igual en `sent`.
+ * de autorización o firma. Diez intentos sin reporte aceptado terminan igual en `sent`. Cada subida se vuelve a enviar
+ * cuando la red falla, con los reintentos de la corrida de certificación (`FIELD_UPLOAD_RETRY`), y solo entonces.
  * @param sii EN: the phase 2 client on the certification environment. ES: el cliente de la fase 2 en el ambiente de certificación.
  * @param issued EN: the set of `issueReceiptsSet`, or anything with its signed envelope. ES: el set de `issueReceiptsSet`, o cualquier cosa con su sobre firmado.
  * @param options EN: the first sequence number, the wait function, the progress events. ES: la primera secuencia, la función de espera, los eventos de progreso.
@@ -342,8 +293,8 @@ export const sendReceiptsSet = async (
 ): Promise<ReceiptsSendResult> => {
   const sleep = options.sleep ?? ((ms: number) => sii.sleep(ms))
   const envelope = readReceiptsEnvelope(issued.envelope.xml)
-  const upload = await fieldReception(
-    () => uploadEnvelope(sii, { envelope: issued.envelope, channel: 'soap' }),
+  const upload = await uploadAsField(
+    (overrides) => uploadEnvelope(sii, { envelope: issued.envelope, channel: 'soap' }, overrides),
     'uploadEnvelope',
   )
   const sent = { envelopeTrackId: upload.trackId, envelopeDuplicate: upload.duplicate }
