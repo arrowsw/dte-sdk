@@ -500,3 +500,86 @@ describe('the guide book', () => {
     )
   })
 })
+
+const section = (xml: string, tag: string): string => new RegExp(`<${tag}>[\\s\\S]*?</${tag}>`).exec(xml)?.[0] ?? ''
+const countOf = (xml: string, tag: string): number => xml.split(`<${tag}>`).length - 1
+
+describe('adjustment submissions', () => {
+  let basic: IssuedSet
+  let guide: IssuedSet
+  beforeAll(async () => {
+    basic = await issueTestSet(plan.basic!, issueOptions())
+    guide = await issueTestSet(plan.guide!, issueOptions())
+  }, 60_000)
+
+  const sectionContent = (xml: string, tag: 'ResumenSegmento' | 'ResumenPeriodo'): string =>
+    section(xml, tag).replace(/Segmento/g, 'Periodo')
+
+  test('the sales book adjusts with the earlier totals carried into the period summary', async () => {
+    const first = createCertificationSalesBook(basic, { ...bookInput, receiver: bookReceiver })
+    const book = createCertificationSalesBook(basic, {
+      ...bookInput,
+      receiver: bookReceiver,
+      submission: 'adjustment',
+      previousTotals: first.periodTotals!,
+    })
+    expect(book.cover.submission).toBe('adjustment')
+    expect(book.xml).toContain('<TipoEnvio>AJUSTE</TipoEnvio>')
+    expect(countOf(book.xml, 'Operacion')).toBe(8)
+    expect(book.xml.indexOf('<ResumenSegmento>')).toBeLessThan(book.xml.indexOf('<ResumenPeriodo>'))
+    expect(book.segmentTotals?.[0]).toMatchObject({ type: 33, documentCount: 3, totalAmount: 920782 })
+    expect(book.periodTotals?.[0]).toMatchObject({ type: 33, documentCount: 6, totalAmount: 1841564 })
+    expect(await validateAgainstXsd(book.xml, 'LibroCV')).toEqual([])
+  })
+
+  test('the sales book adjusts with no earlier totals: both summaries are the lines', async () => {
+    const book = createCertificationSalesBook(basic, {
+      ...bookInput,
+      receiver: bookReceiver,
+      submission: 'adjustment',
+    })
+    expect(sectionContent(book.xml, 'ResumenSegmento')).toBe(sectionContent(book.xml, 'ResumenPeriodo'))
+    expect(book.periodTotals?.[0]).toMatchObject({ type: 33, documentCount: 3 })
+    expect(await validateAgainstXsd(book.xml, 'LibroCV')).toEqual([])
+  })
+
+  test('the purchase book adjusts: the segment has no factor and the period sums the credits of both submissions', async () => {
+    const first = createCertificationPurchaseBook(plan.purchaseBook!, bookInput)
+    const book = createCertificationPurchaseBook(plan.purchaseBook!, {
+      ...bookInput,
+      submission: 'adjustment',
+      previousTotals: first.periodTotals!,
+    })
+    expect(countOf(book.xml, 'Operacion')).toBe(6)
+    expect(section(book.xml, 'ResumenSegmento')).not.toContain('FctProp')
+    expect(section(book.xml, 'ResumenSegmento')).not.toContain('TotCredIVAUsoComun')
+    expect(section(book.xml, 'ResumenSegmento')).toContain('<TotIVAUsoComun>2280</TotIVAUsoComun>')
+    expect(section(book.xml, 'ResumenPeriodo')).toContain('<TotIVAUsoComun>4560</TotIVAUsoComun>')
+    expect(section(book.xml, 'ResumenPeriodo')).toContain('<FctProp>0.6</FctProp>')
+    expect(section(book.xml, 'ResumenPeriodo')).toContain('<TotCredIVAUsoComun>2736</TotCredIVAUsoComun>')
+    expect(book.periodTotals?.[1]).toMatchObject({
+      type: 33,
+      nonRecoverableVat: [{ code: 4, count: 2, amount: 760 }],
+    })
+    expect(await validateAgainstXsd(book.xml, 'LibroCV')).toEqual([])
+  })
+
+  test('the purchase book for exempt taxpayers adjusts with no earlier totals, repeating the summary in both sections', async () => {
+    const book = createCertificationPurchaseBook(plan.exemptPurchaseBook!, { ...bookInput, submission: 'adjustment' })
+    expect(sectionContent(book.xml, 'ResumenSegmento')).toBe(sectionContent(book.xml, 'ResumenPeriodo'))
+    expect(countOf(book.xml, 'Operacion')).toBe(5)
+    expect(await validateAgainstXsd(book.xml, 'LibroCV')).toEqual([])
+  })
+
+  test('the guide book adjusts: only the modified guide carries the operation and the summary is written twice', async () => {
+    const book = createCertificationGuideBook(guide, { ...bookInput, receiver: bookReceiver, submission: 'adjustment' })
+    expect(book.cover.submission).toBe('adjustment')
+    expect(book.xml).toContain('<TipoEnvio>AJUSTE</TipoEnvio>')
+    expect(countOf(book.xml, 'Operacion')).toBe(1)
+    expect(book.entries.map((entry) => entry.adjustment)).toEqual([undefined, 'add', undefined])
+    expect(sectionContent(book.xml, 'ResumenSegmento')).toBe(sectionContent(book.xml, 'ResumenPeriodo'))
+    expect(section(book.xml, 'ResumenPeriodo')).toContain('<TotGuiaAnulada>1</TotGuiaAnulada>')
+    expect(book.segmentTotals).toEqual(book.periodTotals)
+    expect(await validateAgainstXsd(book.xml, 'LibroGuia')).toEqual([])
+  })
+})

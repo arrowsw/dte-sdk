@@ -25,9 +25,9 @@ export type CertificationBookInput = {
   readonly certificate: Certificate
   /** EN: Clock for the book id and signature timestamp. ES: Reloj para el id del libro y la marca de la firma. */
   readonly now?: () => Date
-  /** EN: `total` (default) or `adjustment`, for a period the SII already holds; the guide book is always total. ES: `TipoEnvio` — `total` (por defecto) o `adjustment`, para un período que el SII ya tiene; el libro de guías siempre es total. */
+  /** EN: `total` (default) or `adjustment`, for a period the SII already holds; any of the three books can adjust. ES: `TipoEnvio` — `total` (por defecto) o `adjustment`, para un período que el SII ya tiene; cualquiera de los tres libros puede ajustar. */
   readonly submission?: 'total' | 'adjustment'
-  /** EN: Period totals of the earlier submissions, carried forward on an adjustment. ES: Totales del período de los envíos anteriores, arrastrados en un ajuste. */
+  /** EN: Period totals of the earlier submissions, carried forward on an adjustment of the sales or purchase book; the guide book ignores them. ES: Totales del período de los envíos anteriores, arrastrados en un ajuste del libro de ventas o de compras; el libro de guías los ignora. */
   readonly previousTotals?: readonly BookTotals[]
 }
 
@@ -338,11 +338,13 @@ const defaultFlag = (index: number): GuideBookCaseFlag => (index === 1 ? 'modifi
  * EN: The guide book of the certification: only the guide set's guides, with their transfer reason and issue date;
  * by position the second guide carries `Operacion` 1 and the third is voided (`Anulado` 2, total 0 and nothing else),
  * unless `caseFlags` says otherwise; a sale carries the customer, the net, the VAT rate and the VAT; every guide its
- * total. Notification folio 3 by default, book `ESPECIAL`, submission `TOTAL`.
+ * total. Notification folio 3 by default, book `ESPECIAL`, submission `TOTAL` unless it adjusts; an adjustment marks
+ * only the modified guide with the operation and writes the line summary in both sections.
  * ES: El libro de guías de la certificación: solo las guías del set de guías, con su tipo de traslado y fecha de
  * emisión; por posición la segunda lleva `Operacion` 1 y la tercera va anulada (`Anulado` 2, total 0 y nada más), salvo
  * que `caseFlags` diga otra cosa; una venta lleva el cliente, el neto, la tasa y el IVA; toda guía su total. Folio de
- * notificación 3 por defecto, libro `ESPECIAL`, envío `TOTAL`.
+ * notificación 3 por defecto, libro `ESPECIAL`, envío `TOTAL` salvo que ajuste; un ajuste marca con la operación solo la
+ * guía modificada y escribe el resumen de las líneas en ambas secciones.
  * @throws {DteError} EN: `INVALID_OPTION` (field `set`) when the set is not the guide one; the phase 3 codes. ES: `INVALID_OPTION` (campo `set`) si el set no es el de guías; los códigos de la fase 3.
  */
 export const createCertificationGuideBook = (
@@ -383,10 +385,17 @@ export const createCertificationGuideBook = (
       resolutionDate: input.resolution.date,
       resolutionNumber: input.resolution.number,
       notificationFolio: input.notificationFolio ?? DEFAULT_NOTIFICATION_FOLIO,
-      submission: 'total',
+      submission: input.submission ?? 'total',
     },
     entries,
     now: input.now?.(),
   })
-  return signGuideBook(book, input.certificate)
+  // Phase 3 marks every line of an adjustment with the add operation; the field marks only the modified guide.
+  const marked = book.entries.map((entry, index) => {
+    if ((input.caseFlags?.[index] ?? defaultFlag(index)) === 'modified') return entry
+    const { adjustment, ...rest } = entry
+    void adjustment
+    return rest
+  })
+  return signGuideBook({ ...book, entries: marked }, input.certificate)
 }
