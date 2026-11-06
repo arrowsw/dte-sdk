@@ -117,6 +117,25 @@ describe('declareSimulation', () => {
     expect(harness.posted('pe_avance3')[0]).toMatchObject({ NUM_ENV1: '777' })
   })
 
+  test('a progress page that cannot be read before the declaration does not stop it: the simulation is declared', async () => {
+    const harness = await certificationHarness([
+      entry,
+      avance2([page('x')], () => SIM_KEPT),
+      avance5,
+      {
+        url: `${MAULLIN}/pe_avance6`,
+        method: 'POST',
+        reply: [new DteError('TRANSPORT_FAILED', { reason: 'socket hang up' })],
+      },
+      post('pe_avance3', DECLARATION_ANSWERS.success),
+    ])
+    const result = await declareSimulation(harness.deps, stateWith({ simulation }))
+    expect(result.outcome).toBe('accepted')
+    expect(harness.steps()).toEqual(['SIM_DECLARING', 'POLLING'])
+    expect(harness.posted('pe_avance3')[0]).toMatchObject({ NUM_ENV1: '777' })
+    expect(harness.warnings()).toContain('certification progress before the simulation failed')
+  })
+
   test('declared with the simulation flag: every row empty is retried', async () => {
     const harness = await certificationHarness([
       entry,

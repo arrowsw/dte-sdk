@@ -515,11 +515,12 @@ export const sendSimulation = async (
 
 /**
  * EN: Declares the simulation, unless the progress page names the exchange as the step the application is at, as the
- * reference does: a later step is declared like any other. "Every row empty" is retried here: the portal shows the
- * simulation as not declared while it still processes the track id.
+ * reference does: a later step is declared like any other, and so is a page that cannot be read. "Every row empty" is
+ * retried here: the portal shows the simulation as not declared while it still processes the track id.
  * ES: Declara la simulación, salvo que la página de avance nombre el intercambio como el paso en que está la
- * postulación, como lo hace la referencia: un paso posterior se declara como cualquier otro. "Toda fila vacía" aquí
- * se reintenta: el portal muestra la simulación sin declarar mientras aún procesa el track id.
+ * postulación, como lo hace la referencia: un paso posterior se declara como cualquier otro, y también una página que
+ * no se puede leer. "Toda fila vacía" aquí se reintenta: el portal muestra la simulación sin declarar mientras aún
+ * procesa el track id.
  * @throws {DteError} EN: `MISSING_FIELD { field: 'simulation' }` before the send; the portal codes. ES: `MISSING_FIELD { field: 'simulation' }` antes del envío; los códigos del portal.
  */
 export const declareSimulation = async (
@@ -528,8 +529,8 @@ export const declareSimulation = async (
 ): Promise<DeclarationStepResult<DeclarationOutcome | 'skipped'>> => {
   const rt = runtime(deps)
   if (state.simulation === undefined) throw new DteError('MISSING_FIELD', { field: 'simulation' })
-  const report = await readProgress(rt.portal)
-  if (report.stage?.startsWith(EXCHANGE_WORD) === true)
+  const report = await progressOrNull(rt, 'certification progress before the simulation failed')
+  if (report?.stage?.startsWith(EXCHANGE_WORD) === true)
     return {
       state: await saveState(rt, state, { stage: laterStage(state.stage, report.stageKey) }),
       outcome: 'skipped',
