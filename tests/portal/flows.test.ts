@@ -344,7 +344,8 @@ describe('requestCafInBatches', () => {
 describe('reobtainFolios', () => {
   test('a refused listing comes back as data', async () => {
     const harness = await signedIn([
-      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: refusedPage('REOBTENCION DE FOLIOS') } },
+      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: page('form') } },
+      { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: { body: refusedPage('REOBTENCION DE FOLIOS') } },
     ])
     await expect(reobtainFolios(harness.portal, { type: 33, quantity: 2 })).resolves.toEqual({
       complete: false,

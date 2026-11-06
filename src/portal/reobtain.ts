@@ -9,7 +9,7 @@ import { hasCaf } from './pages/stamping'
 import {
   assertNotRejected,
   companyFields,
-  ensurePage,
+  portalRequest,
   rejected,
   submitForm,
   withPortalSession,
@@ -40,6 +40,9 @@ export type ReobtainableRange = {
 
 const at = (context: PortalContext, page: string): string => cgiUrl(context.portal.environment, page)
 
+// The referers of the reobtention are paths without a host, as field behaviour sends them.
+const refererOf = (context: PortalContext, page: string): string => new URL(at(context, page)).pathname
+
 const assertDocumentType = (type: unknown): void => {
   if (!isDocumentType(type)) throw new DteError('INVALID_DOCUMENT_TYPE', { field: 'type' })
 }
@@ -54,15 +57,16 @@ export const listReobtainableInSession = async (
 ): Promise<readonly ReobtainableRange[]> => {
   assertDocumentType(input.type)
   const company = companyFields(resolvePortalCompany(context.portal, input.companyRut))
-  const entry = await ensurePage(context, 'rf_reobtencion1', at(context, 'rf_reobtencion1_folios'))
-  assertNotRejected(context, entry.html)
+  // A plain request: no login on demand, no representation flow and no check for a refusal. With an expired session
+  // the next page has no forms and the list comes back empty, as field behaviour does.
+  const entry = await portalRequest(context, 'rf_reobtencion1', 'GET', at(context, 'rf_reobtencion1_folios'))
   const list = await submitForm(
     context,
     'rf_reobtencion2',
     at(context, 'rf_reobtencion2_folios'),
     entry.url,
     { ...company, PAGINA: '1', COD_DOCTO: String(input.type), ACEPTAR: 'Consultar' },
-    at(context, 'rf_reobtencion1_folios'),
+    refererOf(context, 'rf_reobtencion1_folios'),
   )
   assertNotRejected(context, list.html)
   const ranges: ReobtainableRange[] = []
@@ -73,7 +77,7 @@ export const listReobtainableInSession = async (
       at(context, 'rf_reobtencion3_folios'),
       list.url,
       formFields,
-      at(context, 'rf_reobtencion2_folios'),
+      refererOf(context, 'rf_reobtencion2_folios'),
     )
     const from = Number(formFields.FOLIO_INI)
     const to = Number(formFields.FOLIO_FIN)
@@ -108,7 +112,7 @@ export const reobtainCafInSession = async (
     at(context, 'rf_genera_folio'),
     at(context, 'rf_reobtencion3_folios'),
     { ...range.downloadFields, ACEPTAR: 'Solicitar Folios' },
-    at(context, 'rf_reobtencion3_folios'),
+    refererOf(context, 'rf_reobtencion3_folios'),
   )
   const downloadFields = reobtainDownloadFields(resolution.html)
   if (downloadFields === null) throw rejected(context, 'reobtainDownloadMissing', details)
@@ -118,7 +122,7 @@ export const reobtainCafInSession = async (
     at(context, 'rf_genera_archivo'),
     resolution.url,
     { ...downloadFields, ACEPTAR: 'AQUI' },
-    at(context, 'rf_genera_folio'),
+    refererOf(context, 'rf_genera_folio'),
   )
   if (!hasCaf(answer.html)) throw rejected(context, 'reobtainCafMissing', details)
   const caf = parseCaf(answer.html)

@@ -1,4 +1,11 @@
-import { formBlocks, formWithAction, inputValues, namedForm } from '../html'
+import { formBlocks, formWithAction, namedForm } from '../html'
+
+// Only an input whose double-quoted name is followed by a double-quoted value is a field: one without a `value` is
+// not sent, as field behaviour does. A repeated name keeps the last value.
+const NAME_THEN_VALUE = /<input[^>]*name="([^"]+)"[^>]*value="([^"]*)"/gi
+
+const inputValues = (html: string): Readonly<Record<string, string>> =>
+  Object.fromEntries(Array.from(html.matchAll(NAME_THEN_VALUE), ([, name, value]) => [name, value]))
 
 const hasRange = (fields: Readonly<Record<string, string>>): boolean => Boolean(fields.FOLIO_INI && fields.FOLIO_FIN)
 
