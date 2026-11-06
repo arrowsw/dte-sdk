@@ -151,7 +151,8 @@ const toSiiTotales = (row: BookTotals, period: PeriodContext | null): SiiTotales
     TotOpIVAUsoComun: nonZero(row.commonUseVatCount),
     TotIVAUsoComun: commonUseVat,
     FctProp: factor,
-    TotCredIVAUsoComun: factor === undefined ? undefined : Math.round((commonUseVat as number) * factor),
+    TotCredIVAUsoComun:
+      factor === undefined ? undefined : (row.commonUseCredit ?? Math.round((commonUseVat as number) * factor)),
     TotIVAFueraPlazo: nonZero(row.lateVat),
     TotIVAPropio: nonZero(row.ownVatAmount),
     TotIVATerceros: nonZero(row.thirdPartyVatAmount),

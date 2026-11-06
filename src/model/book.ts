@@ -329,6 +329,8 @@ export type BookTotals = {
   readonly commonUseVatCount?: number
   /** EN: Common-use VAT. ES: `TotIVAUsoComun` — IVA de uso común. */
   readonly commonUseVat?: number
+  /** EN: Credit of the common-use VAT as the caller rounded it document by document; when absent the period summary rounds the total. ES: `TotCredIVAUsoComun` — Crédito del IVA de uso común tal como el llamador lo redondeó documento a documento; si falta, el resumen del período redondea el total. */
+  readonly commonUseCredit?: number
   /** EN: Late VAT. ES: `TotIVAFueraPlazo` — IVA fuera de plazo. */
   readonly lateVat?: number
   /** EN: Own VAT. ES: `TotIVAPropio` — IVA propio. */
