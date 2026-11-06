@@ -59,6 +59,13 @@ const rejected = (trackId: string, gloss = 'Envio Rechazado'): FakeReply => ({
     .replace('9876543210', trackId)
     .replace('Envio Procesado', gloss),
 })
+// A status answer whose GLOSA element is dropped, or says `gloss`.
+const stateReply = (code: string, trackId: string, gloss: string | null): FakeReply => ({
+  body: siiFixture('soap-estup-epr.xml')
+    .replace('EPR', code)
+    .replace('9876543210', trackId)
+    .replace('&lt;GLOSA&gt;Envio Procesado&lt;/GLOSA&gt;', gloss === null ? '' : `&lt;GLOSA&gt;${gloss}&lt;/GLOSA&gt;`),
+})
 const NOT_AUTHORIZED = 'Rut No Autorizado a Firmar'
 
 let issued: IssuedReceiptsSet
@@ -329,6 +336,33 @@ describe('sendReceiptsSet', () => {
     expect(failed.result.consumptions).toEqual([
       expect.objectContaining({ sequence: 100, trackId: null, outcome: 'failed', detail: failed.result.detail }),
     ])
+  })
+
+  test('the detail of a rejection is the gloss the SII answered or, without one, the state code', async () => {
+    const envelope = await run([reception('111')], [stateReply('RCH', '111', null)])
+    expect(envelope.result).toMatchObject({ outcome: 'envelopeRejected', detail: 'RCH (RCH)', notAuthorized: false })
+    const report = await run(
+      [reception('111'), reception('222'), reception('333')],
+      [estUp('EPR', '111'), stateReply('RCH', '222', null), estUp('EPR', '333')],
+    )
+    expect(report.result.consumptions[0]).toMatchObject({ outcome: 'rejected', detail: 'RCH (RCH)' })
+  })
+
+  test('the authorisation words are looked for in the gloss of any state that is not accepted, an unknown one included', async () => {
+    const unknown = await run(
+      [reception('111'), reception('222')],
+      [estUp('EPR', '111'), stateReply('XYZ', '222', NOT_AUTHORIZED)],
+    )
+    expect(unknown.result).toMatchObject({
+      outcome: 'consumptionFailed',
+      notAuthorized: true,
+      detail: `${NOT_AUTHORIZED} (XYZ)`,
+    })
+    const mute = await run(
+      [reception('111'), reception('222'), reception('333')],
+      [estUp('EPR', '111'), { status: 503, body: NOT_AUTHORIZED }, estUp('EPR', '333')],
+    )
+    expect(mute.result).toMatchObject({ outcome: 'sent', notAuthorized: false })
   })
 
   test('ten rejected reports still end in sent, without a report track id', async () => {

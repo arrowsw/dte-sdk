@@ -174,8 +174,12 @@ const stateOf = async (sii: SiiClient, trackId: string): Promise<FieldUploadStat
   }
 }
 
-const glossOf = (state: FieldUploadState): string =>
-  state.answered ? `${state.message} (${state.code})` : `${state.message}`
+// The gloss as the SII wrote it in its answer (not the catalog's text for the state), else the state code.
+const GLOSS_ELEMENT = /<GLOSA>([^<]+)<\/GLOSA>/i
+const glossOf = (state: FieldUploadState): string => GLOSS_ELEMENT.exec(state.raw ?? '')?.[1] ?? state.code ?? ''
+
+const detailOf = (state: FieldUploadState): string =>
+  state.answered ? `${glossOf(state)} (${state.code})` : `${state.message}`
 
 // What the field makes of the reception of a file: it has a track id, or it is a duplicate the SII names no track id
 // for. `duplicate` also marks a track id taken from a duplicate reply.
@@ -294,9 +298,9 @@ const sendConsumption = async (
         consumptions,
       }
     }
-    const detail = glossOf(state)
+    const detail = detailOf(state)
     consumptions.push({ sequence, xml, trackId: receipt.trackId, outcome: 'rejected', detail })
-    if (state.answered && AUTHORIZATION_WORDS.test(`${state.message}`))
+    if (AUTHORIZATION_WORDS.test(glossOf(state)))
       return { ...NO_CONSUMPTION, outcome: 'consumptionFailed', notAuthorized: true, consumptions, detail }
   }
   sii.logger.warn('receipts folio consumption not accepted', { attempts: MAX_CONSUMPTION_ATTEMPTS })
@@ -352,9 +356,9 @@ export const sendReceiptsSet = async (
         ...NO_CONSUMPTION,
         ...sent,
         outcome: 'envelopeRejected',
-        notAuthorized: AUTHORIZATION_WORDS.test(`${state.message}`),
+        notAuthorized: AUTHORIZATION_WORDS.test(glossOf(state)),
         consumptions: [],
-        detail: glossOf(state),
+        detail: detailOf(state),
       }
   }
   options.onProgress?.({ step: 'BOLETA_RCOF' })
