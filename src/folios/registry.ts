@@ -20,7 +20,7 @@ import {
  * funciones con sus propias transacciones; el resto arma una con `createFolioRegistry`.
  */
 export type FolioRegistry = {
-  /** EN: Reserves the next free folio. ES: Reserva el siguiente folio libre. */
+  /** EN: Reserves the lowest folio of the range that is neither used nor annulled: a folio given back, or left free below a folio marked sent, is handed out again. ES: Reserva el menor folio del rango que no está usado ni anulado: un folio devuelto, o que quedó libre bajo un folio marcado como enviado, se vuelve a entregar. */
   readonly reserve: (scope: FolioScope) => Promise<number>
   /** EN: Records a folio as sent. ES: Registra un folio como enviado. */
   readonly markSent: (

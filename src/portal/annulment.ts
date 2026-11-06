@@ -77,7 +77,7 @@ export type AnnulFoliosInput = {
   readonly all?: boolean
   /** EN: Reason; "Folios no utilizados" by default. ES: `MOTIVO` — Motivo; "Folios no utilizados" por defecto. */
   readonly reason?: string
-  /** EN: Most ranges tried in each pass, taken from the end of the listing; 50 by default. There are up to four passes. ES: Máximo de rangos que se intentan en cada pasada, tomados del final del listado; 50 por defecto. Hay hasta cuatro pasadas. */
+  /** EN: Most ranges tried in EACH pass, taken from the end of the listing; 50 by default. It is not a limit on the call: there are up to four passes, so one call can annul up to four times this many ranges (200 by default). ES: Máximo de rangos que se intentan en CADA pasada, tomados del final del listado; 50 por defecto. No es un tope de la llamada: hay hasta cuatro pasadas, así que una llamada puede anular hasta cuatro veces esta cantidad de rangos (200 por defecto). */
   readonly maxRanges?: number
   /** EN: Folios never to touch, such as a CAF still in use. ES: Folios que no se tocan, como un CAF todavía en uso. */
   readonly exclude?: readonly { readonly from: number; readonly to: number }[]
@@ -395,13 +395,20 @@ export const annulFoliosInSession = async (
 }
 
 /**
- * EN: Annuls unused folios: up to four passes over the listing, by range and folio by folio when the range conflicts,
- * stopping a pass after two real refusals in a row. Each pass takes the last `maxRanges` ranges it has not tried yet. Every query and step is tried up to three times with a pause of 1.5 s. Annulment cannot be undone and counts
- * against the quota for six months; to lift a stamping block, issuing with the unused folios works and annulling makes it
- * worse.
- * ES: Anula folios sin usar: hasta cuatro pasadas por el listado, por rango y folio por folio cuando el rango choca,
- * deteniendo una pasada tras dos negativas reales seguidas. Cada pasada toma los últimos `maxRanges` rangos que aún no intentó. Cada consulta y cada paso se intenta hasta tres veces con 1,5 s de pausa. La anulación no se puede deshacer y pesa
- * contra el cupo seis meses; para levantar un bloqueo de timbraje, emitir con los folios sin usar sirve y anular lo empeora.
+ * EN: Annuls unused folios as the reference does: up to four passes over the listing, by range and folio by folio when
+ * the range conflicts, stopping a pass after two real refusals in a row. Each pass takes the last `maxRanges` ranges it
+ * has not tried yet, so `maxRanges` limits a pass and not the call: one call can annul up to four times `maxRanges`
+ * ranges. Every query of the listing and every step is tried up to three times, 1.5 s apart, whatever the error, on top
+ * of the retries of the client; a step that changed something on a try that failed is recovered by the "already
+ * annulled" answer of the next. Annulment cannot be undone and counts against the quota for six months; to lift a
+ * stamping block, issuing with the unused folios works and annulling makes it worse.
+ * ES: Anula folios sin usar como la referencia: hasta cuatro pasadas por el listado, por rango y folio por folio cuando
+ * el rango choca, deteniendo una pasada tras dos negativas reales seguidas. Cada pasada toma los últimos `maxRanges`
+ * rangos que aún no intentó, así que `maxRanges` limita una pasada y no la llamada: una llamada puede anular hasta
+ * cuatro veces `maxRanges` rangos. Cada consulta del listado y cada paso se intenta hasta tres veces, con 1,5 s entre
+ * intentos, sea cual sea el error, encima de los reintentos del cliente; un paso que cambió algo en un intento fallido
+ * se recupera con la respuesta "ya anulado" del siguiente. La anulación no se puede deshacer y pesa contra el cupo seis
+ * meses; para levantar un bloqueo de timbraje, emitir con los folios sin usar sirve y anular lo empeora.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: type and an explicit scope. ES: tipo y un alcance explícito.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.

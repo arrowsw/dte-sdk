@@ -20,7 +20,7 @@ export type SoapParam = {
 export type SoapEnvelopeInput = {
   /** EN: Operation name (`getSeed`, `getEstUp`, `ingresarAceptacionReclamoDoc`…). ES: Nombre de la operación. */
   readonly method: string
-  /** EN: Parameters; text is escaped with `&`, `<` and `>` only. ES: Parámetros; el texto se escapa como XML. */
+  /** EN: Parameters; text is escaped with `&`, `<` and `>` only: quotes and apostrophes travel as they are. ES: Parámetros; el texto se escapa solo con `&`, `<` y `>`: las comillas y los apóstrofos viajan tal cual. */
   readonly params?: readonly SoapParam[]
   /** EN: Operation namespace (WSRECLAMO, prefix `ws`); omitted for DTEWS, which accepts unqualified operations. ES: Namespace de la operación (WSRECLAMO, prefijo `ws`); se omite en DTEWS, que acepta operaciones sin calificar. */
   readonly namespace?: string
