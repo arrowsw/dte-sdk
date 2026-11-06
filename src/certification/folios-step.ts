@@ -176,7 +176,7 @@ const recoverUnreceived = async (rt: Runtime, held: readonly HeldCaf[], used: Us
 
 // A CAF already in hand can hold folios the SII received in an earlier run or from other software, and a document issued
 // with one is rejected whole. Before issuing, the SII is asked for the folios the run is about to use, oldest CAF first,
-// until the need is covered and at most 30 per CAF; a received folio is taken out of use in the registry. A
+// until the need is covered and at most 30 per CAF; a received folio is marked used in the registry. A
 // folio the SII cannot answer for keeps the previous behaviour and is used.
 const skipReceivedFolios = async (
   rt: Runtime,
@@ -202,36 +202,18 @@ const skipReceivedFolios = async (
       else good += 1
     }
     pending -= good
-    if (received.length > 0) await burnUpTo(rt, h.scope, Math.max(...received))
+    for (const folio of received) await rt.registry.markSent(h.scope, folio, { extra: { receivedAtSii: true } })
   }
 }
 
-// The registry hands folios out in order from a pointer that only moves forward: a folio cannot be taken out of use
-// while a free one below it stays reachable. So, to take a folio out of use, the registry reserves from the start of
-// the CAF up to that folio, as it would for issuing, and the folios on the way are given up with it. The count of
-// folios left stays true, which a folio marked used above free ones would not.
-const burnUpTo = async (rt: Runtime, scope: FolioScope, last: number): Promise<void> => {
-  // A range with nothing left to reserve ends the walk: the rest was already used.
-  const folio = await rt.registry.reserve(scope).catch(() => null)
-  if (folio === null) return
-  // Already past it: that folio was free and is given back.
-  if (folio > last) await rt.registry.release(scope, [folio])
-  else if (folio < last) await burnUpTo(rt, scope, last)
-}
-
-// A range obtained again is used only through the folios the SII showed free. Those it showed received or did not know
-// about, below the last free one, are taken out of use as soon as the CAF is kept. The folios above the last free one
-// were never looked at: they cannot be told apart in the registry without giving up the free ones, so they stay.
+// A range obtained again is used only through the folios the SII showed free: every other folio of it, whether received,
+// not known or never looked at, is marked used as soon as the CAF is kept, so the registry counts exactly the free ones.
 const restrictToFree = async (rt: Runtime, reobtained: ReobtainResult): Promise<void> => {
   for (const [index, range] of reobtained.ranges.entries()) {
     const free = new Set(range.freeFolios)
-    const lastFree = Math.max(...range.freeFolios)
-    const skipped = Array.from({ length: lastFree - range.from + 1 }, (_, offset) => range.from + offset).filter(
-      (folio) => !free.has(folio),
-    )
-    if (skipped.length === 0) continue
     const [held] = heldCafs([reobtained.cafs[index].xml], rt.now())
-    await burnUpTo(rt, held.scope, Math.max(...skipped))
+    for (let folio = range.from; folio <= range.to; folio += 1)
+      if (!free.has(folio)) await rt.registry.markSent(held.scope, folio, { extra: { notFree: true } })
   }
 }
 

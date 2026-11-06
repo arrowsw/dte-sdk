@@ -195,14 +195,15 @@ describe('prepareFolios', () => {
       expect(result.state.usedFolios).toEqual([])
     })
 
-    test('a received folio between free ones takes the folios below it out of use with it, and the count stays true', async () => {
+    test('a received folio between free ones is marked used and the free ones around it stay available', async () => {
       const harness = await certificationHarness([answers(free, received, free, free)])
       await prepareFolios(harness.deps, stateWith({ cafs: [held] }), { needs: { 33: 2 } })
-      expect(await harness.registry.remaining(scope)).toBe(3)
+      expect(await harness.registry.remaining(scope)).toBe(4)
+      expect(await harness.registry.reserve(scope)).toBe(1)
       expect(await harness.registry.reserve(scope)).toBe(3)
     })
 
-    test('a range the registry cannot reserve from any more ends the walk without failing', async () => {
+    test('a received folio the registry already holds leaves its count as it was', async () => {
       const harness = await certificationHarness([answers(free, free, received)])
       const small = cafXml(33, { from: 1, to: 3 })
       const smallScope = { ...scope, range: { from: 1, to: 3 }, cafFingerprint: cafFingerprint(small) }
@@ -212,7 +213,7 @@ describe('prepareFolios', () => {
       expect(await harness.registry.remaining(smallScope)).toBe(2)
     })
 
-    test('a free folio the walk meets past the received one is given back', async () => {
+    test('a received folio below the free ones is marked used and the next folio is the first free one', async () => {
       const harness = await certificationHarness([answers(received, free, free)])
       await harness.registry.markSent(scope, 1)
       await prepareFolios(harness.deps, stateWith({ cafs: [held] }), { needs: { 33: 2 } })
@@ -251,7 +252,7 @@ describe('prepareFolios', () => {
       expect(harness.urls()).toHaveLength(31)
       const folios = harness.fake.requests.map((request) => /<FolioDte>(\d+)<\/FolioDte>/.exec(request.text)?.[1])
       expect(folios.slice(0, 3)).toEqual(['1', '2', '3'])
-      expect(await harness.registry.remaining(bigScope)).toBe(69)
+      expect(await harness.registry.remaining(bigScope)).toBe(70)
     })
   })
 
@@ -487,6 +488,27 @@ describe('prepareFolios', () => {
       expect(result.cafs).toEqual([held, cafXml(33, { from: 300, to: 300 })])
       expect(harness.posted('rf_genera_archivo')).toHaveLength(1)
       expect(harness.posted('of_solicita_folios_dcto')[1].CANTIDAD).toBe('1')
+    })
+
+    test('only the folios shown free stay available: received, unknown and unasked ones are marked used', async () => {
+      const range = cafXml(33, { from: 10, to: 14 })
+      const harness = await certificationHarness([
+        stampEntry,
+        quota(quotaForm(1, 9)),
+        ...reobtainRoutes([10, 14], range),
+        estDte(free, received, free),
+      ])
+      await prepareFolios(harness.deps, stateWith(), { needs: { 33: 2 } })
+      const scope = {
+        companyRut: '76543210-3',
+        type: 33,
+        range: { from: 10, to: 14 },
+        environment: 'certification' as const,
+        cafFingerprint: cafFingerprint(range),
+      }
+      expect(await harness.registry.remaining(scope)).toBe(2)
+      expect(await harness.registry.reserve(scope)).toBe(10)
+      expect(await harness.registry.reserve(scope)).toBe(12)
     })
 
     test('a short answer that covers more is kept, only its free folios can be issued, and the rest is asked', async () => {
