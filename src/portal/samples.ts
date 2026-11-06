@@ -322,8 +322,10 @@ export const uploadSample = async (
   if (BREAKS_FILE_NAME.test(input.fileName)) throw new DteError('INVALID_OPTION', { field: 'fileName' })
   return inGwtStage(portal, 'uploadSample', overrides, SAMPLES_STAGE, input, async ({ context, hashes }) => {
     const boundary = portalBoundary(portal.now())
+    // The field writes the part headers, the file name among them, as UTF-8.
     const body = buildMultipartParts({
       boundary,
+      utf8Headers: true,
       parts: [
         { name: FILE_FIELD, fileName: input.fileName, contentType: FILE_CONTENT_TYPE, bytes: input.bytes },
         { name: 'id', value: String(input.revisionId) },

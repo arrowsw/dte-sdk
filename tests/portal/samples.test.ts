@@ -277,6 +277,13 @@ describe('uploadSample', () => {
     expect(harness.urls()).toEqual([])
   })
 
+  test('a file name outside Latin-1 travels as UTF-8 bytes in the part header', async () => {
+    const harness = await signedIn([alive, warmUp, nocache, upload({ body: 'ok' })])
+    await uploadSample(harness.portal, { ...input, fileName: 'muestra ñ€.pdf' })
+    const [request] = uploads(harness)
+    expect(Buffer.from(request.body!).toString('utf8')).toContain('filename="muestra ñ€.pdf"')
+  })
+
   test('any other file name travels as it comes: spaces, brackets, another extension', async () => {
     const names = ['muestra (1) final.pdf', 'copia #2.PDF', 'muestra.xml', 'sin extension']
     const harness = await signedIn([alive, warmUp, nocache, upload(...names.map(() => ({ body: 'ok' })))])
