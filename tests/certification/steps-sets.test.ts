@@ -84,7 +84,14 @@ describe('obtainTestSet', () => {
     expect(await harness.store.listArtefacts()).toEqual(['estructuras.json', 'set-texto.txt'])
     expect(JSON.parse((await harness.store.readArtefact('estructuras.json'))!)).toEqual(result.state.plan)
     expect(harness.steps()).toEqual(['SETS_DOWNLOADING', 'SETS_LOADED'])
-    expect(harness.posted('pe_generar2')[0]).toEqual({ AUTORIZADA: 'S', TOTAL: '15', SET01: 'S', SET03: 'S' })
+    expect(harness.posted('pe_generar2')[0]).toEqual({
+      RUT_EMP: '76543210',
+      DV_EMP: '3',
+      AUTORIZADA: 'S',
+      TOTAL: '15',
+      SET03: 'S',
+      SET01: 'S',
+    })
     expect(await harness.store.load()).toEqual(result.state)
   })
 

@@ -29,7 +29,7 @@ import {
   STATUS_PAGE,
   type DeclarationRowSpec,
 } from '../support/certification-pages'
-import { failure, MAULLIN, signedIn, type PortalHarness } from '../support/portal'
+import { failure, MAULLIN, portalWith, signedIn, type PortalHarness } from '../support/portal'
 import { certificationPage, page, REJECTION_PAGES } from '../support/portal-pages'
 import { ATTENTION, FULL_SET_TEXT } from '../support/test-set-samples'
 
@@ -53,40 +53,76 @@ describe('downloadTestSet', () => {
     post('pe_generar1', setGenerationForm(), setGenerationForm()),
     post('pe_generar2', download, ...more),
   ]
+  const lastSegment = (url: string) => url.split('/').pop()
+  const referers = (harness: PortalHarness, name: string) =>
+    harness.fake.requests
+      .filter((request) => request.url.endsWith(`/${name}`))
+      .map((request) => request.headers.referer)
 
-  test('confirms the company, ticks the default optional sets the page offers, and returns the text', async () => {
+  test('confirms the company and posts the company, the hidden fields, the optional sets offered and SET01 last', async () => {
     const harness = await signedIn(routes())
     const result = await downloadTestSet(harness.portal)
     expect(harness.posted('pe_generar1')).toEqual([{ ...COMPANY, CODIGO: '8', ACEPTAR: 'Confirmar Empresa' }])
-    expect(harness.posted('pe_generar2')).toEqual([
-      {
-        AUTORIZADA: 'S',
-        TOTAL: '15',
-        SET01: 'S',
-        SET03: 'S',
-        SET06: 'S',
-        SET07: 'S',
-        SET08: 'S',
-        SET09: 'S',
-        SET15: 'S',
-        SET72: 'S',
-      },
-    ])
-    expect(result.requested).toEqual(['SET01', 'SET03', 'SET06', 'SET07', 'SET08', 'SET09', 'SET15', 'SET72'])
+    expect(harness.fake.requests.find((request) => request.url.endsWith('/pe_generar2'))?.text).toBe(
+      'RUT_EMP=76543210&DV_EMP=3&AUTORIZADA=S&TOTAL=15&SET03=S&SET06=S&SET07=S&SET08=S&SET09=S&SET15=S&SET72=S&SET01=S',
+    )
+    expect(referers(harness, 'pe_generar1')).toEqual([`${MAULLIN}/pe_generar`])
+    expect(referers(harness, 'pe_generar2')).toEqual([`${MAULLIN}/pe_generar1`])
+    expect(result.requested).toEqual(['SET03', 'SET06', 'SET07', 'SET08', 'SET09', 'SET15', 'SET72', 'SET01'])
     expect(result.states.map((state) => state.name)).toEqual(['SET BASICO', 'SET GUIA DE DESPACHO'])
     expect(result.optionalSets).toHaveLength(8)
     expect(result.attentionNumber).toBe(ATTENTION)
     expect(result.regenerated).toBe(false)
     expect(parseTestSetText(result.text!).length).toBe(parseTestSetText(FULL_SET_TEXT).length)
+    // A session in the cache: the progress page is not read first.
+    expect(harness.urls().map(lastSegment)).toEqual(['pe_generar', 'pe_generar1', 'pe_generar2'])
   })
 
-  test('custom optional sets, only those offered; a regenerated set is reported', async () => {
+  test('without a session in the cache the progress page is read first, and its failure does not stop the download', async () => {
+    const progress = [
+      get('pe_avance1', page('entry')),
+      post('pe_avance2', certificationPage()),
+      get('pe_avance5', page('p5')),
+      post('pe_avance6', progressPage('SET DE PRUEBAS')),
+    ]
+    const fresh = portalWith([...progress, ...routes()])
+    await expect(downloadTestSet(fresh.portal)).resolves.toMatchObject({ attentionNumber: ATTENTION })
+    expect(fresh.urls().map(lastSegment)).toEqual([
+      'pe_avance1',
+      'pe_avance2',
+      'pe_avance5',
+      'pe_avance6',
+      'pe_generar',
+      'pe_generar1',
+      'pe_generar2',
+    ])
+    expect(fresh.posted('pe_avance2')).toEqual([{ ...COMPANY, ACEPTAR: 'Continuar' }])
+    expect(referers(fresh, 'pe_avance2')).toEqual([`${MAULLIN}/pe_avance1`])
+    expect(referers(fresh, 'pe_avance6')).toEqual([`${MAULLIN}/pe_avance5`])
+    const failing = portalWith([
+      get('pe_avance1', page('entry')),
+      { url: `${MAULLIN}/pe_avance2`, method: 'POST' as const, reply: [new Error('socket hang up')] },
+      ...routes(),
+    ])
+    await expect(downloadTestSet(failing.portal)).resolves.toMatchObject({ attentionNumber: ATTENTION })
+    expect(failing.urls().map(lastSegment)).toEqual([
+      'pe_avance1',
+      'pe_avance2',
+      'pe_generar',
+      'pe_generar1',
+      'pe_generar2',
+    ])
+  })
+
+  test('custom optional sets, only those offered and in page order; a regenerated set is reported', async () => {
     const harness = await signedIn(routes(setDownloadPage(FULL_SET_TEXT, '<p>Set generado correctamente</p>')))
     const result = await downloadTestSet(harness.portal, {
-      optionalSets: ['SET11', 'SET99'],
+      optionalSets: ['SET99', 'SET11', 'SET03'],
       previousAttentionNumber: '1',
     })
-    expect(harness.posted('pe_generar2')).toEqual([{ AUTORIZADA: 'S', TOTAL: '15', SET01: 'S', SET11: 'S' }])
+    expect(harness.fake.requests.find((request) => request.url.endsWith('/pe_generar2'))?.text).toBe(
+      'RUT_EMP=76543210&DV_EMP=3&AUTORIZADA=S&TOTAL=15&SET03=S&SET11=S&SET01=S',
+    )
     expect(result.regenerated).toBe(true)
   })
 
@@ -101,34 +137,44 @@ describe('downloadTestSet', () => {
     const harness = await signedIn([get('pe_generar', setGenerationForm()), post('pe_generar2', setDownloadPage())])
     await downloadTestSet(harness.portal)
     expect(harness.posted('pe_generar1')).toEqual([])
+    expect(referers(harness, 'pe_generar2')).toEqual([`${MAULLIN}/pe_generar1`])
   })
 
-  test('"no está inscrito" once is retried with a fresh session; twice is notEnrolled', async () => {
+  test('"no está inscrito" in plain words once is asked again with a fresh session; twice is notEnrolled', async () => {
+    const plain = page('<p>El contribuyente no esta inscrito en Postulacion Factura Electronica</p>')
     const once = await signedIn([
-      get('pe_generar', NOT_ENROLLED, SET_ENTRY),
+      get('pe_generar', plain, SET_ENTRY),
       post('pe_generar1', setGenerationForm()),
       post('pe_generar2', setDownloadPage()),
     ])
     await expect(downloadTestSet(once.portal)).resolves.toMatchObject({ attentionNumber: ATTENTION })
     expect(once.urls().filter((url) => url.endsWith('pe_generar'))).toHaveLength(2)
-    const twice = await signedIn([get('pe_generar', NOT_ENROLLED, NOT_ENROLLED)])
+    const twice = await signedIn([get('pe_generar', plain, plain)])
     expect((await failure(downloadTestSet(twice.portal))).details).toMatchObject({ rejection: 'notEnrolled' })
+    // With the accent as an entity the page is not asked again, and is still notEnrolled.
+    const entity = await signedIn([get('pe_generar', NOT_ENROLLED)])
+    expect((await failure(downloadTestSet(entity.portal))).details).toMatchObject({ rejection: 'notEnrolled' })
+    expect(entity.urls()).toHaveLength(1)
   })
 
-  test('a refusal and an unreadable generation page', async () => {
-    const refused = await signedIn([get('pe_generar', REJECTION_PAGES.companyNotAuthorized)])
-    expect((await failure(downloadTestSet(refused.portal))).details).toMatchObject({
-      rejection: 'companyNotAuthorized',
-    })
-    const blank = await signedIn([get('pe_generar', SET_ENTRY), post('pe_generar1', page('<p>nada</p>'))])
-    expect((await failure(downloadTestSet(blank.portal))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
-    const refusedLater = await signedIn([
-      get('pe_generar', SET_ENTRY),
-      post('pe_generar1', REJECTION_PAGES.optionNotAuthorized),
+  test('a refusal on the way is not looked for: the set is asked for all the same', async () => {
+    const refused = await signedIn([
+      get('pe_generar', REJECTION_PAGES.userWithoutPermission),
+      post('pe_generar2', setDownloadPage()),
     ])
-    expect((await failure(downloadTestSet(refusedLater.portal))).details).toMatchObject({
-      rejection: 'optionNotAuthorized',
-    })
+    await expect(downloadTestSet(refused.portal)).resolves.toMatchObject({ attentionNumber: ATTENTION, states: [] })
+    expect(refused.fake.requests.find((request) => request.url.endsWith('/pe_generar2'))?.text).toBe(
+      'RUT_EMP=76543210&DV_EMP=3&AUTORIZADA=S&TOTAL=15&SET01=S',
+    )
+    const blank = await signedIn([
+      get('pe_generar', SET_ENTRY),
+      post('pe_generar1', page('<p>nada</p>')),
+      post('pe_generar2', setDownloadPage()),
+    ])
+    await expect(downloadTestSet(blank.portal)).resolves.toMatchObject({ optionalSets: [], states: [] })
+    // Any "no est&aacute;" on the page reads as not enrolled, whatever follows it.
+    const loose = await signedIn([get('pe_generar', REJECTION_PAGES.companyNotAuthorized)])
+    expect((await failure(downloadTestSet(loose.portal))).details).toMatchObject({ rejection: 'notEnrolled' })
   })
 
   test('a session dropped on the download is forgotten and the sequence repeated once', async () => {
@@ -141,15 +187,18 @@ describe('downloadTestSet', () => {
       post('pe_generar2', SESSION_DROPPED, SESSION_DROPPED),
     ])
     expect((await failure(downloadTestSet(twice.portal))).code).toBe('SII_PORTAL_SESSION_EXPIRED')
+    const notEnrolled = await signedIn(
+      routes(page('<p>Usted no se encuentra autenticado. Contribuyente no inscrito.</p>')),
+    )
+    expect((await failure(downloadTestSet(notEnrolled.portal))).details).toMatchObject({ rejection: 'notEnrolled' })
+    expect(notEnrolled.posted('pe_generar2')).toHaveLength(1)
   })
 
-  test('a downloaded page that is no set, a refused one, and one with cases but no attention number', async () => {
+  test('a downloaded page that is no set, and one with cases but no attention number', async () => {
     const empty = await signedIn(routes(page('<p>Sin contenido</p>')))
     expect((await failure(downloadTestSet(empty.portal))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
     const refused = await signedIn(routes(REJECTION_PAGES.userWithoutPermission))
-    expect((await failure(downloadTestSet(refused.portal))).details).toMatchObject({
-      rejection: 'userWithoutPermission',
-    })
+    expect((await failure(downloadTestSet(refused.portal))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
     const bare = await signedIn(routes(page('<pre>CASO 1\nDOCUMENTO FACTURA</pre>')))
     await expect(downloadTestSet(bare.portal)).resolves.toMatchObject({
       attentionNumber: null,
@@ -373,7 +422,7 @@ describe('posts that change the application are never retried', () => {
   const unavailable = { status: 503, body: 'down' }
   const retrying = { retry: { maxAttempts: 2, jitterRatio: 0, baseDelayMs: 1 } }
 
-  test('pe_generar2 is sent once; pe_avance3 keeps the retry policy', async () => {
+  test('pe_generar2 and pe_avance3 follow the retry policy, as any other request', async () => {
     const generate = await signedIn(
       [
         get('pe_generar', SET_ENTRY),
@@ -382,8 +431,8 @@ describe('posts that change the application are never retried', () => {
       ],
       retrying,
     )
-    expect((await failure(downloadTestSet(generate.portal))).code).toBe('SII_HTTP_ERROR')
-    expect(generate.posted('pe_generar2')).toHaveLength(1)
+    await expect(downloadTestSet(generate.portal)).resolves.toMatchObject({ attentionNumber: ATTENTION })
+    expect(generate.posted('pe_generar2')).toHaveLength(2)
     const declare = await signedIn(
       [
         entry,

@@ -1,4 +1,4 @@
-import { attribute, decodeEntities, inputValues, stripTags, bodyText } from '../html'
+import { attribute, decodeEntities, inputValues, stripTags } from '../html'
 
 /**
  * EN: One row of the set table of `pe_generar1`: a set and whether the company obtained it.
@@ -65,27 +65,46 @@ export const parseSetGeneration = (html: string): SetGenerationPage => {
     optionalSets,
     authorized: fields.AUTORIZADA ?? DEFAULT_AUTHORIZED,
     total: fields.TOTAL ?? DEFAULT_TOTAL,
-    asksCompanyConfirmation: html.includes('pe_generar1') || /Confirmar Empresa/i.test(html),
+    asksCompanyConfirmation: html.includes('pe_generar1') || html.includes('Confirmar Empresa'),
   }
 }
 
 /**
- * EN: The company is not enrolled in the application: the page says "no está inscrito", with or without the accent.
- * ES: La empresa no está inscrita en la postulación: la página dice "no está inscrito", con o sin tilde.
+ * EN: The landing page says the company is not enrolled, in the plain wording that makes the run drop a cached session
+ * and ask once more: "no está inscrito", with or without the accent, never as an entity.
+ * ES: La portada dice que la empresa no está inscrita, con el texto llano que hace que la corrida suelte una sesión en
+ * caché y pregunte una vez más: "no está inscrito", con o sin tilde, nunca como entidad.
  */
-export const isNotEnrolled = (html: string): boolean => /no est(?:á|a) inscrit[oa]/i.test(decodeEntities(html))
+export const isNotEnrolledPlain = (html: string): boolean =>
+  html.includes('no está inscrito') || html.includes('no esta inscrito')
+
+/**
+ * EN: The company is not enrolled in the application: the plain wording, or the accent written as an entity.
+ * ES: La empresa no está inscrita en la postulación: el texto llano, o la tilde escrita como entidad.
+ */
+export const isNotEnrolled = (html: string): boolean => isNotEnrolledPlain(html) || html.includes('no est&aacute;')
 
 /**
  * EN: The portal dropped the session between two pages: it asks to authenticate, or shows the application's front
- * page with no case on it.
+ * page with no case on it. Read on the page as it came, in lower case.
  * ES: El portal soltó la sesión entre dos páginas: pide autenticarse, o muestra la portada de la postulación sin caso.
+ * Se lee sobre la página tal como llegó, en minúsculas.
  */
 export const isSessionDropped = (html: string): boolean => {
-  const text = bodyText(html)
+  const lower = html.toLowerCase()
   return (
-    /no se encuentra autenticado/i.test(text) ||
-    (/postulaci[oó]n factura electr[oó]nica/i.test(text) && !/caso/i.test(text))
+    lower.includes('no se encuentra autenticado') ||
+    (lower.includes('postulacion factura electronica') && !lower.includes('caso'))
   )
+}
+
+/**
+ * EN: A page that reads as a dropped session really says the company is not enrolled.
+ * ES: Una página que se lee como sesión perdida dice en realidad que la empresa no está inscrita.
+ */
+export const isNotEnrolledDownload = (html: string): boolean => {
+  const lower = html.toLowerCase()
+  return lower.includes('no inscrito') || (lower.includes('no est') && lower.includes('inscrito'))
 }
 
 /**

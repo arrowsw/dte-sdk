@@ -1,9 +1,10 @@
 import { DEFAULT_OPTIONAL_SETS, type CertificationStage, type DeclarationKey } from '../catalogs/certification'
 import { SII_HOSTS } from '../catalogs/endpoints'
 import { cgiUrl } from '../catalogs/portal'
-import { DteError } from '../errors'
+import { DteError, errorMessage } from '../errors'
 import type { CallOverrides } from '../sii/client'
 import { resolvePortalCompany, type PortalClient } from './client'
+import { hasSessionCookie } from './cookies'
 import { hiddenInputs } from './html'
 import { portalMessageOf } from './pages/auth'
 import { parseCertificationSets, type CertificationSet } from './pages/certification'
@@ -31,6 +32,8 @@ import {
 import {
   attentionNumberOf,
   isNotEnrolled,
+  isNotEnrolledDownload,
+  isNotEnrolledPlain,
   isSessionDropped,
   isSetRegenerated,
   parseSetGeneration,
@@ -287,26 +290,58 @@ export const queryCertificationSets = (
 
 const openSetPage = async (context: PortalContext): Promise<PortalPage> => {
   const first = await ensurePage(context, 'pe_generar', at('pe_generar'))
-  if (!isNotEnrolled(first.html)) return first
+  if (!isNotEnrolledPlain(first.html)) return first
   // A cached session may carry a stale answer: once more, fresh, before believing it.
   forgetSession(context)
   return ensurePage(context, 'pe_generar', at('pe_generar'))
 }
 
+// The four requests that read the progress page. The SII refreshes the state of the application on the way.
+const progressPages = async (
+  context: PortalContext,
+  company: Company,
+): Promise<{ readonly form: PortalPage; readonly progress: PortalPage }> => {
+  const entry = await ensurePage(context, 'pe_avance1', at('pe_avance1'))
+  const form = await submitForm(
+    context,
+    'pe_avance2',
+    at('pe_avance2'),
+    entry.url,
+    { ...company, ACEPTAR: 'Continuar' },
+    at('pe_avance1'),
+  )
+  const progressEntry = await ensurePage(context, 'pe_avance5', at('pe_avance5'))
+  const progress = await submitForm(
+    context,
+    'pe_avance6',
+    at('pe_avance6'),
+    progressEntry.url,
+    { ...company, ACEPTAR: 'Continuar' },
+    at('pe_avance5'),
+  )
+  return { form, progress }
+}
+
 /**
- * EN: Downloads the test set from `pe_generar`: confirms the company on `pe_generar1` when asked, reads the set table
- * and the optional sets, and posts `pe_generar2` with `AUTORIZADA`, `TOTAL`, `SET01` and the optional sets ticked.
- * A session the portal drops on the way is forgotten and the sequence repeated once. "No está inscrito" is
- * `notEnrolled`. Generating the set assigns the cases anew: call it once per certification.
- * ES: Descarga el set de pruebas desde `pe_generar`: confirma la empresa en `pe_generar1` cuando lo pide, lee la tabla
- * de sets y los opcionales, y envía `pe_generar2` con `AUTORIZADA`, `TOTAL`, `SET01` y los opcionales marcados. Una
- * sesión que el portal suelta en el camino se olvida y la secuencia se repite una vez. "No está inscrito" es
- * `notEnrolled`. Generar el set asigna los casos de nuevo: se llama una vez por certificación.
+ * EN: Downloads the test set from `pe_generar`, as the reference does. Without a session in the cache the progress
+ * page is read first, which logs in and lets the SII refresh the application; whatever that read answers, the
+ * download goes on. Then: the landing page (asked once more with a fresh session when it says "no está inscrito"),
+ * the company confirmed on `pe_generar1` when the page asks, and `pe_generar2` posted with the company, `AUTORIZADA`,
+ * `TOTAL`, the optional sets ticked in page order and `SET01` last. No page on the way is searched for a refusal. A
+ * session the portal drops on the download is forgotten and the sequence repeated once. Generating the set assigns
+ * the cases anew: call it once per certification.
+ * ES: Descarga el set de pruebas desde `pe_generar`, como lo hace la referencia. Sin sesión en la caché se lee primero
+ * la página de avance, lo que inicia sesión y deja que el SII refresque la postulación; responda lo que responda esa
+ * lectura, la descarga sigue. Luego: la portada (pedida una vez más con sesión nueva si dice "no está inscrito"), la
+ * empresa confirmada en `pe_generar1` cuando la página lo pide, y `pe_generar2` enviado con la empresa, `AUTORIZADA`,
+ * `TOTAL`, los sets opcionales marcados en el orden de la página y `SET01` al final. En ninguna página del camino se
+ * busca un rechazo. Una sesión que el portal suelta en la descarga se olvida y la secuencia se repite una vez. Generar
+ * el set asigna los casos de nuevo: se llama una vez por certificación.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: the company, the optional sets, whether to download. ES: la empresa, los sets opcionales, si descargar.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: the table, the sets offered and ticked, the text. ES: la tabla, los sets ofrecidos y marcados, el texto.
- * @throws {DteError} EN: `SII_PORTAL_REJECTED` (`notEnrolled` among others), `SII_PORTAL_UNEXPECTED_PAGE`, session and transport codes. ES: los mismos códigos.
+ * @throws {DteError} EN: `SII_PORTAL_REJECTED` with `notEnrolled`, `SII_PORTAL_SESSION_EXPIRED`, `SII_PORTAL_UNEXPECTED_PAGE`, session and transport codes. ES: los mismos códigos.
  */
 export const downloadTestSet = (
   portal: PortalClient,
@@ -316,11 +351,14 @@ export const downloadTestSet = (
   withPortalSession(portal, 'downloadTestSet', overrides, async (context) => {
     const company = companyFields(resolvePortalCompany(portal, input.companyRut))
     const wanted = input.optionalSets ?? DEFAULT_OPTIONAL_SETS
+    if (!hasSessionCookie(context.state.cookies))
+      await progressPages(context, company).catch((error: unknown) => {
+        context.portal.logger.warn('certification progress read before the set failed', {
+          reason: errorMessage(error),
+        })
+      })
     const attempt = async (retry: boolean): Promise<DownloadedTestSet> => {
       const landing = await openSetPage(context)
-      if (isNotEnrolled(landing.html))
-        throw rejected(context, 'notEnrolled', { portalMessage: portalMessageOf(landing.html) })
-      assertNotRejected(context, landing.html)
       const generation = parseSetGeneration(landing.html).asksCompanyConfirmation
         ? await submitForm(
             context,
@@ -328,44 +366,40 @@ export const downloadTestSet = (
             at('pe_generar1'),
             landing.url,
             { ...company, CODIGO: COMPANY_CODE, ACEPTAR: 'Confirmar Empresa' },
-            landing.url,
+            at('pe_generar'),
           )
         : landing
-      assertNotRejected(context, generation.html)
+      if (isNotEnrolled(generation.html))
+        throw rejected(context, 'notEnrolled', { portalMessage: portalMessageOf(generation.html) })
       const page = parseSetGeneration(generation.html)
-      if (page.states.length === 0 && page.optionalSets.length === 0)
-        throw unexpectedPage(context, 'pe_generar1', generation.html)
       const base = { states: page.states, optionalSets: page.optionalSets }
       if (input.download === false)
         return { ...base, requested: [], text: null, attentionNumber: null, regenerated: false }
       const ticked = page.optionalSets.map((option) => option.code).filter((code) => wanted.includes(code))
-      const requested = [BASIC_SET_FIELD, ...ticked]
+      const sets = { ...Object.fromEntries(ticked.map((code) => [code, 'S'])), [BASIC_SET_FIELD]: 'S' }
       const downloaded = await submitForm(
-        once(context),
+        context,
         'pe_generar2',
         at('pe_generar2'),
         generation.url,
-        {
-          AUTORIZADA: page.authorized,
-          TOTAL: page.total,
-          ...Object.fromEntries(requested.map((code) => [code, 'S'])),
-        },
-        generation.url,
+        { ...company, AUTORIZADA: page.authorized, TOTAL: page.total, ...sets },
+        at('pe_generar1'),
       )
       if (isSessionDropped(downloaded.html)) {
+        if (isNotEnrolledDownload(downloaded.html))
+          throw rejected(context, 'notEnrolled', { portalMessage: portalMessageOf(downloaded.html) })
         if (retry)
           throw new DteError('SII_PORTAL_SESSION_EXPIRED', { operation: context.operation, step: 'pe_generar2' })
         forgetSession(context)
         return attempt(true)
       }
-      assertNotRejected(context, downloaded.html)
       const text = setTextOf(downloaded.html)
       const attentionNumber = attentionNumberOf(text)
       if (attentionNumber === null && !/\bCASO\b/i.test(text))
         throw unexpectedPage(context, 'pe_generar2', downloaded.html)
       return {
         ...base,
-        requested,
+        requested: Object.keys(sets),
         text,
         attentionNumber,
         regenerated: isSetRegenerated(downloaded.html, input.previousAttentionNumber ?? null),

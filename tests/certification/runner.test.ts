@@ -133,6 +133,8 @@ test('a fresh run: the set, the folios, four sets sent, declared and approved, t
   expect(steps.filter((step) => step === 'SET_OK')).toHaveLength(4)
   expect(steps.slice(-3)).toEqual(['SETS_DECLARED', 'POLLING', 'SETS_APPROVED'])
   expect(harness.posted('pe_generar2')[0]).toEqual({
+    RUT_EMP: '76543210',
+    DV_EMP: '3',
     AUTORIZADA: 'S',
     TOTAL: '15',
     SET01: 'S',
