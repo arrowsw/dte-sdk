@@ -732,6 +732,29 @@ test('books the SOAP status rejected or the declaration named with content error
   expect(polls(harness)).toBe(3 + 1 + 1)
 })
 
+test('a declaration that never stands is diagnosed: the envelope it names first, then the others as they are declared', async () => {
+  const basicErrors = page('<table><tr><td>SET BASICO</td><td>ENVIO CON ERRORES O REPAROS</td></tr></table>')
+  const partlyKept = booksForm({ purchaseBook: '101' })
+  const harness = await certificationHarness([
+    ...EMPTY_HISTORY,
+    entry,
+    avance2([rowsPage()], () => partlyKept),
+    post('pe_avance3', ...repeat(basicErrors, 10)),
+    fourReceipts(),
+    estUpAlways('EPR'),
+  ])
+  const result = await runBooks(harness.deps, booksState())
+  expect(result.outcome).toBe('rejected')
+  expect(harness.posted('pe_avance3')).toHaveLength(10)
+  const asked = harness.fake.requests
+    .filter((request) => request.url === EST_UP_URL)
+    .map((request) => /<TrackId>(\d+)/.exec(request.text)![1])
+  // The look before the declaration asks in the order the books were sent: purchases, sales, guides, exempt. The
+  // diagnosis asks for the basic set the answer names, then for the rest as the declaration lists them: the other
+  // set, then the sales book before the purchase book.
+  expect(asked).toEqual(['101', '102', '103', '104', '11', '12', '102', '101', '103', '104'])
+})
+
 test('with every book left out of the wait there is no wait: the books named stand as closed and go again', async () => {
   const harness = await certificationHarness([
     ...EMPTY_HISTORY,

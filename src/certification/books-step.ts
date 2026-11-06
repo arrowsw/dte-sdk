@@ -53,8 +53,8 @@ const DECLARED = 'S21'
 const CLOSED_BOOK = 'LNC'
 const NO_BOOKS = 'No hay libros para declarar'
 const ADJUSTABLE: readonly BookKey[] = ['purchaseBook', 'salesBook']
-// The order the wait looks at the books in.
-const WAIT_ORDER: readonly BookKey[] = ['salesBook', 'purchaseBook', 'guideBook', 'exemptPurchaseBook']
+// The order the books are declared and first awaited in: not the order they are sent in.
+const DECLARED_ORDER: readonly BookKey[] = ['salesBook', 'purchaseBook', 'guideBook', 'exemptPurchaseBook']
 const BOOK_NAMES = TEST_SET_PORTAL_NAMES as Readonly<Record<BookKey, string>>
 
 /**
@@ -324,7 +324,7 @@ type BooksDeclaration = {
 }
 
 // Declares every book that has a track id together with the four sets: the portal resets to S01 any row the
-// declaration leaves empty.
+// declaration leaves empty. The order of the entries is the order a diagnosis asks for the ones the answer does not name.
 const declareBooks = async (rt: Runtime, state: CertificationState): Promise<BooksDeclaration> => {
   const today = rt.now()
   const entries: Record<string, { trackId: string; date: string }> = {}
@@ -332,7 +332,7 @@ const declareBooks = async (rt: Runtime, state: CertificationState): Promise<Boo
     const set = state.sets[key]
     if (set !== undefined) entries[key] = entryOf(set.trackId, today)
   }
-  for (const key of BOOK_KEYS) {
+  for (const key of DECLARED_ORDER) {
     const trackId = trackIdOf(state, key)
     if (trackId !== null) entries[key] = entryOf(trackId, today)
   }
@@ -578,7 +578,7 @@ export const runBooks = async (
   if (declaration.success) {
     const refusedBySoap = [...before.terminal].filter(([, status]) => status.rejected).map(([key]) => key)
     const excluded = new Set<string>([...refusedBySoap, ...declaration.contentErrors])
-    const awaited = WAIT_ORDER.filter((key) => outstanding.includes(key) && !excluded.has(key))
+    const awaited = DECLARED_ORDER.filter((key) => outstanding.includes(key) && !excluded.has(key))
     wait =
       awaited.length > 0
         ? await waitForBooksApproval(rt, current, awaited)
@@ -609,7 +609,7 @@ export const runBooks = async (
       wait = await waitForBooksApproval(
         rt,
         current,
-        WAIT_ORDER.filter((key) => failed.includes(key)),
+        DECLARED_ORDER.filter((key) => failed.includes(key)),
       )
       current = wait.state
     }
