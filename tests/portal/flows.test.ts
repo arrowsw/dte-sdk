@@ -91,7 +91,7 @@ describe('requestCafExact', () => {
     expect(harness.posted('af_anular')).not.toEqual([])
   })
 
-  test('annulling stops at 20 ranges in all', async () => {
+  test('annulling takes 20 ranges in each pass', async () => {
     const many = unusedRangesPage(
       Array.from({ length: 30 }, (_, index) => [index * 10 + 1, index * 10 + 5] as [number, number]),
     )
@@ -102,7 +102,7 @@ describe('requestCafExact', () => {
       ...annulRoutes(many),
     ])
     await requestCafExact(harness.portal, { type: 33, quantity: 5, allowAnnul: true })
-    expect(harness.posted('af_anular')).toHaveLength(20)
+    expect(harness.posted('af_anular')).toHaveLength(30)
   })
 
   test('exclude and knownAnnulled reach the annulment, and the memory comes back', async () => {
@@ -342,9 +342,10 @@ describe('requestCafInBatches', () => {
 })
 
 describe('reobtainFolios', () => {
-  test('a refused listing comes back as data', async () => {
+  test('a listing that states a refusal reads as no ranges, with no refusal to report', async () => {
     const harness = await signedIn([
-      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: refusedPage('REOBTENCION DE FOLIOS') } },
+      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: page('form') } },
+      { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: { body: refusedPage('REOBTENCION DE FOLIOS') } },
     ])
     await expect(reobtainFolios(harness.portal, { type: 33, quantity: 2 })).resolves.toEqual({
       complete: false,
@@ -352,8 +353,30 @@ describe('reobtainFolios', () => {
       ranges: [],
       expired: [],
       available: 0,
-      reason: expect.stringContaining('autorizado'),
-      rejection: 'optionNotAuthorized',
+      reason: 'usable ranges do not reach the quantity: 0 of 2',
+    })
+  })
+
+  test('a call the caller aborts while listing is not read as no ranges', async () => {
+    const harness = await signedIn([
+      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: page('form') } },
+      { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: new DteError('REQUEST_ABORTED') },
+    ])
+    expect((await failure(reobtainFolios(harness.portal, { type: 33, quantity: 2 }))).code).toBe('REQUEST_ABORTED')
+  })
+
+  test('a failure that is not a refusal while listing reads as no ranges', async () => {
+    const harness = await signedIn([
+      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: page('form') } },
+      { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: new DteError('TRANSPORT_FAILED') },
+    ])
+    await expect(reobtainFolios(harness.portal, { type: 33, quantity: 2 })).resolves.toEqual({
+      complete: false,
+      cafs: [],
+      ranges: [],
+      expired: [],
+      available: 0,
+      reason: expect.any(String),
     })
   })
 

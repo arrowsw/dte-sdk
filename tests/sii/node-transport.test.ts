@@ -186,11 +186,11 @@ describe('createNodeHttpsTransport', () => {
     expect(response.status).toBe(201)
   })
 
-  test('SOAPAction goes on the wire as two quote characters', async () => {
+  test('SOAPAction goes on the wire as an empty value', async () => {
     const response = await createNodeHttpsTransport({ tls: { ca: cert }, keepAlive: false })(
       get('/echo', { method: 'POST', headers: { ...SOAP_HEADERS, 'Content-Length': '0' } }),
     )
-    expect(response.headers['x-soap-action']).toBe('""')
+    expect(response.headers['x-soap-action']).toBe('')
   })
 
   test('forwards headers, joins repeated response headers and echoes the body', async () => {

@@ -164,6 +164,8 @@ export type CertificationState = {
   readonly cafs: readonly string[]
   /** EN: Every folio used by this run. ES: Cada folio usado por esta corrida. */
   readonly usedFolios: readonly { readonly type: number; readonly folio: number }[]
+  /** EN: The `from-to` ranges the SII reported as annulled or received, by document type: the annulment does not try them again. ES: Los rangos `desde-hasta` que el SII dio por anulados o recibidos, por tipo de documento: la anulación no los vuelve a intentar. */
+  readonly annulledRanges?: Readonly<Record<string, readonly string[]>>
   /** EN: The sets sent. ES: Los sets enviados. */
   readonly sets: Readonly<Partial<Record<SetKey, SentSet>>>
   /** EN: The four sets are approved. ES: Los cuatro sets están aprobados. */

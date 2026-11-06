@@ -27,18 +27,60 @@ test('page readers', () => {
   expect(reobtainDownloadFields(page('<form action="/rf_genera_archivo"></form>'))).toBeNull()
 })
 
+test('forms are chosen by the exact opening tag, with double quotes and the name first', () => {
+  const inputs = '<input name="FOLIO_INI" value="1"><input name="FOLIO_FIN" value="9">'
+  expect(parseReobtainList(page(`<form name=frm1>${inputs}</form>`))).toEqual([])
+  expect(parseReobtainList(page(`<form name='frm1'>${inputs}</form>`))).toEqual([])
+  expect(parseReobtainList(page(`<form action="x" name="frm1">${inputs}</form>`))).toEqual([])
+  expect(parseReobtainList(page(`<FORM NAME="frm12">${inputs}</FORM>`))).toHaveLength(1)
+  expect(reobtainFormFields(page(`<form name=form1>${inputs}</form>`))).toBeNull()
+  expect(reobtainFormFields(page(`<form action="x" name="form1">${inputs}</form>`))).toBeNull()
+  expect(reobtainFormFields(page(`<form name="form1">${inputs}</form>`))).toMatchObject({ FOLIO_INI: '1' })
+  expect(reobtainDownloadFields(page(`<form action='rf_genera_archivo'>${inputs}</form>`))).toBeNull()
+  expect(
+    reobtainDownloadFields(page(`<form method="post" action="/x/rf_genera_archivo">${inputs}</form>`)),
+  ).toMatchObject({
+    FOLIO_INI: '1',
+  })
+  expect(reobtainDownloadFields(page(`<form action="/x/rf_genera_archivo?a=1">${inputs}</form>`))).toBeNull()
+})
+
+test('only inputs with a double-quoted name followed by a double-quoted value are fields', () => {
+  const frm = (inputs: string): string => page(`<form name="frm1">${inputs}</form>`)
+  expect(
+    parseReobtainList(
+      frm(
+        '<input type="hidden" name="FOLIO_INI" value="1"><input name="FOLIO_FIN" value="9">' +
+          '<input name="NO_VALUE"><input value="x" name="VALUE_FIRST"><input name=BARE value=3>' +
+          '<input name=\'SINGLE\' value=\'4\'><input name="EMPTY" value="">',
+      ),
+    ),
+  ).toEqual([{ FOLIO_INI: '1', FOLIO_FIN: '9', EMPTY: '' }])
+  expect(
+    reobtainFormFields(page('<form name="form1"><input name="FOLIO_INI" value="5"><input name="X"></form>')),
+  ).toEqual({
+    FOLIO_INI: '5',
+  })
+})
+
 describe('listReobtainableRanges', () => {
-  test('a refused listing is a refusal, not an empty list', async () => {
-    const refusal = { code: 'SII_PORTAL_REJECTED', details: { rejection: 'optionNotAuthorized' } }
+  test('a listing that states a refusal is read like any other: with no forms it is an empty list', async () => {
     const refused = refusedPage('REOBTENCION DE FOLIOS')
-    const atEntry = await signedIn([{ url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: refused } }])
-    expect(await failure(listReobtainableRanges(atEntry.portal, { type: 33 }))).toMatchObject(refusal)
-    expect(atEntry.posted('rf_reobtencion2_folios')).toEqual([])
     const atList = await signedIn([
       { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: page('form') } },
       { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: { body: refused } },
     ])
-    expect(await failure(listReobtainableRanges(atList.portal, { type: 33 }))).toMatchObject(refusal)
+    expect(await listReobtainableRanges(atList.portal, { type: 33 })).toEqual([])
+  })
+
+  test('a listing that states a refusal and still lists ranges gives its ranges', async () => {
+    const listed = reobtainListPage([[1, 9]]).replace('<form', `${refusedPage('REOBTENCION DE FOLIOS')}<form`)
+    const harness = await signedIn([
+      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: page('form') } },
+      { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: { body: listed } },
+      { url: `${MAULLIN}/rf_reobtencion3_folios`, reply: { body: reobtainDetailPage(1) } },
+    ])
+    expect(await listReobtainableRanges(harness.portal, { type: 33 })).toMatchObject([{ from: 1, to: 9 }])
   })
 
   test('opens each range, because only its detail says it is annulled', async () => {
@@ -82,6 +124,30 @@ describe('listReobtainableRanges', () => {
     ])
   })
 
+  test('the first request is a plain GET: no login, no representation flow, no refusal check', async () => {
+    const harness = await signedIn([
+      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: refusedPage('REOBTENCION DE FOLIOS') } },
+      { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: { body: reobtainListPage([[1, 9]]) } },
+      { url: `${MAULLIN}/rf_reobtencion3_folios`, reply: { body: reobtainDetailPage(1) } },
+    ])
+    expect(await listReobtainableRanges(harness.portal, { type: 33 })).toHaveLength(1)
+    expect(harness.fake.requests.map((request) => request.method)).toEqual(['GET', 'POST', 'POST'])
+    expect(harness.fake.requests[0].headers.referer).toBeUndefined()
+  })
+
+  test('the referers are paths without a host', async () => {
+    const harness = await signedIn([
+      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: page('form') } },
+      { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: { body: reobtainListPage([[1, 9]]) } },
+      { url: `${MAULLIN}/rf_reobtencion3_folios`, reply: { body: reobtainDetailPage(1) } },
+    ])
+    await listReobtainableRanges(harness.portal, { type: 33 })
+    expect(harness.fake.requests.slice(1).map((request) => request.headers.referer)).toEqual([
+      '/cvc_cgi/dte/rf_reobtencion1_folios',
+      '/cvc_cgi/dte/rf_reobtencion2_folios',
+    ])
+  })
+
   test('a bad type stops it', async () => {
     const harness = await signedIn([])
     expect((await failure(listReobtainableRanges(harness.portal, { type: 1 as never }))).code).toBe(
@@ -113,6 +179,15 @@ describe('reobtainCaf', () => {
     })
     expect(harness.posted('rf_genera_folio')).toEqual([{ FOLIO_INI: '1', ACEPTAR: 'Solicitar Folios' }])
     expect(harness.posted('rf_genera_archivo')).toEqual([{ FOLIO_INI: '1', FOLIO_FIN: '9', ACEPTAR: 'AQUI' }])
+  })
+
+  test('the referers are paths without a host', async () => {
+    const harness = await signedIn(routes(REOBTAIN_RESOLUTION, CAF_XML))
+    await reobtainCaf(harness.portal, { type: 33, range })
+    expect(harness.fake.requests.map((request) => request.headers.referer)).toEqual([
+      '/cvc_cgi/dte/rf_reobtencion3_folios',
+      '/cvc_cgi/dte/rf_genera_folio',
+    ])
   })
 
   test.each([

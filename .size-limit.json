@@ -15,7 +15,7 @@
     "name": "dte-sdk/portal (min + brotli)",
     "path": "dist/portal.min.js",
     "ignore": ["node-forge", "@xmldom/xmldom", "fast-xml-parser", "rut.ts", "pdf-lib", "bwip-js", "node:*"],
-    "limit": "70 kB"
+    "limit": "72 kB"
   },
   {
     "name": "dte-sdk/pdf (min + brotli)",

@@ -344,6 +344,15 @@ describe('requestCaf', () => {
       })
     })
 
+    test('sends the UTC date of the instant, not the Chilean one', async () => {
+      // 22:30 on the 15th in Chile is already the 16th in UTC.
+      const harness = await signedIn([...flowTo(message), route('of_genera_archivo', CAF_XML)], {
+        now: () => new Date('2026-11-16T01:30:00.000Z'),
+      })
+      await requestCaf(harness.portal, { type: 33, quantity: 5 })
+      expect(harness.posted('of_genera_archivo')[0]).toMatchObject({ FECHA: '2026-11-16' })
+    })
+
     test.each([
       ['another page', page('nada')],
       ['a transport failure', new DteError('TRANSPORT_FAILED')],
