@@ -57,6 +57,8 @@ export type StampOptions = {
   readonly now?: Date
   /** EN: Check CAF expiry (default true). ES: Chequear el vencimiento del CAF (por defecto true). */
   readonly checkExpiry?: boolean
+  /** EN: `TSTED` as given, instead of the Chile time of `now`. ES: `TSTED` tal como se entrega, en vez de la hora de Chile de `now`. */
+  readonly stampedAt?: string
 }
 
 /**
@@ -105,7 +107,7 @@ export const stampDocument = (doc: Document, caf: Caf, options: StampOptions = {
     totalAmount: header.totals.totalAmount,
     firstItemName: tedText(doc.items[0].name),
     caf: caf.xml,
-    stampedAt: chileTimestamp(options.now),
+    stampedAt: options.stampedAt ?? chileTimestamp(options.now),
   }
   const dd = buildDdString(fields)
   const signature = signWithCaf(caf, dd)

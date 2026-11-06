@@ -8,7 +8,6 @@ import { createEnvelope } from '../envelope/create'
 import { signEnvelope, type SignedEnvelope } from '../envelope/sign'
 import { DteError } from '../errors'
 import type { DocumentInput, IssuerInput, LineItemInput, ReceiverInput, ReferenceInput } from '../model/document'
-import { chileDate } from '../time/chile'
 import { calculateLineAmount } from '../totals/calculate'
 import type { FolioSource } from './folios'
 import type {
@@ -36,7 +35,7 @@ export type IssueSetOptions = {
   readonly folios: FolioSource
   /** EN: The resolution of the certification environment: number 0 and its date. ES: La resolución del ambiente de certificación: número 0 y su fecha. */
   readonly resolution: { readonly number: number; readonly date: string }
-  /** EN: Clock; issue dates are Chile dates of it. ES: Reloj; las fechas de emisión son fechas de Chile de él. */
+  /** EN: Clock, read once per document and once for the envelope. ES: Reloj, leído una vez por documento y una vez para el sobre. */
   readonly now?: () => Date
 }
 
@@ -77,6 +76,11 @@ export type IssuableSetPlan = BasicSetPlan | ExemptSetPlan | GuideSetPlan | Purc
 export const TEST_SET_ENVELOPE_ID = 'DTE_SetDoc'
 
 const GLOBAL_DISCOUNT_DESCRIPTION = 'DESCUENTO GLOBAL ITEMES AFECTOS'
+
+// The test sets are dated and stamped on the UTC clock, as the reference does: the issue date is the UTC day of the
+// run and every stamp is the UTC instant with its milliseconds, without a zone.
+const utcDate = (at: Date): string => at.toISOString().slice(0, 10)
+const utcTimestamp = (at: Date): string => at.toISOString().replace('Z', '')
 const NO_AMOUNT_LINE: PlannedItem = { name: 'SIN MONTO', quantity: 1, unitPrice: 0 }
 const CORRECTION = 'CORRECCION'
 const PURCHASE_TAX_CODE = 15
@@ -108,10 +112,12 @@ export type IssuedRecord = {
 export type IssueContext = {
   /** EN: The options of the run. ES: Las opciones de la corrida. */
   readonly options: IssueSetOptions
-  /** EN: The instant of the run, for signing. ES: El instante de la corrida, para firmar. */
-  readonly now: Date
-  /** EN: The Chile issue date of every document of the run. ES: La fecha de emisión en Chile de cada documento de la corrida. */
+  /** EN: The clock of the run, read once per document. ES: El reloj de la corrida, leído una vez por documento. */
+  readonly clock: () => Date
+  /** EN: The issue date of every document of the run. ES: `FchEmis` — La fecha de emisión de cada documento de la corrida. */
   readonly date: string
+  /** EN: How `TSTED` and `TmstFirma` are written from the instant of a document; the Chile time when absent. ES: Cómo se escriben `TSTED` y `TmstFirma` desde el instante de un documento; la hora de Chile si falta. */
+  readonly stamp?: (at: Date) => string
   /** EN: The records of issued cases, by case id. ES: Los registros de los casos emitidos, por id de caso. */
   readonly records: Map<string, IssuedRecord>
   /** EN: The documents issued so far. ES: Los documentos emitidos hasta ahora. */
@@ -356,7 +362,14 @@ export const issueCertificationDocument = async (
     totals: input.totals,
     withholdVat: input.withholdVat,
   })
-  const signed = issueDocument({ document, caf, certificate: context.options.certificate, now: context.now })
+  const at = context.clock()
+  const signed = issueDocument({
+    document,
+    caf,
+    certificate: context.options.certificate,
+    now: at,
+    timestamp: context.stamp?.(at),
+  })
   const issued: IssuedCase = { caseId: input.caseId, type: input.type, folio, document: signed }
   context.issued.push(issued)
   if (input.record)
@@ -473,6 +486,7 @@ export const signCertificationEnvelope = (
   options: IssueSetOptions,
   now: Date,
   setId: string | undefined,
+  signedAt?: string,
 ): SignedEnvelope =>
   signEnvelope(
     createEnvelope({
@@ -485,6 +499,7 @@ export const signCertificationEnvelope = (
         resolutionDate: options.resolution.date,
         resolutionNumber: options.resolution.number,
         setId,
+        signedAt,
       }),
       now,
     }),
@@ -496,26 +511,40 @@ export const signCertificationEnvelope = (
  * then debit notes, each with the SET reference (`SET`, folio 1, the issue date, `CASO <id>`) and, on notes, the
  * reference to the document of the referenced case with the code and reason of the set. Basic invoices carry
  * `TpoTranVenta` 1 and the global discount of the case; purchase documents name the issuer as receiver and carry the
- * withholding; an internal transfer names the issuer and totals 0.
+ * withholding; an internal transfer names the issuer and totals 0. The set is dated and stamped on the UTC clock, as
+ * the reference does: the issue date is the UTC day the run starts on, and `TSTED`, `TmstFirma` and `TmstFirmaEnv` are
+ * UTC instants with milliseconds. Late in the Chilean evening that is already the next day.
  * ES: Emite cada documento del plan de un set y firma su sobre. Primero las facturas (o guías), luego las notas de
  * crédito, luego las de débito, cada una con la referencia SET (`SET`, folio 1, la fecha de emisión, `CASO <id>`) y, en
  * las notas, la referencia al documento del caso referido con el código y la razón del set. Las facturas del set
  * básico llevan `TpoTranVenta` 1 y el descuento global del caso; los documentos de compra nombran al emisor como
- * receptor y llevan la retención; un traslado interno nombra al emisor y totaliza 0.
+ * receptor y llevan la retención; un traslado interno nombra al emisor y totaliza 0. El set se fecha y se marca con
+ * el reloj UTC, como lo hace la referencia: la fecha de emisión es el día UTC en que parte la corrida, y `TSTED`,
+ * `TmstFirma` y `TmstFirmaEnv` son instantes UTC con milisegundos. Tarde en la noche de Chile eso ya es el día
+ * siguiente.
  * @param plan EN: a set plan of `planCertificationSets`. ES: un plan de set de `planCertificationSets`.
  * @param options EN: issuer, receiver, certificate, folios, resolution, clock. ES: emisor, receptor, certificado, folios, resolución, reloj.
  * @throws {DteError} EN: `MISSING_FIELD` (`invoices` or `guides` on an empty plan, `referencedCase` on a note whose case was not issued before it), `FOLIO_OUT_OF_RANGE` from the folio source, and the phase 1 codes. ES: `MISSING_FIELD` (`invoices` o `guides` en un plan vacío, `referencedCase` en una nota cuyo caso no se emitió antes), `FOLIO_OUT_OF_RANGE` de la fuente de folios, y los códigos de la fase 1.
  */
 export const issueTestSet = async (plan: IssuableSetPlan, options: IssueSetOptions): Promise<IssuedSet> => {
-  const now = options.now?.() ?? new Date()
-  const context: IssueContext = { options, now, date: chileDate(now), records: new Map(), issued: [] }
+  const clock = options.now ?? (() => new Date())
+  const context: IssueContext = {
+    options,
+    clock,
+    date: utcDate(clock()),
+    stamp: utcTimestamp,
+    records: new Map(),
+    issued: [],
+  }
   if (plan.kind === 'guide') await issueGuides(context, plan)
   else await issueInvoicesAndNotes(context, plan)
+  const sealedAt = clock()
   const envelope = signCertificationEnvelope(
     context.issued.map((issued) => issued.document),
     options,
-    now,
+    sealedAt,
     TEST_SET_ENVELOPE_ID,
+    utcTimestamp(sealedAt),
   )
   return { kind: plan.kind, attentionNumber: plan.attentionNumber, cases: context.issued, envelope }
 }

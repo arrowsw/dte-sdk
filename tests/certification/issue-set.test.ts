@@ -6,7 +6,6 @@ import { calculateTotals } from '../../src/totals/calculate'
 import { verifyDocumentSignature } from '../../src/document/sign'
 import { verifyEnvelopeSignature } from '../../src/envelope/sign'
 import { verifyTed } from '../../src/ted/build'
-import { chileDate } from '../../src/time/chile'
 import { ATTENTION } from '../support/test-set-samples'
 import type { DocumentType } from '../../src/catalogs/document-types'
 import { cafFor, certificationCafs, fullPlan, issueOptions, issuer } from '../support/certification-fixtures'
@@ -398,11 +397,35 @@ describe('errors and defaults', () => {
     expect((await failure(issueTestSet(basic, few))).code).toBe('FOLIO_OUT_OF_RANGE')
   })
 
-  test('without a clock the issue date is today in Chile, and a certificate without RUT sends as the issuer', async () => {
+  test('without a clock the issue date is the UTC day of now, and a certificate without RUT sends as the issuer', async () => {
     const options = { ...issueOptions(), now: undefined, certificate: { ...issueOptions().certificate, rut: null } }
+    const before = new Date().toISOString().slice(0, 10)
     const set = await issueTestSet(basic, options)
-    expect(set.cases[0].document.header.issueDate).toBe(chileDate(new Date()))
+    const after = new Date().toISOString().slice(0, 10)
+    expect([before, after]).toContain(set.cases[0].document.header.issueDate)
     expect(set.envelope.cover.senderRut).toBe(ISSUER_RUT)
+  })
+
+  test('the set is dated and stamped on the UTC clock, read once per document and once for the envelope', async () => {
+    // 22:30 of the 15th in Chile is already the 16th in UTC.
+    const start = Date.parse('2026-11-16T01:30:00.250Z')
+    const box = { reads: 0 }
+    const clock = () => new Date(start + 1000 * box.reads++)
+    const set = await issueTestSet(basic, { ...issueOptions(), now: clock })
+    expect(set.cases.every((issued) => issued.document.header.issueDate === '2026-11-16')).toBe(true)
+    expect(set.cases[0].document.references[0].date).toBe('2026-11-16')
+    // The first reading dates the set; each document then takes the next one, and the envelope the last.
+    expect(set.cases.map((issued) => issued.document.signedAt)).toEqual(
+      set.cases.map((_, index) => new Date(start + 1000 * (index + 1)).toISOString().replace('Z', '')),
+    )
+    expect(set.cases[0].document.signedAt).toBe('2026-11-16T01:30:01.250')
+    expect(set.cases[0].document.ted.stampedAt).toBe('2026-11-16T01:30:01.250')
+    expect(set.cases[0].document.xml).toContain('<TSTED>2026-11-16T01:30:01.250</TSTED>')
+    expect(set.cases[0].document.xml).toContain('<TmstFirma>2026-11-16T01:30:01.250</TmstFirma>')
+    expect(set.envelope.cover.signedAt).toBe('2026-11-16T01:30:09.250')
+    expect(set.envelope.xml).toContain('<TmstFirmaEnv>2026-11-16T01:30:09.250</TmstFirmaEnv>')
+    expect(box.reads).toBe(set.cases.length + 2)
+    expect(set.cases.every((issued) => verifyDocumentSignature(issued.document.xml).valid)).toBe(true)
   })
 
   test('basic notes that need no fill-in keep their items; items with a price are never overwritten', async () => {
