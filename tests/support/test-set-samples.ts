@@ -19,7 +19,7 @@ CASO ${ATTENTION}-2
 DOCUMENTO                        FACTURA ELECTRONICA
 ITEM                             CANTIDAD   PRECIO UNITARIO   DESCUENTO
 Pintura blanca                   40         5000              14%
-Servicio exento de instalacion   1          20000
+Servicio EXENTO de instalacion   1          20000
 
 DESCUENTO GLOBAL ITEMES AFECTOS  7%
 --------------------------------------------------

@@ -264,8 +264,10 @@ const parseItemRow = (line: string, reasonText: string): TestCaseItem | null => 
     .split(ITEM_SPLIT)
     .map((part) => part.trim())
     .filter((part) => part !== '')
-  if (parts.length >= 2 && !line.includes(':') && !/^(DOCUMENTO|REFERENCIA|RAZON)/i.test(line)) {
-    const first = parts[0].toUpperCase()
+  // The words that keep a row from being an item, and `MODIFICA MONTO` below, count as the field reads them: in
+  // capitals only, so "Razones varias" is an item and a lower-case "modifica monto" leaves the value a quantity.
+  if (parts.length >= 2 && !line.includes(':') && !/^(DOCUMENTO|REFERENCIA|RAZON)/.test(line)) {
+    const first = parts[0]
     if (first === 'ITEM' || first.includes('CANTIDAD') || first.includes('UNITARIO')) return null
     {
       if (parts.length === 4) {
@@ -281,7 +283,7 @@ const parseItemRow = (line: string, reasonText: string): TestCaseItem | null => 
       if (parts.length === 2) {
         const value = int(parts[1])
         if (!Number.isNaN(value))
-          return reasonText.toUpperCase().includes('MODIFICA MONTO')
+          return reasonText.includes('MODIFICA MONTO')
             ? { name: parts[0], quantity: 1, unitPrice: value }
             : { name: parts[0], quantity: value }
       }
