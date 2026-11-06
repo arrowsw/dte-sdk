@@ -75,16 +75,21 @@ export const scopeFor = (held: readonly HeldCaf[], type: number, folio: number):
   held.find((h) => h.caf.documentType === type && folio >= h.caf.range.from && folio <= h.caf.range.to)!.scope
 
 /**
- * EN: A folio source over the held CAFs through the registry: the first CAF of the type with a folio left gives the
- * next one, reserved in the registry, so two runs never take the same folio.
- * ES: Una fuente de folios sobre los CAF en mano a través del registro: el primer CAF del tipo con un folio libre da
- * el siguiente, reservado en el registro, así dos corridas nunca toman el mismo folio.
+ * EN: A folio source over the held CAFs through the registry: the first CAF of the type with a folio left gives its
+ * lowest folio that is neither used nor annulled, reserved in the registry, so two runs never take the same folio. The
+ * lowest and not the next after the last one: the run marks used the folios the SII did not show free, wherever they
+ * lie, and the free ones below them are the ones to issue with, as field behaviour takes them.
+ * ES: Una fuente de folios sobre los CAF en mano a través del registro: el primer CAF del tipo con un folio libre da su
+ * menor folio que no esté usado ni anulado, reservado en el registro, así dos corridas nunca toman el mismo folio. El
+ * menor y no el siguiente al último: la corrida marca como usados los folios que el SII no mostró libres, estén donde
+ * estén, y los libres bajo ellos son los que hay que emitir, como los toma el comportamiento de campo.
  */
 export const registryFolioSource = (registry: FolioRegistry, held: readonly HeldCaf[]): FolioSource => ({
   take: async (type: DocumentType) => {
     for (const h of held) {
       if (h.caf.documentType !== type) continue
-      if ((await registry.remaining(h.scope)) > 0) return { caf: h.caf, folio: await registry.reserve(h.scope) }
+      if ((await registry.remaining(h.scope)) > 0)
+        return { caf: h.caf, folio: await registry.reserve(h.scope, { lowestFree: true }) }
     }
     throw new DteError('FOLIO_OUT_OF_RANGE', { type })
   },

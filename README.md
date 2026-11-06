@@ -345,8 +345,12 @@ present a client certificate.
   It does not sign in on demand: call it with a session that is alive.
 
 `createFolioRegistry`, `createMemoryFolioRegistry` and, from `dte-sdk/node`, `createDirectoryFolioRegistry` keep local
-track of the folios of each CAF: reserve (the lowest folio of the range that is neither used nor annulled), mark as
-sent or annulled, release. A service with its own database implements `FolioRegistry` with its own transactions.
+track of the folios of each CAF: reserve, mark as sent or annulled, release. `reserve` hands out the next free folio:
+after the last one reserved, or from the lowest one reserved and not sent, never one that is used or annulled and never
+a free one below that point. With `{ lowestFree: true }` it hands out the lowest free folio of the whole range, which is
+what the certification run asks for; use it only when the registry records every folio the range has spent. A service
+with its own database implements `FolioRegistry` with its own transactions, the option included if it is to back a
+certification run.
 
 A refusal of the SII is `SII_PORTAL_REJECTED`, with `details.rejection` and `portalRejectionMessage` saying what it means
 and what to do; the composite flows return it as data, so the CAFs already obtained are not lost. Login, logout and the

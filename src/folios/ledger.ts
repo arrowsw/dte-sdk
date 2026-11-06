@@ -125,21 +125,35 @@ const outOfRange = (scope: FolioScope, folio: number): DteError =>
   new DteError('FOLIO_OUT_OF_RANGE', { folio, from: scope.range.from, to: scope.range.to, type: scope.type })
 
 /**
- * EN: The lowest folio of the range that is neither used nor annulled, wherever the used ones lie: a folio given back, or
- * left free below a folio marked sent, is handed out again.
- * ES: El menor folio del rango que no está usado ni anulado, estén donde estén los usados: un folio devuelto, o que quedó
- * libre bajo un folio marcado como enviado, se vuelve a entregar.
+ * EN: How a folio is chosen.
+ * ES: Cómo se elige un folio.
+ */
+export type ReserveOptions = {
+  /** EN: Hand out the lowest folio of the range that is neither used nor annulled, wherever the used ones lie: a folio given back, or left free below a folio marked sent, goes out again. Without it the choice moves on from the last folio reserved and never goes back below it. The certification run asks for it, because it marks used the folios the SII did not show free; only for a ledger that records every folio the range has spent. ES: Entrega el menor folio del rango que no está usado ni anulado, estén donde estén los usados: un folio devuelto, o que quedó libre bajo un folio marcado como enviado, vuelve a salir. Sin esto la elección avanza desde el último folio reservado y nunca vuelve bajo él. La corrida de certificación lo pide, porque marca como usados los folios que el SII no mostró libres; solo para un libro que registra todo folio gastado del rango. */
+  readonly lowestFree?: boolean
+}
+
+/**
+ * EN: The next free folio: it starts at the lowest reserved-but-unsent folio, or after the last reserved, and walks past
+ * used and annulled folios; a free folio below that start is not handed out. With `lowestFree` it starts at the first
+ * folio of the range instead. Either way a folio that is used or annulled is never handed out.
+ * ES: El siguiente folio libre: parte en el menor folio reservado y no enviado, o después del último reservado, y avanza
+ * saltando los usados y los anulados; un folio libre bajo ese punto de partida no se entrega. Con `lowestFree` parte en
+ * el primer folio del rango. En ambos casos nunca se entrega un folio usado o anulado.
  * @throws {DteError} EN: `FOLIO_OUT_OF_RANGE` past the end of the range. ES: `FOLIO_OUT_OF_RANGE` pasado el fin del rango.
  */
 export const reserveInLedger = (
   ledger: FolioLedger,
   scope: FolioScope,
   at: string,
+  options: ReserveOptions = {},
 ): { readonly ledger: FolioLedger; readonly folio: number } => {
   const entry = ledger.entries[keyOf(scope)] ?? freshEntry(scope, at)
   const annulled = annulledFolios(ledger, scope)
   const used = new Set(entry.used)
-  let folio = scope.range.from
+  const unsent = entry.used.filter((folio) => entry.sent[String(folio)] === undefined && !annulled.has(folio))
+  const pointer = unsent[0] ?? (entry.lastReserved === null ? scope.range.from : entry.lastReserved + 1)
+  let folio = options.lowestFree === true ? scope.range.from : Math.max(pointer, scope.range.from)
   while (used.has(folio) || annulled.has(folio)) folio += 1
   if (folio > scope.range.to) throw outOfRange(scope, folio)
   const nextUsed = [...entry.used, folio].sort((a, b) => a - b)

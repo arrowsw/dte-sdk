@@ -68,7 +68,7 @@ export { downloadMipymeBackup } from './backup'
 export type { MipymeBackup, MipymeBackupChunk, MipymeBackupInput, MipymeDownloadedChunk } from './backup'
 export { cafFingerprint, createFolioRegistry, createMemoryFolioRegistry } from '../folios/registry'
 export type { FolioLedgerStore, FolioRegistry } from '../folios/registry'
-export type { FolioEntry, FolioLedger, FolioScope, FolioSentRecord, FolioStats } from '../folios/ledger'
+export type { FolioEntry, FolioLedger, FolioScope, FolioSentRecord, FolioStats, ReserveOptions } from '../folios/ledger'
 export {
   TEST_SET_KINDS,
   TEST_SET_PORTAL_NAMES,

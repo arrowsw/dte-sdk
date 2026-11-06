@@ -191,7 +191,7 @@ describe('prepareFolios', () => {
       expect(result.outcome).toBe('ready')
       expect(harness.urls()).toEqual(repeat(EST_DTE, 3))
       expect(await harness.registry.remaining(scope)).toBe(4)
-      expect(await harness.registry.reserve(scope)).toBe(2)
+      expect(await harness.registry.reserve(scope, { lowestFree: true })).toBe(2)
       expect(result.state.usedFolios).toEqual([])
     })
 
@@ -199,8 +199,8 @@ describe('prepareFolios', () => {
       const harness = await certificationHarness([answers(free, received, free, free)])
       await prepareFolios(harness.deps, stateWith({ cafs: [held] }), { needs: { 33: 2 } })
       expect(await harness.registry.remaining(scope)).toBe(4)
-      expect(await harness.registry.reserve(scope)).toBe(1)
-      expect(await harness.registry.reserve(scope)).toBe(3)
+      expect(await harness.registry.reserve(scope, { lowestFree: true })).toBe(1)
+      expect(await harness.registry.reserve(scope, { lowestFree: true })).toBe(3)
     })
 
     test('a received folio the registry already holds leaves its count as it was', async () => {
@@ -218,7 +218,7 @@ describe('prepareFolios', () => {
       await harness.registry.markSent(scope, 1)
       await prepareFolios(harness.deps, stateWith({ cafs: [held] }), { needs: { 33: 2 } })
       expect(await harness.registry.remaining(scope)).toBe(4)
-      expect(await harness.registry.reserve(scope)).toBe(2)
+      expect(await harness.registry.reserve(scope, { lowestFree: true })).toBe(2)
     })
 
     test('a received folio can leave the CAF short, and the portal is asked for the rest', async () => {
@@ -554,8 +554,8 @@ describe('prepareFolios', () => {
         cafFingerprint: cafFingerprint(range),
       }
       expect(await harness.registry.remaining(scope)).toBe(2)
-      expect(await harness.registry.reserve(scope)).toBe(10)
-      expect(await harness.registry.reserve(scope)).toBe(12)
+      expect(await harness.registry.reserve(scope, { lowestFree: true })).toBe(10)
+      expect(await harness.registry.reserve(scope, { lowestFree: true })).toBe(12)
     })
 
     test('a short answer that covers more is kept, only its free folios can be issued, and the rest is asked', async () => {
@@ -577,7 +577,7 @@ describe('prepareFolios', () => {
         cafFingerprint: cafFingerprint(range),
       }
       expect(await harness.registry.remaining(scope)).toBe(1)
-      expect(await harness.registry.reserve(scope)).toBe(11)
+      expect(await harness.registry.reserve(scope, { lowestFree: true })).toBe(11)
     })
 
     test('a short answer that covers more takes the place of the CAFs in hand, and the rest is asked', async () => {

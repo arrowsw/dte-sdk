@@ -208,7 +208,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   session or a refusal page is an empty list, and in `reobtainFolios` a listing that fails for any reason is no ranges
   (`ReobtainResult` loses `rejection`). `annulFolios` applies `maxRanges` to each pass, not to the call (up to four
   passes: up to 200 ranges by default, 80 in `requestCafExact`), and tries each step up to three times whatever the
-  error. The folio ledger hands out the lowest folio of a range that is neither used nor annulled. In the run,
+  error. `FolioRegistry.reserve` takes `{ lowestFree: true }` (`ReserveOptions`): the lowest folio of the range that
+  is neither used nor annulled, instead of the next one after the last reserved, which stays the default. In the run,
+  folios are taken with that option, because the run marks used the folios the SII did not show free;
   `prepareFolios` asks the SII for the folios it is about to use (30 queries per CAF at the most) and marks the
   received ones used, reads a maximum it cannot read as no cap, obtains again with the whole need (the ranges kept
   take the place of the CAFs in hand; ranges only listed cover nothing), never asks for a blocked type, asks in as
