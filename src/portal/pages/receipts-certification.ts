@@ -16,14 +16,30 @@ const AUTHORIZED_RECEIPTS_LINE = /autorizada.*boleta|boleta.*autorizada/i
 // A Long as GWT writes it in an answer: a single-quoted token of its base-64 alphabet.
 const LONG_TOKEN = /'([A-Za-z0-9$_]+)'/
 
+// The string table as the field cuts it: from the last `,[` to the last `],0,7]`, read as JSON. A body that does not cut
+// into a JSON array (an apostrophe written as `\x27` is enough) has no table.
+const fieldTable = (body: string): readonly unknown[] => {
+  try {
+    // A cut that parses ends in `]` (one that ends in a comma never parses), and JSON that ends in `]` is an array.
+    return JSON.parse(body.substring(body.lastIndexOf(',[') + 1, body.lastIndexOf('],0,7]') + 1)) as unknown[]
+  } catch {
+    return []
+  }
+}
+
 /**
  * EN: The digits of a representative in the portal's list: the last string of the table made of 7 or 8 digits, or
- * null. A company without valid representatives, one that is not enrolled, answers an empty table.
+ * null. The table is cut from the raw body as the field cuts it, so one the field cannot read has no representative. A
+ * company without valid representatives, one that is not enrolled, answers an empty table.
  * ES: Los dígitos de un representante en la lista del portal: el último string de la tabla hecho de 7 u 8 dígitos, o
- * null. Una empresa sin representantes vigentes, una que no está inscrita, responde una tabla vacía.
+ * null. La tabla se corta del cuerpo crudo como la corta el campo, así que una que el campo no puede leer no tiene
+ * representante. Una empresa sin representantes vigentes, una que no está inscrita, responde una tabla vacía.
  */
 export const representativeDigitsOf = (answer: GwtAnswer): string | null =>
-  [...answer.table].reverse().find((item) => REPRESENTATIVE.test(item)) ?? null
+  fieldTable(answer.body)
+    .map(String)
+    .reverse()
+    .find((item) => REPRESENTATIVE.test(item)) ?? null
 
 /**
  * EN: What the declaration needs from the application record.
@@ -50,7 +66,13 @@ export type ReceiptsPostulation = {
 export const postulationOf = (answer: GwtAnswer): ReceiptsPostulation | null => {
   const token = LONG_TOKEN.exec(answer.body)?.[1]
   if (!answer.ok || token === undefined) return null
-  return { authorizationDate: answer.table.find((item) => AUTHORIZATION_DATE.test(item)) ?? '', token }
+  return {
+    authorizationDate:
+      fieldTable(answer.body)
+        .map(String)
+        .find((item) => AUTHORIZATION_DATE.test(item)) ?? '',
+    token,
+  }
 }
 
 /**

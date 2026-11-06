@@ -29,6 +29,20 @@ describe('the receipts portal answers', () => {
     expect(representativeDigitsOf(gwtAnswer(okAnswer([1], ['123456', '123456789'])))).toBeNull()
   })
 
+  test('the table is cut from the raw body as the field cuts it: one it cannot read has no representative and no date', () => {
+    // An apostrophe is written \\x27 by GWT, which is not JSON: the field reads no table, so no representative.
+    const apostrophe = '//OK[2,1,["O\\x27Higgins","12345678"],0,7]'
+    expect(representativeDigitsOf(gwtAnswer(apostrophe))).toBeNull()
+    expect(postulationOf(gwtAnswer(`//OK[3,'BAqo',2,1,["O\\x27Higgins","15/11/2026"],0,7]`))).toEqual({
+      authorizationDate: '',
+      token: 'BAqo',
+    })
+    // Without the closing trailer the cut is not an array either.
+    expect(representativeDigitsOf(gwtAnswer('//OK[2,1,["12345678"]'))).toBeNull()
+    expect(representativeDigitsOf(gwtAnswer('//OK[2,1,[12345678],0,7]'))).toBe('12345678')
+    expect(representativeDigitsOf(gwtAnswer('//OK[1,2,3,0,7]'))).toBeNull()
+  })
+
   test('the application record gives the authorisation date and the Long as written; without a Long it is no record', () => {
     const answer = gwtAnswer('//OK[3,\'BAqo\',2,1,["cl.sii.x/1","15/11/2026","otro"],0,7]')
     expect(postulationOf(answer)).toEqual({ authorizationDate: '15/11/2026', token: 'BAqo' })

@@ -1,4 +1,5 @@
 import { RECEIPTS_PORTAL } from '../../src/catalogs/certification'
+import type { PortalClientOptions } from '../../src/portal/client'
 import { receiptsComplianceBody } from '../../src/portal/pages/receipts-certification'
 import {
   declareReceiptsCompliance,
@@ -8,7 +9,7 @@ import {
   verifyReceiptsAuthorization,
 } from '../../src/portal/receipts-certification'
 import type { Logger } from '../../src/sii/logger'
-import { gwtMethodOf } from '../support/exchange-fixtures'
+import { gwtMethodOf, SESSION_CHECK_URL, sessionCheckRoute as alive } from '../support/exchange-fixtures'
 import type { FakeReply, FakeRoute, RecordedRequest } from '../support/fake-sii'
 import { EMPTY_OK, EXCEPTION, okAnswer } from '../support/gwt-answers'
 import { failure, MAULLIN, PALENA, portalWith, seedSession, signedIn, type PortalHarness } from '../support/portal'
@@ -58,17 +59,20 @@ const logger = (): Logger & { readonly lines: string[] } => {
   const log = (message: string): void => void lines.push(message)
   return { debug: log, info: log, warn: log, error: log, lines }
 }
+// Every operation checks a saved session against the company page first, as the field does once per run.
+const signed = (routes: readonly FakeRoute[], options: Partial<PortalClientOptions> = {}): Promise<PortalHarness> =>
+  signedIn([alive, ...routes], options)
 const retrying = { retry: { maxAttempts: 3, initialDelayMs: 1 } }
 // A session whose cookies name no RUT.
 const anonymous = async (routes: readonly FakeRoute[]): Promise<PortalHarness> => {
-  const harness = portalWith(routes)
+  const harness = portalWith([alive, ...routes])
   await seedSession(harness.portal, { 'NETSCAPE_LIVEWIRE.locexp': 'x' })
   return harness
 }
 
 describe('downloadReceiptsTestSet', () => {
   test('reads the representatives and the application, then downloads the set with the session owner as representative', async () => {
-    const harness = await signedIn([facade(), servlet()])
+    const harness = await signed([facade(), servlet()])
     const result = await downloadReceiptsTestSet(harness.portal, { providerMail: 'soporte@example.test' })
     expect(result).toEqual({ text: RECEIPTS_SET_TEXT, representativeRut: '12345678-5' })
     expect(posts(harness).map((request) => request.text)).toEqual([
@@ -80,7 +84,7 @@ describe('downloadReceiptsTestSet', () => {
       'x-gwt-module-base': BASE,
       'x-gwt-permutation': KNOWN.permutation,
     })
-    const download = harness.fake.requests[2]
+    const download = harness.fake.requests[3]
     expect(download.method).toBe('GET')
     expect(download.url).toBe(
       `${BASE}DownloadFileServlet?rutEmpresa=76543210&dvEmpresa=3&rutRepre=12345678&dvRepre=5&mailProvSw=soporte%40example.test`,
@@ -89,7 +93,7 @@ describe('downloadReceiptsTestSet', () => {
   })
 
   test('the representative of the download comes from rut and dv, never from rutm and dvm, nor from the portal list', async () => {
-    const harness = portalWith([facade(), servlet()])
+    const harness = portalWith([alive, facade(), servlet()])
     await seedSession(harness.portal, {
       'NETSCAPE_LIVEWIRE.rut': '11111111',
       'NETSCAPE_LIVEWIRE.dv': '1',
@@ -99,7 +103,7 @@ describe('downloadReceiptsTestSet', () => {
     const gwt = { permutation: 'A'.repeat(32), policy: 'B'.repeat(32) }
     const result = await downloadReceiptsTestSet(harness.portal, { companyRut: '12.345.678-5', gwt })
     expect(result.representativeRut).toBe('11111111-1')
-    expect(harness.urls()[2]).toBe(
+    expect(harness.urls()[3]).toBe(
       `${BASE}DownloadFileServlet?rutEmpresa=12345678&dvEmpresa=5&rutRepre=11111111&dvRepre=1&mailProvSw=`,
     )
     expect(posts(harness)[0].text).toContain(`|${gwt.policy}|`)
@@ -107,11 +111,11 @@ describe('downloadReceiptsTestSet', () => {
   })
 
   test('the fallback cookies name the representative, and a missing verifier goes out empty', async () => {
-    const harness = portalWith([facade(), servlet()])
+    const harness = portalWith([alive, facade(), servlet()])
     await seedSession(harness.portal, { RUT_NS: '11111111', 'NETSCAPE_LIVEWIRE.locexp': 'x' })
     const result = await downloadReceiptsTestSet(harness.portal)
     expect(result.representativeRut).toBe('11111111-')
-    expect(harness.urls()[2]).toBe(
+    expect(harness.urls()[3]).toBe(
       `${BASE}DownloadFileServlet?rutEmpresa=76543210&dvEmpresa=3&rutRepre=11111111&dvRepre=&mailProvSw=`,
     )
   })
@@ -126,19 +130,19 @@ describe('downloadReceiptsTestSet', () => {
   })
 
   test('a download that is no set is unexpected', async () => {
-    const short = await signedIn([facade(), servlet({ body: '  nada  ' })])
+    const short = await signed([facade(), servlet({ body: '  nada  ' })])
     expect((await failure(downloadReceiptsTestSet(short.portal))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
   })
 
   test('the HTTP status of the download is not looked at: a set is a body of ten characters or more', async () => {
-    const odd = await signedIn([facade(), servlet({ status: 500, body: RECEIPTS_SET_TEXT })])
+    const odd = await signed([facade(), servlet({ status: 500, body: RECEIPTS_SET_TEXT })])
     expect((await downloadReceiptsTestSet(odd.portal)).text).toBe(RECEIPTS_SET_TEXT)
   })
 })
 
 describe('declareReceiptsTrackId', () => {
   test('posts ingresarTrackId with the company, the state 90 and the track id, once', async () => {
-    const harness = await signedIn([facade()])
+    const harness = await signed([facade()])
     await expect(declareReceiptsTrackId(harness.portal, { trackId: ' 9876543210 ' })).resolves.toEqual({
       body: EMPTY_OK,
     })
@@ -148,28 +152,30 @@ describe('declareReceiptsTrackId', () => {
   })
 
   test('an answer that is not //OK is a refusal, an empty track id is refused before any request, and nothing is retried', async () => {
-    const refused = await signedIn([facade({ ingresarTrackId: { body: EXCEPTION } })])
+    const refused = await signed([facade({ ingresarTrackId: { body: EXCEPTION } })])
     const error = await failure(declareReceiptsTrackId(refused.portal, { trackId: '1' }))
     expect(error.code).toBe('SII_PORTAL_REJECTED')
     expect(error.details).toMatchObject({ rejection: 'receiptsTrackIdRefused', httpStatus: 200 })
-    const quiet = await signedIn([])
+    const quiet = await signed([])
     expect((await failure(declareReceiptsTrackId(quiet.portal, { trackId: '  ' }))).details).toEqual({
       field: 'trackId',
     })
     expect(quiet.urls()).toEqual([])
-    const busy = await signedIn([facade({ ingresarTrackId: { status: 503, body: 'busy' } })], retrying)
-    expect((await failure(declareReceiptsTrackId(busy.portal, { trackId: '1' }))).code).toBe('SII_HTTP_ERROR')
+    const busy = await signed([facade({ ingresarTrackId: { status: 503, body: 'busy' } })], retrying)
+    const unavailable = await failure(declareReceiptsTrackId(busy.portal, { trackId: '1' }))
+    expect(unavailable.code).toBe('SII_PORTAL_REJECTED')
+    expect(unavailable.details).toMatchObject({ rejection: 'receiptsTrackIdRefused', httpStatus: 503 })
     expect(posts(busy)).toHaveLength(1)
-    const down = await signedIn([facade({ ingresarTrackId: { status: 500, body: EMPTY_OK } })])
+    const down = await signed([facade({ ingresarTrackId: { status: 500, body: EMPTY_OK } })])
     await expect(declareReceiptsTrackId(down.portal, { trackId: '1' })).resolves.toEqual({ body: EMPTY_OK })
-    const bare = await signedIn([facade({ ingresarTrackId: { status: 500, body: 'Error' } })])
+    const bare = await signed([facade({ ingresarTrackId: { status: 500, body: 'Error' } })])
     expect((await failure(declareReceiptsTrackId(bare.portal, { trackId: '1' }))).details['httpStatus']).toBe(500)
   })
 })
 
 describe('readReceiptsStatus', () => {
   test('a company without representatives is not enrolled, and nothing else is asked', async () => {
-    const harness = await signedIn([facade({ [LIST]: { body: EMPTY_OK } })])
+    const harness = await signed([facade({ [LIST]: { body: EMPTY_OK } })])
     await expect(readReceiptsStatus(harness.portal)).resolves.toEqual({
       enrolled: false,
       readyToDeclare: false,
@@ -180,7 +186,7 @@ describe('readReceiptsStatus', () => {
   })
 
   test('P90 is ready to declare; another state is reported as it is', async () => {
-    const ready = await signedIn([facade({ obtenerEstadoAutorizaEmp: { body: READY } })])
+    const ready = await signed([facade({ obtenerEstadoAutorizaEmp: { body: READY } })])
     await expect(readReceiptsStatus(ready.portal)).resolves.toEqual({
       enrolled: true,
       readyToDeclare: true,
@@ -190,17 +196,17 @@ describe('readReceiptsStatus', () => {
     expect(posts(ready)[1].text).toBe(
       `7|0|7|${HEAD}|obtenerEstadoAutorizaEmp|${INTEGER}|${STRING}|3|1|2|3|4|4|5|6|5|6|5|76543210|7|5|90|0|`,
     )
-    const earlier = await signedIn([facade({ obtenerEstadoAutorizaEmp: { body: okAnswer([1], ['x', 'P05']) } })])
+    const earlier = await signed([facade({ obtenerEstadoAutorizaEmp: { body: okAnswer([1], ['x', 'P05']) } })])
     await expect(readReceiptsStatus(earlier.portal)).resolves.toMatchObject({ readyToDeclare: false, state: 'P05' })
     expect(methods(earlier)).toEqual([LIST, 'obtenerEstadoAutorizaEmp'])
     // The raw body is read: a P90 inside a sentence counts, as the field reads it.
-    const odd = await signedIn([
+    const odd = await signed([
       facade({ obtenerEstadoAutorizaEmp: { body: okAnswer([1], ['La empresa no esta en estado P90']) } }),
     ])
     await expect(readReceiptsStatus(odd.portal)).resolves.toMatchObject({ readyToDeclare: true, state: 'P90' })
-    const quoted = await signedIn([facade({ obtenerEstadoAutorizaEmp: { body: '<html>"P07"</html>' } })])
+    const quoted = await signed([facade({ obtenerEstadoAutorizaEmp: { body: '<html>"P07"</html>' } })])
     await expect(readReceiptsStatus(quoted.portal)).resolves.toMatchObject({ readyToDeclare: false, state: 'P07' })
-    const nothing = await signedIn([facade({ obtenerEstadoAutorizaEmp: { body: EXCEPTION } })])
+    const nothing = await signed([facade({ obtenerEstadoAutorizaEmp: { body: EXCEPTION } })])
     await expect(readReceiptsStatus(nothing.portal)).resolves.toEqual({
       enrolled: true,
       readyToDeclare: false,
@@ -211,16 +217,16 @@ describe('readReceiptsStatus', () => {
   })
 
   test('the HTTP status of a read is not looked at, for the list or for the state', async () => {
-    const down = await signedIn([facade({ obtenerEstadoAutorizaEmp: { status: 500, body: READY } })])
+    const down = await signed([facade({ obtenerEstadoAutorizaEmp: { status: 500, body: READY } })])
     await expect(readReceiptsStatus(down.portal)).resolves.toMatchObject({ readyToDeclare: true, state: 'P90' })
-    const listDown = await signedIn([facade({ [LIST]: { status: 500, body: REPRESENTATIVES } })])
+    const listDown = await signed([facade({ [LIST]: { status: 500, body: REPRESENTATIVES } })])
     await expect(readReceiptsStatus(listDown.portal)).resolves.toMatchObject({ enrolled: true })
-    const unlisted = await signedIn([facade({ [LIST]: { status: 500, body: 'Error' } })])
+    const unlisted = await signed([facade({ [LIST]: { status: 500, body: 'Error' } })])
     await expect(readReceiptsStatus(unlisted.portal)).resolves.toMatchObject({ enrolled: false })
   })
 
   test('an empty list for 90 is settled by asking for 91: declared, or not approved yet', async () => {
-    const declared = await signedIn([
+    const declared = await signed([
       facade({ obtenerEstadoAutorizaEmp: (_request, call) => ({ body: call === 1 ? EMPTY_OK : DECLARED }) }),
     ])
     await expect(readReceiptsStatus(declared.portal)).resolves.toEqual({
@@ -232,7 +238,7 @@ describe('readReceiptsStatus', () => {
     expect(posts(declared)[2].text).toBe(
       `7|0|7|${HEAD}|obtenerEstadoAutorizaEmp|${INTEGER}|${STRING}|3|1|2|3|4|4|5|6|5|6|5|76543210|7|5|91|0|`,
     )
-    const pending = await signedIn([facade()])
+    const pending = await signed([facade()])
     await expect(readReceiptsStatus(pending.portal)).resolves.toEqual({
       enrolled: true,
       readyToDeclare: false,
@@ -240,7 +246,7 @@ describe('readReceiptsStatus', () => {
       state: null,
     })
     const log = logger()
-    const silent = await signedIn(
+    const silent = await signed(
       [
         facade({
           obtenerEstadoAutorizaEmp: (_request, call) => (call === 1 ? { body: EMPTY_OK } : new Error('socket hang up')),
@@ -259,7 +265,7 @@ describe('declareReceiptsCompliance', () => {
   const input = { provider, businessName }
 
   test('with the set approved it reads the application and posts the declaration once, with the session owner as representative', async () => {
-    const harness = await signedIn([ready()])
+    const harness = await signed([ready()])
     await expect(declareReceiptsCompliance(harness.portal, input)).resolves.toEqual({
       outcome: 'declared',
       state: 'P91',
@@ -291,22 +297,21 @@ describe('declareReceiptsCompliance', () => {
     expect(declaration.headers).toMatchObject({
       'content-type': 'text/x-gwt-rpc; charset=UTF-8',
       'x-gwt-permutation': KNOWN.permutation,
-      referer: BASE,
     })
-    const linked = await signedIn([ready()])
+    const linked = await signed([ready()])
     await declareReceiptsCompliance(linked.portal, { ...input, link: 'consulta.example.test' })
     expect(posts(linked)[3].text).toContain('|consulta.example.test|')
   })
 
   test('already declared, or not approved yet: an outcome, and nothing is sent', async () => {
-    const declared = await signedIn([
+    const declared = await signed([
       facade({ obtenerEstadoAutorizaEmp: (_request, call) => ({ body: call === 1 ? EMPTY_OK : DECLARED }) }),
     ])
     await expect(declareReceiptsCompliance(declared.portal, input)).resolves.toEqual({
       outcome: 'alreadyDeclared',
       state: 'P91',
     })
-    const pending = await signedIn([facade()])
+    const pending = await signed([facade()])
     await expect(declareReceiptsCompliance(pending.portal, input)).resolves.toEqual({
       outcome: 'notReady',
       state: null,
@@ -315,26 +320,27 @@ describe('declareReceiptsCompliance', () => {
   })
 
   test('a company that is not enrolled, and a declaration the portal does not take, are refusals', async () => {
-    const outsider = await signedIn([facade({ [LIST]: { body: EMPTY_OK } })])
+    const outsider = await signed([facade({ [LIST]: { body: EMPTY_OK } })])
     expect((await failure(declareReceiptsCompliance(outsider.portal, input))).details['rejection']).toBe(
       'receiptsNotEnrolled',
     )
-    const refused = await signedIn([ready({ autorizarEmpresaBolProd: { body: EXCEPTION } })])
+    const refused = await signed([ready({ autorizarEmpresaBolProd: { body: EXCEPTION } })])
     const error = await failure(declareReceiptsCompliance(refused.portal, input))
     expect(error.code).toBe('SII_PORTAL_REJECTED')
     expect(error.details).toMatchObject({ rejection: 'receiptsComplianceRefused', httpStatus: 200 })
     expect(error.details['portalMessage']).toContain('The call failed on the server')
-    const down = await signedIn([ready({ autorizarEmpresaBolProd: { status: 500, body: '//OK[0,[],0,7]' } })])
+    const down = await signed([ready({ autorizarEmpresaBolProd: { status: 500, body: '//OK[0,[],0,7]' } })])
     await expect(declareReceiptsCompliance(down.portal, input)).resolves.toMatchObject({ outcome: 'declared' })
-    const bare = await signedIn([ready({ autorizarEmpresaBolProd: { status: 500, body: 'Error' } })])
+    const bare = await signed([ready({ autorizarEmpresaBolProd: { status: 500, body: 'Error' } })])
     expect((await failure(declareReceiptsCompliance(bare.portal, input))).details['httpStatus']).toBe(500)
-    const busy = await signedIn([ready({ autorizarEmpresaBolProd: { status: 503, body: 'busy' } })], retrying)
-    expect((await failure(declareReceiptsCompliance(busy.portal, input))).code).toBe('SII_HTTP_ERROR')
+    const busy = await signed([ready({ autorizarEmpresaBolProd: { status: 503, body: 'busy' } })], retrying)
+    const unavailable = await failure(declareReceiptsCompliance(busy.portal, input))
+    expect(unavailable.details).toMatchObject({ rejection: 'receiptsComplianceRefused', httpStatus: 503 })
     expect(methods(busy).filter((method) => method === 'autorizarEmpresaBolProd')).toHaveLength(1)
   })
 
   test('an application record without an authorisation date is declared with the date left empty', async () => {
-    const undated = await signedIn([
+    const undated = await signed([
       ready({ obtenerPostulacionSeg: { body: '//OK[3,\'BAqo\',2,1,["cl.sii.x/1"],0,7]' } }),
     ])
     await expect(declareReceiptsCompliance(undated.portal, input)).resolves.toEqual({
@@ -366,9 +372,9 @@ describe('declareReceiptsCompliance', () => {
   })
 
   test('the HTTP status of the application read is not looked at; the record is judged by its //OK and its Long', async () => {
-    const odd = await signedIn([ready({ obtenerPostulacionSeg: { status: 500, body: POSTULATION } })])
+    const odd = await signed([ready({ obtenerPostulacionSeg: { status: 500, body: POSTULATION } })])
     await expect(declareReceiptsCompliance(odd.portal, input)).resolves.toMatchObject({ outcome: 'declared' })
-    const bare = await signedIn([ready({ obtenerPostulacionSeg: { status: 500, body: 'Error' } })])
+    const bare = await signed([ready({ obtenerPostulacionSeg: { status: 500, body: 'Error' } })])
     expect((await failure(declareReceiptsCompliance(bare.portal, input))).code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
   })
 
@@ -381,7 +387,7 @@ describe('declareReceiptsCompliance', () => {
       '//OK[3,\'x|9|8\',2,1,["cl.sii.x/1","10/11/2026"],0,7]',
     ]
     for (const body of unusable) {
-      const broken = await signedIn([ready({ obtenerPostulacionSeg: { body } })])
+      const broken = await signed([ready({ obtenerPostulacionSeg: { body } })])
       const error = await failure(declareReceiptsCompliance(broken.portal, input))
       expect(error.code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
       expect(error.details).toMatchObject({ step: 'obtenerPostulacionSeg' })
@@ -390,7 +396,7 @@ describe('declareReceiptsCompliance', () => {
   })
 
   test('the provider and the business name are mandatory, checked before any request', async () => {
-    const quiet = await signedIn([])
+    const quiet = await signed([])
     const fieldOf = async (bad: unknown): Promise<unknown> =>
       (await failure(declareReceiptsCompliance(quiet.portal, bad as Parameters<typeof declareReceiptsCompliance>[1])))
         .details['field']
@@ -407,7 +413,7 @@ describe('declareReceiptsCompliance', () => {
   })
 
   test('the representative of the declaration is rutm and dvm before rut and dv, its verifier in capitals', async () => {
-    const harness = portalWith([ready()])
+    const harness = portalWith([alive, ready()])
     await seedSession(harness.portal, {
       'NETSCAPE_LIVEWIRE.rut': '11111111',
       'NETSCAPE_LIVEWIRE.dv': '1',
@@ -474,12 +480,12 @@ describe('verifyReceiptsAuthorization', () => {
     { url: secondUrl, method: 'POST', reply: { body: selector } },
   ]
   const production = async (selector: string, entry?: string, secondUrl?: string) => {
-    const harness = portalWith(stamping(selector, entry, secondUrl), { environment: 'production' })
+    const harness = portalWith([alive, ...stamping(selector, entry, secondUrl)], { environment: 'production' })
     await seedSession(harness.portal)
     return harness
   }
   const certification = (progress: FakeReply | string) =>
-    signedIn([
+    signed([
       {
         url: `${MAULLIN}/pe_avance6`,
         method: 'GET',
@@ -498,10 +504,14 @@ describe('verifyReceiptsAuthorization', () => {
         certification: { authorized: true, queryFailed: false, state: 'REVISADO CONFORME' },
       },
     )
-    expect(live.urls()).toEqual([`${PALENA}/of_solicita_folios`, `${PALENA}/of_solicita_folios_dcto`])
+    expect(live.urls()).toEqual([
+      SESSION_CHECK_URL,
+      `${PALENA}/of_solicita_folios`,
+      `${PALENA}/of_solicita_folios_dcto`,
+    ])
     expect(live.posted('of_solicita_folios_dcto')[0]).toMatchObject({ RUT_EMP: '76543210', DV_EMP: '3', KEY: '7' })
-    expect(test.urls()).toEqual([`${MAULLIN}/pe_avance6`])
-    expect(test.fake.requests[0].method).toBe('GET')
+    expect(test.urls()).toEqual([SESSION_CHECK_URL, `${MAULLIN}/pe_avance6`])
+    expect(test.fake.requests[1].method).toBe('GET')
   })
 
   test('no type 39 and no receipts row are plain answers; a side without a client is null', async () => {
@@ -538,13 +548,13 @@ describe('verifyReceiptsAuthorization', () => {
     await expect(verifyReceiptsAuthorization({ production: named.portal })).resolves.toMatchObject({
       production: { authorized: true },
     })
-    expect(named.urls()[1]).toBe(other)
+    expect(named.urls()[2]).toBe(other)
     expect(named.posted('of_otra')[0]).toMatchObject({ RUT_EMP: '76543210', DV_EMP: '3' })
     const bare = await production(typeSelector(QUOTED_BOLETA), page('<p>sin formulario</p>'))
     await expect(verifyReceiptsAuthorization({ production: bare.portal })).resolves.toMatchObject({
       production: { authorized: true },
     })
-    expect(bare.urls()[1]).toBe(`${PALENA}/of_solicita_folios_dcto`)
+    expect(bare.urls()[2]).toBe(`${PALENA}/of_solicita_folios_dcto`)
   })
 
   test('a certification state is read whatever the HTTP status, and the page can say authorised on its own', async () => {
@@ -561,7 +571,7 @@ describe('verifyReceiptsAuthorization', () => {
 
   test('a form the portal does not serve is a failed query, never "not authorised"', async () => {
     const live = await production(page('LIBRUD-OFSF-DTE-3-1-02 No ha sido posible completar su solicitud'))
-    const test = await signedIn([])
+    const test = await signed([])
     const result = await verifyReceiptsAuthorization({ production: live.portal, certification: test.portal })
     expect(result.production).toMatchObject({
       authorized: false,
@@ -571,5 +581,187 @@ describe('verifyReceiptsAuthorization', () => {
     })
     expect(result.certification).toMatchObject({ authorized: false, queryFailed: true, state: null })
     expect(result.certification?.error).toContain('no route')
+  })
+})
+
+describe('the transport of the receipts portal, as the field talks to it', () => {
+  const GWT_HEADERS = ['content-length', 'content-type', 'cookie', 'x-gwt-module-base', 'x-gwt-permutation']
+  const headerNames = (request: RecordedRequest): string[] => Object.keys(request.headers).sort()
+  const ready = facade({
+    obtenerEstadoAutorizaEmp: { body: READY },
+    obtenerPostulacionSeg: { body: POSTULATION },
+  })
+  const COOKIE = 'NETSCAPE_LIVEWIRE.rut=12345678; NETSCAPE_LIVEWIRE.dv=5; TS01ab=cookie-value'
+
+  test('a portal call carries the GWT headers and the cookies, and no other header the client controls', async () => {
+    const harness = await signed([ready])
+    await declareReceiptsCompliance(harness.portal, { provider, businessName })
+    await declareReceiptsTrackId(harness.portal, { trackId: '1' })
+    expect(posts(harness)).toHaveLength(5)
+    for (const request of posts(harness)) {
+      expect(headerNames(request)).toEqual(GWT_HEADERS)
+      expect(request.headers).toMatchObject({
+        'content-type': 'text/x-gwt-rpc; charset=UTF-8',
+        'x-gwt-module-base': BASE,
+        'x-gwt-permutation': KNOWN.permutation,
+        cookie: COOKIE,
+      })
+    }
+  })
+
+  test('the download carries the cookies, the referer, the short browser line and the accept list of the field', async () => {
+    const harness = await signed([facade(), servlet()])
+    await downloadReceiptsTestSet(harness.portal)
+    const download = harness.fake.requests[3]
+    expect(download.headers).toEqual({
+      cookie: COOKIE,
+      referer: `${BASE}?SET=1`,
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      accept: 'text/plain,text/html,*/*',
+    })
+  })
+
+  test('the stamping requests carry the cookies and the short browser line; only the first one an accept list', async () => {
+    const live = portalWith(
+      [
+        alive,
+        { url: `${PALENA}/of_solicita_folios`, method: 'GET', reply: { body: STAMP_ENTRY } },
+        {
+          url: `${PALENA}/of_solicita_folios_dcto`,
+          method: 'POST',
+          reply: { body: typeSelector(`<option value="39">B</option>`) },
+        },
+      ],
+      { environment: 'production' },
+    )
+    await seedSession(live.portal)
+    await verifyReceiptsAuthorization({ production: live.portal })
+    const [entry, form] = live.fake.requests.slice(1)
+    const agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+    expect(entry.headers).toEqual({ cookie: COOKIE, 'user-agent': agent, accept: 'text/html,*/*' })
+    expect(form.headers).toEqual({
+      cookie: COOKIE,
+      'user-agent': agent,
+      'content-type': 'application/x-www-form-urlencoded',
+      'content-length': String(form.body?.length),
+    })
+    const test = await signed([{ url: `${MAULLIN}/pe_avance6`, method: 'GET', reply: { body: page('x') } }])
+    await verifyReceiptsAuthorization({ certification: test.portal })
+    expect(test.fake.requests[1].headers).toEqual({ cookie: COOKIE, 'user-agent': agent, accept: 'text/html,*/*' })
+  })
+
+  test('the portal calls wait up to 30 s and the production check up to 20 s, and a timeout of the caller wins', async () => {
+    const harness = await signed([ready, servlet()])
+    await downloadReceiptsTestSet(harness.portal)
+    await declareReceiptsTrackId(harness.portal, { trackId: '1' })
+    await readReceiptsStatus(harness.portal)
+    await declareReceiptsCompliance(harness.portal, { provider, businessName })
+    const portalRequests = harness.fake.requests.filter((request) => request.url.startsWith(BASE))
+    expect(portalRequests.length).toBeGreaterThan(8)
+    expect(new Set(portalRequests.map((request) => request.timeoutMs))).toEqual(new Set([30000]))
+    const short = await signed([ready, servlet()])
+    await downloadReceiptsTestSet(short.portal, {}, { timeoutMs: 5000 })
+    expect(new Set(short.fake.requests.slice(1).map((request) => request.timeoutMs))).toEqual(new Set([5000]))
+    const live = portalWith(
+      [
+        alive,
+        { url: `${PALENA}/of_solicita_folios`, method: 'GET', reply: { body: STAMP_ENTRY } },
+        {
+          url: `${PALENA}/of_solicita_folios_dcto`,
+          method: 'POST',
+          reply: { body: typeSelector('<option value="39">B</option>') },
+        },
+      ],
+      { environment: 'production' },
+    )
+    await seedSession(live.portal)
+    const test = await signed([{ url: `${MAULLIN}/pe_avance6`, method: 'GET', reply: { body: page('x') } }])
+    await verifyReceiptsAuthorization({ production: live.portal, certification: test.portal })
+    expect(live.fake.requests.slice(1).map((request) => request.timeoutMs)).toEqual([20000, 20000])
+    expect(test.fake.requests[1].timeoutMs).toBe(20000)
+  })
+
+  test('nothing is retried and no warm-up or hash lookup precedes the calls', async () => {
+    const flaky = await signed([facade({ [LIST]: new Error('socket hang up') }), servlet()], retrying)
+    await expect(readReceiptsStatus(flaky.portal)).rejects.toThrow('socket hang up')
+    expect(flaky.urls()).toEqual([SESSION_CHECK_URL, FACADE])
+    const harness = await signed([facade(), servlet()])
+    await downloadReceiptsTestSet(harness.portal)
+    expect(harness.urls().map((url) => url.replace(/\?.*/, ''))).toEqual([
+      SESSION_CHECK_URL,
+      FACADE,
+      FACADE,
+      `${BASE}DownloadFileServlet`,
+    ])
+  })
+
+  test('a saved session is checked once per operation, unless the caller says the run already did', async () => {
+    const checked = await signed([facade(), servlet()])
+    await readReceiptsStatus(checked.portal, { sessionChecked: true })
+    await declareReceiptsTrackId(checked.portal, { trackId: '1', sessionChecked: true })
+    await downloadReceiptsTestSet(checked.portal, { sessionChecked: true })
+    expect(checked.urls()).not.toContain(SESSION_CHECK_URL)
+    const again = await signed([facade()])
+    await readReceiptsStatus(again.portal)
+    expect(again.urls()[0]).toBe(SESSION_CHECK_URL)
+    const stamping = portalWith(
+      [
+        { url: `${PALENA}/of_solicita_folios`, method: 'GET', reply: { body: STAMP_ENTRY } },
+        {
+          url: `${PALENA}/of_solicita_folios_dcto`,
+          method: 'POST',
+          reply: { body: typeSelector('<option value="39">B</option>') },
+        },
+        { url: `${MAULLIN}/pe_avance6`, method: 'GET', reply: { body: page('x') } },
+      ],
+      { environment: 'production' },
+    )
+    await seedSession(stamping.portal)
+    const progress = await signed([{ url: `${MAULLIN}/pe_avance6`, method: 'GET', reply: { body: page('x') } }])
+    const result = await verifyReceiptsAuthorization({
+      production: stamping.portal,
+      certification: progress.portal,
+      sessionChecked: true,
+    })
+    expect(result.production?.queryFailed).toBe(false)
+    expect(stamping.urls()).toEqual([`${PALENA}/of_solicita_folios`, `${PALENA}/of_solicita_folios_dcto`])
+    expect(progress.urls()).toEqual([`${MAULLIN}/pe_avance6`])
+  })
+
+  test('every answer is read as UTF-8, the downloaded set included, whatever the content type says', async () => {
+    const set = 'CASO-1\nItem\tCantidad\tPrecio\nCajón de té\t1\t1.000\n'
+    const harness = await signed([facade(), servlet({ body: set, encoding: 'utf8' })])
+    expect((await downloadReceiptsTestSet(harness.portal)).text).toBe(set)
+    const answer = {
+      body: page('<table><tr><td>BOLETA ELECTRONICA</td><td><b>AUTORIZADA Ñandú</b></td></tr></table>'),
+      encoding: 'utf8' as const,
+    }
+    const test = await signed([{ url: `${MAULLIN}/pe_avance6`, method: 'GET', reply: answer }])
+    expect((await verifyReceiptsAuthorization({ certification: test.portal })).certification?.state).toBe(
+      'AUTORIZADA Ñandú',
+    )
+  })
+
+  test('a 5xx answer is a page like any other: judged by its body, not by its status, and never repeated', async () => {
+    const busy = { status: 503, body: 'Service Unavailable' }
+    const status = await signed([facade({ obtenerEstadoAutorizaEmp: busy })], retrying)
+    await expect(readReceiptsStatus(status.portal)).resolves.toEqual({
+      enrolled: true,
+      readyToDeclare: false,
+      declared: false,
+      state: null,
+    })
+    const unlisted = await signed([facade({ [LIST]: busy })], retrying)
+    await expect(readReceiptsStatus(unlisted.portal)).resolves.toMatchObject({ enrolled: false })
+    const download = await signed([facade(), servlet({ status: 502, body: '<html>Bad Gateway</html>' })], retrying)
+    expect((await downloadReceiptsTestSet(download.portal)).text).toBe('<html>Bad Gateway</html>')
+    const progress = await signed(
+      [{ url: `${MAULLIN}/pe_avance6`, method: 'GET', reply: { status: 504, body: page('<p>Gateway Timeout</p>') } }],
+      retrying,
+    )
+    await expect(verifyReceiptsAuthorization({ certification: progress.portal })).resolves.toMatchObject({
+      certification: { authorized: false, queryFailed: false, state: null },
+    })
+    expect(progress.urls()).toEqual([SESSION_CHECK_URL, `${MAULLIN}/pe_avance6`])
   })
 })

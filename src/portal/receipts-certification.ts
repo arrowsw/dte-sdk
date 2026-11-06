@@ -11,11 +11,12 @@ import { declarationRepresentative, downloadRepresentative, type CookieRepresent
 import {
   GWT_CONTENT_TYPE,
   GWT_INTEGER,
-  gwtHeaders,
+  gwtAnswer,
+  gwtBody,
   gwtInteger,
   gwtNull,
   gwtString,
-  postGwt,
+  type GwtAnswer,
   type GwtHashes,
   type GwtParameter,
 } from './gwt'
@@ -36,12 +37,13 @@ import {
 } from './pages/receipts-certification'
 import {
   companyFields,
-  ensureSession,
+  ensureLiveSession,
   portalRequest,
   rejected,
   unexpectedPage,
   withPortalSession,
   type PortalContext,
+  type PortalPage,
 } from './session'
 
 const RECEIPT_TYPE = 39
@@ -59,18 +61,51 @@ const partyOf = (rut: SiiRut): Party => {
   return { digits: body, verifier }
 }
 
-// The posts that change the application (the track id, the declaration) are sent once: a retry could repeat them.
-const once = (context: PortalContext): PortalContext => ({
-  ...context,
-  overrides: { ...context.overrides, retry: false },
-})
+// Every request of this portal is written as the field writes it: the headers it names and the cookies, no retry, the
+// wait the field gives it, answers read as UTF-8 whatever their status, and no warm-up, hash lookup or redirect.
+const PORTAL_TIMEOUT_MS = 30000
+const STAMPING_TIMEOUT_MS = 20000
+const SHORT_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+const DOWNLOAD_AGENT = `${SHORT_AGENT} AppleWebKit/537.36`
+const FORM_CONTENT_TYPE = 'application/x-www-form-urlencoded'
 
-const call = (
+const withFieldPortal = <T>(
+  portal: PortalClient,
+  operation: string,
+  overrides: CallOverrides | undefined,
+  timeoutMs: number,
+  sessionChecked: boolean | undefined,
+  run: (context: PortalContext) => Promise<T>,
+): Promise<T> =>
+  withPortalSession(portal, operation, overrides, async (session) => {
+    await ensureLiveSession(session, sessionChecked === true)
+    return run({
+      ...session,
+      overrides: { ...overrides, retry: false, timeoutMs: overrides?.timeoutMs ?? timeoutMs },
+      verbatim: { headers: {}, sealed: true },
+    })
+  })
+
+const call = async (
   context: PortalContext,
   hashes: GwtHashes,
   method: string,
   parameters: readonly GwtParameter[],
-): ReturnType<typeof postGwt> => postGwt(context, method, RECEIPTS_PORTAL, hashes, method, parameters)
+): Promise<{ readonly page: PortalPage; readonly answer: GwtAnswer }> => {
+  const body = gwtBody({
+    moduleBase: RECEIPTS_PORTAL.base,
+    policy: hashes.policy,
+    service: RECEIPTS_PORTAL.serviceInterface,
+    method,
+    parameters,
+  })
+  const page = await portalRequest(context, method, 'POST', SERVICE_URL, {
+    body: encodeUtf8(body),
+    contentType: GWT_CONTENT_TYPE,
+    headers: { 'X-GWT-Permutation': hashes.permutation, 'X-GWT-Module-Base': RECEIPTS_PORTAL.base },
+  })
+  return { page, answer: gwtAnswer(page.html) }
+}
 
 const companyParameters = (company: Party): readonly GwtParameter[] => [
   gwtInteger(Number(company.digits)),
@@ -114,6 +149,8 @@ export type ReceiptsPortalInput = {
   readonly companyRut?: string
   /** EN: The portal's hashes, when the pair known to work has gone stale. ES: Los hashes del portal, cuando el par que se sabe que funciona quedó obsoleto. */
   readonly gwt?: GwtHashes
+  /** EN: True when an earlier operation of the same run already checked the saved session, as the field does once per run. ES: True cuando una operación anterior de la misma corrida ya comprobó la sesión guardada, como hace el campo una vez por corrida. */
+  readonly sessionChecked?: boolean
 }
 
 /**
@@ -199,6 +236,8 @@ export type VerifyReceiptsAuthorizationInput = {
   readonly certification?: PortalClient
   /** EN: Company RUT; each client's by default. ES: RUT de la empresa; por defecto el de cada cliente. */
   readonly companyRut?: string
+  /** EN: True when an earlier operation of the same run already checked the saved sessions. ES: True cuando una operación anterior de la misma corrida ya comprobó las sesiones guardadas. */
+  readonly sessionChecked?: boolean
 }
 
 /**
@@ -233,42 +272,54 @@ export type ReceiptsAuthorization = {
  * EN: Downloads the receipts test set. The representatives list and the application record are read first (the portal
  * wants them before the download; their answers are not judged), then `DownloadFileServlet` with the company, the
  * representative from the `rut` and `dv` session cookies and the provider's mail. The HTTP status of the download is
- * not looked at: any body of ten characters or more is the set.
+ * not looked at: any body of ten characters or more is the set. Like every operation of this portal it sends each
+ * request once, with the headers and the 30 s wait of the field, and reads the answers as UTF-8.
  * ES: Descarga el set de pruebas de boletas. Primero se leen la lista de representantes y el registro de la
  * postulación (el portal los quiere antes de la descarga; sus respuestas no se juzgan), y luego `DownloadFileServlet`
  * con la empresa, el representante de las cookies de sesión `rut` y `dv` y el correo del proveedor. No se mira el
- * estado HTTP de la descarga: cualquier cuerpo de diez caracteres o más es el set.
+ * estado HTTP de la descarga: cualquier cuerpo de diez caracteres o más es el set. Como toda operación de este portal,
+ * envía cada petición una vez, con las cabeceras y la espera de 30 s del campo, y lee las respuestas como UTF-8.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: the company, the provider's mail, the hashes. ES: la empresa, el correo del proveedor, los hashes.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: the set text and the representative named. ES: el texto del set y el representante nombrado.
  * @throws {DteError} EN: `SII_PORTAL_UNEXPECTED_PAGE` when the download is no set; `MISSING_FIELD { field: 'representative' }` when the session cookies name none; session, block and transport codes. ES: los mismos códigos.
  */
-export const downloadReceiptsTestSet = (
+export const downloadReceiptsTestSet = async (
   portal: PortalClient,
   input: DownloadReceiptsTestSetInput = {},
   overrides?: CallOverrides,
-): Promise<ReceiptsTestSetDownload> =>
-  withPortalSession(portal, 'downloadReceiptsTestSet', overrides, async (context) => {
-    const company = partyOf(resolvePortalCompany(portal, input.companyRut))
-    const hashes = input.gwt ?? RECEIPTS_PORTAL.known
-    await ensureSession(context)
-    // The portal wants both calls before the download; their answers are not judged.
-    await call(context, hashes, REPRESENTATIVES_METHOD, companyParameters(company))
-    const representative = downloadRepresentative(context.state.cookies)
-    if (representative.digits === '') throw new DteError('MISSING_FIELD', { field: 'representative' })
-    await call(context, hashes, POSTULATION_METHOD, postulationParameters(company))
-    const query = `rutEmpresa=${company.digits}&dvEmpresa=${company.verifier}&rutRepre=${representative.digits}&dvRepre=${representative.verifier}&mailProvSw=${encodeURIComponent(input.providerMail ?? '')}`
-    const page = await portalRequest(
-      context,
-      'DownloadFileServlet',
-      'GET',
-      `${RECEIPTS_PORTAL.base}DownloadFileServlet?${query}`,
-      { referer: `${RECEIPTS_PORTAL.base}?SET=1`, headers: { Accept: 'text/plain,text/html,*/*' } },
-    )
-    if (!isReceiptsSet(page.html)) throw unexpectedPage(context, 'DownloadFileServlet', page.html)
-    return { text: page.html, representativeRut: `${representative.digits}-${representative.verifier}` }
-  })
+): Promise<ReceiptsTestSetDownload> => {
+  const company = partyOf(resolvePortalCompany(portal, input.companyRut))
+  const hashes = input.gwt ?? RECEIPTS_PORTAL.known
+  return withFieldPortal(
+    portal,
+    'downloadReceiptsTestSet',
+    overrides,
+    PORTAL_TIMEOUT_MS,
+    input.sessionChecked,
+    async (context) => {
+      // The portal wants both calls before the download; their answers are not judged.
+      await call(context, hashes, REPRESENTATIVES_METHOD, companyParameters(company))
+      const representative = downloadRepresentative(context.state.cookies)
+      if (representative.digits === '') throw new DteError('MISSING_FIELD', { field: 'representative' })
+      await call(context, hashes, POSTULATION_METHOD, postulationParameters(company))
+      const query = `rutEmpresa=${company.digits}&dvEmpresa=${company.verifier}&rutRepre=${representative.digits}&dvRepre=${representative.verifier}&mailProvSw=${encodeURIComponent(input.providerMail ?? '')}`
+      const page = await portalRequest(
+        context,
+        'DownloadFileServlet',
+        'GET',
+        `${RECEIPTS_PORTAL.base}DownloadFileServlet?${query}`,
+        {
+          referer: `${RECEIPTS_PORTAL.base}?SET=1`,
+          headers: { 'User-Agent': DOWNLOAD_AGENT, Accept: 'text/plain,text/html,*/*' },
+        },
+      )
+      if (!isReceiptsSet(page.html)) throw unexpectedPage(context, 'DownloadFileServlet', page.html)
+      return { text: page.html, representativeRut: `${representative.digits}-${representative.verifier}` }
+    },
+  )
+}
 
 /**
  * EN: Declares the track id of the receipts envelope, so the SII validates the set (`ingresarTrackId`). Sent once. The
@@ -281,30 +332,37 @@ export const downloadReceiptsTestSet = (
  * @returns EN: the raw answer. ES: la respuesta cruda.
  * @throws {DteError} EN: `MISSING_FIELD { field: 'trackId' }`; `SII_PORTAL_REJECTED { rejection: 'receiptsTrackIdRefused' }` when the answer is not `//OK`; session, block and transport codes. ES: los mismos códigos.
  */
-export const declareReceiptsTrackId = (
+export const declareReceiptsTrackId = async (
   portal: PortalClient,
   input: ReceiptsPortalInput & { readonly trackId: string },
   overrides?: CallOverrides,
-): Promise<{ readonly body: string }> =>
-  withPortalSession(portal, 'declareReceiptsTrackId', overrides, async (context) => {
-    if (input.trackId.trim() === '') throw new DteError('MISSING_FIELD', { field: 'trackId' })
-    const company = partyOf(resolvePortalCompany(portal, input.companyRut))
-    await ensureSession(context)
-    const { page, answer } = await call(once(context), input.gwt ?? RECEIPTS_PORTAL.known, 'ingresarTrackId', [
-      ...companyParameters(company),
-      gwtString(null),
-      gwtString(String(READY_STATE)),
-      gwtNull(GWT_INTEGER),
-      gwtString(null),
-      gwtString(input.trackId.trim()),
-    ])
-    if (!answer.ok)
-      throw rejected(context, 'receiptsTrackIdRefused', {
-        httpStatus: page.status,
-        portalMessage: bodyExcerpt(page.html),
-      })
-    return { body: page.html }
-  })
+): Promise<{ readonly body: string }> => {
+  if (input.trackId.trim() === '') throw new DteError('MISSING_FIELD', { field: 'trackId' })
+  const company = partyOf(resolvePortalCompany(portal, input.companyRut))
+  return withFieldPortal(
+    portal,
+    'declareReceiptsTrackId',
+    overrides,
+    PORTAL_TIMEOUT_MS,
+    input.sessionChecked,
+    async (context) => {
+      const { page, answer } = await call(context, input.gwt ?? RECEIPTS_PORTAL.known, 'ingresarTrackId', [
+        ...companyParameters(company),
+        gwtString(null),
+        gwtString(String(READY_STATE)),
+        gwtNull(GWT_INTEGER),
+        gwtString(null),
+        gwtString(input.trackId.trim()),
+      ])
+      if (!answer.ok)
+        throw rejected(context, 'receiptsTrackIdRefused', {
+          httpStatus: page.status,
+          portalMessage: bodyExcerpt(page.html),
+        })
+      return { body: page.html }
+    },
+  )
+}
 
 const NOT_ENROLLED: ReceiptsStatus = { enrolled: false, readyToDeclare: false, declared: false, state: null }
 
@@ -345,16 +403,16 @@ const statusIn = async (context: PortalContext, hashes: GwtHashes, company: Part
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @throws {DteError} EN: session, block and transport codes. ES: códigos de sesión, bloqueo y transporte.
  */
-export const readReceiptsStatus = (
+export const readReceiptsStatus = async (
   portal: PortalClient,
   input: ReceiptsPortalInput = {},
   overrides?: CallOverrides,
-): Promise<ReceiptsStatus> =>
-  withPortalSession(portal, 'readReceiptsStatus', overrides, async (context) => {
-    const company = partyOf(resolvePortalCompany(portal, input.companyRut))
-    await ensureSession(context)
-    return statusIn(context, input.gwt ?? RECEIPTS_PORTAL.known, company)
-  })
+): Promise<ReceiptsStatus> => {
+  const company = partyOf(resolvePortalCompany(portal, input.companyRut))
+  return withFieldPortal(portal, 'readReceiptsStatus', overrides, PORTAL_TIMEOUT_MS, input.sessionChecked, (context) =>
+    statusIn(context, input.gwt ?? RECEIPTS_PORTAL.known, company),
+  )
+}
 
 const requiredText = (value: string | undefined, field: string): string => {
   const text = (value ?? '').trim()
@@ -383,57 +441,63 @@ const declarationDate = (now: Date): string => {
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @throws {DteError} EN: `MISSING_FIELD` (`provider`, `provider.rut`, `provider.name`, `provider.mail`, `businessName`, `representative`), `INVALID_RUT`; `SII_PORTAL_REJECTED` with `receiptsNotEnrolled` or `receiptsComplianceRefused`; `SII_PORTAL_UNEXPECTED_PAGE` when the application record is not an `//OK` answer or lacks its Long, before anything is sent; session, block and transport codes. ES: los mismos códigos.
  */
-export const declareReceiptsCompliance = (
+export const declareReceiptsCompliance = async (
   portal: PortalClient,
   input: DeclareReceiptsComplianceInput,
   overrides?: CallOverrides,
-): Promise<ReceiptsComplianceResult> =>
-  withPortalSession(portal, 'declareReceiptsCompliance', overrides, async (context) => {
-    if (input.provider === undefined) throw new DteError('MISSING_FIELD', { field: 'provider' })
-    const provider = partyOf(toSiiRut(requiredText(input.provider.rut, 'provider.rut'), 'provider.rut'))
-    const providerName = requiredText(input.provider.name, 'provider.name')
-    const providerMail = requiredText(input.provider.mail, 'provider.mail')
-    const businessName = requiredText(input.businessName, 'businessName')
-    const company = partyOf(resolvePortalCompany(portal, input.companyRut))
-    const hashes = input.gwt ?? RECEIPTS_PORTAL.known
-    await ensureSession(context)
-    const status = await statusIn(context, hashes, company)
-    if (!status.enrolled) throw rejected(context, 'receiptsNotEnrolled', {})
-    if (status.declared) return { outcome: 'alreadyDeclared', state: status.state }
-    if (!status.readyToDeclare) return { outcome: 'notReady', state: status.state }
-    const representative = await declarationRepresentativeOf(context, hashes, company)
-    // The declaration cannot be undone: without the application's own Long, nothing is sent.
-    const application = await call(context, hashes, POSTULATION_METHOD, postulationParameters(company))
-    const record = postulationOf(application.answer)
-    if (record === null) throw unexpectedPage(context, POSTULATION_METHOD, application.page.html)
-    const body = receiptsComplianceBody({
-      moduleBase: RECEIPTS_PORTAL.base,
-      policy: hashes.policy,
-      serviceInterface: RECEIPTS_PORTAL.serviceInterface,
-      company,
-      provider,
-      representative,
-      date: declarationDate(portal.now()),
-      providerMail,
-      providerName,
-      link: input.link ?? DEFAULT_LINK,
-      authorizationDate: record.authorizationDate,
-      token: record.token,
-      businessName,
-    })
-    const page = await portalRequest(once(context), 'autorizarEmpresaBolProd', 'POST', SERVICE_URL, {
-      body: encodeUtf8(body),
-      contentType: GWT_CONTENT_TYPE,
-      referer: RECEIPTS_PORTAL.base,
-      headers: gwtHeaders(RECEIPTS_PORTAL.base, hashes.permutation),
-    })
-    if (!page.html.startsWith('//OK'))
-      throw rejected(context, 'receiptsComplianceRefused', {
-        httpStatus: page.status,
-        portalMessage: bodyExcerpt(page.html),
+): Promise<ReceiptsComplianceResult> => {
+  if (input.provider === undefined) throw new DteError('MISSING_FIELD', { field: 'provider' })
+  const provider = partyOf(toSiiRut(requiredText(input.provider.rut, 'provider.rut'), 'provider.rut'))
+  const providerName = requiredText(input.provider.name, 'provider.name')
+  const providerMail = requiredText(input.provider.mail, 'provider.mail')
+  const businessName = requiredText(input.businessName, 'businessName')
+  const company = partyOf(resolvePortalCompany(portal, input.companyRut))
+  const hashes = input.gwt ?? RECEIPTS_PORTAL.known
+  return withFieldPortal(
+    portal,
+    'declareReceiptsCompliance',
+    overrides,
+    PORTAL_TIMEOUT_MS,
+    input.sessionChecked,
+    async (context) => {
+      const status = await statusIn(context, hashes, company)
+      if (!status.enrolled) throw rejected(context, 'receiptsNotEnrolled', {})
+      if (status.declared) return { outcome: 'alreadyDeclared', state: status.state }
+      if (!status.readyToDeclare) return { outcome: 'notReady', state: status.state }
+      const representative = await declarationRepresentativeOf(context, hashes, company)
+      // The declaration cannot be undone: without the application's own Long, nothing is sent.
+      const application = await call(context, hashes, POSTULATION_METHOD, postulationParameters(company))
+      const record = postulationOf(application.answer)
+      if (record === null) throw unexpectedPage(context, POSTULATION_METHOD, application.page.html)
+      const body = receiptsComplianceBody({
+        moduleBase: RECEIPTS_PORTAL.base,
+        policy: hashes.policy,
+        serviceInterface: RECEIPTS_PORTAL.serviceInterface,
+        company,
+        provider,
+        representative,
+        date: declarationDate(portal.now()),
+        providerMail,
+        providerName,
+        link: input.link ?? DEFAULT_LINK,
+        authorizationDate: record.authorizationDate,
+        token: record.token,
+        businessName,
       })
-    return { outcome: 'declared', state: DECLARED }
-  })
+      const page = await portalRequest(context, 'autorizarEmpresaBolProd', 'POST', SERVICE_URL, {
+        body: encodeUtf8(body),
+        contentType: GWT_CONTENT_TYPE,
+        headers: { 'X-GWT-Permutation': hashes.permutation, 'X-GWT-Module-Base': RECEIPTS_PORTAL.base },
+      })
+      if (!page.html.startsWith('//OK'))
+        throw rejected(context, 'receiptsComplianceRefused', {
+          httpStatus: page.status,
+          portalMessage: bodyExcerpt(page.html),
+        })
+      return { outcome: 'declared', state: DECLARED }
+    },
+  )
+}
 
 const failed = (error: unknown): ReceiptsAuthorizationCheck => ({
   authorized: false,
@@ -444,46 +508,73 @@ const failed = (error: unknown): ReceiptsAuthorizationCheck => ({
 
 // The types the stamping form offers: the entry page is read, its form posted with the company, and every option with
 // a quoted value read from the answer, which must have a selector to be the form.
-const stampingTypes = (portal: PortalClient, companyRut: string | undefined): Promise<readonly number[]> =>
-  withPortalSession(portal, 'verifyReceiptsAuthorization', undefined, async (context) => {
-    const resolved = resolvePortalCompany(portal, companyRut)
-    // The field posts the RUT as it was written, split on the hyphen: its verifier is not put in capitals.
-    const [digits, verifier] = (companyRut ?? resolved).replace(/\./g, '').split('-')
-    const company = companyRut === undefined ? companyFields(resolved) : { RUT_EMP: digits, DV_EMP: verifier }
-    await ensureSession(context)
-    const entryUrl = cgiUrl(portal.environment, 'of_solicita_folios')
-    const entry = await portalRequest(context, 'of_solicita_folios', 'GET', entryUrl)
-    const form = await portalRequest(
-      context,
-      'of_solicita_folios_dcto',
-      'POST',
-      stampingAction(entry.html, new URL(entryUrl).origin),
-      { form: { ...inputFieldsOf(entry.html), ...company } },
-    )
-    if (!hasSelector(form.html)) throw unexpectedPage(context, 'of_solicita_folios_dcto', form.html)
-    return offeredTypes(form.html)
-  })
+const stampingTypes = async (
+  portal: PortalClient,
+  companyRut: string | undefined,
+  sessionChecked: boolean | undefined,
+): Promise<readonly number[]> => {
+  const resolved = resolvePortalCompany(portal, companyRut)
+  // The field posts the RUT as it was written, split on the hyphen: its verifier is not put in capitals.
+  const [digits, verifier] = (companyRut ?? resolved).replace(/\./g, '').split('-')
+  const company = companyRut === undefined ? companyFields(resolved) : { RUT_EMP: digits, DV_EMP: verifier }
+  const entryUrl = cgiUrl(portal.environment, 'of_solicita_folios')
+  const agent = { 'User-Agent': SHORT_AGENT }
+  return withFieldPortal(
+    portal,
+    'verifyReceiptsAuthorization',
+    undefined,
+    STAMPING_TIMEOUT_MS,
+    sessionChecked,
+    async (context) => {
+      const entry = await portalRequest(context, 'of_solicita_folios', 'GET', entryUrl, {
+        headers: { ...agent, Accept: 'text/html,*/*' },
+      })
+      const form = await portalRequest(
+        context,
+        'of_solicita_folios_dcto',
+        'POST',
+        stampingAction(entry.html, new URL(entryUrl).origin),
+        { form: { ...inputFieldsOf(entry.html), ...company }, contentType: FORM_CONTENT_TYPE, headers: agent },
+      )
+      if (!hasSelector(form.html)) throw unexpectedPage(context, 'of_solicita_folios_dcto', form.html)
+      return offeredTypes(form.html)
+    },
+  )
+}
 
 // The receipts row of the progress page, which is one GET: the status of the answer is not looked at.
-const progressRow = (portal: PortalClient): Promise<ReturnType<typeof receiptsProgressRow>> =>
-  withPortalSession(portal, 'verifyReceiptsAuthorization', undefined, async (context) => {
-    await ensureSession(context)
-    const page = await portalRequest(context, 'pe_avance6', 'GET', cgiUrl(portal.environment, 'pe_avance6'))
-    return receiptsProgressRow(page.html)
-  })
+const progressRow = (
+  portal: PortalClient,
+  sessionChecked: boolean | undefined,
+): Promise<ReturnType<typeof receiptsProgressRow>> =>
+  withFieldPortal(
+    portal,
+    'verifyReceiptsAuthorization',
+    undefined,
+    STAMPING_TIMEOUT_MS,
+    sessionChecked,
+    async (context) => {
+      const page = await portalRequest(context, 'pe_avance6', 'GET', cgiUrl(portal.environment, 'pe_avance6'), {
+        headers: { 'User-Agent': SHORT_AGENT, Accept: 'text/html,*/*' },
+      })
+      return receiptsProgressRow(page.html)
+    },
+  )
 
 /**
  * EN: Reads whether the company may issue receipts, with the requests of the field. In production, a GET of the
  * stamping entry page and a POST of its form with the company, and type 39 among the quoted option values of the answer
  * (which must have a selector). In certification, one GET of the progress page: its receipts row says conform, approved
  * or authorised, or a line of the page says the receipts are authorised. A query the portal does not answer is
- * `queryFailed`, never "not authorised": a missing stamping form was once read as a refusal. Neither side throws.
+ * `queryFailed`, never "not authorised": a missing stamping form was once read as a refusal. Neither side throws. Each
+ * request is sent once, with the headers of the field and a 20 s wait.
  * ES: Lee si la empresa puede emitir boletas, con las peticiones del campo. En producción, un GET de la página de
  * entrada del timbraje y un POST de su formulario con la empresa, y el tipo 39 entre los valores de opción entre
  * comillas de la respuesta (que debe tener un selector). En certificación, un GET de la página de avance: su fila de
  * boletas dice conforme, aprobado o autorizado, o una línea de la página dice que las boletas están autorizadas. Una
  * consulta que el portal no responde es `queryFailed`, nunca "no autorizada": un formulario de timbraje ausente se leyó
- * una vez como rechazo. Ningún lado lanza.
+ * una vez como rechazo. Ningún lado lanza. Cada petición se envía una vez, con las cabeceras del campo y una espera
+ * de 20 s.
  * @param input EN: the two clients and the company. ES: los dos clientes y la empresa.
  */
 export const verifyReceiptsAuthorization = async (
@@ -492,14 +583,14 @@ export const verifyReceiptsAuthorization = async (
   const production =
     input.production === undefined
       ? null
-      : await stampingTypes(input.production, input.companyRut).then(
+      : await stampingTypes(input.production, input.companyRut, input.sessionChecked).then(
           (types) => ({ authorized: types.includes(RECEIPT_TYPE), queryFailed: false, types }),
           (error: unknown) => ({ ...failed(error), types: [] }),
         )
   const certification =
     input.certification === undefined
       ? null
-      : await progressRow(input.certification).then(
+      : await progressRow(input.certification, input.sessionChecked).then(
           (row) => ({ authorized: row.authorized, queryFailed: false, state: row.state }),
           (error: unknown) => ({ ...failed(error), state: null }),
         )
