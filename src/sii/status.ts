@@ -186,8 +186,9 @@ const NEGATIVE = /^-\d+$/
 // A TrackID is interpolated into a URL path and into a SOAP parameter, so nothing but digits gets through: it cannot
 // add a path segment, a query string or markup. The SII issues at most 15 digits; the bound is generous.
 const TRACK_ID_PATTERN = /^\d{1,20}$/
-const RECEIVED_GLOSS = /\brecibido\b/i
-const NOT_RECEIVED_GLOSS = /\bno\s+recibido\b/i
+// Read as plain substrings of `GLOSA_ESTADO`, the way field behaviour reads them: no word boundaries, a single space.
+const RECEIVED_GLOSS = /recibido/i
+const NOT_RECEIVED_GLOSS = /no recibido/i
 
 const requireTrackId = (value: unknown): string => {
   if (typeof value !== 'string' || !TRACK_ID_PATTERN.test(value))
@@ -614,15 +615,18 @@ export const queryDocumentStatus = async (
 
 /**
  * EN: Whether the SII already holds a document with this type and folio: `QueryEstDte` (always SOAP), asked as the
- * company itself, with the final-consumer receiver, today's date in Chile and amount 1 answers by folio existence first. `FAU` is `false`
- * (the folio is free); `DOK` and `DNK`, or a gloss that says "recibido" (and not "no recibido"), are `true` (the
- * folio is used); anything else is `null`: undetermined, the caller decides. Prevents reusing a folio obtained again
- * from a CAF, which the SII rejects.
+ * company itself, with the final-consumer receiver, today's date in Chile and amount 1, answers by folio existence
+ * first. The answer is read as field behaviour reads it, from the code and from `GLOSA_ESTADO` alone: `FAU`, or a
+ * gloss that says "no recibido", is `false` (the folio is free); any other gloss that says "recibido" is `true` (the
+ * folio is used); anything else is `null`: undetermined, the caller decides. `DOK` and `DNK` come with such a gloss;
+ * without it they are undetermined too. Prevents reusing a folio obtained again from a CAF, which the SII rejects.
  * ES: Si el SII ya tiene un documento con este tipo y folio: `QueryEstDte` (siempre SOAP), consultando como la propia
- * empresa (`RutConsultante`), con el receptor consumidor final, la fecha de hoy en Chile y monto 1 responde primero por existencia del folio. `FAU` es `false` (el folio
- * está libre); `DOK` y `DNK`, o una glosa que diga "recibido" (y no "no recibido"), son `true` (el folio está usado);
- * todo lo demás es `null`: indeterminado, decide el llamador. Evita reutilizar un folio reobtenido de un CAF, que el
- * SII rechaza.
+ * empresa (`RutConsultante`), con el receptor consumidor final, la fecha de hoy en Chile y monto 1, responde primero
+ * por existencia del folio. La respuesta se lee como la lee el comportamiento de campo, solo del código y de
+ * `GLOSA_ESTADO`: `FAU`, o una glosa que diga "no recibido", es `false` (el folio está libre); cualquier otra glosa
+ * que diga "recibido" es `true` (el folio está usado); todo lo demás es `null`: indeterminado, decide el llamador.
+ * `DOK` y `DNK` vienen con esa glosa; sin ella también son indeterminados. Evita reutilizar un folio reobtenido de un
+ * CAF, que el SII rechaza.
  * @throws {DteError} EN: the codes of `queryDocumentStatus`. ES: los códigos de `queryDocumentStatus`.
  */
 export const folioReceived = async (
@@ -645,7 +649,7 @@ export const folioReceived = async (
     },
     overrides,
   )
-  if (status.code === 'FAU') return false
-  if (status.code === 'DOK' || status.code === 'DNK') return true
-  return RECEIVED_GLOSS.test(status.message) && !NOT_RECEIVED_GLOSS.test(status.message) ? true : null
+  const stateGloss = extractTagContent(status.raw, 'GLOSA_ESTADO') ?? ''
+  if (status.code === 'FAU' || NOT_RECEIVED_GLOSS.test(stateGloss)) return false
+  return RECEIVED_GLOSS.test(stateGloss) ? true : null
 }

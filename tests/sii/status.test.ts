@@ -1113,16 +1113,21 @@ describe('folioReceived', () => {
     SLOW,
   )
 
+  // The reading of the reference: `FAU`, or a gloss with "no recibido", is free; any other gloss with "recibido" is
+  // used; everything else is undetermined. Only `GLOSA_ESTADO` is read, as plain substrings.
   test.each([
     ['FAU', 'DTE No Recibido por el SII.', false],
     ['FAU', 'Documento recibido', false],
     ['DOK', 'Documento Recibido por el SII.', true],
-    ['DOK', 'Sin glosa de recepción', true],
-    ['DNK', 'Datos no coinciden', true],
+    ['DNK', 'Documento Recibido por SII pero Datos NO Coinciden con los registrados', true],
     ['XYZ', 'Documento recibido con observaciones', true],
     ['XYZ', 'RECIBIDO', true],
-    ['XYZ', 'Documento no recibido', null],
-    ['XYZ', 'DTE NO  RECIBIDO por el SII', null],
+    ['XYZ', 'Documentos recibidos', true],
+    ['XYZ', 'Documento no recibido', false],
+    ['DOK', 'DTE No Recibido', false],
+    ['XYZ', 'DTE NO  RECIBIDO por el SII', true],
+    ['DOK', 'Sin glosa de recepción', null],
+    ['DNK', 'Datos no coinciden', null],
     ['XYZ', 'Folio sin información', null],
     ['EMP', 'Empresa no autorizada', null],
     ['FAN', 'Folio anulado', null],
@@ -1132,9 +1137,13 @@ describe('folioReceived', () => {
     expect(await folioReceived(sii, { type: 33, folio: 45 })).toBe(expected)
   })
 
-  test('with no gloss at all the catalog message decides', async () => {
-    const { sii } = cachedSii(route(EST_DTE, withEstado('XYZ', '')))
-    expect(await folioReceived(sii, { type: 33, folio: 45 })).toBeNull()
+  test('with no gloss the answer is undetermined, whatever the code but FAU: the catalog message is not read', async () => {
+    const empty = cachedSii(route(EST_DTE, withEstado('XYZ', '')))
+    expect(await folioReceived(empty.sii, { type: 33, folio: 45 })).toBeNull()
+    const received = cachedSii(route(EST_DTE, withEstado('DOK', '')))
+    expect(await folioReceived(received.sii, { type: 33, folio: 45 })).toBeNull()
+    const free = cachedSii(route(EST_DTE, withEstado('FAU', '')))
+    expect(await folioReceived(free.sii, { type: 33, folio: 45 })).toBe(false)
   })
 
   test('a failed query is an error, not an undetermined answer', async () => {
