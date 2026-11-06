@@ -214,7 +214,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   take the place of the CAFs in hand; ranges only listed cover nothing), never asks for a blocked type, asks in as
   many batches as folios are missing, reads the maximum again after annulling, never annuls a range it downloaded,
   keeps a range obtained again only through the folios the SII showed free, saves every CAF as it is obtained, and
-  remembers the annulled ranges in the new `CertificationState.annulledRanges`.
+  remembers the annulled ranges in the new `CertificationState.annulledRanges`. `dte-sdk/portal` limit to 72 kB.
 
 ### Fixed
 

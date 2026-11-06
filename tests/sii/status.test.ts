@@ -1146,6 +1146,18 @@ describe('folioReceived', () => {
     expect(await folioReceived(free.sii, { type: 33, folio: 45 })).toBe(false)
   })
 
+  test('an answer with no state gloss at all is undetermined, or free with FAU', async () => {
+    const without = (code: string): FakeReply => ({
+      body: siiFixture('soap-estdte-dok.xml')
+        .replace('&lt;ESTADO&gt;DOK&lt;/ESTADO&gt;', `&lt;ESTADO&gt;${code}&lt;/ESTADO&gt;`)
+        .replace(/&lt;GLOSA_ESTADO&gt;[^&]*&lt;\/GLOSA_ESTADO&gt;/, ''),
+    })
+    const received = cachedSii(route(EST_DTE, without('DOK')))
+    expect(await folioReceived(received.sii, { type: 33, folio: 45 })).toBeNull()
+    const free = cachedSii(route(EST_DTE, without('FAU')))
+    expect(await folioReceived(free.sii, { type: 33, folio: 45 })).toBe(false)
+  })
+
   test('a failed query is an error, not an undetermined answer', async () => {
     const { sii } = cachedSii(route(EST_DTE, fx('soap-estup-error.xml')), { retry: false })
     await expectCode(folioReceived(sii, { type: 33, folio: 45 }), 'SII_QUERY_ERROR', { code: '-1' })

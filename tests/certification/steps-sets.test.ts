@@ -781,6 +781,37 @@ describe('prepareFolios', () => {
     expect(harness.posted('af_anular3').map((form) => form.FOLIO_INI)).toEqual(['1'])
   })
 
+  test('annulling never touches a range obtained again whose CAF had expired', async () => {
+    const free = { body: siiFixture('soap-estdte-fau.xml') }
+    const harness = await certificationHarness([
+      stampEntry,
+      quota(REJECTION_PAGES.stampingBlocked, quotaForm(), quotaForm()),
+      get('rf_reobtencion1_folios', page('form')),
+      post('rf_reobtencion2_folios', reobtainListPage([[101, 200]])),
+      post('rf_reobtencion3_folios', reobtainDetailPage(101)),
+      post('rf_genera_folio', REOBTAIN_RESOLUTION),
+      post('rf_genera_archivo', OLD_CAF_XML),
+      { url: EST_DTE, method: 'POST' as const, reply: [free, free] },
+      get('af_anular1', ...repeat(ANNUL_ENTRY, 4)),
+      post(
+        'af_anular2',
+        ...repeat(
+          unusedRangesPage([
+            [101, 200, '01-11-2026'],
+            [1, 9, '01-11-2026'],
+          ]),
+          4,
+        ),
+      ),
+      post('af_anular3', ...repeat(ANNUL_FORM, 4)),
+      post('af_anular', ...repeat(ANNUL_OK, 4)),
+      confirm(CAF_XML),
+    ])
+    const result = await prepareFolios(harness.deps, stateWith(), { needs: { 33: 2 } })
+    expect(result.cafs).toEqual([CAF_XML])
+    expect(harness.posted('af_anular3').map((form) => form.FOLIO_INI)).toEqual(['1'])
+  })
+
   test('still short: the error carries the numbers and the reason', async () => {
     const harness = await certificationHarness([
       stampEntry,
