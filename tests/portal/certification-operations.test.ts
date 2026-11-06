@@ -748,6 +748,41 @@ describe('advanceStage', () => {
   })
 })
 
+describe('advanceStage, as the reference asks for it', () => {
+  const advancing = (form: string, entryPage = form) =>
+    signedIn([entry, post('pe_avance2', entryPage), post('pe_avance4', ADVANCE_ANSWERS.advanced)])
+
+  test('TOTREG and PASO are taken from the first input that names them with quotes, name first, of any type', async () => {
+    const text = await advancing(
+      page('<INPUT TYPE="TEXT" NAME="TOTREG" VALUE="9"><INPUT TYPE="TEXT" NAME="PASO" VALUE="P05">'),
+    )
+    await advanceStage(text.portal)
+    expect(text.posted('pe_avance4')[0]).toMatchObject({ TOTREG: '9', PASO: 'P05' })
+    const reordered = await advancing(page('<input type=hidden value="7" name="TOTREG"><input name=PASO value=P03>'))
+    await advanceStage(reordered.portal)
+    expect(reordered.posted('pe_avance4')[0]).toMatchObject({ TOTREG: '0', PASO: 'P01' })
+    const emptied = await advancing(page('<input name="TOTREG" value=""><input name="PASO" value="">'))
+    await advanceStage(emptied.portal)
+    expect(emptied.posted('pe_avance4')[0]).toMatchObject({ TOTREG: '', PASO: '' })
+  })
+
+  test('the referer of pe_avance4 is pe_avance2, wherever the form came from', async () => {
+    const moved = await signedIn([
+      entry,
+      {
+        url: `${MAULLIN}/pe_avance2`,
+        method: 'POST' as const,
+        reply: { status: 302, headers: { location: 'pe_avance2x' } },
+      },
+      get('pe_avance2x', declarationFormPage(STANDARD_ROWS)),
+      post('pe_avance4', ADVANCE_ANSWERS.advanced),
+    ])
+    await advanceStage(moved.portal)
+    const [request] = moved.fake.requests.filter((item) => item.url.endsWith('/pe_avance4'))
+    expect(request.headers.referer).toBe(`${MAULLIN}/pe_avance2`)
+  })
+})
+
 describe('listBookHistory', () => {
   const history = (body: string) => [
     { url: `${UPL}/DTEauth?7`, reply: { body: page('auth') } },

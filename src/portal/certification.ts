@@ -625,11 +625,11 @@ export const readProgress = (
 
 /**
  * EN: Asks the portal to move the application to its next stage: `pe_avance4` with `TOTREG` and `PASO` as `pe_avance2`
- * holds them (`PASO` changes with the stage; a fixed value makes the SII answer "ya se encuentra en el paso"). An
- * answer saying the stage was already there is `unchanged`, not a failure.
+ * holds them (`PASO` changes with the stage; a fixed value makes the SII answer "ya se encuentra en el paso"), with
+ * `pe_avance2` as referer. An answer saying the stage was already there is `unchanged`, not a failure.
  * ES: Pide al portal pasar la postulación a su siguiente etapa: `pe_avance4` con `TOTREG` y `PASO` tal como los trae
- * `pe_avance2` (`PASO` cambia con la etapa; un valor fijo hace que el SII responda "ya se encuentra en el paso"). Una
- * respuesta que diga que ya estaba en la etapa es `unchanged`, no una falla.
+ * `pe_avance2` (`PASO` cambia con la etapa; un valor fijo hace que el SII responda "ya se encuentra en el paso"), con
+ * `pe_avance2` de referer. Una respuesta que diga que ya estaba en la etapa es `unchanged`, no una falla.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: the company. ES: la empresa.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
@@ -644,7 +644,10 @@ export const advanceStage = (
   withPortalSession(portal, 'advanceStage', overrides, async (context) => {
     const company = companyFields(resolvePortalCompany(portal, input.companyRut))
     const formPage = await enter(context, company)
-    const hidden = hiddenInputs(formPage.html)
+    // Read as the reference reads them: the first tag of that name written with quotes and with the name before the
+    // value, whatever its type. A field the page does not carry in that shape takes its default.
+    const fieldOf = (name: string, fallback: string): string =>
+      new RegExp(`name="${name}"[^>]*value="([^"]*)"`, 'i').exec(formPage.html)?.[1] ?? fallback
     const page = await submitForm(
       context,
       'pe_avance4',
@@ -652,11 +655,11 @@ export const advanceStage = (
       formPage.url,
       {
         ...company,
-        TOTREG: hidden.TOTREG ?? '0',
-        PASO: hidden.PASO ?? DEFAULT_STEP,
+        TOTREG: fieldOf('TOTREG', '0'),
+        PASO: fieldOf('PASO', DEFAULT_STEP),
         ACEPTAR: 'Avanzar Siguiente Paso',
       },
-      formPage.url,
+      at('pe_avance2'),
     )
     assertNotRejected(context, page.html)
     return classifyAdvanceAnswer(page.html)
