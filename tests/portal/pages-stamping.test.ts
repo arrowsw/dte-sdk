@@ -35,6 +35,18 @@ test.each([
   expect(hardRejection(page(text))).toBe(rejection)
 })
 
+test.each([
+  'NO SE AUTORIZA TIMBRAJE',
+  'la empresa no est&aacute; autorizada para operar',
+  'no tiene permiso en la empresa',
+  'tiene situaciones pendientes con el SII',
+  'no registra Verificaci&oacute;n de Actividades',
+  'no est&aacute; autorizado para ingresar a esta opci&oacute;n',
+])('every wording is read from the first 4000 characters of text only: %s', (text) => {
+  expect(hardRejection(page(`${'x '.repeat(2000)}${text}`))).toBeNull()
+  expect(hardRejection(page(`${'x '.repeat(1900)}${text}`))).not.toBeNull()
+})
+
 test('only the empresa wording in the feminine counts as company not authorized', () => {
   expect(hardRejection(page('la empresa no est&aacute; autorizada para operar en esta modalidad'))).toBe(
     'companyNotAuthorized',
