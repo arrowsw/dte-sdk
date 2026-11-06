@@ -6,6 +6,7 @@ import {
   parseProgressPage,
   portalStageOf,
   saysNotProcessedYet,
+  saysRejection,
   verifyDeclaration,
 } from '../../src/portal/pages/certification-progress'
 import {
@@ -318,6 +319,17 @@ test('portalStageOf and classifyItemState on the wordings of the field', () => {
   expect(classifyItemState('CON REPAROS')).toBe('objections')
   expect(classifyItemState('EN REVISION')).toBe('inReview')
   expect(classifyItemState('ANULADO')).toBe('annulled')
+})
+
+test('saysRejection reads a rejection in a wording whatever else it says', () => {
+  expect(saysRejection('Rechazado')).toBe(true)
+  expect(saysRejection('ENVIO CON ERRORES O REPAROS')).toBe(true)
+  expect(saysRejection('Fecha no corresponde al envio')).toBe(true)
+  // A wording that reads as approved can say it too: the class alone would miss it.
+  expect(classifyItemState('REVISADO CONFORME CON ERRORES')).toBe('approved')
+  expect(saysRejection('REVISADO CONFORME CON ERRORES')).toBe(true)
+  expect(saysRejection('CON REPAROS')).toBe(false)
+  expect(saysRejection('PENDIENTE CONFIRMAR')).toBe(false)
 })
 
 describe('the receipts row of the progress page', () => {

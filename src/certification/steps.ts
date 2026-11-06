@@ -1,4 +1,4 @@
-import { SET_KEYS, type CertificationStage, type SetKey } from '../catalogs/certification'
+import { SET_KEYS, type CertificationStage, type DeclarationKey, type SetKey } from '../catalogs/certification'
 import { DteError, errorMessage } from '../errors'
 import {
   advanceStage,
@@ -7,11 +7,10 @@ import {
   downloadTestSet,
   readProgress,
   type DeclarationEntries,
-  type DeclarationEntry,
   type DeclarationOutcome,
   type DeclarationResult,
 } from '../portal/certification'
-import { saysNotProcessedYet } from '../portal/pages/certification-progress'
+import { saysNotProcessedYet, saysRejection } from '../portal/pages/certification-progress'
 import { queryUploadStatus } from '../sii/status'
 import { uploadEnvelope } from '../sii/upload'
 import { chileDate } from '../time/chile'
@@ -225,18 +224,22 @@ const DIAGNOSIS_CLASS = (state: FieldUploadState): string =>
 
 /**
  * EN: The SOAP status of every declared envelope, asked once each, for the diagnosis of a content error: never fatal.
- * The answer as it came goes to the artefacts.
+ * The envelopes the answer named are asked for first, then the others. The answer as it came goes to the artefacts.
  * ES: El estado SOAP de cada envío declarado, preguntado una vez por cada uno, para el diagnóstico de un error de
- * contenido: nunca fatal. La respuesta tal como llegó va a los artefactos.
+ * contenido: nunca fatal. Primero se pregunta por los envíos que la respuesta nombró y luego por los demás. La
+ * respuesta tal como llegó va a los artefactos.
  */
 export const diagnose = async (
   rt: Runtime,
   entries: DeclarationEntries,
   prefix: string,
+  named: readonly DeclarationKey[] = [],
 ): Promise<Readonly<Record<string, EnvelopeDiagnosis>>> => {
   const diagnosis: Record<string, EnvelopeDiagnosis> = {}
-  // The steps build the entries without holes, so every value is an entry.
-  for (const [key, entry] of Object.entries(entries) as [string, DeclarationEntry][]) {
+  for (const key of new Set([...named, ...(Object.keys(entries) as DeclarationKey[])])) {
+    // A row the answer named may have no envelope declared: there is nothing to ask for.
+    const entry = entries[key]
+    if (entry === undefined) continue
     try {
       const state = await queryFieldUploadState(rt.sii, entry.trackId)
       if (state.raw !== null) await rt.store.writeArtefact(`${prefix}-estado-${key}-${entry.trackId}.xml`, state.raw)
@@ -298,7 +301,7 @@ export const declareWithRetries = async (
     if (result.contentErrors.length > 0)
       return result.verified === false && more
         ? again()
-        : { ...ended, diagnosis: await diagnose(rt, entries, options.prefix) }
+        : { ...ended, diagnosis: await diagnose(rt, entries, options.prefix, result.contentErrors) }
     if (result.allRejected) return options.retryOnAllRejected === true && more ? again() : ended
     return result.verified === false && more ? again() : ended
   }
@@ -378,7 +381,7 @@ export const waitForTestSetsApproval = async (
       rt.emit({ step: 'SETS_APPROVED' })
       return { state: await saveState(rt, state, { setsApproved: true, stage: 'books' }), outcome: 'approved' }
     }
-    const rejected = relevant.filter(([, item]) => item.state === 'rejected' || item.state === 'inconsistent')
+    const rejected = relevant.filter(([, item]) => saysRejection(item.text))
     if (rejected.length > 0) {
       rt.emit({ step: 'SETS_REJECTED' })
       return { state, outcome: 'rejected', detail: rejected.map(([key, item]) => `${key}: ${item.text}`).join('; ') }

@@ -321,6 +321,19 @@ export const classifyAdvanceAnswer = (html: string): AdvanceAnswer => {
   return { outcome: 'failed', message: text.slice(0, 400) }
 }
 
+const INCONSISTENT_STATE = /NO CORRESPONDE|NO COINCIDE|FECHA INVALIDA/
+
+/**
+ * EN: A state wording stops a wait, as the reference reads it: it says "RECHAZADO" or "ERRORES", or names a date or
+ * number that does not match, whatever else it says. A wording can read as approved and say this too.
+ * ES: Un texto de estado detiene una espera, como lo lee la referencia: dice "RECHAZADO" o "ERRORES", o nombra una
+ * fecha o número que no corresponde, diga lo que diga además. Un texto puede leerse como aprobado y decir esto también.
+ */
+export const saysRejection = (text: string): boolean => {
+  const upper = text.toUpperCase()
+  return upper.includes('RECHAZADO') || upper.includes('ERRORES') || INCONSISTENT_STATE.test(upper)
+}
+
 /**
  * EN: The class of a state wording, as the reference reads it: "REVISADO CONFORME" is approved; a date or number that
  * does not match is inconsistent; "RECHAZADO" or "ERRORES" is a rejection; "REPAROS" alone is only an objection.
@@ -330,7 +343,7 @@ export const classifyAdvanceAnswer = (html: string): AdvanceAnswer => {
 export const classifyItemState = (text: string): ItemState => {
   const upper = text.toUpperCase()
   if (upper.includes('REVISADO CONFORME')) return 'approved'
-  if (/NO CORRESPONDE|NO COINCIDE|FECHA INVALIDA/.test(upper)) return 'inconsistent'
+  if (INCONSISTENT_STATE.test(upper)) return 'inconsistent'
   if (upper.includes('RECHAZADO') || upper.includes('ERRORES')) return 'rejected'
   if (upper.includes('EN REVISION')) return 'inReview'
   if (upper.includes('REPAROS')) return 'objections'

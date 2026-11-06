@@ -540,6 +540,26 @@ describe('declareTestSets', () => {
     expect(harness.fake.requests.filter((request) => request.url === EST_UP)).toHaveLength(1)
   })
 
+  test('the diagnosis asks for the envelopes the answer names first, then for the others', async () => {
+    const guideErrors = page(
+      '<table><tr><td>SET GUIA DE DESPACHO</td><td>ENVIO CON ERRORES O REPAROS</td></tr><tr><td>SET FACTURA EXENTA</td><td>ENVIO CON ERRORES O REPAROS</td></tr></table>',
+    )
+    const harness = await certificationHarness([
+      entry,
+      post('pe_avance2', ...repeat(form, 20)),
+      post('pe_avance3', ...repeat(guideErrors, 10)),
+      estUpRoute(estUp('RPR', '5'), estUp('EPR', '1234')),
+    ])
+    const two = { basic: sent.basic, guide: { trackId: '5', date: TODAY, sentAt: 'x', cases: [] } }
+    const result = await declareTestSets(harness.deps, stateWith({ sets: two }))
+    expect(result).toMatchObject({ outcome: 'contentErrors', success: false })
+    const asked = harness.fake.requests
+      .filter((request) => request.url === EST_UP)
+      .map((request) => />(\d+)<\/TrackId>/.exec(request.text)?.[1])
+    // The exempt set is named too, but no envelope of it was declared: nothing to ask for.
+    expect(asked).toEqual(['5', '1234'])
+  })
+
   test.each([
     ['rejected', estUp('RCT', '1234'), { code: 'RCT', status: 'rejected' }],
     ['pending', estUp('SOK', '1234'), { code: 'SOK', status: 'pending' }],
@@ -742,6 +762,29 @@ describe('waitForTestSetsApproval', () => {
       detail: 'basic: ENVIO CON ERRORES O REPAROS; guide: FECHA NO CORRESPONDE',
     })
     expect(harness.steps()).toEqual(['POLLING', 'SETS_REJECTED'])
+  })
+
+  test('a wording that says rejected stops the wait even on a set that also reads approved', async () => {
+    const harness = await certificationHarness(
+      progressRoutes(
+        progressPage('SET', { 'SET BASICO': 'REVISADO CONFORME CON ERRORES', 'SET GUIA DESP.': 'EN REVISION' }),
+      ),
+    )
+    const result = await waitForTestSetsApproval(harness.deps, stateWith({ sets: sent }))
+    expect(result).toMatchObject({ outcome: 'rejected', detail: 'basic: REVISADO CONFORME CON ERRORES' })
+    expect(harness.sleeps).toEqual([10000])
+    // With every set approved the approval is read first, whatever else the wordings say.
+    const all = await certificationHarness(
+      progressRoutes(
+        progressPage('SET', {
+          'SET BASICO': 'REVISADO CONFORME CON ERRORES',
+          'SET GUIA DESP.': 'REVISADO CONFORME, FECHA NO CORRESPONDE',
+        }),
+      ),
+    )
+    await expect(waitForTestSetsApproval(all.deps, stateWith({ sets: sent }))).resolves.toMatchObject({
+      outcome: 'approved',
+    })
   })
 
   test('objections alone do not stop the wait, and a set that was not sent is not looked at', async () => {
