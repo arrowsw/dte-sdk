@@ -137,6 +137,46 @@ describe('parseExchangeSet', () => {
     expect(parseExchangeSet(emptyId).setId).toBe('SetDTE')
   })
 
+  test('a set a strict parser would refuse is still read, as the field reads it', () => {
+    const three = parseExchangeSet(SET).documents
+    expect(parseExchangeSet(`\n${SET}`).documents).toEqual(three)
+    expect(parseExchangeSet(`${SET}\nfin`).documents).toEqual(three)
+    expect(parseExchangeSet(SET.replace('<RznSoc>SII</RznSoc>', '<RznSoc>A & B</RznSoc>')).documents).toEqual(three)
+    const unclosed = envelope('EnvioDTE', '<DTE version="1.0"><Documento ID="F1T33"></DTE>')
+    expect(parseExchangeSet(unclosed).documents).toEqual([
+      { type: 0, folio: 0, issueDate: null, issuerRut: SET_ISSUER, receiverRut: COMPANY, total: 0 },
+    ])
+  })
+
+  test('only what the parser itself cannot read is refused as XML', () => {
+    const error = thrown(() => parseExchangeSet(`${SET}<!-- fin`))
+    expect(error.code).toBe('XML_PARSE_FAILED')
+    expect(error.details).toEqual({ reason: 'Comment is not closed.' })
+  })
+
+  test('a number is read as the parser reads it, and a zero counts as not given', () => {
+    const loose = envelope(
+      'EnvioDTE',
+      document(33, 1, COMPANY, 5)
+        .replace('<MntTotal>5</MntTotal>', '<MntTotal>1e3</MntTotal>')
+        .replace('<Folio>1</Folio>', '<Folio>0x10</Folio>')
+        .replace('<FchEmis>2026-11-01</FchEmis>', '<FchEmis>0</FchEmis>')
+        .replace(`<RUTRecep>${COMPANY}</RUTRecep>`, '<RUTRecep>00</RUTRecep>'),
+    )
+    expect(parseExchangeSet(loose).documents).toEqual([
+      { type: 33, folio: 16, issueDate: null, issuerRut: SET_ISSUER, receiverRut: COMPANY, total: 1000 },
+    ])
+  })
+
+  test('the tags are read by their full name, and the set id may be a child element', () => {
+    const prefixed = envelope('EnvioDTE', document(33, 1, COMPANY)).replace(/<(\/?)(EnvioDTE|SetDTE)/g, '<$1sii:$2')
+    expect(thrown(() => parseExchangeSet(prefixed)).details).toEqual({ field: 'SetDTE', reason: 'no envelope root' })
+    const idChild = envelope('EnvioDTE', `<ID>SetHijo</ID>${document(33, 1, COMPANY)}`, '')
+    expect(parseExchangeSet(idChild).setId).toBe('SetHijo')
+    const both = envelope('EnvioDTE', `<ID>SetHijo</ID>${document(33, 1, COMPANY)}`)
+    expect(parseExchangeSet(both).setId).toBe('SetDoc')
+  })
+
   test('the RUTs of the set are not validated: only the dots go and the letter is upper-cased', () => {
     const odd = envelope('EnvioDTE', document(33, 1, '14.625.621-k'))
       .replace(`<RutEmisor>${SET_ISSUER}</RutEmisor>`, '<RutEmisor>9.999.999-x</RutEmisor>')
