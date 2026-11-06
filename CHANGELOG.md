@@ -247,13 +247,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   take a query that never got through as accepted and an unanswered or unknown state as a rejection, name the report
   `RCOF_<rut>_<clock>` and report a rejection with the SII's own gloss. Every request to the receipts portal and to
   the production authorisation check carries only the reference's headers, is sent once, waits 30 s (20 s in
-  production) and is read as UTF-8 whatever its status; the operations take `sessionChecked`. The representative comes
-  from the session's cookies (the list is read again as the fallback, the check digit falls back to `8`); the states
-  `P90` and `P91` are searched in the raw answer; the posts of the track id and of the declaration are judged by
-  `//OK` alone; the declaration is dated with the local date and writes the provider's name and mail and the business
-  name as given; the track id is declared as given. `verifyReceiptsAuthorization` reads the progress page with one
-  request and the reference's words, and posts the stamping form with the company as the caller wrote it. Also here:
-  `advanceStage` and `declareCompliance` no longer search their pages for a refusal.
+  production) and is read as UTF-8 whatever its status, the firewall's page included; the operations take
+  `sessionChecked`. The representative comes from the session's cookies (the list is read again as the fallback, the
+  check digit falls back to `8`); the states `P90` and `P91` are searched in the raw answer; the posts of the track id
+  and of the declaration are judged by `//OK` alone; the declaration is dated with the local date and writes the
+  provider's name and mail and the business name as given; the track id is declared as given.
+  `verifyReceiptsAuthorization` reads the progress page with one request and the reference's words, and posts the
+  stamping form with the company as the caller wrote it. Also here: `advanceStage` and `declareCompliance` no longer
+  search their pages for a refusal.
 
 ### Fixed
 
