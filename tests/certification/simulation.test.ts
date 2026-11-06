@@ -294,6 +294,17 @@ describe('the party fields', () => {
     })
   })
 
+  test('the issuer as receiver of its purchase documents has its business activity cut at 40 characters', async () => {
+    const long = 'Venta al por mayor de maquinaria y equipo de oficina'
+    const simulation = await issueSimulation(
+      { purchase: plan.purchase! },
+      { ...issueOptions(), issuer: { ...issuer, businessActivity: long } },
+    )
+    const header = simulation.cases[0].document.header
+    expect(header.issuer.businessActivity).toBe(long)
+    expect(header.receiver.businessActivity).toBe('Venta al por mayor de maquinaria y equip')
+  })
+
   test('an issuer without an activity code and a receiver without a line of business carry neither', async () => {
     const options = issueOptions([cafFor(52)])
     const { activityCode, ...bare } = issuer

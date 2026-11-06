@@ -8,7 +8,7 @@ import { verifyEnvelopeSignature } from '../../src/envelope/sign'
 import { verifyTed } from '../../src/ted/build'
 import { ATTENTION } from '../support/test-set-samples'
 import type { DocumentType } from '../../src/catalogs/document-types'
-import { cafFor, certificationCafs, fullPlan, issueOptions, issuer } from '../support/certification-fixtures'
+import { cafFor, certificationCafs, fullPlan, issueOptions, issuer, receiver } from '../support/certification-fixtures'
 import { ISSUER_RUT, RECEIVER_RUT } from '../support/fixtures'
 import { failure } from '../support/portal'
 
@@ -546,6 +546,23 @@ describe('errors and defaults', () => {
       exemptAmount: 500,
       totalAmount: 360500,
     })
+  })
+
+  test('a business activity longer than the 40 characters a receiver holds is cut there; the issuer keeps its own', async () => {
+    const long = 'Venta al por mayor de maquinaria y equipo de oficina'
+    const purchase = await issueTestSet(plan.purchase!, {
+      ...issueOptions(),
+      issuer: { ...issuer, businessActivity: long },
+    })
+    const invoice = purchase.cases.find((issued) => issued.type === 46)!.document
+    expect(invoice.header.issuer.businessActivity).toBe(long)
+    expect(invoice.header.receiver.businessActivity).toBe('Venta al por mayor de maquinaria y equip')
+    const basic = await issueTestSet(plan.basic!, {
+      ...issueOptions(),
+      receiver: { ...receiver, businessActivity: long },
+    })
+    expect(basic.cases[0].document.header.receiver.businessActivity).toBe('Venta al por mayor de maquinaria y equip')
+    expect(basic.cases[0].document.xml).toContain('<GiroRecep>Venta al por mayor de maquinaria y equip</GiroRecep>')
   })
 
   test('a basic credit note with no items at all gets the SIN MONTO line, and an issuer with a city keeps it as receiver', async () => {
