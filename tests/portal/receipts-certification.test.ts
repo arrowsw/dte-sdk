@@ -410,6 +410,18 @@ describe('declareReceiptsCompliance', () => {
     }
   })
 
+  test('the provider name and mail and the business name are declared as the caller wrote them, spaces included', async () => {
+    const harness = await signed([ready()])
+    const spaced = { rut: ' 10.000.004-0 ', name: ' Proveedor de Software SpA ', mail: 'soporte@example.test ' }
+    await declareReceiptsCompliance(harness.portal, { provider: spaced, businessName: ' Comercial Andina SpA ' })
+    const table = posts(harness)[3].text.split('|')
+    expect(table).toEqual(
+      expect.arrayContaining([' Proveedor de Software SpA ', 'soporte@example.test ', ' Comercial Andina SpA ']),
+    )
+    // The RUT is read as a RUT: its digits and verifier travel apart.
+    expect(table).toEqual(expect.arrayContaining(['10000004']))
+  })
+
   test('the provider and the business name are mandatory, checked before any request', async () => {
     const quiet = await signed([])
     const fieldOf = async (bad: unknown): Promise<unknown> =>

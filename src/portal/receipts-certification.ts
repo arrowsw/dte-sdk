@@ -414,10 +414,10 @@ export const readReceiptsStatus = async (
   )
 }
 
+// A text the declaration cannot go without. It is declared as the caller wrote it: the field trims none of them.
 const requiredText = (value: string | undefined, field: string): string => {
-  const text = (value ?? '').trim()
-  if (text === '') throw new DteError('MISSING_FIELD', { field })
-  return text
+  if (value === undefined || value.trim() === '') throw new DteError('MISSING_FIELD', { field })
+  return value
 }
 
 // The date of the process's own clock, `dd-mm-yyyy`, as the field writes it: in a process that is not on Chile's time
