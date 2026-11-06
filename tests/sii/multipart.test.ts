@@ -200,6 +200,15 @@ describe('buildMultipartParts', () => {
     expect(build({ name: 'f', fileName: 'B', contentType: 'text/plain', bytes })).toThrow(DteError)
   })
 
+  test('with UTF-8 headers a file name outside Latin-1 is written as UTF-8 bytes; by default it stays Latin-1', () => {
+    const part = { name: 'f', fileName: 'ñ€.pdf', contentType: 'text/plain', bytes: encodeLatin1('x') }
+    const utf8 = buildMultipartParts({ boundary: 'B', parts: [part], utf8Headers: true })
+    expect(Buffer.from(utf8).toString('utf8')).toContain('filename="ñ€.pdf"')
+    const latin1 = buildMultipartParts({ boundary: 'B', parts: [{ ...part, fileName: 'ñ.pdf' }] })
+    expect(decodeLatin1(latin1)).toContain('filename="ñ.pdf"')
+    expect(Buffer.from(latin1).includes(Buffer.from('ñ', 'latin1'))).toBe(true)
+  })
+
   test('no parts gives the closing line alone, and a boundary inside a part is refused', () => {
     expect(decodeLatin1(buildMultipartParts({ boundary: 'B', parts: [] }))).toBe('--B--\r\n')
     expect(() =>

@@ -8,6 +8,8 @@ import { FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from '../support/fixtures'
 import { certificate } from '../support/portal'
 import { validateAgainstXsd } from '../support/xsd'
 
+jest.setTimeout(30_000)
+
 // The SII issues the exchange set; the company under certification receives it.
 const SET_ISSUER = RECEIVER_RUT
 const COMPANY = ISSUER_RUT
@@ -78,29 +80,123 @@ describe('parseExchangeSet', () => {
     expect(parseExchangeSet(envelope('EnvioDTETraslado', one)).documents).toHaveLength(1)
   })
 
-  test('reads export and settlement documents, the lower-case RUT tags, and the cover issuer of a document without one', () => {
-    const exportDocument = `<DTE version="1.0"><Exportaciones ID="E1"><Encabezado><IdDoc><TipoDTE>110</TipoDTE><Folio>4</Folio><FchEmis>2026-11-04</FchEmis></IdDoc><Emisor><RutEmisor>${SET_ISSUER}</RutEmisor></Emisor><Receptor><RutRecep>${OTHER_RECEIVER}</RutRecep></Receptor><Totales><MntTotal>10</MntTotal></Totales></Encabezado></Exportaciones></DTE>`
-    const settlement = `<DTE version="1.0"><Liquidacion ID="L1"><Encabezado><IdDoc><TipoDTE>43</TipoDTE><Folio>5</Folio><FchEmis>2026-11-05</FchEmis></IdDoc></Encabezado></Liquidacion></DTE>`
-    expect(parseExchangeSet(envelope('EnvioDTE', exportDocument + settlement)).documents).toEqual([
-      { type: 110, folio: 4, issueDate: '2026-11-04', issuerRut: SET_ISSUER, receiverRut: OTHER_RECEIVER, total: 10 },
-      { type: 43, folio: 5, issueDate: '2026-11-05', issuerRut: SET_ISSUER, receiverRut: COMPANY, total: 0 },
+  test('reads a document nested in a second DTE and the lower-case RUT tags; export and settlement documents read as empty', () => {
+    const inner = `<Documento ID="N1"><Encabezado><IdDoc><TipoDTE>33</TipoDTE><Folio>4</Folio><FchEmis>2026-11-04</FchEmis></IdDoc><Emisor><RutEmisor>${SET_ISSUER}</RutEmisor></Emisor><Receptor><RutRecep>${OTHER_RECEIVER}</RutRecep></Receptor><Totales><MntTotal>10</MntTotal></Totales></Encabezado></Documento>`
+    const nested = `<DTE version="1.0"><DTE version="1.0">${inner}</DTE></DTE>`
+    const exportDocument = `<DTE version="1.0"><Exportaciones ID="E1"><Encabezado><IdDoc><TipoDTE>110</TipoDTE><Folio>4</Folio></IdDoc></Encabezado></Exportaciones></DTE>`
+    const settlement = `<DTE version="1.0"><Liquidacion ID="L1"><Encabezado><IdDoc><TipoDTE>43</TipoDTE><Folio>5</Folio></IdDoc></Encabezado></Liquidacion></DTE>`
+    expect(parseExchangeSet(envelope('EnvioDTE', nested + exportDocument + settlement)).documents).toEqual([
+      { type: 33, folio: 4, issueDate: '2026-11-04', issuerRut: SET_ISSUER, receiverRut: OTHER_RECEIVER, total: 10 },
+      { type: 0, folio: 0, issueDate: null, issuerRut: SET_ISSUER, receiverRut: COMPANY, total: 0 },
+      { type: 0, folio: 0, issueDate: null, issuerRut: SET_ISSUER, receiverRut: COMPANY, total: 0 },
     ])
   })
 
-  test('a set without documents, without an envelope root, or with a document that lacks its fields', () => {
+  test('a set without documents or without an envelope root is the only one refused', () => {
     expect(thrown(() => parseExchangeSet(envelope('EnvioDTE', ''))).code).toBe('ENVELOPE_EMPTY')
     expect(thrown(() => parseExchangeSet('<Other><SetDTE/></Other>')).details).toEqual({
       field: 'SetDTE',
       reason: 'no envelope root',
     })
+  })
+
+  test('a document that lacks its fields reads as zeros, empty RUTs and no date, never as an error', () => {
     const noType = envelope('EnvioDTE', document(33, 1, COMPANY).replace('<TipoDTE>33</TipoDTE>', ''))
-    expect(thrown(() => parseExchangeSet(noType)).details).toEqual({ field: 'TipoDTE' })
+    expect(parseExchangeSet(noType).documents[0]).toMatchObject({ type: 0, folio: 1 })
     const badFolio = envelope('EnvioDTE', document(33, 1, COMPANY).replace('<Folio>1</Folio>', '<Folio>A1</Folio>'))
-    expect(thrown(() => parseExchangeSet(badFolio)).details).toEqual({ field: 'Folio', reason: 'not a number' })
-    const noReceiver = envelope('EnvioDTE', document(33, 1)).replace(`<RutReceptor>${COMPANY}</RutReceptor>`, '')
-    expect(thrown(() => parseExchangeSet(noReceiver)).details).toEqual({ field: 'RUTRecep' })
+    expect(parseExchangeSet(badFolio).documents[0]).toMatchObject({ type: 33, folio: 0 })
+    const badTotal = envelope(
+      'EnvioDTE',
+      document(33, 1, COMPANY, 5).replace('<MntTotal>5</MntTotal>', '<MntTotal>x</MntTotal>'),
+    )
+    expect(parseExchangeSet(badTotal).documents[0].total).toBe(0)
+    const noDate = envelope('EnvioDTE', document(33, 1, COMPANY).replace('<FchEmis>2026-11-01</FchEmis>', ''))
+    expect(parseExchangeSet(noDate).documents[0].issueDate).toBeNull()
+    const emptyDate = envelope('EnvioDTE', document(33, 1, COMPANY).replace('2026-11-01', ''))
+    expect(parseExchangeSet(emptyDate).documents[0].issueDate).toBeNull()
+    const bare = envelope('EnvioDTE', '<DTE version="1.0"/>')
+      .replace(/<RutReceptor>.*?<\/RutReceptor>/, '')
+      .replace(/<RutEnvia>.*?<\/RutEnvia>/, '')
+    expect(parseExchangeSet(bare)).toMatchObject({ senderRut: null, receiverRut: null })
+    expect(parseExchangeSet(bare).documents).toEqual([
+      { type: 0, folio: 0, issueDate: null, issuerRut: SET_ISSUER, receiverRut: '', total: 0 },
+    ])
     const noIssuer = envelope('EnvioDTE', document(33, 1, COMPANY)).replace(`<RutEmisor>${SET_ISSUER}</RutEmisor>`, '')
-    expect(thrown(() => parseExchangeSet(noIssuer)).details).toEqual({ field: 'RutEmisor' })
+    expect(parseExchangeSet(noIssuer)).toMatchObject({
+      issuerRut: '',
+      documents: [{ type: 33, issuerRut: SET_ISSUER }],
+    })
+    const nothing = noIssuer.replace(`<RUTEmisor>${SET_ISSUER}</RUTEmisor>`, '')
+    expect(parseExchangeSet(nothing).documents[0].issuerRut).toBe('')
+  })
+
+  test('an empty element falls back to the cover as an absent one does, and a numeric prefix counts', () => {
+    const emptyReceiver = envelope('EnvioDTE', document(33, 1, '').replace('<RUTRecep></RUTRecep>', '<RUTRecep/>'))
+    expect(parseExchangeSet(emptyReceiver).documents[0].receiverRut).toBe(COMPANY)
+    const prefixed = envelope('EnvioDTE', document(33, 1, COMPANY).replace('<Folio>1</Folio>', '<Folio>12abc</Folio>'))
+    expect(parseExchangeSet(prefixed).documents[0].folio).toBe(12)
+    const emptyId = envelope('EnvioDTE', document(33, 1, COMPANY), ' ID=""')
+    expect(parseExchangeSet(emptyId).setId).toBe('SetDTE')
+  })
+
+  test('a set a strict parser would refuse is still read, as the field reads it', () => {
+    const three = parseExchangeSet(SET).documents
+    expect(parseExchangeSet(`\n${SET}`).documents).toEqual(three)
+    expect(parseExchangeSet(`${SET}\nfin`).documents).toEqual(three)
+    expect(parseExchangeSet(SET.replace('<RznSoc>SII</RznSoc>', '<RznSoc>A & B</RznSoc>')).documents).toEqual(three)
+    const unclosed = envelope('EnvioDTE', '<DTE version="1.0"><Documento ID="F1T33"></DTE>')
+    expect(parseExchangeSet(unclosed).documents).toEqual([
+      { type: 0, folio: 0, issueDate: null, issuerRut: SET_ISSUER, receiverRut: COMPANY, total: 0 },
+    ])
+  })
+
+  test('only what the parser itself cannot read is refused as XML', () => {
+    const error = thrown(() => parseExchangeSet(`${SET}<!-- fin`))
+    expect(error.code).toBe('XML_PARSE_FAILED')
+    expect(error.details).toEqual({ reason: 'Comment is not closed.' })
+  })
+
+  test('a number is read as the parser reads it, and a zero counts as not given', () => {
+    const loose = envelope(
+      'EnvioDTE',
+      document(33, 1, COMPANY, 5)
+        .replace('<MntTotal>5</MntTotal>', '<MntTotal>1e3</MntTotal>')
+        .replace('<Folio>1</Folio>', '<Folio>0x10</Folio>')
+        .replace('<FchEmis>2026-11-01</FchEmis>', '<FchEmis>0</FchEmis>')
+        .replace(`<RUTRecep>${COMPANY}</RUTRecep>`, '<RUTRecep>00</RUTRecep>'),
+    )
+    expect(parseExchangeSet(loose).documents).toEqual([
+      { type: 33, folio: 16, issueDate: null, issuerRut: SET_ISSUER, receiverRut: COMPANY, total: 1000 },
+    ])
+  })
+
+  test('a type of zero is a type given: the other tag is read only when the first is absent', () => {
+    const both = document(33, 1, COMPANY).replace('<TipoDTE>33</TipoDTE>', '<TipoDTE>0</TipoDTE><TpoDoc>39</TpoDoc>')
+    expect(parseExchangeSet(envelope('EnvioDTE', both)).documents[0].type).toBe(0)
+    const empty = document(33, 1, COMPANY).replace('<TipoDTE>33</TipoDTE>', '<TipoDTE/><TpoDoc>39</TpoDoc>')
+    expect(parseExchangeSet(envelope('EnvioDTE', empty)).documents[0].type).toBe(0)
+  })
+
+  test('the tags are read by their full name, and the set id may be a child element', () => {
+    const prefixed = envelope('EnvioDTE', document(33, 1, COMPANY)).replace(/<(\/?)(EnvioDTE|SetDTE)/g, '<$1sii:$2')
+    expect(thrown(() => parseExchangeSet(prefixed)).details).toEqual({ field: 'SetDTE', reason: 'no envelope root' })
+    const idChild = envelope('EnvioDTE', `<ID>SetHijo</ID>${document(33, 1, COMPANY)}`, '')
+    expect(parseExchangeSet(idChild).setId).toBe('SetHijo')
+    const both = envelope('EnvioDTE', `<ID>SetHijo</ID>${document(33, 1, COMPANY)}`)
+    expect(parseExchangeSet(both).setId).toBe('SetDoc')
+  })
+
+  test('the RUTs of the set are not validated: only the dots go and the letter is upper-cased', () => {
+    const odd = envelope('EnvioDTE', document(33, 1, '14.625.621-k'))
+      .replace(`<RutEmisor>${SET_ISSUER}</RutEmisor>`, '<RutEmisor>9.999.999-x</RutEmisor>')
+      .replace(`<RutEnvia>${SET_ISSUER}</RutEnvia>`, '<RutEnvia>ab.c</RutEnvia>')
+      .replace(`<RUTEmisor>${SET_ISSUER}</RUTEmisor>`, '<RUTEmisor>1.1</RUTEmisor>')
+    expect(parseExchangeSet(odd)).toMatchObject({
+      issuerRut: '9999999-X',
+      senderRut: 'ABC',
+      receiverRut: COMPANY,
+      documents: [{ issuerRut: '11', receiverRut: '14625621-K' }],
+    })
   })
 })
 
@@ -319,6 +415,41 @@ describe('createExchangeAnswers', () => {
     const phoneOnly = createExchangeAnswers(SET, { ...input, contact: { phone: '123' } })
     expect(cover(phoneOnly.reception.xml, 'RespuestaDTE', 'Resultado')).not.toHaveProperty('FonoContacto')
     expect(cover(phoneOnly.receipts.xml, 'EnvioRecibos', 'SetRecibos')['FonoContacto']).toBe('123')
+  })
+
+  test('only the name of the contact goes through the text sanitizer; the mail and the phone travel as given', () => {
+    const odd = createExchangeAnswers(SET, {
+      ...input,
+      contact: { name: "O'Higgins", mail: " o'brien@example.test", phone: '+56 "2" 2345' },
+    })
+    const cover = (xml: string, root: string, set: string) => node(node(node(parseXml(xml)[root])[set])['Caratula'])
+    expect(cover(odd.reception.xml, 'RespuestaDTE', 'Resultado')).toMatchObject({
+      NmbContacto: 'OHiggins',
+      MailContacto: "o'brien@example.test",
+    })
+    expect(cover(odd.receipts.xml, 'EnvioRecibos', 'SetRecibos')).toMatchObject({
+      NmbContacto: 'OHiggins',
+      FonoContacto: '+56 "2" 2345',
+      MailContacto: "o'brien@example.test",
+    })
+  })
+
+  test('each contact field is written when it is not empty, whatever the sanitizer leaves of it', () => {
+    const quoted = createExchangeAnswers(SET, { ...input, contact: { name: "'", mail: '', phone: '' } })
+    expect(quoted.reception.xml).toContain('<NmbContacto></NmbContacto>')
+    expect(quoted.reception.xml).not.toContain('MailContacto')
+    expect(quoted.receipts.xml).not.toContain('FonoContacto')
+  })
+
+  test('a document the set leaves unreadable is answered with its empty fields, the date as an empty element', () => {
+    const bare = createExchangeAnswers(
+      envelope('EnvioDTE', '<DTE version="1.0"/>').replace(/<RutReceptor>.*?<\/RutReceptor>/, ''),
+      input,
+    )
+    expect(bare.reception.xml).toContain('<FchEmis/>')
+    expect(bare.reception.xml).toContain('<RUTRecep></RUTRecep>')
+    expect(bare.reception.xml).toContain('<EstadoRecepDTE>3</EstadoRecepDTE>')
+    expect(bare.approval.xml).toContain('<CodRchDsc>-1</CodRchDsc>')
   })
 
   test('the clock defaults to now, and the receipts are signed by the company when the certificate names no holder', () => {

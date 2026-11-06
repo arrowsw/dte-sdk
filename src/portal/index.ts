@@ -204,8 +204,14 @@ export type { BooksOutcome } from '../certification/books-step'
 export { EXCHANGE_PORTAL, SAMPLES_PORTAL, EXCHANGE_ANSWER_FILES, EXCHANGE_ANSWER_KEYS } from '../catalogs/certification'
 export type { GwtPortal, ExchangeAnswerKey } from '../catalogs/certification'
 export { gwtBody, gwtAnswer, encodeGwtLong, decodeGwtLong, discoverGwtHashes } from './gwt'
-export type { GwtCall, GwtParameter, GwtAnswer, GwtHashes, GwtDiscoveryInput } from './gwt'
-export { downloadExchangeSet, validateExchangeUser, uploadExchangeAnswers, confirmExchange } from './exchange'
+export type { GwtCall, GwtParameter, GwtAnswer, GwtHashes, GwtDiscoveryInput, GwtStage } from './gwt'
+export {
+  downloadExchangeSet,
+  validateExchangeUser,
+  uploadExchangeAnswers,
+  confirmExchange,
+  withExchangeStage,
+} from './exchange'
 export type {
   ExchangeCompanyInput,
   ExchangeGwtInput,
@@ -218,9 +224,17 @@ export type {
   ExchangeConfirmation,
 } from './exchange'
 export type { ExchangeUserState } from './pages/exchange'
-export { readSamplesReview, createSamplesReview, uploadSample, submitSamplesReview, readSamplesDetail } from './samples'
+export {
+  readSamplesReview,
+  createSamplesReview,
+  uploadSample,
+  submitSamplesReview,
+  readSamplesDetail,
+  withSamplesStage,
+} from './samples'
 export type {
   SamplesCompanyInput,
+  ReadSamplesReviewInput,
   SamplesReviewInput,
   SamplesReview,
   SamplesReviewCreated,

@@ -1,6 +1,6 @@
 import { DOMParser } from '@xmldom/xmldom'
 import { XMLParser, XMLValidator } from 'fast-xml-parser'
-import { DteError } from '../errors'
+import { DteError, errorMessage } from '../errors'
 
 /**
  * EN: Result of parsing XML into a plain object: elements become keys, repeated elements become arrays, attributes are
@@ -19,6 +19,7 @@ export type XmlDocument = ReturnType<DOMParser['parseFromString']>
 const base = { ignoreAttributes: false, attributeNamePrefix: '@_', trimValues: true, parseTagValue: false } as const
 const objectParser = new XMLParser(base)
 const noNamespaceParser = new XMLParser({ ...base, removeNSPrefix: true })
+const looseParser = new XMLParser({ ...base, parseTagValue: true })
 
 const assertWellFormed = (xml: string): void => {
   const result = XMLValidator.validate(xml)
@@ -42,6 +43,22 @@ export const parseXml = (xml: string): ParsedXml => {
 export const parseXmlWithoutNamespaces = (xml: string): ParsedXml => {
   assertWellFormed(xml)
   return noNamespaceParser.parse(xml) as ParsedXml
+}
+
+/**
+ * EN: Parses XML the loose way, for input whose reader in the field is this loose: nothing is checked for
+ * well-formedness (whatever can be read is read), tags keep their prefixes, and a text that reads as a number becomes
+ * one (`007` is 7, `1e3` is 1000). Throws `XML_PARSE_FAILED` only when the parser itself gives up.
+ * ES: Parsea XML con tolerancia, para entradas cuyo lector de campo es así de tolerante: no se comprueba que esté bien
+ * formado (se lee lo que se pueda leer), las etiquetas conservan sus prefijos, y un texto que se lee como número pasa
+ * a serlo (`007` es 7, `1e3` es 1000). Lanza `XML_PARSE_FAILED` solo cuando el propio parser se rinde.
+ */
+export const parseXmlLoosely = (xml: string): ParsedXml => {
+  try {
+    return looseParser.parse(xml) as ParsedXml
+  } catch (error) {
+    throw new DteError('XML_PARSE_FAILED', { reason: errorMessage(error) })
+  }
 }
 
 const failDom = (message: string): never => {

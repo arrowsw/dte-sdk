@@ -9,13 +9,15 @@ import { resolvePortalCompany, type PortalClient } from './client'
 import { bodyText } from './html'
 import {
   gwtBoolean,
-  gwtHashesOf,
   gwtLong,
   gwtString,
+  inGwtStage,
   portalBoundary,
   postGwt,
-  warmUpGwtPortal,
+  withGwtStage,
   type GwtHashes,
+  type GwtStage,
+  type GwtStageSpec,
 } from './gwt'
 import {
   reviewId,
@@ -25,37 +27,49 @@ import {
   type ReviewState,
   type SampleDetail,
 } from './pages/samples'
-import {
-  ensureSession,
-  portalRequest,
-  rejected,
-  unexpectedPage,
-  withPortalSession,
-  type PortalContext,
-  type PortalPage,
-} from './session'
+import { portalRequest, rejected, unexpectedPage, type PortalContext, type PortalPage } from './session'
 
 const NO_CACHE: Readonly<Record<string, string>> = { 'Cache-Control': 'no-cache', Pragma: 'no-cache' }
 const FILE_FIELD = 'Filedata'
-// It travels in the multipart `filename`, so it cannot be free text.
-const SAFE_FILE_NAME = /^[\w.-]+\.pdf$/i
+// The name travels as it comes in the multipart `filename`; only what would end the header or its quoted value early
+// is refused.
+const BREAKS_FILE_NAME = /[\r\n"]/
 const FILE_CONTENT_TYPE = 'application/octet-stream'
 const MAX_UPLOAD_ATTEMPTS = 4
 const UPLOAD_WAIT_MS = 2000
 const SERVER_ERROR = 500
 const CLIENT_ERROR = 400
 
-const enter = async (context: PortalContext): Promise<void> => {
-  await ensureSession(context)
-  await warmUpGwtPortal(context, SAMPLES_PORTAL)
+// What the samples portal gets from every request of the stage, and nothing besides what the call names: the field's
+// browser line, its accept list, the keep-alive, and the origin and the referer of the portal itself.
+const SAMPLES_STAGE: GwtStageSpec = {
+  portal: SAMPLES_PORTAL,
+  headers: {
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+    Accept: '*/*',
+    Connection: 'keep-alive',
+    Origin: 'https://www4.sii.cl',
+    Referer: SAMPLES_PORTAL.base,
+  },
+  discoverHashes: true,
 }
 
-// A post that changes the review (its creation, a PDF, the submission) is sent once by the transport: the upload has
-// its own retry, for the portal's 5xx only.
-const once = (context: PortalContext): PortalContext => ({
-  ...context,
-  overrides: { ...context.overrides, retry: false },
-})
+/**
+ * EN: Runs `run` in one stage of the samples portal: the session made sure of, one warm-up, the hashes looked up once,
+ * and every call that is given the stage sent once over it. The whole printed samples stage is one stage in the field:
+ * the reading, the creation, every PDF, the submission, the re-reading and the detail.
+ * ES: Ejecuta `run` en una etapa del portal de muestras: la sesión asegurada, un calentamiento, los hashes buscados una
+ * vez, y cada llamada que recibe la etapa enviada una vez sobre ella. Toda la etapa de muestras impresas es una etapa en
+ * el campo: la lectura, la creación, cada PDF, el envío, la relectura y el detalle.
+ * @throws {DteError} EN: session, block and transport codes, and whatever `run` throws. ES: códigos de sesión, bloqueo y transporte, y lo que lance `run`.
+ */
+export const withSamplesStage = <T>(
+  portal: PortalClient,
+  operation: string,
+  overrides: CallOverrides | undefined,
+  run: (stage: GwtStage) => Promise<T>,
+): Promise<T> => withGwtStage(portal, operation, overrides, SAMPLES_STAGE, undefined, run)
 
 const call = (
   context: PortalContext,
@@ -73,6 +87,17 @@ export type SamplesCompanyInput = {
   readonly companyRut?: string
   /** EN: The portal's hashes, when the caller knows them; discovered otherwise. ES: Los hashes del portal, si el llamador los conoce; si no, se descubren. */
   readonly gwt?: GwtHashes
+  /** EN: The stage to run in, from `withSamplesStage`; the call opens a stage of its own without one. ES: La etapa en que correr, de `withSamplesStage`; sin ella la llamada abre una etapa propia. */
+  readonly stage?: GwtStage
+}
+
+/**
+ * EN: Input of `readSamplesReview`.
+ * ES: Entrada de `readSamplesReview`.
+ */
+export type ReadSamplesReviewInput = SamplesCompanyInput & {
+  /** EN: True to read the answer whatever its HTTP status, as the field reads the state again after a submission; by default any status but 200 is unexpected. ES: True para leer la respuesta sea cual sea su estado HTTP, como el campo relee el estado tras un envío; por defecto cualquier estado distinto de 200 es inesperado. */
+  readonly anyStatus?: boolean
 }
 
 /**
@@ -84,6 +109,8 @@ export type SamplesReviewInput = {
   readonly revisionToken: string
   /** EN: The portal's hashes, when the caller knows them. ES: Los hashes del portal, si el llamador los conoce. */
   readonly gwt?: GwtHashes
+  /** EN: The stage to run in, from `withSamplesStage`. ES: La etapa en que correr, de `withSamplesStage`. */
+  readonly stage?: GwtStage
 }
 
 /**
@@ -135,6 +162,8 @@ export type UploadSampleInput = {
   readonly bytes: Uint8Array
   /** EN: The portal's hashes, when the caller knows them. ES: Los hashes del portal, si el llamador los conoce. */
   readonly gwt?: GwtHashes
+  /** EN: The stage to run in, from `withSamplesStage`. ES: La etapa en que correr, de `withSamplesStage`. */
+  readonly stage?: GwtStage
 }
 
 /**
@@ -166,22 +195,20 @@ export type SamplesDetail = {
  * HTTP 200 con un estado, o con una frase cuando la postulación no está en la etapa de muestras impresas (antes de
  * ella, y también después).
  * @param portal EN: the client. ES: el cliente.
- * @param input EN: the company and the hashes. ES: la empresa y los hashes.
+ * @param input EN: the company and the hashes; `anyStatus` to read the answer whatever its status. ES: la empresa y los hashes; `anyStatus` para leer la respuesta sea cual sea su estado.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: the state, the blocking sentence, the review id and token, the date, the hashes and the raw answer. ES: el estado, la frase que bloquea, el id y token de la revisión, la fecha, los hashes y la respuesta cruda.
- * @throws {DteError} EN: `SII_PORTAL_UNEXPECTED_PAGE` when the status is not 200; `MISSING_FIELD`; session, block and transport codes. ES: los mismos códigos.
+ * @throws {DteError} EN: `SII_PORTAL_UNEXPECTED_PAGE` when the status is not 200 (never with `anyStatus`); `MISSING_FIELD`; session, block and transport codes. ES: los mismos códigos.
  */
-export const readSamplesReview = (
+export const readSamplesReview = async (
   portal: PortalClient,
-  input: SamplesCompanyInput = {},
+  input: ReadSamplesReviewInput = {},
   overrides?: CallOverrides,
-): Promise<SamplesReview> =>
-  withPortalSession(portal, 'readSamplesReview', overrides, async (context) => {
-    const company = resolvePortalCompany(portal, input.companyRut)
-    await enter(context)
-    const hashes = await gwtHashesOf(context, SAMPLES_PORTAL, input.gwt)
+): Promise<SamplesReview> => {
+  const company = resolvePortalCompany(portal, input.companyRut)
+  return inGwtStage(portal, 'readSamplesReview', overrides, SAMPLES_STAGE, input, async ({ context, hashes }) => {
     const { page, answer } = await call(context, 'leeImpreso', hashes, [gwtString(company)])
-    if (page.status !== 200) throw unexpectedPage(context, 'leeImpreso', page.html)
+    if (input.anyStatus !== true && page.status !== 200) throw unexpectedPage(context, 'leeImpreso', page.html)
     const state = reviewState(page.html)
     const review = reviewId(answer)
     return {
@@ -194,6 +221,7 @@ export const readSamplesReview = (
       body: page.html,
     }
   })
+}
 
 /**
  * EN: Creates a printed samples review: `creaLista` with the company as sender and provider. The portal only creates
@@ -206,16 +234,14 @@ export const readSamplesReview = (
  * @returns EN: the review id and token. ES: el id y el token de la revisión.
  * @throws {DteError} EN: `SII_PORTAL_REJECTED { rejection: 'samplesReviewRefused' }` with the SII's sentence; `SII_PORTAL_UNEXPECTED_PAGE` without HTTP 200, `//OK` or a readable id; `MISSING_FIELD`; session, block and transport codes. ES: los mismos códigos.
  */
-export const createSamplesReview = (
+export const createSamplesReview = async (
   portal: PortalClient,
   input: SamplesCompanyInput = {},
   overrides?: CallOverrides,
-): Promise<SamplesReviewCreated> =>
-  withPortalSession(portal, 'createSamplesReview', overrides, async (context) => {
-    const { body: digits, verifier } = splitSiiRut(resolvePortalCompany(portal, input.companyRut))
-    await enter(context)
-    const hashes = await gwtHashesOf(context, SAMPLES_PORTAL, input.gwt)
-    const { page, answer } = await call(once(context), 'creaLista', hashes, [
+): Promise<SamplesReviewCreated> => {
+  const { body: digits, verifier } = splitSiiRut(resolvePortalCompany(portal, input.companyRut))
+  return inGwtStage(portal, 'createSamplesReview', overrides, SAMPLES_STAGE, input, async ({ context, hashes }) => {
+    const { page, answer } = await call(context, 'creaLista', hashes, [
       gwtString(digits),
       gwtString(verifier),
       gwtString(''),
@@ -229,6 +255,7 @@ export const createSamplesReview = (
     if (review === null) throw unexpectedPage(context, 'creaLista', page.html)
     return { revisionId: review.id, revisionToken: review.token, hashes, body: page.html }
   })
+}
 
 const isServerError = (error: unknown): boolean =>
   isDteError(error) &&
@@ -294,28 +321,29 @@ const uploadOnce = async (
  * @param input EN: the review, the file and the hashes. ES: la revisión, el archivo y los hashes.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: the answer and the attempts made. ES: la respuesta y los intentos hechos.
- * @throws {DteError} EN: `INVALID_OPTION { field: 'fileName' }` unless the name is `[\w.-]+.pdf`; `SII_PORTAL_REJECTED { rejection: 'sampleUploadRefused', file, httpStatus }` on a 4xx; `SII_HTTP_ERROR` on the last 5xx; `SII_PORTAL_UNEXPECTED_PAGE` on any other status; session, block and transport codes. ES: los mismos códigos.
+ * @throws {DteError} EN: `INVALID_OPTION { field: 'fileName' }` when the name holds a CR, an LF or a double quote; `SII_PORTAL_REJECTED { rejection: 'sampleUploadRefused', file, httpStatus }` on a 4xx; `SII_HTTP_ERROR` on the last 5xx; `SII_PORTAL_UNEXPECTED_PAGE` on any other status; session, block and transport codes. ES: los mismos códigos.
  */
-export const uploadSample = (
+export const uploadSample = async (
   portal: PortalClient,
   input: UploadSampleInput,
   overrides?: CallOverrides,
-): Promise<SampleUploaded> =>
-  withPortalSession(portal, 'uploadSample', overrides, async (context) => {
-    if (!SAFE_FILE_NAME.test(input.fileName)) throw new DteError('INVALID_OPTION', { field: 'fileName' })
-    await enter(context)
-    const hashes = await gwtHashesOf(context, SAMPLES_PORTAL, input.gwt)
+): Promise<SampleUploaded> => {
+  if (BREAKS_FILE_NAME.test(input.fileName)) throw new DteError('INVALID_OPTION', { field: 'fileName' })
+  return inGwtStage(portal, 'uploadSample', overrides, SAMPLES_STAGE, input, async ({ context, hashes }) => {
     const boundary = portalBoundary(portal.now())
+    // The field writes the part headers, the file name among them, as UTF-8.
     const body = buildMultipartParts({
       boundary,
+      utf8Headers: true,
       parts: [
         { name: FILE_FIELD, fileName: input.fileName, contentType: FILE_CONTENT_TYPE, bytes: input.bytes },
         { name: 'id', value: String(input.revisionId) },
         { name: 'ambiente', value: 'false' },
       ],
     })
-    return uploadOnce(once(context), input, hashes, body, boundary, 1)
+    return uploadOnce(context, input, hashes, body, boundary, 1)
   })
+}
 
 /**
  * EN: Submits a review to the SII: `solicitaRevisionSII` with the review token. The answer is `//OK[0,[],0,7]` whether
@@ -333,10 +361,8 @@ export const submitSamplesReview = (
   input: SamplesReviewInput,
   overrides?: CallOverrides,
 ): Promise<{ readonly body: string }> =>
-  withPortalSession(portal, 'submitSamplesReview', overrides, async (context) => {
-    await enter(context)
-    const hashes = await gwtHashesOf(context, SAMPLES_PORTAL, input.gwt)
-    const { page, answer } = await call(once(context), 'solicitaRevisionSII', hashes, [
+  inGwtStage(portal, 'submitSamplesReview', overrides, SAMPLES_STAGE, input, async ({ context, hashes }) => {
+    const { page, answer } = await call(context, 'solicitaRevisionSII', hashes, [
       gwtLong(input.revisionToken),
       gwtBoolean(false),
     ])
@@ -354,19 +380,25 @@ export const submitSamplesReview = (
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: the rows and the raw answer. ES: las filas y la respuesta cruda.
  */
-export const readSamplesDetail = (
+export const readSamplesDetail = async (
   portal: PortalClient,
   input: SamplesReviewInput,
   overrides?: CallOverrides,
-): Promise<SamplesDetail> =>
-  withPortalSession(portal, 'readSamplesDetail', overrides, async (context) => {
-    try {
-      await enter(context)
-      const hashes = await gwtHashesOf(context, SAMPLES_PORTAL, input.gwt)
-      const { page } = await call(context, 'muestraMail', hashes, [gwtLong(input.revisionToken)])
-      return { rows: sampleDetails(page.html), body: page.html }
-    } catch (error) {
-      portal.logger.warn('sii samples detail unavailable', { reason: errorMessage(error) })
-      return { rows: [], body: '' }
-    }
-  })
+): Promise<SamplesDetail> => {
+  try {
+    return await inGwtStage(
+      portal,
+      'readSamplesDetail',
+      overrides,
+      SAMPLES_STAGE,
+      input,
+      async ({ context, hashes }) => {
+        const { page } = await call(context, 'muestraMail', hashes, [gwtLong(input.revisionToken)])
+        return { rows: sampleDetails(page.html), body: page.html }
+      },
+    )
+  } catch (error) {
+    portal.logger.warn('sii samples detail unavailable', { reason: errorMessage(error) })
+    return { rows: [], body: '' }
+  }
+}

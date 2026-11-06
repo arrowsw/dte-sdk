@@ -14,14 +14,17 @@ import { encodeLatin1 } from '../text/latin1'
 import { resolvePortalCompany, type PortalClient } from './client'
 import {
   GWT_NULL,
-  gwtHashesOf,
+  gwtDistinctString,
   gwtInteger,
   gwtString,
+  inGwtStage,
   portalBoundary,
   postGwt,
-  warmUpGwtPortal,
+  withGwtStage,
   type GwtHashes,
   type GwtParameter,
+  type GwtStage,
+  type GwtStageSpec,
 } from './gwt'
 import {
   exchangeUserState,
@@ -31,14 +34,7 @@ import {
   uploadMessage,
   type ExchangeUserState,
 } from './pages/exchange'
-import {
-  ensureSession,
-  portalRequest,
-  rejected,
-  unexpectedPage,
-  withPortalSession,
-  type PortalContext,
-} from './session'
+import { portalRequest, rejected, unexpectedPage, type PortalContext } from './session'
 
 const USER_TYPE = 'cl.sii.sdi.dim.pfe.to.UsuarioTo/3723336533'
 const FOLLOW_UP_TYPE = 'cl.sii.sdi.dim.pfe.to.PostulacionSeguimientoTo/3921005560'
@@ -65,16 +61,37 @@ const holderOf = (portal: PortalClient): Party => {
 
 const query = (company: Party): string => `?re=${company.digits}&dve=${company.verifier}`
 
-const enter = async (context: PortalContext): Promise<void> => {
-  await ensureSession(context)
-  await warmUpGwtPortal(context, EXCHANGE_PORTAL)
+const SII_ORIGIN = 'https://www4.sii.cl'
+// Origin travels with the forms the portal receives; the client adds no header the field does not send.
+const FORM_HEADERS: Readonly<Record<string, string>> = { Origin: SII_ORIGIN }
+
+// What the exchange portal gets from every request of the stage, and nothing besides what the call names: the field's
+// short browser line, its accept list and the keep-alive. The hashes are the known pair, never looked up.
+const EXCHANGE_STAGE: GwtStageSpec = {
+  portal: EXCHANGE_PORTAL,
+  headers: {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    Accept: 'text/html,application/xhtml+xml,*/*;q=0.8',
+    Connection: 'keep-alive',
+  },
+  discoverHashes: false,
 }
 
-// A post that changes the application (an upload, a confirmation) is sent once: a retry after a timeout could repeat it.
-const once = (context: PortalContext): PortalContext => ({
-  ...context,
-  overrides: { ...context.overrides, retry: false },
-})
+/**
+ * EN: Runs `run` in one stage of the exchange portal: the session made sure of, one warm-up, and every call that is
+ * given the stage sent once over it. The upload, the user validation and the confirmation share one stage in the field.
+ * ES: Ejecuta `run` en una etapa del portal de intercambio: la sesión asegurada, un calentamiento, y cada llamada que
+ * recibe la etapa enviada una vez sobre ella. La subida, la validación del usuario y la confirmación comparten una etapa en el campo.
+ * @param sessionChecked EN: true when an earlier stage of the same run already checked the saved session (the download, before the uploads). ES: true cuando una etapa anterior de la misma corrida ya comprobó la sesión guardada (la descarga, antes de las subidas).
+ * @throws {DteError} EN: session, block and transport codes, and whatever `run` throws. ES: códigos de sesión, bloqueo y transporte, y lo que lance `run`.
+ */
+export const withExchangeStage = <T>(
+  portal: PortalClient,
+  operation: string,
+  overrides: CallOverrides | undefined,
+  run: (stage: GwtStage) => Promise<T>,
+  sessionChecked = false,
+): Promise<T> => withGwtStage(portal, operation, overrides, EXCHANGE_STAGE, undefined, run, sessionChecked)
 
 /**
  * EN: Input of the exchange operations that only name the company.
@@ -83,6 +100,8 @@ const once = (context: PortalContext): PortalContext => ({
 export type ExchangeCompanyInput = {
   /** EN: Company RUT; the client's by default. ES: `re` + `dve` — RUT de la empresa; por defecto el del cliente. */
   readonly companyRut?: string
+  /** EN: The stage to run in, from `withExchangeStage`; the call opens a stage of its own without one. ES: La etapa en que correr, de `withExchangeStage`; sin ella la llamada abre una etapa propia. */
+  readonly stage?: GwtStage
 }
 
 /**
@@ -90,7 +109,7 @@ export type ExchangeCompanyInput = {
  * ES: Entrada de las operaciones del intercambio que llaman al servicio del portal.
  */
 export type ExchangeGwtInput = ExchangeCompanyInput & {
-  /** EN: The portal's hashes, when the caller knows them; discovered otherwise. ES: Los hashes del portal, si el llamador los conoce; si no, se descubren. */
+  /** EN: The portal's hashes, when the caller knows better than the pair known to work, which is the default; they are never looked up. ES: Los hashes del portal, si el llamador conoce otros mejores que el par que se sabe que funciona, que es el de por defecto; nunca se buscan. */
   readonly gwt?: GwtHashes
 }
 
@@ -180,15 +199,15 @@ export type ExchangeConfirmation = {
  * @returns EN: the set XML. ES: el XML del set.
  * @throws {DteError} EN: `SII_PORTAL_UNEXPECTED_PAGE` with the page in `details.page` when the answer is no set, redacted as every capture (the set can be saved by hand from the portal); `MISSING_FIELD`; session, block and transport codes. ES: los mismos códigos.
  */
-export const downloadExchangeSet = (
+export const downloadExchangeSet = async (
   portal: PortalClient,
   input: ExchangeCompanyInput = {},
   overrides?: CallOverrides,
-): Promise<ExchangeSetDownload> =>
-  withPortalSession(portal, 'downloadExchangeSet', overrides, async (context) => {
-    const company = companyOf(portal, input.companyRut)
-    await enter(context)
-    const boundary = portalBoundary(portal.now())
+): Promise<ExchangeSetDownload> => {
+  const company = companyOf(portal, input.companyRut)
+  return inGwtStage(portal, 'downloadExchangeSet', overrides, EXCHANGE_STAGE, input, async ({ context }) => {
+    // The download's limit is the prefix and the clock in decimal; the uploads' is the clock in hexadecimal.
+    const boundary = `----WebKitFormBoundary${portal.now().getTime()}`
     const page = await portalRequest(
       context,
       'downloadFile',
@@ -198,6 +217,7 @@ export const downloadExchangeSet = (
         body: encodeLatin1(`--${boundary}--\r\n`),
         contentType: multipartContentType(boundary),
         referer: EXCHANGE_PORTAL.base,
+        headers: FORM_HEADERS,
       },
     )
     if (!isExchangeSet(page.status, page.html))
@@ -208,28 +228,27 @@ export const downloadExchangeSet = (
       })
     return { xml: page.html }
   })
+}
 
 /**
- * EN: Validates the user on the exchange portal: the warm-up, the hashes, then `validarUsuario` with the company and
- * the certificate holder. The answer says whether the company stands in the exchange stage; `//OK` is not required.
- * ES: Valida al usuario en el portal de intercambio: el calentamiento, los hashes y luego `validarUsuario` con la
- * empresa y el titular del certificado. La respuesta dice si la empresa está en la etapa de intercambio; no se exige `//OK`.
+ * EN: Validates the user on the exchange portal: the warm-up, then `validarUsuario` with the company and
+ * the certificate holder over the known hashes. The answer says whether the company stands in the exchange stage; `//OK` is not required.
+ * ES: Valida al usuario en el portal de intercambio: el calentamiento y luego `validarUsuario` con la
+ * empresa y el titular del certificado, sobre los hashes conocidos. La respuesta dice si la empresa está en la etapa de intercambio; no se exige `//OK`.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: the company and the hashes. ES: la empresa y los hashes.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: the state, the hashes used and the raw answer. ES: el estado, los hashes usados y la respuesta cruda.
  * @throws {DteError} EN: `MISSING_FIELD { field: 'certificate.rut' }` when the certificate names no holder; session, block and transport codes. ES: los mismos códigos.
  */
-export const validateExchangeUser = (
+export const validateExchangeUser = async (
   portal: PortalClient,
   input: ExchangeGwtInput = {},
   overrides?: CallOverrides,
-): Promise<ExchangeUserValidation> =>
-  withPortalSession(portal, 'validateExchangeUser', overrides, async (context) => {
-    const company = companyOf(portal, input.companyRut)
-    const holder = holderOf(portal)
-    await enter(context)
-    const hashes = await gwtHashesOf(context, EXCHANGE_PORTAL, input.gwt)
+): Promise<ExchangeUserValidation> => {
+  const company = companyOf(portal, input.companyRut)
+  const holder = holderOf(portal)
+  return inGwtStage(portal, 'validateExchangeUser', overrides, EXCHANGE_STAGE, input, async ({ context, hashes }) => {
     const user: GwtParameter = {
       kind: 'object',
       type: USER_TYPE,
@@ -238,8 +257,8 @@ export const validateExchangeUser = (
         GWT_NULL,
         GWT_NULL,
         GWT_NULL,
-        gwtString(holder.verifier),
-        gwtString(company.verifier),
+        gwtDistinctString(holder.verifier),
+        gwtDistinctString(company.verifier),
         gwtInteger(Number(company.digits)),
         GWT_NULL,
         GWT_NULL,
@@ -252,6 +271,7 @@ export const validateExchangeUser = (
     const { page, answer } = await postGwt(context, 'validarUsuario', EXCHANGE_PORTAL, hashes, 'validarUsuario', [user])
     return { ...exchangeUserState(answer), hashes, body: page.html }
   })
+}
 
 const uploadAll = async (
   context: PortalContext,
@@ -273,6 +293,7 @@ const uploadAll = async (
     }),
     contentType: multipartContentType(boundary),
     referer: EXCHANGE_PORTAL.base,
+    headers: FORM_HEADERS,
   })
   if (isUploadRefused(page.status, page.html))
     throw rejected(context, 'exchangeUploadRefused', {
@@ -297,16 +318,16 @@ const uploadAll = async (
  * @returns EN: the three upload pages. ES: las tres páginas de subida.
  * @throws {DteError} EN: `SII_PORTAL_REJECTED { rejection: 'exchangeUploadRefused', file }`; `MISSING_FIELD`; session, block and transport codes. ES: los mismos códigos.
  */
-export const uploadExchangeAnswers = (
+export const uploadExchangeAnswers = async (
   portal: PortalClient,
   input: UploadExchangeAnswersInput,
   overrides?: CallOverrides,
-): Promise<ExchangeUploadResult> =>
-  withPortalSession(portal, 'uploadExchangeAnswers', overrides, async (context) => {
-    const company = companyOf(portal, input.companyRut)
-    await enter(context)
-    return { answers: await uploadAll(once(context), company, input, EXCHANGE_ANSWER_KEYS, []) }
-  })
+): Promise<ExchangeUploadResult> => {
+  const company = companyOf(portal, input.companyRut)
+  return inGwtStage(portal, 'uploadExchangeAnswers', overrides, EXCHANGE_STAGE, input, async ({ context }) => ({
+    answers: await uploadAll(context, company, input, EXCHANGE_ANSWER_KEYS, []),
+  }))
+}
 
 const confirmAll = async (
   context: PortalContext,
@@ -350,23 +371,21 @@ const confirmAll = async (
  * @returns EN: the validation answer and the three confirmations. ES: la respuesta de la validación y las tres confirmaciones.
  * @throws {DteError} EN: `SII_PORTAL_UNEXPECTED_PAGE` whose `details.step` names the id that did not confirm; `MISSING_FIELD`; session, block and transport codes. ES: los mismos códigos.
  */
-export const confirmExchange = (
+export const confirmExchange = async (
   portal: PortalClient,
   input: ExchangeGwtInput = {},
   overrides?: CallOverrides,
-): Promise<ExchangeConfirmation> =>
-  withPortalSession(portal, 'confirmExchange', overrides, async (context) => {
-    const company = companyOf(portal, input.companyRut)
-    await enter(context)
-    const hashes = await gwtHashesOf(context, EXCHANGE_PORTAL, input.gwt)
-    const sent = once(context)
+): Promise<ExchangeConfirmation> => {
+  const company = companyOf(portal, input.companyRut)
+  return inGwtStage(portal, 'confirmExchange', overrides, EXCHANGE_STAGE, input, async ({ context, hashes }) => {
     const { page } = await postGwt(
-      sent,
+      context,
       'validarSetContriPostSeguimiento',
       EXCHANGE_PORTAL,
       hashes,
       'validarSetContriPostSeguimiento',
       [gwtInteger(Number(company.digits)), gwtString(company.verifier)],
     )
-    return { validation: page.html, confirmations: await confirmAll(sent, hashes, company, FOLLOW_UP_IDS, []) }
+    return { validation: page.html, confirmations: await confirmAll(context, hashes, company, FOLLOW_UP_IDS, []) }
   })
+}
