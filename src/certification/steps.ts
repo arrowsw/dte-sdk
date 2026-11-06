@@ -646,25 +646,35 @@ export const waitForSimulationApproval = async (
 }
 
 /**
- * EN: The end of the certification: one more advance (an "already there" with the printed samples means they are
- * still under review), then the declaration of compliance. A block leaves its sentence in the state; a final page
- * that does not confirm throws; a declaration ends the run.
- * ES: El cierre de la certificación: un avance más (un "ya está ahí" con los documentos impresos significa que siguen
- * en revisión), luego la declaración de cumplimiento. Un bloqueo deja su frase en el estado; una página final que no
- * confirma lanza; una declaración termina la corrida.
- * @throws {DteError} EN: `SII_PORTAL_UNEXPECTED_PAGE` when the final page does not confirm; the portal codes. ES: `SII_PORTAL_UNEXPECTED_PAGE` si la página final no confirma; los códigos del portal.
+ * EN: The end of the certification, as the reference closes it: one more request to advance the stage, then the
+ * declaration of compliance. The advance is tried and nothing more: a refusal or an error only goes to the log and the
+ * declaration is made all the same, and the progress is not read afterwards (an "already there" with the printed
+ * samples means they are still under review, which the declaration then says). A block leaves its sentence in the
+ * state; a final page that does not confirm throws; a declaration ends the run.
+ * ES: El cierre de la certificación, como lo hace la referencia: una petición más para avanzar la etapa, luego la
+ * declaración de cumplimiento. El avance se intenta y nada más: una negativa o un error solo van al log y la
+ * declaración se hace igual, y el avance no se vuelve a leer (un "ya está ahí" con los documentos impresos significa
+ * que siguen en revisión, y eso lo dice la declaración). Un bloqueo deja su frase en el estado; una página final que
+ * no confirma lanza; una declaración termina la corrida.
+ * @throws {DteError} EN: `SII_PORTAL_UNEXPECTED_PAGE` when the final page does not confirm; the portal codes of the declaration. ES: `SII_PORTAL_UNEXPECTED_PAGE` si la página final no confirma; los códigos del portal de la declaración.
  */
 export const declareComplianceFinal = async (
   deps: CertificationDependencies,
   state: CertificationState,
 ): Promise<StepResult<'declared' | 'blocked'>> => {
   const rt = runtime(deps)
-  const advanced = await advanceToNextStage(deps, state)
+  // No stage is read here, so the advance of the closing emits no progress event.
+  const advance = await advanceStage(rt.portal).catch((error: unknown) => ({
+    outcome: 'failed' as const,
+    message: errorMessage(error),
+  }))
+  if (advance.outcome === 'failed')
+    rt.portal.logger.warn('certification final advance not applied', { reason: advance.message })
   const result = await declareCompliance(rt.portal)
   if (result.outcome === 'blocked') {
-    const next = await saveState(rt, advanced.state, {
+    const next = await saveState(rt, state, {
       blocked: result.message,
-      stage: laterStage(advanced.state.stage, 'compliance'),
+      stage: laterStage(state.stage, 'compliance'),
     })
     return { state: next, outcome: 'blocked', detail: result.message }
   }
@@ -674,7 +684,7 @@ export const declareComplianceFinal = async (
       step: 'pe_avance9',
       portalMessage: result.message,
     })
-  const { blocked, ...rest } = advanced.state
+  const { blocked, ...rest } = state
   void blocked
   const next = await saveState(rt, rest as CertificationState, { stage: 'done' })
   rt.emit({ step: 'CERT_DONE' })

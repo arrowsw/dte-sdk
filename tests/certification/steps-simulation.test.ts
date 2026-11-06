@@ -33,6 +33,7 @@ import {
   STANDARD_ROWS,
 } from '../support/certification-pages'
 import { DteError } from '../../src/errors'
+import type { FakeRoute } from '../support/fake-sii'
 import { failure } from '../support/portal'
 import { page } from '../support/portal-pages'
 
@@ -359,12 +360,15 @@ describe('waitForSimulationApproval', () => {
 })
 
 describe('declareComplianceFinal', () => {
-  const routes = (second: string, third?: string, final?: string) => [
+  const routes = (
+    second: string,
+    third?: string,
+    final?: string,
+    advance: FakeRoute['reply'] = [{ body: ADVANCE_ANSWERS.unchanged }],
+  ) => [
     entry,
     avance2([], () => declarationFormPage(STANDARD_ROWS)),
-    post('pe_avance4', ADVANCE_ANSWERS.unchanged),
-    avance5,
-    avance6([], () => progressPage('DOCUMENTOS IMPRESOS', {})),
+    { url: `${MAULLIN}/pe_avance4`, method: 'POST' as const, reply: advance },
     get('pe_avance7', COMPLIANCE_ENTRY),
     post('pe_avance8', second, ...(third === undefined ? [] : [third])),
     ...(final === undefined ? [] : [post('pe_avance9', final)]),
@@ -376,8 +380,39 @@ describe('declareComplianceFinal', () => {
     expect(result).toMatchObject({ outcome: 'declared', detail: 'Su Declaración de Cumplimiento ha sido efectuada' })
     expect(result.state.stage).toBe('done')
     expect(result.state.blocked).toBeUndefined()
-    expect(harness.steps()).toEqual(['ADVANCE_WAITING', 'ADVANCE_DONE', 'CERT_DONE'])
+    // The advance of the closing reads no stage, so it emits no progress event.
+    expect(harness.steps()).toEqual(['CERT_DONE'])
     expect(await harness.store.load()).toEqual(result.state)
+  })
+
+  test('the advance is one post to pe_avance4 and no read of the progress after it', async () => {
+    const harness = await certificationHarness(routes(COMPLIANCE_FORM, undefined, COMPLIANCE_DECLARED))
+    await declareComplianceFinal(harness.deps, stateWith({ stage: 'printedSamples' }))
+    expect(harness.urls().map((url) => url.split('/').pop())).toEqual([
+      'pe_avance1',
+      'pe_avance2',
+      'pe_avance4',
+      'pe_avance7',
+      'pe_avance8',
+      'pe_avance9',
+    ])
+  })
+
+  test('an advance that fails or throws is only logged, and the compliance is declared all the same', async () => {
+    const refused = await certificationHarness(
+      routes(COMPLIANCE_FORM, undefined, COMPLIANCE_DECLARED, [{ body: ADVANCE_ANSWERS.failed }]),
+    )
+    const first = await declareComplianceFinal(refused.deps, stateWith({ stage: 'printedSamples' }))
+    expect(first.outcome).toBe('declared')
+    expect(refused.steps()).toEqual(['CERT_DONE'])
+    expect(refused.warnings()).toContain('certification final advance not applied')
+    const broken = await certificationHarness(
+      routes(COMPLIANCE_FORM, undefined, COMPLIANCE_DECLARED, [new DteError('TRANSPORT_FAILED', { reason: 'down' })]),
+    )
+    const second = await declareComplianceFinal(broken.deps, stateWith({ stage: 'printedSamples' }))
+    expect(second.outcome).toBe('declared')
+    expect(broken.warnings()).toContain('certification final advance not applied')
+    expect(broken.posted('pe_avance9')).toHaveLength(1)
   })
 
   test('blocked: the sentence stays in the state', async () => {
