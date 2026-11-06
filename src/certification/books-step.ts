@@ -53,7 +53,7 @@ const DECLARED = 'S21'
 const CLOSED_BOOK = 'LNC'
 const NO_BOOKS = 'No hay libros para declarar'
 const ADJUSTABLE: readonly BookKey[] = ['purchaseBook', 'salesBook']
-// The order the books are declared and first awaited in: not the order they are sent in.
+// The order the books are declared and first awaited in, which is not the order they are sent in.
 const DECLARED_ORDER: readonly BookKey[] = ['salesBook', 'purchaseBook', 'guideBook', 'exemptPurchaseBook']
 const BOOK_NAMES = TEST_SET_PORTAL_NAMES as Readonly<Record<BookKey, string>>
 
@@ -370,14 +370,20 @@ const isRefused = (table: Table, key: BookKey): boolean => {
   return status === CLOSED_BOOK || status === 'LRH' || status.includes('RECHAZADO') || status.includes('ERROR')
 }
 
-// A book the portal shows approved is recorded as approved, sent by this run or not.
+// The books of a run: the exempt purchase book only when the test set brought one.
+const wantedBooks = (state: CertificationState): readonly BookKey[] =>
+  BOOK_KEYS.filter((key) => key !== 'exemptPurchaseBook' || state.plan?.exemptPurchaseBook !== undefined)
+
+// A book of the run the portal shows approved is recorded as approved, sent by this run or not.
 const markApproved = async (
   rt: Runtime,
   state: CertificationState,
   table: Table,
   verify: readonly BookKey[],
 ): Promise<CertificationState> => {
-  const fresh = verify.filter((key) => isApproved(table, key) && state.books.results[key]?.approved !== true)
+  const fresh = wantedBooks(state).filter(
+    (key) => verify.includes(key) && isApproved(table, key) && state.books.results[key]?.approved !== true,
+  )
   if (fresh.length === 0) return state
   const results = { ...state.books.results }
   for (const key of fresh)
@@ -482,7 +488,7 @@ export const runBooks = async (
   const plan = state.plan
   if (plan === undefined) throw new DteError('MISSING_FIELD', { field: 'plan' })
   rt.emit({ step: 'BOOKS_START' })
-  const wanted = BOOK_KEYS.filter((key) => key !== 'exemptPurchaseBook' || plan.exemptPurchaseBook !== undefined)
+  const wanted = wantedBooks(state)
   const occupied = new Set<string>()
   const thisYear = Number(chileDate(rt.now()).slice(0, 4))
   let emptyYears = 0
@@ -588,17 +594,23 @@ export const runBooks = async (
     // them, and the portal would show them declared forever.
     const closed = new Map(wait.table)
     for (const key of refusedBySoap) closed.set(BOOK_NAMES[key], CLOSED_BOOK)
-    for (const key of BOOK_KEYS)
-      if (declaration.contentErrors.includes(key) && (closed.get(BOOK_NAMES[key]) ?? '') === '')
-        closed.set(BOOK_NAMES[key], CLOSED_BOOK)
+    // In the order the declaration names them, which is the order a book the page does not list is awaited in.
+    for (const key of declaration.contentErrors.flatMap((named) => BOOK_KEYS.filter((book) => book === named)))
+      if ((closed.get(BOOK_NAMES[key]) ?? '') === '') closed.set(BOOK_NAMES[key], CLOSED_BOOK)
     wait = { ...wait, ok: wait.ok && excluded.size === 0, table: closed }
     const triedFailed = new Set<string>()
     for (let retry = 1; !wait.ok && retry <= MAX_PERIOD_RETRIES; retry += 1) {
-      // The books of the page that this run does not send are left alone.
-      const failed = BOOK_KEYS.filter((key) => failedBooks(wait!.table).includes(key) && outstanding.includes(key))
+      // Every failed book of the page keeps the search going and is awaited, in the order of the page; only the ones
+      // this run sends go again, in the order they are sent.
+      const failed = failedBooks(wait.table)
       if (failed.length === 0) break
       const kept = failed.some((key) => keptTotals(current, period, key) !== undefined)
-      await resend(failed, kept, triedFailed, retry)
+      await resend(
+        BOOK_KEYS.filter((key) => failed.includes(key) && outstanding.includes(key)),
+        kept,
+        triedFailed,
+        retry,
+      )
       declaration = await declare()
       if (!declaration.success) {
         // A declaration that does not stand ends the search, unless every row came back empty, an adjustment was
@@ -606,11 +618,7 @@ export const runBooks = async (
         if (declaration.allRejected || triedFailed.size > 0 || declaration.detail === NO_BOOKS) continue
         break
       }
-      wait = await waitForBooksApproval(
-        rt,
-        current,
-        DECLARED_ORDER.filter((key) => failed.includes(key)),
-      )
+      wait = await waitForBooksApproval(rt, current, failed)
       current = wait.state
     }
   }

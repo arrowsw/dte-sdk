@@ -780,6 +780,34 @@ test('with every book left out of the wait there is no wait: the books named sta
   expect(harness.sleeps).toEqual([15000, 10000, 15000, 10000, 15000])
 })
 
+test('books left out of the first wait are awaited afterwards in the order they were closed: the rejected ones, then the named ones', async () => {
+  const declared = rowsPage({ purchaseBook: 'S21', salesBook: 'S21', guideBook: 'S21', exemptPurchaseBook: 'S21' })
+  const harness = await certificationHarness([
+    ...EMPTY_HISTORY,
+    entry,
+    avance2([
+      rowsPage(),
+      booksForm(),
+      KEPT,
+      booksForm(),
+      booksForm({ purchaseBook: '201', salesBook: '202', guideBook: '203', exemptPurchaseBook: '204' }),
+      declared,
+      declared,
+    ]),
+    post('pe_avance3', DECLARATION_ANSWERS.contentErrors, DECLARATION_ANSWERS.success),
+    uploads(...[101, 102, 103, 104, 201, 202, 203, 204].map((id) => reception(String(id)))),
+    estUpBy({ '102': 'RCH', '103': 'LNC' }),
+  ])
+  const result = await runBooks(harness.deps, booksState())
+  expect(result.outcome).toBe('approved')
+  const asked = harness.fake.requests
+    .filter((request) => request.url === EST_UP_URL)
+    .map((request) => /<TrackId>(\d+)/.exec(request.text)![1])
+  // No book is awaited at first, so no page gives an order: the sales and guide books the status rejected come first,
+  // then the exempt and the purchase book as the declaration names them. The second poll asks in that order.
+  expect(asked.slice(-4)).toEqual(['202', '203', '204', '201'])
+})
+
 test('with no book left to declare after a resend the search goes on to the next free period', async () => {
   const mandatory = {
     purchaseBook: 'REVISADO CONFORME',
@@ -875,6 +903,94 @@ test('a row is a book when its name holds the book name; it is sent again only u
   expect(result.state.books.results.purchaseBook).toMatchObject({ trackId: '101', approved: true })
   expect(retries(harness)).toEqual([])
   expect(polls(harness)).toBe(1 + 40)
+})
+
+test('a failed row of a book this run does not send keeps the search going: it is awaited, in the order of the page, and declared again', async () => {
+  const kept = (purchase: string): string => booksForm({ purchaseBook: purchase, salesBook: '102', guideBook: '103' })
+  const conforming = { salesBook: 'REVISADO CONFORME', guideBook: 'REVISADO CONFORME' }
+  const closed = rowsPage({ ...conforming, purchaseBook: 'LNC', exemptPurchaseBook: 'S21' })
+  const exemptDeclared = rowsPage({ ...conforming, purchaseBook: 'REVISADO CONFORME', exemptPurchaseBook: 'S21' })
+  const harness = await certificationHarness([
+    ...EMPTY_HISTORY,
+    entry,
+    avance2([
+      rowsPage({ exemptPurchaseBook: 'S21' }),
+      booksForm(),
+      kept('101'),
+      closed,
+      booksForm(),
+      kept('201'),
+      ...repeat(exemptDeclared, 40),
+      booksForm(),
+      kept('201'),
+    ]),
+    post('pe_avance3', ...repeat(DECLARATION_ANSWERS.success, 3)),
+    uploads(...[101, 102, 103, 201].map((id) => reception(String(id)))),
+    estUpAlways('EPR'),
+  ])
+  const { exemptPurchaseBook, ...rest } = plan
+  void exemptPurchaseBook
+  const result = await runBooks(harness.deps, booksState({ plan: rest }))
+  expect(result.outcome).toBe('approved')
+  // The closed purchase book goes again as an adjustment. The row of the exempt book, which this run does not send,
+  // stands declared: it is awaited with the purchase book until the polls run out, and then alone, after a round that
+  // moves the period, sends nothing and declares again.
+  expect(retries(harness)).toEqual([
+    { step: 'BOOK_PERIOD_RETRY', period: '2026-11', attempt: 1 },
+    { step: 'BOOK_PERIOD_RETRY', period: '2026-10', attempt: 2 },
+  ])
+  expect(sentBooks(harness)).toHaveLength(4)
+  expect(harness.posted('pe_avance3')).toHaveLength(3)
+  expect(polls(harness)).toBe(3 + 1 + 40 + 1)
+  expect(Object.keys(result.state.books.results).sort()).toEqual(['guideBook', 'purchaseBook', 'salesBook'])
+})
+
+test('the books a second wait looks at come in the order of the page, and so does the status asked for them', async () => {
+  // The page lists the guide book before the sales book; both stand declared when the first wait ends.
+  const row = (name: string, cell: string): string => `<tr><td><font>${name}</font></td><td>${cell}</td></tr>`
+  const names = ['LIBRO DE COMPRAS', 'LIBRO DE GUIAS', 'LIBRO DE VENTAS']
+  const rows = (...states: readonly string[]): string =>
+    page(`<table>${names.map((name, index) => row(name, `<b>${states[index]}</b>`)).join('')}</table>`)
+  const start = page(
+    `<table>${names.map((name, index) => row(name, `<input type=hidden name="EST${index + 1}" value="S01">`)).join('')}</table>`,
+  )
+  const form = declarationFormPage(names.map((label, index) => ({ label, index: index + 1, value: '1' })))
+  const stillDeclared = rows('S25', 'S21', 'S21')
+  let guideAsked = 0
+  const harness = await certificationHarness([
+    ...EMPTY_HISTORY,
+    entry,
+    avance2([start, form, form, rows('LNC', 'S21', 'S21'), form, form, stillDeclared, stillDeclared, form, form], () =>
+      rows('S25', 'S25', 'S25'),
+    ),
+    post('pe_avance3', ...repeat(DECLARATION_ANSWERS.success, 3)),
+    uploads(...[101, 102, 103, 201, 202, 203, 302, 303].map((id) => reception(String(id)))),
+    {
+      url: EST_UP_URL,
+      method: 'POST',
+      // The guide book sent again is accepted when its resend is looked at, and rejected when the wait asks again.
+      reply: (request: RecordedRequest) => {
+        if (!request.text.includes('<TrackId>203')) return estUp('EPR')
+        guideAsked += 1
+        return estUp(guideAsked === 1 ? 'EPR' : 'RCH')
+      },
+    },
+  ])
+  const { exemptPurchaseBook, ...rest } = plan
+  void exemptPurchaseBook
+  const result = await runBooks(harness.deps, booksState({ plan: rest }))
+  expect(result.outcome).toBe('approved')
+  const asked = harness.fake.requests
+    .filter((request) => request.url === EST_UP_URL)
+    .map((request) => /<TrackId>(\d+)/.exec(request.text)![1])
+  // Sent books are looked at in the order they are sent. At its second poll the second wait asks for the guide book
+  // (203) before the sales book, as the page lists them, and that rejection ends the wait: the sales book (202) is
+  // not asked for again. Both go once more, in a free period.
+  expect(asked).toEqual(['101', '102', '103', '201', '202', '203', '203', '302', '303'])
+  expect(retries(harness)).toEqual([
+    { step: 'BOOK_PERIOD_RETRY', period: '2026-11', attempt: 1 },
+    { step: 'BOOK_PERIOD_RETRY', period: '2026-10', attempt: 2 },
+  ])
 })
 
 test('without a plan there is nothing to run', async () => {
