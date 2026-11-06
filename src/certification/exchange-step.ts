@@ -50,8 +50,9 @@ const downloadSet = async (rt: Runtime, companyRut: string): Promise<string | nu
     return xml
   } catch (error) {
     rt.portal.logger.warn('sii exchange set could not be downloaded', { reason: errorMessage(error) })
+    // A page that cannot be kept changes nothing: the set is still to be saved by hand.
     if (isDteError(error) && error.code === 'SII_PORTAL_UNEXPECTED_PAGE' && typeof error.details['page'] === 'string')
-      await rt.store.writeArtefact(artefact('pfe-download-error.html'), error.details['page'])
+      await rt.store.writeArtefact(artefact('pfe-download-error.html'), error.details['page']).catch(() => undefined)
     return null
   }
 }
