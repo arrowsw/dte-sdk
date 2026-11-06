@@ -502,7 +502,7 @@ describe('prepareFolios', () => {
       post('rf_genera_archivo', archive),
     ]
 
-    test('folios already in hand count as covered but do not lower what is asked: a whole answer ends it', async () => {
+    test('folios in hand count as covered but do not lower what is asked: a whole answer ends it and takes their place', async () => {
       const held = cafXml(33, { from: 200, to: 200 })
       const range = cafXml(33, { from: 10, to: 12 })
       const harness = await certificationHarness([
@@ -512,7 +512,9 @@ describe('prepareFolios', () => {
         estDte(free, free, free, free),
       ])
       const result = await prepareFolios(harness.deps, stateWith({ cafs: [held] }), { needs: { 33: 3 } })
-      expect(result.cafs).toEqual([held, range])
+      // The type is issued with the ranges obtained again alone; the CAF that was in hand stays in the state.
+      expect(result.cafs).toEqual([range])
+      expect(result.state.cafs).toEqual([held, range])
       const asked = harness.fake.requests
         .filter((request) => request.url === EST_DTE)
         .map((request) => /<FolioDte>(\d+)<\/FolioDte>/.exec(request.text)?.[1])
@@ -576,6 +578,68 @@ describe('prepareFolios', () => {
       }
       expect(await harness.registry.remaining(scope)).toBe(1)
       expect(await harness.registry.reserve(scope)).toBe(11)
+    })
+
+    test('a short answer that covers more takes the place of the CAFs in hand, and the rest is asked', async () => {
+      const held = cafXml(33, { from: 200, to: 200 })
+      const range = cafXml(33, { from: 10, to: 12 })
+      const harness = await certificationHarness([
+        stampEntry,
+        quota(quotaForm(1, 9), quotaForm(1, 9)),
+        ...reobtainRoutes([10, 12], range),
+        estDte(free, free, free, received),
+        post('of_confirma_folio', cafXml(33, { from: 300, to: 300 })),
+      ])
+      const result = await prepareFolios(harness.deps, stateWith({ cafs: [held] }), { needs: { 33: 3 } })
+      expect(result.cafs).toEqual([range, cafXml(33, { from: 300, to: 300 })])
+      expect(result.state.cafs).toEqual([held, range, cafXml(33, { from: 300, to: 300 })])
+      expect(harness.posted('of_solicita_folios_dcto')[1].CANTIDAD).toBe('1')
+    })
+
+    test('usable ranges that do not reach the need are not downloaded and cover nothing: the whole need is asked', async () => {
+      const one = (folio: number): string => cafXml(33, { from: folio, to: folio })
+      const harness = await certificationHarness([
+        { ...stampEntry, reply: repeat({ body: STAMP_ENTRY }, 10) },
+        quota(...repeat(quotaForm(1, 9), 8)),
+        get('rf_reobtencion1_folios', page('form')),
+        post('rf_reobtencion2_folios', reobtainListPage([[10, 11]])),
+        post('rf_reobtencion3_folios', reobtainDetailPage(10)),
+        confirm(one(1), one(2), one(3)),
+      ])
+      const result = await prepareFolios(harness.deps, stateWith(), { needs: { 33: 3 } })
+      expect(result.cafs).toEqual([one(1), one(2), one(3)])
+      expect(harness.urls().some((url) => url.endsWith('rf_genera_archivo'))).toBe(false)
+    })
+
+    test('a CAF obtained again that is narrower than the listed range is restricted within its own range', async () => {
+      const narrow = cafXml(33, { from: 12, to: 12 })
+      const harness = await certificationHarness([
+        stampEntry,
+        quota(quotaForm(1, 9), quotaForm(1, 9)),
+        ...reobtainRoutes([10, 12], narrow),
+        estDte(received, received, free),
+        post('of_confirma_folio', cafXml(33, { from: 300, to: 300 })),
+      ])
+      const result = await prepareFolios(harness.deps, stateWith(), { needs: { 33: 2 } })
+      expect(result.cafs).toEqual([narrow, cafXml(33, { from: 300, to: 300 })])
+    })
+
+    test('after a block on the person a short answer joins what the run holds and has just obtained', async () => {
+      const held = cafXml(33, { from: 200, to: 200 })
+      const range = cafXml(33, { from: 10, to: 12 })
+      const harness = await certificationHarness([
+        stampEntry,
+        quota(quotaForm(), REJECTION_PAGES.personWithPendingIssues, quotaForm(), quotaForm()),
+        ...reobtainRoutes([10, 12], range),
+        estDte(free, free, free, received),
+        get('af_anular1', ...repeat(ANNUL_ENTRY, 4)),
+        post('af_anular2', ...repeat(unusedRangesPage([[500, 509, '01-11-2026']]), 4)),
+        post('af_anular3', ...repeat(ANNUL_FORM, 4)),
+        post('af_anular', ...repeat(ANNUL_OK, 4)),
+        confirm(cafXml(33, { from: 300, to: 300 })),
+      ])
+      const result = await prepareFolios(harness.deps, stateWith({ cafs: [held] }), { needs: { 33: 3 } })
+      expect(result.cafs).toEqual([held, range, cafXml(33, { from: 300, to: 300 })])
     })
   })
 
@@ -683,6 +747,40 @@ describe('prepareFolios', () => {
     expect(JSON.stringify(harness.posted('af_anular'))).not.toContain('500')
   })
 
+  test('annulling never touches a range the run downloaded: an expired CAF of the state, or one obtained again and not kept', async () => {
+    const free = { body: siiFixture('soap-estdte-fau.xml') }
+    const received = { body: siiFixture('soap-estdte-dok.xml') }
+    const held = cafXml(33, { from: 300, to: 301 })
+    const harness = await certificationHarness([
+      stampEntry,
+      quota(REJECTION_PAGES.stampingBlocked, quotaForm(), quotaForm()),
+      get('rf_reobtencion1_folios', page('form')),
+      post('rf_reobtencion2_folios', reobtainListPage([[10, 12]])),
+      post('rf_reobtencion3_folios', reobtainDetailPage(10)),
+      post('rf_genera_folio', REOBTAIN_RESOLUTION),
+      post('rf_genera_archivo', cafXml(33, { from: 12, to: 12 })),
+      { url: EST_DTE, method: 'POST' as const, reply: [free, free, received, received, free] },
+      get('af_anular1', ...repeat(ANNUL_ENTRY, 4)),
+      post(
+        'af_anular2',
+        ...repeat(
+          unusedRangesPage([
+            [101, 200, '01-11-2026'],
+            [12, 12, '01-11-2026'],
+            [1, 9, '01-11-2026'],
+          ]),
+          4,
+        ),
+      ),
+      post('af_anular3', ...repeat(ANNUL_FORM, 4)),
+      post('af_anular', ...repeat(ANNUL_OK, 4)),
+      confirm(cafXml(33, { from: 400, to: 400 })),
+    ])
+    const result = await prepareFolios(harness.deps, stateWith({ cafs: [OLD_CAF_XML, held] }), { needs: { 33: 3 } })
+    expect(result.cafs).toEqual([OLD_CAF_XML, held, cafXml(33, { from: 400, to: 400 })])
+    expect(harness.posted('af_anular3').map((form) => form.FOLIO_INI)).toEqual(['1'])
+  })
+
   test('still short: the error carries the numbers and the reason', async () => {
     const harness = await certificationHarness([
       stampEntry,
@@ -699,6 +797,8 @@ describe('prepareFolios', () => {
       rejection: 'quotaCapReached',
       reason: 'noUnusedFolios',
     })
+    // What was obtained before the step ended short is kept: the next attempt finds it in hand.
+    expect((await harness.store.load())?.cafs).toEqual([cafXml(33, { from: 1, to: 1 })])
     const refused = await certificationHarness([
       stampEntry,
       quota(quotaForm(5, 3), REJECTION_PAGES.companyNotAuthorized),
