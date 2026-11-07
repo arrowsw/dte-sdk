@@ -137,6 +137,7 @@ const ROOT_EXPORTS = [
   'queryReceptionDate',
   'queryTransferable',
   'queryUploadStatus',
+  'receiverAnswer',
   'receiverStatus',
   'receptionStatusMessage',
   'redactExchange',

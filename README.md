@@ -253,6 +253,12 @@ available: `getSeed`/`getToken`, `uploadBook`, `uploadFolioConsumption`, `queryU
 `queryDocumentStatus`, `folioReceived`, `listClaimEvents`, `queryTransferable`,
 `queryReceptionDate`, `receiverStatus`.
 
+`receiverAnswer(events, receivedAt, today)` reads what the receiver answered, with no request:
+the events of `listClaimEvents`, the `receivedAt` of `queryReceptionDate` and today in Chile
+(`chileDate()`). A credit note that annuls comes first, then a claim, then an acceptance; with
+none of them, eight calendar days after the SII received the document it is accepted by law
+(Ley 19.983, `tacitlyAccepted`). It also gives `claimDeadline`, the last day to claim.
+
 `queryAuthorizedIssuer(sii, { rut })` asks the public registry of authorized issuers of the SII
 (`ee_empresa_rut`) for a RUT: its business name, the resolution of the environment, which is the
 `NroResol` and `FchResol` of every cover (number 0 in certification), and the document types it

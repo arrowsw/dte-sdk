@@ -23,8 +23,9 @@ describe('claim catalogs', () => {
     expect(isClaimAction(42)).toBe(false)
   })
 
-  test('event codes include the credit-note events', () => {
-    expect(Object.keys(CLAIM_EVENT_CODES).sort()).toEqual(['ACD', 'ENC', 'ERM', 'NCA', 'RCD', 'RFP', 'RFT'])
+  test('event codes include the credit-note events and the cash payment the SII registers', () => {
+    expect(Object.keys(CLAIM_EVENT_CODES).sort()).toEqual(['ACD', 'ENC', 'ERM', 'NCA', 'PAG', 'RCD', 'RFP', 'RFT'])
+    expect(CLAIM_EVENT_CODES.PAG).toBe('DTE Pagado al Contado')
   })
 
   test('response codes 0 to 19 and -1 have a message', () => {

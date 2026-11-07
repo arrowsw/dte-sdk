@@ -5,6 +5,7 @@ import {
   listClaimEvents,
   queryReceptionDate,
   queryTransferable,
+  receiverAnswer,
   receiverStatus,
   registerClaim,
   type ClaimDocumentInput,
@@ -605,5 +606,84 @@ describe('receiverStatus', () => {
   test('no events from the fixture is none', async () => {
     const { sii } = answering(fx('claims-events-none.xml'))
     expect(await receiverStatus(sii, doc)).toEqual({ status: 'none', lastEvent: null, code: 16 })
+  })
+})
+
+describe('receiverAnswer', () => {
+  const at = (...codes: readonly string[]) => codes.map((code) => ({ code }))
+  const RECEIVED = '2026-09-18T20:08:52'
+
+  test.each([
+    [at('NCA', 'ACD', 'RCD'), 'annulled'],
+    [at('ERM', 'RCD'), 'claimed'],
+    [at('RFP'), 'claimed'],
+    [at('RFT', 'ACD'), 'claimed'],
+    [at('ERM', 'ACD'), 'accepted'],
+    [at('ERM'), 'goodsReceived'],
+    [at('PAG', 'ENC'), 'pending'],
+    [[], 'pending'],
+  ] as const)('within the eight days, %j is %s', (events, answer) => {
+    expect(receiverAnswer(events, RECEIVED, '2026-09-26')).toEqual({ answer, claimDeadline: '2026-09-26' })
+  })
+
+  test('past the eight days with no answer, the document is accepted by law; an explicit answer stays', () => {
+    expect(receiverAnswer([], RECEIVED, '2026-09-27')).toEqual({
+      answer: 'tacitlyAccepted',
+      claimDeadline: '2026-09-26',
+    })
+    expect(receiverAnswer(at('ERM', 'PAG'), RECEIVED, '2026-10-30').answer).toBe('tacitlyAccepted')
+    expect(receiverAnswer(at('RCD'), RECEIVED, '2026-10-30').answer).toBe('claimed')
+    expect(receiverAnswer(at('ACD'), RECEIVED, '2026-10-30').answer).toBe('accepted')
+    expect(receiverAnswer(at('NCA'), RECEIVED, '2026-10-30').answer).toBe('annulled')
+  })
+
+  test('the eight calendar days cross months and years, and a bare date works too', () => {
+    expect(receiverAnswer([], '2026-12-28', '2027-01-05')).toEqual({ answer: 'pending', claimDeadline: '2027-01-05' })
+    expect(receiverAnswer([], '2028-02-25T09:00:00', '2028-03-05').answer).toBe('tacitlyAccepted')
+    expect(receiverAnswer([], '2028-02-25T09:00:00', '2028-03-04').claimDeadline).toBe('2028-03-04')
+  })
+
+  test('with no reception date there is no deadline, and nothing is tacit', () => {
+    expect(receiverAnswer(at('ERM'), null, '2030-01-01')).toEqual({ answer: 'goodsReceived', claimDeadline: null })
+    expect(receiverAnswer([], 'Documento no recibido', '2030-01-01')).toEqual({
+      answer: 'pending',
+      claimDeadline: null,
+    })
+  })
+
+  test('today must be a date, written either way', () => {
+    expect(receiverAnswer([], RECEIVED, '27-09-2026').answer).toBe('tacitlyAccepted')
+    for (const today of ['2026-13-01', 'hoy'])
+      expect(() => receiverAnswer([], RECEIVED, today)).toThrow(expect.objectContaining({ code: 'INVALID_DATE' }))
+  })
+
+  test('over the answers of the registry, as the SII sends them', async () => {
+    const listed = answering(
+      answer(
+        '<codResp>15</codResp><descResp>Listado de eventos del documento</descResp>' +
+          '<listaEventosDoc><codEvento>PAG</codEvento><descEvento>DTE Pagado al Contado</descEvento><rutResponsable>76543210</rutResponsable><dvResponsable>3</dvResponsable><fechaEvento>02-11-2026 22:39:22</fechaEvento></listaEventosDoc>' +
+          '<listaEventosDoc><codEvento>RCD</codEvento><descEvento>Reclamo al Contenido del Documento</descEvento><rutResponsable>14625621</rutResponsable><dvResponsable>k</dvResponsable><fechaEvento>04-11-2026 09:15:00</fechaEvento></listaEventosDoc>',
+      ),
+    )
+    const { events } = await listClaimEvents(listed.sii, doc)
+    expect(events.map((item) => [item.code, item.responsibleRut, item.dateIso])).toEqual([
+      ['PAG', '76543210-3', '2026-11-02T22:39:22'],
+      ['RCD', '14625621-K', '2026-11-04T09:15:00'],
+    ])
+    expect(receiverAnswer(events, '2026-11-02T20:00:00', '2026-11-05')).toEqual({
+      answer: 'claimed',
+      claimDeadline: '2026-11-10',
+    })
+    const received = answering(fx('claims-reception-date.xml'))
+    const { receivedAt } = await queryReceptionDate(received.sii, doc)
+    expect(receiverAnswer([], receivedAt, '2026-11-24')).toEqual({
+      answer: 'tacitlyAccepted',
+      claimDeadline: '2026-11-23',
+    })
+    const none = answering(answer('<codResp>16</codResp><descResp>Documento no presenta eventos</descResp>'))
+    expect(receiverAnswer((await listClaimEvents(none.sii, doc)).events, null, '2026-11-24')).toEqual({
+      answer: 'pending',
+      claimDeadline: null,
+    })
   })
 })

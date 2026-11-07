@@ -25,8 +25,10 @@ export const isClaimAction = (value: unknown): value is ClaimAction =>
   typeof value === 'string' && Object.keys(CLAIM_ACTIONS).includes(value)
 
 /**
- * EN: Event codes the registry reports (`codEvento`), including the credit-note events the receiver does not register.
- * ES: `codEvento` — Códigos de evento del registro, incluidos los de notas de crédito que no registra el receptor.
+ * EN: Event codes the registry reports (`codEvento`), including the ones the receiver does not register: the credit-note
+ * events and `PAG`, a cash payment the SII itself registers, seen in answers of the registry.
+ * ES: `codEvento` — Códigos de evento del registro, incluidos los que no registra el receptor: los de notas de crédito
+ * y `PAG`, un pago al contado que registra el propio SII, visto en respuestas del registro.
  */
 export const CLAIM_EVENT_CODES: Readonly<Record<string, string>> = {
   ACD: 'Acepta contenido del documento',
@@ -36,6 +38,7 @@ export const CLAIM_EVENT_CODES: Readonly<Record<string, string>> = {
   RFT: 'Reclamo por falta total de mercaderías',
   NCA: 'Nota de crédito de anulación',
   ENC: 'Otra nota de crédito',
+  PAG: 'DTE Pagado al Contado',
 }
 
 /**
