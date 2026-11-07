@@ -170,6 +170,30 @@ describe('registerSummaryOf', () => {
     })
   })
 
+  test.each([
+    [' 1,0000', 1],
+    ['0,8532', 0.8532],
+    ['0', 0],
+    [0.75, 0.75],
+    ['85,32', null],
+    ['-0,1', null],
+    ['1,0001', null],
+    [2, null],
+    ['abc', null],
+    ['', null],
+    [null, null],
+  ])(
+    'the proportionality factor %p, with a decimal comma or not, is %p: outside 0 to 1 it is none',
+    (value, factor) => {
+      const header = { dcvFctProp: value }
+      expect(registerSummaryOf({ data: [], dataCabecera: header }).header).toEqual({
+        updatedAt: null,
+        proportionalityFactor: factor,
+        raw: header,
+      })
+    },
+  )
+
   test('as measured with no documents', () => {
     expect(registerSummaryOf({ data: null, dataCabecera: null, respEstado: { codRespuesta: 3 } })).toEqual({
       rows: [],

@@ -271,6 +271,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The proportionality factor of the register reads with a decimal comma.** `dcvFctProp` reportedly comes as a text
+  with spaces and a decimal comma (`" 1,0000"`, `"0,8532"`), which `fetchRegisterSummary` read as no factor. It now
+  reads that form too; a value outside 0 to 1 is not a factor, so it is null and stays in `raw`.
 - **A certificate not valid yet is refused.** `loadCertificateFromPem` and `loadCertificateFromPkcs12` checked only
   `notAfter`; a certificate whose `notBefore` is still ahead, by the same `now` option, now throws the new
   `CERT_NOT_YET_VALID` with `details.validFrom`. `allowExpired` lets either case load.
