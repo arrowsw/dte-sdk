@@ -1,4 +1,5 @@
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { mkdir, open, readdir, readFile, stat, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { loadNodeFs } from '../../src/sii/node-fs'
 import { createDirectoryTokenCache } from '../../src/sii/node-token-cache'
@@ -9,6 +10,26 @@ const temp = createTempDirs()
 afterAll(temp.cleanup)
 
 const entry = { token: 'TOKEN=abc; NETSCAPE_LIVEWIRE.rut=1', expiresAt: 1_800_000_000_000 }
+
+/** The outcome of `promise`, or `'still waiting'` once `ms` have passed. */
+const within = <T>(ms: number, promise: Promise<T>): Promise<T | 'still waiting'> => {
+  const timer: { id?: ReturnType<typeof setTimeout> } = {}
+  const late = new Promise<'still waiting'>((resolve) => {
+    timer.id = setTimeout(() => resolve('still waiting'), ms)
+  })
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer.id))
+}
+
+/** Runs `run` with `process.getuid` replaced, as for another user or on Windows, and puts it back. */
+const withGetuid = async (getuid: (() => number) | undefined, run: () => Promise<void>): Promise<void> => {
+  const original = process.getuid
+  process.getuid = getuid
+  try {
+    await run()
+  } finally {
+    process.getuid = original
+  }
+}
 
 describe('createDirectoryTokenCache', () => {
   test('set then get returns the entry, from a new instance too', async () => {
@@ -37,7 +58,7 @@ describe('createDirectoryTokenCache', () => {
     await expect(cache.get('../escape/..\\x y')).resolves.toEqual(entry)
   })
 
-  test('two keys that share a file name never get each other token', async () => {
+  test("two keys that share a file name never get each other's token", async () => {
     const dir = await temp.make('dte-sdk-cache-')
     const logger = recordingLogger()
     const cache = createDirectoryTokenCache({ dir, logger })
@@ -137,6 +158,38 @@ describe('createDirectoryTokenCache', () => {
       ['warn', 'token cache failed', { operation: 'set', reason: 'ENOSPC: no space left on device' }],
     ])
     expect(await readdir(dir)).toEqual([])
+  })
+
+  test('get reads only a regular file, and a FIFO at the name never makes it wait', async () => {
+    const dir = await temp.make('dte-sdk-cache-')
+    const logger = recordingLogger()
+    const cache = createDirectoryTokenCache({ dir, logger })
+    execFileSync('mkfifo', [join(dir, 'fifo.json')])
+    await symlink('/dev/null', join(dir, 'device.json'))
+    await mkdir(join(dir, 'folder.json'))
+    const outcome = await within(2000, Promise.all([cache.get('fifo'), cache.get('device'), cache.get('folder')]))
+    // A read still waiting for a writer is let go, so this test fails instead of hanging the suite.
+    await (await open(join(dir, 'fifo.json'), 'r+')).close()
+    expect(outcome).toEqual([null, null, null])
+    expect(logger.lines).toEqual(
+      Array(3).fill(['warn', 'token cache failed', { operation: 'get', reason: 'not a file of this user' }]),
+    )
+  })
+
+  test('an entry of another user is a miss, and where there are no user ids the owner is not checked', async () => {
+    const dir = await temp.make('dte-sdk-cache-')
+    const logger = recordingLogger()
+    const cache = createDirectoryTokenCache({ dir, logger })
+    await cache.set('k', entry)
+    const uid = process.getuid!()
+    await withGetuid(
+      () => uid + 1,
+      () => expect(cache.get('k')).resolves.toBeNull(),
+    )
+    await withGetuid(undefined, () => expect(cache.get('k')).resolves.toEqual(entry))
+    expect(logger.lines).toEqual([
+      ['warn', 'token cache failed', { operation: 'get', reason: 'not a file of this user' }],
+    ])
   })
 
   test('never throws: a failure is a miss, reported to the logger with the operation', async () => {
