@@ -73,6 +73,9 @@ const EXPECTED_FUNCTIONS: Record<string, readonly string[]> = {
     'createDirectoryUploadArchive',
     'createDirectoryTokenCache',
     'createDirectoryFolioRegistry',
+    'findCafFiles',
+    'findLatestCafFile',
+    'resolveCafFile',
   ],
   portal: [
     'createPortalClient',
@@ -102,6 +105,7 @@ const EXPECTED_FUNCTIONS: Record<string, readonly string[]> = {
     'renderPrintedSamples',
     'writePrintedSamples',
     'readPrintedSamples',
+    'siiOfficeForCommune',
   ],
 }
 const ENTRIES = Object.keys(EXPECTED_FUNCTIONS)

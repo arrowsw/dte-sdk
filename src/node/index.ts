@@ -1,11 +1,10 @@
 /**
  * EN: dte-sdk/node entry: the adapters that need Node: the `node:https` transport with client certificates and the SII
- * legacy TLS settings, and the on-disk HTTP capture, upload archive, token and session cache and folio registry. They load `node:` modules on first
- * use, never at import.
+ * legacy TLS settings, the on-disk HTTP capture, upload archive, token and session cache and folio registry, and the
+ * search for CAF files on disk. They load `node:` modules on first use, never at import.
  * ES: Entrada dte-sdk/node: los adaptadores que necesitan Node: el transporte `node:https` con certificado de cliente y los
- * ajustes de TLS antiguos del SII, y la captura HTTP, el archivo de envíos, la caché de tokens y sesiones y el registro de
- * folios en disco. Cargan los
- * módulos `node:` en el primer uso, nunca al importar.
+ * ajustes de TLS antiguos del SII, la captura HTTP, el archivo de envíos, la caché de tokens y sesiones y el registro de
+ * folios en disco, y la búsqueda de archivos CAF en disco. Cargan los módulos `node:` en el primer uso, nunca al importar.
  */
 export { createNodeHttpsTransport } from '../sii/node-transport'
 export type { NodeTlsOptions, NodeHttpsTransportOptions, TlsVersion } from '../sii/node-transport'
@@ -17,3 +16,5 @@ export { createDirectoryTokenCache } from '../sii/node-token-cache'
 export type { DirectoryTokenCacheOptions } from '../sii/node-token-cache'
 export { createDirectoryFolioRegistry } from '../folios/node-registry'
 export type { DirectoryFolioRegistryOptions } from '../folios/node-registry'
+export { findCafFiles, findLatestCafFile, resolveCafFile } from '../folios/node-caf-files'
+export type { CafFile, FindCafFilesOptions, ResolveCafFileOptions, ResolvedCafFile } from '../folios/node-caf-files'

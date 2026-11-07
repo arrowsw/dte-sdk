@@ -132,12 +132,12 @@ npm install pdf-lib bwip-js
 
 ## Entry points
 
-| Import from      | What it holds                                                                                                                                                                                      | Runs on                                                        |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `dte-sdk`        | Documents, stamps, signatures, envelopes, books and the SII web services client over `fetch`                                                                                                       | Node, Bun, Deno; bundles for the browser with no configuration |
-| `dte-sdk/node`   | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`                                                  | Node                                                           |
-| `dte-sdk/portal` | SII portal, folios and CAF requests, the folio registry, purchase and sales register, MIPYME backup, and certification: sets, runner, exchange, upload of the samples and the receipts application | Node                                                           |
-| `dte-sdk/pdf`    | Printed samples                                                                                                                                                                                    | Node, with `pdf-lib` and `bwip-js` installed                   |
+| Import from      | What it holds                                                                                                                                                                                            | Runs on                                                        |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `dte-sdk`        | Documents, stamps, signatures, envelopes, books and the SII web services client over `fetch`                                                                                                             | Node, Bun, Deno; bundles for the browser with no configuration |
+| `dte-sdk/node`   | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile` | Node                                                           |
+| `dte-sdk/portal` | SII portal, folios and CAF requests, the folio registry, purchase and sales register, MIPYME backup, and certification: sets, runner, exchange, upload of the samples and the receipts application       | Node                                                           |
+| `dte-sdk/pdf`    | Printed samples and the SII office of each commune (`SII_OFFICES`, `siiOfficeForCommune`)                                                                                                                | Node, with `pdf-lib` and `bwip-js` installed                   |
 
 `DteError` and `isDteError` come from `dte-sdk` and recognize what every entry throws.
 
@@ -369,6 +369,31 @@ a free one below that point. With `{ lowestFree: true }` it hands out the lowest
 what the certification run asks for; use it only when the registry records every folio the range has spent. A service
 with its own database implements `FolioRegistry` with its own transactions, the option included if it is to back a
 certification run.
+
+To pick the CAF file to issue with, `dte-sdk/node` searches a directory, and its folders down to five levels below it,
+for CAF files. `findCafFiles({ dir, type, issuerRut })` lists the usable ones newest first (by modification time):
+`.xml` files that parse as a CAF of that type whose `RE` is that company, read from the file and never from the folder it
+lies in, and that have not expired (`isCafExpired`, with its one-day margin). A folder or file that cannot be read is
+skipped. `findLatestCafFile` gives the first of them, or null. `resolveCafFile({ dir, type, issuerRut, required,
+registry, environment })` gives the newest one that still has `required` free folios, `remaining` in the registry for the
+scope of the file (or its whole range without a registry), with that `scope` to reserve from, and null when none has:
+then it is time to ask the SII for a new CAF.
+
+```typescript
+import { createDirectoryFolioRegistry, resolveCafFile } from 'dte-sdk/node'
+
+const registry = createDirectoryFolioRegistry({ dir: './folios' })
+const file = await resolveCafFile({
+  dir: './cafs',
+  type: 33,
+  issuerRut: '76543210-3',
+  required: 1,
+  registry,
+  environment: 'production',
+})
+if (file === null) throw new Error('No CAF with free folios: request one')
+const folio = await registry.reserve(file.scope!) // file.caf goes to issueDocument
+```
 
 A refusal of the SII is `SII_PORTAL_REJECTED`, with `details.rejection` and `portalRejectionMessage` saying what it means
 and what to do; the composite flows return it as data, so the CAFs already obtained are not lost. Login, logout and the
@@ -732,7 +757,7 @@ import {
 // The signed XML is the input: one document the SDK issued, or any EnvioDTE/EnvioBOLETA
 const [doc] = parsePrintableDocuments(signed.xml)
 const pdf = await renderPrintedSample(doc, {
-  siiOffice: 'S.I.I. - SANTIAGO ORIENTE',
+  siiOffice: 'S.I.I. - SANTIAGO ORIENTE', // default: the office of the issuer's commune
   resolution: 'Res. Ex. SII N° 80 del 2014',
 })
 const transferableCopy = await renderPrintedSample(doc, { transferable: true }) // adds the acknowledgement box and CEDIBLE
@@ -758,7 +783,10 @@ const samples = await readPrintedSamples('./certification/samples')
 The printed sample follows the SII printed-samples manual: one page 21.5 cm wide and as tall as its content between 11
 and 33 cm, the red type box with the RUT, the type name and the folio, issuer, date, receiver, references, detail,
 totals, the acknowledgement box and `CEDIBLE` mark on the transferable copy (33, 34, 43, 46 and sale guides), and the
-PDF417 stamp of the TED with its legends. The stamp encodes the signed bytes exactly (`renderTedBarcode` gives the PNG
+PDF417 stamp of the TED with its legends. The legend under the type box is `siiOffice` when given; otherwise the office
+of the issuer's commune (`CmnaOrigen`), looked up with `siiOfficeForCommune` in `SII_OFFICES` (306 commune names in 37
+offices, ignoring case, surrounding spaces and accents), and `S.I.I. - SANTIAGO CENTRO` for a commune the table lacks.
+The stamp encodes the signed bytes exactly (`renderTedBarcode` gives the PNG
 alone). It needs Node and the optional peers `pdf-lib` and `bwip-js`, which are loaded on first use: without them
 the render functions throw `DEPENDENCY_UNAVAILABLE`. Failures of a batch come back as data (`failures[].code`), never as thrown errors; a folio that is not a run
 of digits is an `INVALID_FOLIO` failure, since it would name the file. Retentions, the commission block of settlement

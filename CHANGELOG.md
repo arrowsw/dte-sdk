@@ -131,13 +131,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `receiptsTrackIdRefused`, `receiptsComplianceRefused`. `dte-sdk/portal` limit to 68 kB.
 - `receiptReferences` on `DocumentInput` and `Document`, with `ReceiptReferenceInput`, `ReceiptReference` and
   `SiiReferenciaBoleta`: the reference of a receipt (39, 41) as the receipts schema defines it.
+- CAF files on disk (`dte-sdk/node`): `findCafFiles` lists the usable CAF files of a type and company below a directory
+  (five folder levels deep), newest first by modification time: `.xml` files that parse as a CAF of that `TD`, whose
+  `RE` is the company (read from the file, never from its folder) and that have not expired; unreadable folders and
+  files are skipped. `findLatestCafFile` gives the first, and `resolveCafFile` the newest with `required` free folios in
+  a `FolioRegistry` (or in its whole range without one), with its registry `scope`, or null. Types `CafFile`,
+  `FindCafFilesOptions`, `ResolveCafFileOptions`, `ResolvedCafFile`. `dte-sdk/node` limit to 8 kB.
+- The SII office of each commune (`dte-sdk/pdf`): `SII_OFFICES` (306 commune names in 37 offices) and
+  `siiOfficeForCommune`, which ignores case, surrounding spaces and accents. `renderPrintedSample` and the batch
+  functions print the office of the issuer's commune when `siiOffice` is not given, and `S.I.I. - SANTIAGO CENTRO` only
+  for a commune the table lacks. `dte-sdk/pdf` limit to 11 kB.
 
 ### Changed
 
 - **Four entries.** `dte-sdk` keeps documents, stamps, signatures, envelopes, books and the web services client over
   `fetch`, and reaches no `node:` module, so it bundles for the browser with no configuration. `dte-sdk/node` holds
-  `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache` and
-  `createDirectoryFolioRegistry`.
+  `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`,
+  `createDirectoryFolioRegistry` and the search for CAF files on disk.
   `dte-sdk/portal` holds the portal, the folio registry, the register, the MIPYME backup and the certification sets.
   `dte-sdk/pdf` holds the printed samples. One `DteError` crosses them. Why and the measurements:
   `docs/decisions/entry-points.md`.

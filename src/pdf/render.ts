@@ -1,6 +1,7 @@
 import type { PDFDocument, PDFFont, PDFImage, PDFPage, RGB } from 'pdf-lib'
 import { format } from 'rut.ts'
 import { documentTypeName, isDocumentType, isTransferable } from '../catalogs/document-types'
+import { siiOfficeForCommune } from '../catalogs/sii-offices'
 import { DteError, errorMessage, isDteError } from '../errors'
 import {
   ACKNOWLEDGEMENT_TEXT,
@@ -37,7 +38,7 @@ export type PrintedLogo = {
  * ES: Opciones comunes a todas las muestras impresas.
  */
 export type PrintedSampleOptions = {
-  /** EN: SII office under the type box; default `S.I.I. - SANTIAGO CENTRO`. ES: Oficina del SII bajo el recuadro; por defecto `S.I.I. - SANTIAGO CENTRO`. */
+  /** EN: SII office under the type box; default the office of the issuer's commune (`siiOfficeForCommune`), or `S.I.I. - SANTIAGO CENTRO` when the commune is not in the table. ES: Oficina del SII bajo el recuadro; por defecto la oficina de la comuna del emisor (`siiOfficeForCommune`), o `S.I.I. - SANTIAGO CENTRO` si la comuna no está en la tabla. */
   readonly siiOffice?: string
   /** EN: Resolution line under the stamp; default `Res. Ex. SII N° 0 del {year}`. ES: Línea de resolución bajo el timbre; por defecto `Res. Ex. SII N° 0 del {año}`. */
   readonly resolution?: string
@@ -654,7 +655,8 @@ const draw = async (
   const page = document.addPage([PAGE.width, height])
   const canvas: Canvas = { page, fonts, height, paint: ([r, g, b]) => pdf.rgb(r, g, b) }
   let y = MARGIN
-  y = drawHeader(canvas, doc, logo, y, options.siiOffice ?? DEFAULT_SII_OFFICE) + GAP.section
+  const office = options.siiOffice ?? siiOfficeForCommune(doc.issuer.commune) ?? DEFAULT_SII_OFFICE
+  y = drawHeader(canvas, doc, logo, y, office) + GAP.section
   y = drawIssueDate(canvas, doc, y) + GAP.small
   y = drawReceiver(canvas, doc, y) + GAP.section
   if (transferReason !== null) y = drawTransferReason(canvas, transferReason, y) + GAP.small
