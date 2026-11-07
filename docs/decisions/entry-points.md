@@ -5,16 +5,16 @@ D40 and D41 of the design specs). Tracks [issue #5](https://github.com/arrowsw/d
 
 **Decision: four entries, ES modules only.**
 
-| Entry            | Holds                                                                                                                                             | Size     | Reaches `node:`   |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ----------------- |
-| `dte-sdk`        | Documents, stamps, signatures, envelopes, books, SII web services client over `fetch`                                                             | 30.06 kB | No                |
-| `dte-sdk/node`   | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry` | 4.54 kB  | Yes, on first use |
-| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, certification sets and runner                                                                    | 55.86 kB | Yes, on first use |
-| `dte-sdk/pdf`    | Printed samples; `pdf-lib` and `bwip-js` are optional peers                                                                                       | 8.32 kB  | Yes, on first use |
+| Entry | Holds | Size | Reaches `node:` |
+|---|---|---|---|
+| `dte-sdk` | Documents, stamps, signatures, envelopes, books, SII web services client over `fetch` | 30.06 kB | No |
+| `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry` | 4.71 kB | Yes, on first use |
+| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, certification sets and runner | 55.86 kB | Yes, on first use |
+| `dte-sdk/pdf` | Printed samples; `pdf-lib` and `bwip-js` are optional peers | 8.32 kB | Yes, on first use |
 
 Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
-it at phase 5b-2, which took `dte-sdk/portal` from 39.35 kB to 55.86 kB. Each limit is the measure rounded up to the next
-2 kB.
+it at phase 5b-2, which took `dte-sdk/portal` from 39.35 kB to 55.86 kB; the `dte-sdk/node` row was measured again when
+`createDirectoryTokenCache` joined it. Each limit is the measure rounded up to the next 2 kB.
 
 ## Why
 
@@ -35,12 +35,12 @@ A consumer with a bundler gets about the same bytes, because tree-shaking alread
 `node-forge` is most of the rest. Only a consumer that prints without signing gains, since it no longer loads `node-forge`.
 
 | Consumer, kB min + brotli | SDK code only: before → after | With dependencies, before → after |
-| ------------------------- | ----------------------------- | --------------------------------- |
-| Issuing documents         | 11.39 → 10.86                 | 116.85 → 116.69                   |
-| Web services              | 14.40 → 13.94                 | 120.08 → 119.66                   |
-| Portal                    | 15.15 → 14.84                 | 120.62 → 120.73                   |
-| Printed samples           | 8.05 → 6.96                   | 113.73 → 46.13                    |
-| Certification sets        | 18.54 → 18.29                 | 124.25 → 124.28                   |
+|---|---|---|
+| Issuing documents | 11.39 → 10.86 | 116.85 → 116.69 |
+| Web services | 14.40 → 13.94 | 120.08 → 119.66 |
+| Portal | 15.15 → 14.84 | 120.62 → 120.73 |
+| Printed samples | 8.05 → 6.96 | 113.73 → 46.13 |
+| Certification sets | 18.54 → 18.29 | 124.25 → 124.28 |
 
 The last column leaves out `pdf-lib` and `bwip-js`, which load on first use and add about 360 kB to whoever prints.
 
@@ -65,11 +65,11 @@ get real types. The CI imports every entry on Bun and Deno.
 
 Minified and brotli-compressed:
 
-| After      | ESM         | CJS         |
-| ---------- | ----------- | ----------- |
-| Phase 1    | under 16 kB | under 16 kB |
-| Phase 2    | 25.65 kB    | 25.9 kB     |
-| Phase 3    | 31.85 kB    | 32.07 kB    |
-| Phase 4    | 44.45 kB    | 44.64 kB    |
-| Phase 4b   | 53.61 kB    | 53.72 kB    |
-| Phase 5b-1 | 59.54 kB    | 59.75 kB    |
+| After | ESM | CJS |
+|---|---|---|
+| Phase 1 | under 16 kB | under 16 kB |
+| Phase 2 | 25.65 kB | 25.9 kB |
+| Phase 3 | 31.85 kB | 32.07 kB |
+| Phase 4 | 44.45 kB | 44.64 kB |
+| Phase 4b | 53.61 kB | 53.72 kB |
+| Phase 5b-1 | 59.54 kB | 59.75 kB |

@@ -273,9 +273,10 @@ Options worth knowing:
   `<trackId>-<kind>-duplicate-<yyyymmddHHMMSS>` and never replaces the record of the original.
 - `logger`: silent by default; pass `console` or your own. Messages never carry tokens, RUTs
   or XML.
-- `tokenCache`: in memory by default. `createDirectoryTokenCache({ dir })` from `dte-sdk/node` keeps the tokens on
-  disk, one owner-only file per key, so the processes of one volume share them; it serves as the portal's
-  `sessionCache` too.
+- `tokenCache`: in memory by default. `createDirectoryTokenCache({ dir, logger })` from `dte-sdk/node` keeps the
+  tokens on disk, one file per key that only its owner can read (on Windows the permissions of `dir` decide), so a
+  restart and the other processes of the same user reuse them; it serves as the portal's `sessionCache` too. Give it
+  a directory of its own. It never throws: an entry it cannot read or write is a miss, reported only to `logger`.
 - Every call accepts `{ signal, timeoutMs, retry }` as a last argument.
 
 ## SII books
@@ -336,7 +337,9 @@ present a client certificate.
 - **One session per certificate.** The SII rations sessions per RUT, so `sessionCache` and `lock` are ports: several
   replicas need shared ones. Sessions are reused for 90 minutes and logged in on demand. In memory by default, so a
   restart logs in again; `createDirectoryTokenCache({ dir })` from `dte-sdk/node` keeps the session on disk, one
-  owner-only file per certificate, and a restart or a second process on the same volume reuses it.
+  owner-only file per certificate, and a restart reuses it. The default `lock` holds within one process only: two
+  processes that share the directory and run at once can send requests of one session at the same time or replace
+  each other's session, so give them a shared `lock` too, or keep one process per certificate.
 - **Rationing.** `MAX_AUTOR` and `FOLIOS_DISP` appear only while the SII rations a type. Unused folios lower what it
   authorizes and eventually block stamping.
 - **To lift a block, issue with the folios you have.** `reobtainFolios` gets lost CAFs back without spending quota.
