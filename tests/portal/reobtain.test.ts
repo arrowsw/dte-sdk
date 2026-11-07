@@ -8,7 +8,14 @@ import {
 import { listReobtainableRanges, reobtainCaf, type ReobtainableRange } from '../../src/portal/reobtain'
 import { fixturePath } from '../support/fixtures'
 import { failure, MAULLIN, signedIn } from '../support/portal'
-import { page, refusedPage, REOBTAIN_RESOLUTION, reobtainDetailPage, reobtainListPage } from '../support/portal-pages'
+import {
+  page,
+  refusedPage,
+  REOBTAIN_ENTRY,
+  REOBTAIN_RESOLUTION,
+  reobtainDetailPage,
+  reobtainListPage,
+} from '../support/portal-pages'
 
 const CAF_XML = readFileSync(fixturePath('caf-33.xml'), 'latin1')
 
@@ -64,28 +71,33 @@ test('only inputs with a double-quoted name followed by a double-quoted value ar
 })
 
 describe('listReobtainableRanges', () => {
-  test('a listing that states a refusal is read like any other: with no forms it is an empty list', async () => {
+  test('a listing that states a refusal throws it, whether it lists ranges or not', async () => {
     const refused = refusedPage('REOBTENCION DE FOLIOS')
-    const atList = await signedIn([
-      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: page('form') } },
-      { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: { body: refused } },
-    ])
-    expect(await listReobtainableRanges(atList.portal, { type: 33 })).toEqual([])
+    const listed = reobtainListPage([[1, 9]]).replace('<form', `${refused}<form`)
+    for (const body of [refused, listed]) {
+      const harness = await signedIn([
+        { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: REOBTAIN_ENTRY } },
+        { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: { body } },
+      ])
+      expect(await failure(listReobtainableRanges(harness.portal, { type: 33 }))).toMatchObject({
+        code: 'SII_PORTAL_REJECTED',
+        details: { rejection: 'optionNotAuthorized' },
+      })
+      expect(harness.posted('rf_reobtencion3_folios')).toEqual([])
+    }
   })
 
-  test('a listing that states a refusal and still lists ranges gives its ranges', async () => {
-    const listed = reobtainListPage([[1, 9]]).replace('<form', `${refusedPage('REOBTENCION DE FOLIOS')}<form`)
+  test('a real listing with no ranges is an empty list', async () => {
     const harness = await signedIn([
-      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: page('form') } },
-      { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: { body: listed } },
-      { url: `${MAULLIN}/rf_reobtencion3_folios`, reply: { body: reobtainDetailPage(1) } },
+      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: REOBTAIN_ENTRY } },
+      { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: { body: reobtainListPage([]) } },
     ])
-    expect(await listReobtainableRanges(harness.portal, { type: 33 })).toMatchObject([{ from: 1, to: 9 }])
+    expect(await listReobtainableRanges(harness.portal, { type: 33 })).toEqual([])
   })
 
   test('opens each range, because only its detail says it is annulled', async () => {
     const harness = await signedIn([
-      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: page('form') } },
+      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: REOBTAIN_ENTRY } },
       {
         url: `${MAULLIN}/rf_reobtencion2_folios`,
         reply: {
@@ -124,20 +136,47 @@ describe('listReobtainableRanges', () => {
     ])
   })
 
-  test('the first request is a plain GET: no login, no representation flow, no refusal check', async () => {
+  test('the procedure is entered like the others: a refusal at the entry throws before anything is posted', async () => {
     const harness = await signedIn([
       { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: refusedPage('REOBTENCION DE FOLIOS') } },
-      { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: { body: reobtainListPage([[1, 9]]) } },
-      { url: `${MAULLIN}/rf_reobtencion3_folios`, reply: { body: reobtainDetailPage(1) } },
     ])
-    expect(await listReobtainableRanges(harness.portal, { type: 33 })).toHaveLength(1)
-    expect(harness.fake.requests.map((request) => request.method)).toEqual(['GET', 'POST', 'POST'])
-    expect(harness.fake.requests[0].headers.referer).toBeUndefined()
+    expect(await failure(listReobtainableRanges(harness.portal, { type: 33 }))).toMatchObject({
+      code: 'SII_PORTAL_REJECTED',
+      details: { rejection: 'optionNotAuthorized' },
+    })
+    expect(harness.fake.requests.map((request) => request.method)).toEqual(['GET'])
+  })
+
+  test('a page that is not the procedure, or not its listing, is never an empty list', async () => {
+    const otherEntry = await signedIn([{ url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: page('otra') } }])
+    expect(await failure(listReobtainableRanges(otherEntry.portal, { type: 33 }))).toMatchObject({
+      code: 'SII_PORTAL_UNEXPECTED_PAGE',
+      details: { step: 'rf_reobtencion1' },
+    })
+    const entryAgain = await signedIn([
+      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: REOBTAIN_ENTRY } },
+      { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: { body: REOBTAIN_ENTRY } },
+    ])
+    expect(await failure(listReobtainableRanges(entryAgain.portal, { type: 33 }))).toMatchObject({
+      code: 'SII_PORTAL_UNEXPECTED_PAGE',
+      details: { step: 'rf_reobtencion2' },
+    })
+    const login = await signedIn([
+      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: REOBTAIN_ENTRY } },
+      {
+        url: `${MAULLIN}/rf_reobtencion2_folios`,
+        reply: { body: page('<p>Ingrese su clave</p>', 'Autenticaci&oacute;n') },
+      },
+    ])
+    expect(await failure(listReobtainableRanges(login.portal, { type: 33 }))).toMatchObject({
+      code: 'SII_PORTAL_SESSION_EXPIRED',
+      details: { step: 'rf_reobtencion2' },
+    })
   })
 
   test('the referers are paths without a host', async () => {
     const harness = await signedIn([
-      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: page('form') } },
+      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: REOBTAIN_ENTRY } },
       { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: { body: reobtainListPage([[1, 9]]) } },
       { url: `${MAULLIN}/rf_reobtencion3_folios`, reply: { body: reobtainDetailPage(1) } },
     ])

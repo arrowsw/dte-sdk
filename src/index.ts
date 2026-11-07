@@ -342,7 +342,14 @@ export type {
   QueryDocumentStatusInput,
   FolioReceivedInput,
 } from './sii/status'
-export { registerClaim, listClaimEvents, queryTransferable, queryReceptionDate, receiverStatus } from './sii/claims'
+export {
+  registerClaim,
+  listClaimEvents,
+  queryTransferable,
+  queryReceptionDate,
+  receiverStatus,
+  receiverAnswer,
+} from './sii/claims'
 export type {
   ClaimDocumentType,
   ClaimDocumentInput,
@@ -354,4 +361,9 @@ export type {
   ReceptionDateResult,
   ReceiverStatus,
   ReceiverStatusResult,
+  ReceiverAnswer,
+  ReceiverAnswerResult,
 } from './sii/claims'
+export { queryAuthorizedIssuer } from './sii/issuer-registry'
+export type { AuthorizedIssuer, IssuerRegistryClient } from './sii/issuer-registry'
+export type { AuthorizedDocumentType, IssuerRegistryEntry } from './portal/pages/issuer-registry'

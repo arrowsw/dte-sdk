@@ -161,18 +161,20 @@ export const formWithAction = (html: string, action: string): string | null =>
   formBlocks(html).find((block) => actionOfTag(/<form\b[^>]*>/i.exec(block)![0])?.includes(action)) ?? null
 
 /**
- * EN: The options of a `<select>`, or null when the page has no such select.
- * ES: Las opciones de un `<select>`, o null si la página no tiene ese select.
+ * EN: The options of a `<select>`, or null when the page has no such select. `selected` is the bare attribute: the SII
+ * may mark more than one option, and a browser takes the last.
+ * ES: Las opciones de un `<select>`, o null si la página no tiene ese select. `selected` es el atributo sin valor: el SII
+ * puede marcar más de una opción, y un navegador toma la última.
  */
 export const selectOptions = (
   html: string,
   name: string,
-): readonly { readonly value: string; readonly label: string }[] | null => {
+): readonly { readonly value: string; readonly label: string; readonly selected: boolean }[] | null => {
   const block = new RegExp(`<select\\b[^>]*name\\s*=\\s*["']?${name}\\b[^>]*>([\\s\\S]*?)</select>`, 'i').exec(html)
   if (block === null) return null
   return [...block[1].matchAll(/<option\b([^>]*)>([^<]*)/gi)].flatMap((match) => {
     const value = attribute(`<option ${match[1]}>`, 'value')
-    return value === null ? [] : [{ value, label: stripTags(match[2]) }]
+    return value === null ? [] : [{ value, label: stripTags(match[2]), selected: /(?:^|\s)selected\b/i.test(match[1]) }]
   })
 }
 

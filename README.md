@@ -253,6 +253,20 @@ available: `getSeed`/`getToken`, `uploadBook`, `uploadFolioConsumption`, `queryU
 `queryDocumentStatus`, `folioReceived`, `listClaimEvents`, `queryTransferable`,
 `queryReceptionDate`, `receiverStatus`.
 
+`receiverAnswer(events, receivedAt, today)` reads what the receiver answered, with no request:
+the events of `listClaimEvents`, the `receivedAt` of `queryReceptionDate` and today in Chile
+(`chileDate()`). A credit note that annuls comes first, then a claim, then an acceptance; with
+none of them, eight calendar days after the SII received the document it is accepted by law
+(Ley 19.983, `tacitlyAccepted`). It also gives `claimDeadline`, the last day to claim.
+
+`queryAuthorizedIssuer(sii, { rut })` asks the public registry of authorized issuers of the SII
+(`ee_empresa_rut`) for a RUT: its business name, the resolution of the environment, which is the
+`NroResol` and `FchResol` of every cover (number 0 in certification), and the document types it
+may issue. The registry asks for no certificate and no session, so any object with
+`environment`, `transport`, `capture`, `logger`, `now`, `retry` and `sleep` will do as well as a
+client. A RUT that is not an authorized issuer throws `SII_PORTAL_REJECTED` with
+`rejection: 'companyNotAuthorized'`.
+
 Options worth knowing:
 
 - `transport`: `fetch` by default; `createNodeHttpsTransport({ tls })` from `dte-sdk/node` for a custom CA
@@ -784,8 +798,8 @@ The printed sample follows the SII printed-samples manual: one page 21.5 cm wide
 and 33 cm, the red type box with the RUT, the type name and the folio, issuer, date, receiver, references, detail,
 totals, the acknowledgement box and `CEDIBLE` mark on the transferable copy (33, 34, 43, 46 and sale guides), and the
 PDF417 stamp of the TED with its legends. The legend under the type box is `siiOffice` when given; otherwise the office
-of the issuer's commune (`CmnaOrigen`), looked up with `siiOfficeForCommune` in `SII_OFFICES` (306 commune names in 37
-offices, ignoring case, surrounding spaces and accents), and `S.I.I. - SANTIAGO CENTRO` for a commune the table lacks.
+of the issuer's commune (`CmnaOrigen`), looked up with `siiOfficeForCommune` in `SII_OFFICES` (355 commune names in 40
+offices, every official commune included, ignoring case, surrounding spaces and accents), and `S.I.I. - SANTIAGO CENTRO` for a commune the table lacks.
 The stamp encodes the signed bytes exactly (`renderTedBarcode` gives the PNG
 alone). It needs Node and the optional peers `pdf-lib` and `bwip-js`, which are loaded on first use: without them
 the render functions throw `DEPENDENCY_UNAVAILABLE`. Failures of a batch come back as data (`failures[].code`), never as thrown errors; a folio that is not a run

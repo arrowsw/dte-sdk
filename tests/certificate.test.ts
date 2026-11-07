@@ -126,6 +126,36 @@ describe('loadCertificateFromPem', () => {
   const privateKeyPem = fixtureText('cert.key.pem')
   const certificatePem = fixtureText('cert.pem')
 
+  test('a certificate not valid yet is rejected by the same clock, unless allowExpired', () => {
+    const validFrom = new Date('2026-01-01T00:00:00.000Z')
+    expectCode(
+      () => loadCertificateFromPem({ privateKeyPem, certificatePem }, { now: new Date(validFrom.getTime() - 1000) }),
+      'CERT_NOT_YET_VALID',
+    )
+    const early = (() => {
+      try {
+        return loadCertificateFromPem({ privateKeyPem, certificatePem }, { now: new Date('2025-06-01T00:00:00Z') })
+      } catch (error) {
+        return error as DteError
+      }
+    })()
+    expect(early).toMatchObject({ details: { validFrom }, message: 'Certificate is not valid yet' })
+    expect(loadCertificateFromPem({ privateKeyPem, certificatePem }, { now: validFrom }).notBefore).toEqual(validFrom)
+    expect(
+      loadCertificateFromPem(
+        { privateKeyPem, certificatePem },
+        { now: new Date('2025-06-01T00:00:00Z'), allowExpired: true },
+      ).rut,
+    ).toBe('76543210-3')
+    expectCode(
+      () =>
+        loadCertificateFromPkcs12(fixtureBytes('cert.pfx'), FIXTURE_PASSWORD, {
+          now: new Date('2025-06-01T00:00:00Z'),
+        }),
+      'CERT_NOT_YET_VALID',
+    )
+  })
+
   test('loads a matching key/cert pair', () => {
     const cert = loadCertificateFromPem({ privateKeyPem, certificatePem }, { now: FIXED_NOW })
     expect(cert.rut).toBe('76543210-3')

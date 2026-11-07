@@ -33,16 +33,67 @@ describe('the SII office of a commune', () => {
     expect(siiOfficeForCommune('toString')).toBeNull()
   })
 
-  test('the table: 37 offices, 306 communes, each in one office and written in its normal form', () => {
+  test('the table: 40 offices, 355 communes, each in one office and written in its normal form', () => {
     const offices = Object.keys(SII_OFFICES)
     const communes = Object.values(SII_OFFICES).flat()
-    expect(offices).toHaveLength(37)
-    expect(communes).toHaveLength(306)
+    expect(offices).toHaveLength(40)
+    expect(communes).toHaveLength(355)
     expect(new Set(communes).size).toBe(communes.length)
     for (const office of offices) expect(office).toMatch(/^S\.I\.I\. - [A-ZÁÉÍÓÚÑ ]+$/)
     for (const commune of communes) {
-      expect(commune).toMatch(/^[a-z][a-z -]*[a-z]$/)
+      expect(commune).toMatch(/^[a-z][a-z '-]*[a-z]$/)
       expect(siiOfficeForCommune(commune)).toBe(offices.find((office) => SII_OFFICES[office].includes(commune)))
     }
+  })
+
+  // The official communes the office directory left out, each with the office of the SII unit that serves it.
+  test.each([
+    ['S.I.I. - LA SERENA', ['Canela', 'Los Vilos', 'Combarbalá', 'Monte Patria', 'Punitaqui', 'Río Hurtado']],
+    ['S.I.I. - SAN FELIPE', ['Llay-Llay', 'Santa María']],
+    ['S.I.I. - SANTIAGO PONIENTE', ['María Pinto']],
+    [
+      'S.I.I. - RANCAGUA',
+      [
+        'Las Cabras',
+        'Mostazal',
+        'Peumo',
+        'Pichidegua',
+        'San Vicente',
+        'La Estrella',
+        'Litueche',
+        'Marchihue',
+        'Paredones',
+        'Chépica',
+        'Chimbarongo',
+        'Lolol',
+        'Nancagua',
+        'Palmilla',
+        'Peralillo',
+        'Placilla',
+        'Pumanque',
+      ],
+    ],
+    ['S.I.I. - TALCA', ['Chanco', 'Pelluhue', 'Colbún', 'Retiro', 'Villa Alegre', 'Yerbas Buenas']],
+    ['S.I.I. - CHILLÁN', ['Treguaco']],
+    ['S.I.I. - TALCAHUANO', ['Talcahuano', 'Hualpén']],
+    ['S.I.I. - CONCEPCIÓN', ['Contulmo']],
+    ['S.I.I. - TEMUCO', ['Saavedra', 'Renaico']],
+    ['S.I.I. - PANGUIPULLI', ['Panguipulli']],
+    ['S.I.I. - PUERTO MONTT', ['Curaco de Vélez', 'Puqueldón', 'Queilén', 'Quemchi', 'Quinchao']],
+    ['S.I.I. - CHAITÉN', ['Chaitén', 'Futaleufú', 'Palena']],
+    ['S.I.I. - COYHAIQUE', ["O'Higgins"]],
+    ['S.I.I. - PUNTA ARENAS', ['Antártica']],
+  ])('%s serves %j', (office, communes) => {
+    for (const commune of communes) expect([commune, siiOfficeForCommune(commune)]).toEqual([commune, office])
+  })
+
+  test('an official spelling and the variant the table had give the same office', () => {
+    for (const [official, variant] of [
+      ['Llay-Llay', 'Llay Llay'],
+      ['Treguaco', 'Trehuaco'],
+      ['Mostazal', 'San Francisco de Mostazal'],
+      ['Saavedra', 'Puerto Saavedra'],
+    ])
+      expect(siiOfficeForCommune(official)).toBe(siiOfficeForCommune(variant))
   })
 })

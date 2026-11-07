@@ -94,6 +94,23 @@ describe('validity', () => {
     expect(isCafExpired(parseCaf(fixtureText('caf-33-old.xml')))).toBe(true)
   })
 
+  test.each([
+    ['2026-08-31', '2027-02-28'],
+    ['2026-08-30', '2027-02-28'],
+    ['2026-08-28', '2027-02-28'],
+    ['2026-08-27', '2027-02-27'],
+    ['2027-08-31', '2028-02-29'],
+    ['2027-08-29', '2028-02-29'],
+    ['2026-12-31', '2027-06-30'],
+    ['2026-03-31', '2026-09-30'],
+    ['2026-05-31', '2026-11-30'],
+    ['2026-04-30', '2026-10-30'],
+    ['2026-07-31', '2027-01-31'],
+    ['2027-09-30', '2028-03-30'],
+  ])('an authorization on %s expires on %s: a day the sixth month lacks is its last day', (authorized, expires) => {
+    expect(cafExpiresAt(caf(33, authorized))?.toISOString()).toBe(`${expires}T04:00:00.000Z`)
+  })
+
   test('folio range', () => {
     const c = parseCaf(caf33)
     expect(isFolioInRange(c, 1)).toBe(true)

@@ -1,0 +1,91 @@
+<!-- Captured in the SII certification environment on 2026-11-06; company, RUT and representative replaced with fictitious data. -->
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"><html>
+<head>
+<title>Anulaci&oacute;n de Folios</title>
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+<script type="text/javascript" src="https://zeus.sii.cl/admin/barranav.js">
+</script>
+<script type="text/javascript" src="/cvc/dte/validadte.js">
+</script>
+<STYLE TYPE="text/css">
+ .titulo  {
+  font-family: arial,helvetica;
+  font-style: bold;
+  font-size: 14pt;
+  text-decoration: none;
+  color: #000000;
+ }
+ .texto  {
+  font-family: arial,helvetica;
+  font-style: normal;
+  font-size: 10pt;
+  text-decoration: none;
+  color: #000000;
+ }
+ .reporte  {
+  font-family: arial,helvetica;
+  font-style: normal;
+  font-size: 7.5pt;
+  text-decoration: none;
+  color: #000000;
+ }
+</STYLE>
+<script type="text/javascript">
+<!--
+function volver(pagina)
+{
+  history.go(-pagina);
+}
+//-->
+</script>
+</head>
+<body link="#003399">
+<center><div><table border="0" width="920">
+<tr><td width="920">
+<script type="text/javascript">mostrar();</script></td></tr>
+<tr><td width="920"><p align="justify"><br>
+<font color="#000000" face="Arial" size="4"><strong><B>
+ANULACION DE FOLIOS
+</b></strong></font><br>
+<font class="texto">En esta p&aacute;gina usted podr&aacute; anular folios que han sido autorizados por el SII, siempre y cuando no hayan sido recepcionados por el SII.</font>
+</p></td></tr>
+<tr>
+<td height="40"><hr>
+</td>
+</tr>
+</table></div></center>
+<center><table border=0>
+<tr><td width="630"><p align="justify">
+<font class="texto">Para ver la informaci&oacute;n del contribuyente, deber&aacute; completar los siguientes datos : 
+</font></p></td></tr></table>
+<form name="form1" method="post" action="/cvc_cgi/dte/af_anular2" onSubmit="return validarut()">
+<table border="0" width="550">
+<tr><td width="220" align="justify">
+<font class="texto">
+<b>RUT de la empresa</b>
+</font></td><td width="330" align="justify">
+<input name="RUT_EMP" type="text" size=8 maxlength=8 > - 
+<input name="DV_EMP"  type="text" size=1 maxlength=1 onBlur="this.value=this.value.toUpperCase()">
+<input name="PAGINA" type="hidden" value="1">
+</td></tr>
+<tr><td width="220" align="justify">
+<font class="texto">
+Seleccione el Documento
+</font></td><td width="330">
+<select name = COD_DOCTO>
+<OPTION value="33">FACTURA ELECTRONICA<OPTION value="34">FACTURA NO AFECTA O EXENTA ELECTRONICA<OPTION value="39">BOLETA ELECTRONICA DE VENTAS Y SERV.<OPTION value="41">BOLETA ELECTRONICA DE VTAS Y SERV EXENTA<OPTION value="43">LIQUIDACION FACTURA ELECTRONICA<OPTION value="46">FACTURA DE COMPRA ELECTRONICA<OPTION value="52">GUIA DE DESPACHO ELECTRONICA<OPTION value="56">NOTA DE DEBITO ELECTRONICA<OPTION value="61">NOTA DE CREDITO ELECTRONICA<OPTION value="110">FACTURA DE EXPORTACION ELECTRONICA<OPTION value="111">NOTA DE DEBITO EXPORTACION ELECTRONICA<OPTION value="112">NOTA DE CREDITO EXPORTACION ELECTRONICA</select>
+</td></tr></table><br><br>
+<input name="RESET" type="reset" value="Limpiar">
+<input name="ACEPTAR" type="submit" value="Consultar">
+</form>
+</center>
+<script type="text/javascript">document.form1.RUT_EMP.focus()</script>
+<div id="certifica" style="position:absolute; width:0; height:0; z-index:6;top: 0; left: 0; visibility: hidden">
+<script type="text/javascript" src="/admin/certifica_dte.js">
+</script>
+<script type="text/javascript">
+certifica(14484,'Cert','autanu');
+</script>
+</div>
+</body>
+</html>

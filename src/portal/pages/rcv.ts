@@ -111,7 +111,7 @@ export type RegisterSummaryRow = {
 export type RegisterHeader = {
   /** EN: When the register last changed, as the SII writes it. ES: `dcvFecModificacion` — Cuándo cambió el registro por última vez, como lo escribe el SII. */
   readonly updatedAt: string | null
-  /** EN: Proportionality factor. ES: `dcvFctProp` — Factor de proporcionalidad. */
+  /** EN: Proportionality factor, from 0 to 1, whether the SII sends a number or a text with a decimal comma; null when it is absent or outside that range. ES: `dcvFctProp` — Factor de proporcionalidad, de 0 a 1, venga como número o como texto con coma decimal; null si falta o está fuera de ese rango. */
   readonly proportionalityFactor: number | null
   /** EN: The header as the SII sent it. ES: La cabecera tal como la envió el SII. */
   readonly raw: RcvObject
@@ -181,6 +181,13 @@ const objectsOf = (value: unknown): readonly RcvObject[] => (Array.isArray(value
 const numberOf = (value: unknown): number | null => {
   const parsed = typeof value === 'string' && value.trim() !== '' ? Number(value) : value
   return typeof parsed === 'number' && Number.isFinite(parsed) ? parsed : null
+}
+
+// The proportionality factor is a share, reportedly sent as a text with spaces and a decimal comma (" 1,0000",
+// "0,8532"): a value outside 0 to 1 is not a factor, and only `raw` keeps it.
+const factorOf = (value: unknown): number | null => {
+  const parsed = numberOf(typeof value === 'string' ? value.replace(',', '.') : value)
+  return parsed !== null && parsed >= 0 && parsed <= 1 ? parsed : null
 }
 
 const textOf = (value: unknown): string | null => {
@@ -273,7 +280,7 @@ export const registerSummaryOf = (answer: RcvObject): RegisterSummary => ({
   header: isObject(answer.dataCabecera)
     ? {
         updatedAt: textOf(answer.dataCabecera.dcvFecModificacion),
-        proportionalityFactor: numberOf(answer.dataCabecera.dcvFctProp),
+        proportionalityFactor: factorOf(answer.dataCabecera.dcvFctProp),
         raw: answer.dataCabecera,
       }
     : null,

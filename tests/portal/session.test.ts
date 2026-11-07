@@ -10,6 +10,7 @@ import {
   withFreshSessionRetry,
   withPortalSession,
 } from '../../src/portal/session'
+import { portalMessageOf } from '../../src/portal/pages/auth'
 import { queryFolioQuota } from '../../src/portal/stamping'
 import { createMemoryCapture } from '../../src/sii/capture'
 import type { Logger } from '../../src/sii/logger'
@@ -36,6 +37,7 @@ import {
   SESSION_LIMIT_PAGE,
   STAMP_ENTRY,
 } from '../support/portal-pages'
+import { capturedBytes } from '../support/captured-pages'
 import { createTempDirs } from '../support/temp-dir'
 
 const ENTRY = 'https://zeusr.sii.cl/AUT2000/InicioAutenticacion/IngresoCertificado.html*'
@@ -423,6 +425,51 @@ describe('requests', () => {
     await run(harness, async (context) => {
       expect((await portalRequest(context, 'x', 'GET', `${MAULLIN}/a`)).html).toBe('Ñuñoa')
       expect((await portalRequest(context, 'x', 'GET', `${MAULLIN}/b`)).html).toBe('Ñuñoa')
+    })
+  })
+
+  test('with no charset in the header, a UTF-8 `<meta>` in the first bytes says UTF-8, as herculesr declares it', async () => {
+    const meta = (tag: string, text: string) =>
+      new TextEncoder().encode(
+        `<html><head>${tag}<title>Autenticación</title></head><body><p>${text}</p></body></html>`,
+      )
+    const harness = await signedIn([
+      {
+        url: `${MAULLIN}/login`,
+        reply: { headers: { 'Content-Type': 'text/html' }, body: capturedBytes('autenticacion') },
+      },
+      { url: `${MAULLIN}/short`, reply: { body: meta('<meta charset="utf-8"/>', 'Su sesión expiró') } },
+      {
+        url: `${MAULLIN}/quoted`,
+        reply: { body: meta(`<meta http-equiv='Content-Type' content='text/html; charset=utf8'>`, 'Él') },
+      },
+      {
+        url: `${MAULLIN}/header`,
+        reply: {
+          headers: { 'Content-Type': 'text/html; charset=ISO-8859-1' },
+          body: meta('<meta charset="utf-8">', 'Ñ'),
+        },
+      },
+      {
+        url: `${MAULLIN}/late`,
+        reply: {
+          body: new Uint8Array([...new TextEncoder().encode(' '.repeat(1100)), ...meta('<meta charset=utf-8>', 'ó')]),
+        },
+      },
+      { url: `${MAULLIN}/latin`, reply: { body: '<meta charset="iso-8859-1"><p>Ñuñoa</p>', encoding: 'latin1' } },
+    ])
+    await run(harness, async (context) => {
+      const login = await portalRequest(context, 'x', 'GET', `${MAULLIN}/login`)
+      expect(login.html).toContain('<title>Autenticación</title>')
+      expect(portalMessageOf((await portalRequest(context, 'x', 'GET', `${MAULLIN}/short`)).html)).toBe(
+        'Autenticación Su sesión expiró',
+      )
+      expect((await portalRequest(context, 'x', 'GET', `${MAULLIN}/quoted`)).html).toContain('<p>Él</p>')
+      // A charset the header states wins over the page.
+      expect((await portalRequest(context, 'x', 'GET', `${MAULLIN}/header`)).html).toContain('<p>Ã\u0091</p>')
+      // Only the first bytes are looked at.
+      expect((await portalRequest(context, 'x', 'GET', `${MAULLIN}/late`)).html).toContain('<p>Ã³</p>')
+      expect((await portalRequest(context, 'x', 'GET', `${MAULLIN}/latin`)).html).toContain('Ñuñoa')
     })
   })
 

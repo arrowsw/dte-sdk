@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The receiver's answer with the eight-day rule.** `receiverAnswer(events, receivedAt, today)` is a pure helper over
+  the events of `listClaimEvents`, the `receivedAt` of `queryReceptionDate` (or null) and today in Chile. It gives the
+  answer, `annulled` (`NCA`), `claimed` (`RCD`, `RFP`, `RFT`), `accepted` (`ACD`), `tacitlyAccepted` (past the eight
+  calendar days of Ley 19.983 with none of those), `goodsReceived` (`ERM`) or `pending`, in that order of precedence,
+  and `claimDeadline`, the reception day plus eight. `PAG` ("DTE Pagado al Contado", which the SII registers itself) is
+  in `CLAIM_EVENT_CODES`; it and `ENC` change nothing. `receiverStatus` is unchanged.
+- **The public registry of authorized issuers.** `queryAuthorizedIssuer(sii, { rut })` asks `ee_empresa_rut` on
+  maullin or palena, with no certificate and no session, and returns the business name, the resolution of the
+  environment (`resolutionNumber`, `resolutionDate`: the `NroResol` and `FchResol` of the cover, number 0 in
+  certification), the regional office and each document type with the days it was authorized and deauthorized. A RUT
+  that is not an issuer throws `SII_PORTAL_REJECTED` with `rejection: 'companyNotAuthorized'`; labels that moved leave
+  their fields null, and a page with neither a name nor document types throws `SII_PORTAL_UNEXPECTED_PAGE`. It is in
+  the root entry, which fits it under its 32 kB limit.
 - Core issuance: `createDocument`, `stampDocument` (TED), `signDocument` (enveloped XMLDSig),
   `issueDocument`, `createEnvelope`/`signEnvelope` (`EnvioDTE`, `EnvioBOLETA`), verification
   helpers (`verifyTed`, `verifyDocumentSignature`, `verifyEnvelopeSignature`).
@@ -137,7 +150,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files are skipped. `findLatestCafFile` gives the first, and `resolveCafFile` the newest with `required` free folios in
   a `FolioRegistry` (or in its whole range without one), with its registry `scope`, or null. Types `CafFile`,
   `FindCafFilesOptions`, `ResolveCafFileOptions`, `ResolvedCafFile`. `dte-sdk/node` limit to 8 kB.
-- The SII office of each commune (`dte-sdk/pdf`): `SII_OFFICES` (306 commune names in 37 offices) and
+- The SII office of each commune (`dte-sdk/pdf`): `SII_OFFICES` (355 commune names in 40 offices) and
   `siiOfficeForCommune`, which ignores case, surrounding spaces and accents. `renderPrintedSample` and the batch
   functions print the office of the issuer's commune when `siiOffice` is not given, and `S.I.I. - SANTIAGO CENTRO` only
   for a commune the table lacks. `dte-sdk/pdf` limit to 11 kB.
@@ -271,6 +284,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Every official commune has its SII office.** `SII_OFFICES` covered 306 names in 37 offices, and 49 of the 346
+  official communes had none, so a printed sample of an issuer in Talcahuano, Chimbarongo or San Vicente got the
+  default legend. They are now placed by the jurisdiction of the SII unit that serves each: under the office the table
+  gives to the commune where that unit sits, or under a new office named after it (`S.I.I. - TALCAHUANO`,
+  `S.I.I. - PANGUIPULLI`, `S.I.I. - CHAITÉN`); the official spellings of names it had (Llay-Llay, Treguaco, Mostazal,
+  Saavedra) go with them, and Quemchi, which two units serve, goes with the one that serves fewer communes. No existing
+  name changed office: 355 names in 40 offices.
+- **The proportionality factor of the register reads with a decimal comma.** `dcvFctProp` reportedly comes as a text
+  with spaces and a decimal comma (`" 1,0000"`, `"0,8532"`), which `fetchRegisterSummary` read as no factor. It now
+  reads that form too; a value outside 0 to 1 is not a factor, so it is null and stays in `raw`.
+- **A certificate not valid yet is refused.** `loadCertificateFromPem` and `loadCertificateFromPkcs12` checked only
+  `notAfter`; a certificate whose `notBefore` is still ahead, by the same `now` option, now throws the new
+  `CERT_NOT_YET_VALID` with `details.validFrom`. `allowExpired` lets either case load.
+- **Portal pages that declare UTF-8 only in a `<meta>` are read as UTF-8.** The login pages of herculesr say
+  `charset=UTF-8` in the page and not in the header, and a page without a charset in its header was always decoded as
+  Latin-1, so what they said reached `details.portalMessage` garbled ("AutenticaciÃ³n"). With no charset in the header,
+  the first 1024 bytes are now read for a `<meta>` that declares UTF-8; a charset in the header still decides.
+- **A CAF authorized at the end of a month expires on the last day of the sixth month.** `cafExpiresAt` let the day run
+  over into the next month: a CAF authorized on 2026-08-31 expired on 2027-03-03 instead of 2027-02-28, so it could
+  stamp documents the SII rejects with `CAF-3-517`. The day is now kept within the month (2027-08-31 gives
+  2028-02-29), still at midnight continental Chile; `isCafExpired` and `findCafFiles` follow.
+- **The reobtention is entered like the other procedures.** `listReobtainableRanges` asked for the procedure with a
+  plain request, so with a session that had expired it got the login page and returned an empty list and no error, as
+  it did in the certification environment. It now goes through the login on demand and the representation screen, and
+  only a listing gives a list (empty when it has no ranges): a stated refusal throws `SII_PORTAL_REJECTED`, a login
+  page `SII_PORTAL_SESSION_EXPIRED` and any other page `SII_PORTAL_UNEXPECTED_PAGE`. `reobtainFolios` still does not
+  throw for a failed listing: it reads as no ranges, with the failure in `reason`.
+- **Stamping reads the quota form of the type, and never sends a request twice.** The page of the company, with only
+  `-1 NINGUNO` chosen, also posts to `of_confirma_folio`, so `queryFolioQuota` could report a type as unrationed and
+  `requestCaf` could skip choosing the type. A page is now the quota form only when the type asked for is the option its
+  selector has chosen; otherwise the type is chosen first, and a last page that is not that form (a login page, an
+  unknown page) throws `SII_PORTAL_SESSION_EXPIRED` or `SII_PORTAL_UNEXPECTED_PAGE`. The request form itself posts to
+  `of_confirma_folio` with `FOLIO_INICIAL` 0 too: when the SII shows it again after a request, its button ("Solicitar
+  Numeración", not "Confirmar Folio Inicial") tells it apart, nothing is sent a second time, and the new rejection
+  `stampingUncertain` says to check the reobtainable ranges before asking again; a refusal the page states is that
+  refusal. `requestCafInBatches` reports `stampingUncertain` as such instead of as `quotaCapReached`. "No está autorizado
+  para solicitar timbraje" reads as `userWithoutPermission`. The `dte-sdk/portal` size limit goes from 72 kB to 74 kB.
+- **An annulment answer is read only by its own words.** Every page of the annulment says it is for folios "que no han
+  sido recepcionados por el SII", and the listings say "ningún folio haya sido recepcionado": those sentences are
+  taken out before an answer is read. Before, any answer `annulFolios` did not know read as a conflict and then as
+  `received`, which is final, so the folios went into `knownAnnulled` and were never tried again. An answer now counts
+  only by a concrete sentence ("ha autorizado la anulación" or the heading `SOLICITUD ANULACION DE FOLIOS`, received,
+  annulled before, error 500), and anything else is `unknown`, which is not final and never enters `knownAnnulled`.
+  The `refused` reason is gone: it came from loose words that matched every page. A single folio whose answer is a
+  conflict keeps that answer instead of being sent again, and a range `af_anular3` reports as annulled before is
+  `alreadyAnnulled` only for the folios that page lists ("Folio Inicial Anulado", "Folio Final Anulado"), the rest of
+  it `unknown`.
 - **The test set is read in the case field behaviour reads it.** `EXENTO` in the name of an invoice item, `ANULA` in the
   reason of a basic-set note and `MODIFICA MONTO` in a reason count in capitals only, and so do the words that keep a
   row of a case from being an item (`DOCUMENTO`, `REFERENCIA` or `RAZON` opening the row, `ITEM`, `CANTIDAD` or

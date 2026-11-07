@@ -1,5 +1,5 @@
 import type { PortalRejection } from '../../catalogs/portal'
-import { inputValues, selectOptions, visibleText } from '../html'
+import { decodeEntities, inputValues, selectOptions, visibleText } from '../html'
 
 // The rejection pages are long and the SII writes accents as entities: every detector reads the same decoded text. A
 // rejection can arrive at any step of the flow, so there is one detector and every step runs it.
@@ -25,7 +25,7 @@ const REJECTIONS: readonly { readonly rejection: PortalRejection; readonly match
   {
     rejection: 'userWithoutPermission',
     matches: (text) =>
-      /no\s+tiene\s+permiso\s+en\s+(la\s+)?empresa|usuario\s+no\s+autorizado\s+para\s+(la\s+)?empresa|no\s+est.{0,8}\s*autorizado\s+para\s+operar\s+en\s+la\s+empresa/i.test(
+      /no\s+tiene\s+permiso\s+en\s+(la\s+)?empresa|usuario\s+no\s+autorizado\s+para\s+(la\s+)?empresa|no\s+est.{0,8}\s*autorizado\s+para\s+(operar\s+en\s+la\s+empresa|solicitar\s+timbraje)/i.test(
         text,
       ),
   },
@@ -77,6 +77,28 @@ export const stampableTypes = (html: string): readonly StampableType[] | null =>
         .filter((option) => /^\d+$/.test(option.value))
         .map((option) => ({ type: Number(option.value), name: option.label }))
 }
+
+/**
+ * EN: The type the `COD_DOCTO` selector has chosen, or null: the last option marked `selected`, as a browser takes it.
+ * The page of the company marks only `-1 NINGUNO`; the page of a type marks that one too, and then the type.
+ * ES: El tipo que eligió el selector `COD_DOCTO`, o null: la última opción marcada `selected`, como la toma un
+ * navegador. La página de la empresa marca solo `-1 NINGUNO`; la de un tipo también la marca, y después el tipo.
+ */
+export const selectedDocumentType = (html: string): number | null => {
+  const chosen = (selectOptions(html, 'COD_DOCTO') ?? []).filter((option) => option.selected).pop()
+  return chosen !== undefined && /^\d+$/.test(chosen.value) ? Number(chosen.value) : null
+}
+
+/**
+ * EN: The page is the request form: its button (`ACEPTAR`) says "Solicitar Numeración". It posts to `of_confirma_folio`
+ * with a hidden `FOLIO_INICIAL` of 0, like the confirmation of the initial folio, whose button says "Confirmar Folio
+ * Inicial": the button is what tells them apart.
+ * ES: La página es el formulario de solicitud: su botón (`ACEPTAR`) dice "Solicitar Numeración". Envía a
+ * `of_confirma_folio` con un `FOLIO_INICIAL` oculto en 0, como la confirmación del folio inicial, cuyo botón dice
+ * "Confirmar Folio Inicial": el botón es lo que las distingue.
+ */
+export const isRequestForm = (html: string): boolean =>
+  /^\s*solicitar\s+numeraci/i.test(decodeEntities(inputValues(html).ACEPTAR ?? ''))
 
 /**
  * EN: True when the selector offers the type. A page with no selector to inspect does not block: only a selector can
