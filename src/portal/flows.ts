@@ -385,16 +385,14 @@ const reobtainInSession = async (context: PortalContext, input: ReobtainFoliosIn
 /**
  * EN: Covers a quantity from authorized ranges without spending quota, oldest folio first. It is what lifts a stamping
  * block, since the SII asks for folios to be issued. A range with some received folios is not discarded: its free
- * folios are used. An expired CAF does not count and the walk moves on. The listing is asked for with no session
- * handling on the way in (no login on demand: with a session that expired the list comes back empty) and whatever fails
- * while listing reads as no ranges, with the failure in `reason`: it does not throw. A page that states a refusal is
- * not told apart either: it has no ranges.
+ * folios are used. An expired CAF does not count and the walk moves on. The listing logs in on demand, and whatever
+ * fails while listing (a refusal, an expired session, a page that is not the listing) reads as no ranges, with the
+ * failure in `reason`: it does not throw.
  * ES: Cubre una cantidad con rangos autorizados sin gastar cupo, partiendo por el folio más antiguo. Es lo que levanta
  * un bloqueo de timbraje, porque el SII pide emitir folios. Un rango con algunos folios recibidos no se descarta: se
- * usan sus folios libres. Un CAF vencido no cuenta y se sigue con el siguiente. El listado se pide sin manejo de sesión
- * al entrar (sin login a pedido: con una sesión vencida la lista vuelve vacía) y cualquier fallo al listar se lee como
- * sin rangos, con el fallo en `reason`: no lanza. Una página que declara un rechazo tampoco se distingue: no tiene
- * rangos.
+ * usan sus folios libres. Un CAF vencido no cuenta y se sigue con el siguiente. El listado inicia sesión a pedido, y
+ * cualquier fallo al listar (un rechazo, una sesión vencida, una página que no es el listado) se lee como sin rangos,
+ * con el fallo en `reason`: no lanza.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: type, quantity and the checks the caller can make. ES: tipo, cantidad y las verificaciones que puede hacer quien llama.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.

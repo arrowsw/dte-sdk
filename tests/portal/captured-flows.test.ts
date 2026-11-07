@@ -3,11 +3,12 @@
 import { readFileSync } from 'node:fs'
 import { PORTAL_REJECTIONS } from '../../src/catalogs/portal'
 import { annulFolios } from '../../src/portal/annulment'
+import { listReobtainableRanges, reobtainCaf } from '../../src/portal/reobtain'
 import { queryFolioQuota, requestCaf } from '../../src/portal/stamping'
-import type { FakeReply, FakeRoute } from '../support/fake-sii'
+import type { FakeReply, FakeRoute, RecordedRequest } from '../support/fake-sii'
 import { capturedBytes, capturedPage } from '../support/captured-pages'
 import { fixturePath } from '../support/fixtures'
-import { failure, MAULLIN, signedIn } from '../support/portal'
+import { failure, HERCULES, MAULLIN, portalWith, signedIn } from '../support/portal'
 import { page } from '../support/portal-pages'
 
 const HTML = { 'content-type': 'text/html' }
@@ -280,5 +281,101 @@ describe('stamping', () => {
     ])
     await expect(requestCaf(repeated.portal, { type: 33, quantity: 2 })).resolves.toMatchObject({ recovered: true })
     expect(repeated.posted('of_genera_archivo')[0]).toMatchObject({ FOLIO_INI: '114', FOLIO_FIN: '115' })
+  })
+})
+
+describe('reobtention', () => {
+  const REOBTAIN_ENTRY = `${MAULLIN}/rf_reobtencion1_folios`
+  const hasSession = (request: RecordedRequest): boolean => (request.headers.cookie ?? '').includes('NETSCAPE_LIVEWIRE')
+  // A portal that knows no session: the entry redirects to the certificate login, and a post without a session gets
+  // the login page, as the certification environment answered on 2026-11-06.
+  const sessionRoutes: readonly FakeRoute[] = [
+    {
+      url: REOBTAIN_ENTRY,
+      method: 'GET',
+      reply: (request) =>
+        hasSession(request)
+          ? served('rf_reobtencion1_folios')
+          : {
+              status: 302,
+              headers: {
+                Location: `https://zeusr.sii.cl/AUT2000/InicioAutenticacion/IngresoCertificado.html?${REOBTAIN_ENTRY}`,
+              },
+            },
+    },
+    { url: 'https://zeusr.sii.cl/AUT2000/InicioAutenticacion/*', reply: served('ingreso-certificado') },
+    {
+      url: `${HERCULES}*`,
+      method: 'POST',
+      reply: {
+        headers: { ...HTML, 'Set-Cookie': 'NETSCAPE_LIVEWIRE.rut=11111111; Path=/, NETSCAPE_LIVEWIRE.dv=1; Path=/' },
+        body: capturedPage('autenticacion').replace('of_solicita_folios', 'rf_reobtencion1_folios'),
+      },
+    },
+    {
+      url: `${MAULLIN}/rf_reobtencion2_folios`,
+      method: 'POST',
+      reply: (request) => served(hasSession(request) ? 'rf_reobtencion2_folios' : 'ingreso-certificado'),
+    },
+    {
+      url: `${MAULLIN}/rf_reobtencion3_folios`,
+      method: 'POST',
+      reply: (request) =>
+        served(request.text.includes('FOLIO_INI=114') ? 'rf_reobtencion3_folios-anulado' : 'rf_reobtencion3_folios'),
+    },
+  ]
+
+  test('with no session it logs in on demand and lists the ranges, instead of an empty list', async () => {
+    const harness = portalWith(sessionRoutes)
+    const ranges = await listReobtainableRanges(harness.portal, { type: 33 })
+    expect(ranges.map((range) => [range.from, range.to, range.annulled])).toEqual([
+      [114, 114, true],
+      [109, 113, false],
+      [101, 108, false],
+      [100, 100, false],
+      [1, 99, false],
+    ])
+    expect(harness.posted('CAutInicio')).toEqual([{ referencia: REOBTAIN_ENTRY }])
+    expect(harness.posted('rf_reobtencion2_folios')).toEqual([
+      { RUT_EMP: '76543210', DV_EMP: '3', PAGINA: '1', COD_DOCTO: '33', ACEPTAR: 'Consultar' },
+    ])
+  })
+
+  test('a login page in place of the listing is an expired session, not an empty list', async () => {
+    const harness = await signedIn([
+      get('rf_reobtencion1_folios', served('rf_reobtencion1_folios')),
+      post('rf_reobtencion2_folios', served('ingreso-certificado')),
+    ])
+    expect(await failure(listReobtainableRanges(harness.portal, { type: 33 }))).toMatchObject({
+      code: 'SII_PORTAL_SESSION_EXPIRED',
+    })
+  })
+
+  test('a range of the listing downloads through its resolution', async () => {
+    const harness = await signedIn([
+      get('rf_reobtencion1_folios', served('rf_reobtencion1_folios')),
+      post('rf_reobtencion2_folios', served('rf_reobtencion2_folios')),
+      post('rf_reobtencion3_folios', served('rf_reobtencion3_folios')),
+      post('rf_genera_folio', served('rf_genera_folio')),
+      post('rf_genera_archivo', { body: CAF_XML }),
+    ])
+    const ranges = await listReobtainableRanges(harness.portal, { type: 33 })
+    const oldest = ranges.find((range) => range.from === 1)!
+    await expect(reobtainCaf(harness.portal, { type: 33, range: oldest })).resolves.toMatchObject({ recovered: true })
+    expect(harness.posted('rf_genera_folio')[0]).toMatchObject({
+      FOLIO_INI: '1',
+      FOLIO_FIN: '99',
+      CANT_DOCTOS: '99',
+      ACEPTAR: 'Solicitar Folios',
+    })
+    expect(harness.posted('rf_genera_archivo')[0]).toEqual({
+      RUT_EMP: '76543210',
+      DV_EMP: '3',
+      COD_DOCTO: '33',
+      FOLIO_INI: '1',
+      FOLIO_FIN: '99',
+      FECHA: '2023-06-22',
+      ACEPTAR: 'AQUI',
+    })
   })
 })

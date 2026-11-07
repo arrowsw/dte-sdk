@@ -29,6 +29,7 @@ import {
   asksForAuthentication,
   closeSessionsOffer,
   isBlockedPage,
+  looksLikeLoginRedirect,
   isCertificateNotEnabledPage,
   isRepresentationChoice,
   isRepresentationRefused,
@@ -243,6 +244,18 @@ export const unexpectedPage = (context: PortalContext, step: string, html: strin
     portalMessage: portalMessageOf(html),
     body: bodyExcerpt(html),
   })
+
+/**
+ * EN: The error for a page that is not the one a step needed: a page that asks to log in means the session expired, and
+ * it is dropped; any other is a page the code cannot interpret.
+ * ES: El error para una página que no es la que necesitaba un paso: una que pide ingresar significa que la sesión
+ * venció, y se descarta; cualquier otra es una página que el código no puede interpretar.
+ */
+export const wrongPage = (context: PortalContext, step: string, html: string): DteError => {
+  if (!asksForAuthentication(html) && !looksLikeLoginRedirect(html)) return unexpectedPage(context, step, html)
+  forgetSession(context)
+  return new DteError('SII_PORTAL_SESSION_EXPIRED', { operation: context.operation, step })
+}
 
 /**
  * EN: The error for a business refusal, with what the portal said.

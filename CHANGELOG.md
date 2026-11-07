@@ -271,6 +271,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The reobtention is entered like the other procedures.** `listReobtainableRanges` asked for the procedure with a
+  plain request, so with a session that had expired it got the login page and returned an empty list and no error, as
+  it did in the certification environment. It now goes through the login on demand and the representation screen, and
+  only a listing gives a list (empty when it has no ranges): a stated refusal throws `SII_PORTAL_REJECTED`, a login
+  page `SII_PORTAL_SESSION_EXPIRED` and any other page `SII_PORTAL_UNEXPECTED_PAGE`. `reobtainFolios` still does not
+  throw for a failed listing: it reads as no ranges, with the failure in `reason`.
 - **Stamping reads the quota form of the type, and never sends a request twice.** The page of the company, with only
   `-1 NINGUNO` chosen, also posts to `of_confirma_folio`, so `queryFolioQuota` could report a type as unrationed and
   `requestCaf` could skip choosing the type. A page is now the quota form only when the type asked for is the option its

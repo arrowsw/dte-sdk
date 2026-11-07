@@ -117,14 +117,20 @@ export const ANNUL_FORM = page(
 )
 export const ANNUL_OK = page('<p>SOLICITUD ANULACION DE FOLIOS. El SII ha autorizado la anulaci&oacute;n</p>')
 
+// The entry of the reobtention, with its query form and selector; every page of the procedure carries its heading.
+export const REOBTAIN_ENTRY = page(
+  '<b>REOBTENCION DE FOLIOS</b><form name="form1" action="/cvc_cgi/dte/rf_reobtencion2_folios"><input name="RUT_EMP"><select name = COD_DOCTO><OPTION value="33">FACTURA ELECTRONICA</select></form>',
+)
+
 export const reobtainListPage = (ranges: readonly (readonly [number, number])[]): string =>
   page(
-    ranges
-      .map(
-        ([from, to], index) =>
-          `<form name="frm${index}" action="/cvc_cgi/dte/rf_reobtencion3_folios"><input type=hidden name="FOLIO_INI" value="${from}"><input type=hidden name="FOLIO_FIN" value="${to}"><input type=hidden name="COD_DOCTO" value="33"></form>`,
-      )
-      .join('\n'),
+    '<b>REOBTENCION DE FOLIOS</b>' +
+      ranges
+        .map(
+          ([from, to], index) =>
+            `<form name="frm${index}" action="/cvc_cgi/dte/rf_reobtencion3_folios"><input type=hidden name="FOLIO_INI" value="${from}"><input type=hidden name="FOLIO_FIN" value="${to}"><input type=hidden name="COD_DOCTO" value="33"></form>`,
+        )
+        .join('\n'),
   )
 
 export const reobtainDetailPage = (from: number, annulled = false): string =>

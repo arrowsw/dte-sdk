@@ -32,6 +32,7 @@ import {
   submitForm,
   unexpectedPage,
   withPortalSession,
+  wrongPage,
   type PortalContext,
   type PortalPage,
 } from './session'
@@ -396,8 +397,7 @@ export const queryFolioQuotaInSession = async (
     if (rejection !== null)
       throw rejected(context, rejection, { type: input.type, portalMessage: portalMessageOf(page.html) })
     // A page that is not the quota form of the type is never read as an unrationed type.
-    if (!atQuota && mustAuthenticate(page.html)) throw sessionExpired(context, SELECTOR)
-    if (!atQuota) throw unexpectedPage(context, ENTRY, page.html)
+    if (!atQuota) throw wrongPage(context, ENTRY, page.html)
     const quota = quotaFields(page.html)
     return { unrestricted: quota.maxAuthorized === null, blocked: false, ...quota }
   } finally {
