@@ -271,6 +271,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A CAF authorized at the end of a month expires on the last day of the sixth month.** `cafExpiresAt` let the day run
+  over into the next month: a CAF authorized on 2026-08-31 expired on 2027-03-03 instead of 2027-02-28, so it could
+  stamp documents the SII rejects with `CAF-3-517`. The day is now kept within the month (2027-08-31 gives
+  2028-02-29), still at midnight continental Chile; `isCafExpired` and `findCafFiles` follow.
 - **The reobtention is entered like the other procedures.** `listReobtainableRanges` asked for the procedure with a
   plain request, so with a session that had expired it got the login page and returned an empty list and no error, as
   it did in the certification environment. It now goes through the login on demand and the representation screen, and
