@@ -132,7 +132,7 @@ npm install pdf-lib bwip-js
 | Import from      | What it holds                                                                                                                                                                                      | Runs on                                                        |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | `dte-sdk`        | Documents, stamps, signatures, envelopes, books and the SII web services client over `fetch`                                                                                                       | Node, Bun, Deno; bundles for the browser with no configuration |
-| `dte-sdk/node`   | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryFolioRegistry`                                                                               | Node                                                           |
+| `dte-sdk/node`   | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`                                                  | Node                                                           |
 | `dte-sdk/portal` | SII portal, folios and CAF requests, the folio registry, purchase and sales register, MIPYME backup, and certification: sets, runner, exchange, upload of the samples and the receipts application | Node                                                           |
 | `dte-sdk/pdf`    | Printed samples                                                                                                                                                                                    | Node, with `pdf-lib` and `bwip-js` installed                   |
 
@@ -273,6 +273,9 @@ Options worth knowing:
   `<trackId>-<kind>-duplicate-<yyyymmddHHMMSS>` and never replaces the record of the original.
 - `logger`: silent by default; pass `console` or your own. Messages never carry tokens, RUTs
   or XML.
+- `tokenCache`: in memory by default. `createDirectoryTokenCache({ dir })` from `dte-sdk/node` keeps the tokens on
+  disk, one owner-only file per key, so the processes of one volume share them; it serves as the portal's
+  `sessionCache` too.
 - Every call accepts `{ signal, timeoutMs, retry }` as a last argument.
 
 ## SII books
@@ -331,7 +334,9 @@ present a client certificate.
 
 - **CAF XML is a secret.** `xml` holds the private key of the CAF. Where you keep it is up to you.
 - **One session per certificate.** The SII rations sessions per RUT, so `sessionCache` and `lock` are ports: several
-  replicas need shared ones. Sessions are reused for 90 minutes and logged in on demand.
+  replicas need shared ones. Sessions are reused for 90 minutes and logged in on demand. In memory by default, so a
+  restart logs in again; `createDirectoryTokenCache({ dir })` from `dte-sdk/node` keeps the session on disk, one
+  owner-only file per certificate, and a restart or a second process on the same volume reuses it.
 - **Rationing.** `MAX_AUTOR` and `FOLIOS_DISP` appear only while the SII rations a type. Unused folios lower what it
   authorizes and eventually block stamping.
 - **To lift a block, issue with the folios you have.** `reobtainFolios` gets lost CAFs back without spending quota.

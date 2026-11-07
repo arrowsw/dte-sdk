@@ -38,7 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SII_UPLOAD_REJECTED.details.status` is a number.
 - Injectable HTTP transport (`createFetchTransport`, `createNodeHttpsTransport` with TLS
   verification on by default; `tls.ca` adds to Node's bundled roots instead of replacing
-  them), token cache, retry policy with backoff, HTTP capture with
+  them), token cache (`createMemoryTokenCache`, and `createDirectoryTokenCache` from `dte-sdk/node`: tokens and
+  portal sessions on disk, one owner-only file per key, shared by the processes of one volume, never throwing),
+  retry policy with backoff, HTTP capture with
   redaction (`createMemoryCapture`, `createDirectoryCapture`) and upload archive
   (`createMemoryUploadArchive`, `createDirectoryUploadArchive`; a duplicate answer is kept
   as `<trackId>-<kind>-duplicate-<timestamp>` and archived replies and SOAP fault reasons have
@@ -133,7 +135,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Four entries.** `dte-sdk` keeps documents, stamps, signatures, envelopes, books and the web services client over
   `fetch`, and reaches no `node:` module, so it bundles for the browser with no configuration. `dte-sdk/node` holds
-  `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive` and `createDirectoryFolioRegistry`.
+  `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache` and
+  `createDirectoryFolioRegistry`.
   `dte-sdk/portal` holds the portal, the folio registry, the register, the MIPYME backup and the certification sets.
   `dte-sdk/pdf` holds the printed samples. One `DteError` crosses them. Why and the measurements:
   `docs/decisions/entry-points.md`.
@@ -202,7 +205,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   company and reads the answer from the code and the state gloss alone (`FAU` or "no recibido" is free, any other
   "recibido" is used, the rest is undetermined), and `queryDocumentStatus` takes `consultantRut`. An authorised range
   is recovered with the UTC date, and "company not authorised" is only the wording `empresa no está autorizada para
-  operar`. The reobtention sends referers without a host, picks its forms by their exact opening tag, reads only
+operar`. The reobtention sends referers without a host, picks its forms by their exact opening tag, reads only
   inputs with a quoted name and value, does no session handling on the way in and looks for no refusal: an expired
   session or a refusal page is an empty list, and in `reobtainFolios` a listing that fails for any reason is no ranges
   (`ReobtainResult` loses `rejection`). `annulFolios` applies `maxRanges` to each pass, not to the call (up to four

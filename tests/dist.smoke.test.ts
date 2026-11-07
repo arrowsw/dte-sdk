@@ -71,6 +71,7 @@ const EXPECTED_FUNCTIONS: Record<string, readonly string[]> = {
     'createNodeHttpsTransport',
     'createDirectoryCapture',
     'createDirectoryUploadArchive',
+    'createDirectoryTokenCache',
     'createDirectoryFolioRegistry',
   ],
   portal: [
