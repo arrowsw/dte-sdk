@@ -271,6 +271,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A certificate not valid yet is refused.** `loadCertificateFromPem` and `loadCertificateFromPkcs12` checked only
+  `notAfter`; a certificate whose `notBefore` is still ahead, by the same `now` option, now throws the new
+  `CERT_NOT_YET_VALID` with `details.validFrom`. `allowExpired` lets either case load.
 - **Portal pages that declare UTF-8 only in a `<meta>` are read as UTF-8.** The login pages of herculesr say
   `charset=UTF-8` in the page and not in the header, and a page without a charset in its header was always decoded as
   Latin-1, so what they said reached `details.portalMessage` garbled ("AutenticaciÃ³n"). With no charset in the header,
