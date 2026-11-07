@@ -13,6 +13,7 @@ import {
 import { queryFolioQuota } from '../../src/portal/stamping'
 import { createMemoryCapture } from '../../src/sii/capture'
 import type { Logger } from '../../src/sii/logger'
+import { createDirectoryTokenCache } from '../../src/sii/node-token-cache'
 import { FIXED_NOW, ISSUER_RUT } from '../support/fixtures'
 import {
   failure,
@@ -35,6 +36,7 @@ import {
   SESSION_LIMIT_PAGE,
   STAMP_ENTRY,
 } from '../support/portal-pages'
+import { createTempDirs } from '../support/temp-dir'
 
 const ENTRY = 'https://zeusr.sii.cl/AUT2000/InicioAutenticacion/IngresoCertificado.html*'
 const LOGIN_OK = {
@@ -64,6 +66,9 @@ const run = <T>(
   work: Parameters<typeof withPortalSession<T>>[3],
 ) => withPortalSession<T>(harness.portal, 'test', undefined, work)
 
+const temp = createTempDirs()
+afterAll(temp.cleanup)
+
 describe('openPortalSession', () => {
   test('visits the entry page, then posts the certificate login', async () => {
     const harness = portalWith([
@@ -84,6 +89,22 @@ describe('openPortalSession', () => {
     const stored = await harness.portal.sessionCache.get(SESSION_KEY)
     expect(JSON.parse(stored!.token)).toMatchObject({ 'NETSCAPE_LIVEWIRE.rut': '12345678', TS01: 'abc' })
     expect(stored!.expiresAt).toBe(FIXED_NOW.getTime() + 90 * 60 * 1000)
+  })
+
+  test('a restarted client reuses the session a directory cache kept, without logging in', async () => {
+    const dir = await temp.make('dte-sdk-session-')
+    const first = portalWith(
+      [{ url: ENTRY, reply: { body: page('x') } }, { url: `${HERCULES}*`, reply: LOGIN_OK }, HOME],
+      {
+        sessionCache: createDirectoryTokenCache({ dir }),
+      },
+    )
+    await expect(openPortalSession(first.portal)).resolves.toMatchObject({ reused: false })
+    const restarted = portalWith([{ url: `${MAULLIN}/ad_empresa1`, reply: { body: COMPANY_FORM } }], {
+      sessionCache: createDirectoryTokenCache({ dir }),
+    })
+    await expect(openPortalSession(restarted.portal)).resolves.toEqual({ userRut: '12345678-5', reused: true })
+    expect(restarted.fake.requests).toHaveLength(1)
   })
 
   test('reuses a cached session that still answers', async () => {

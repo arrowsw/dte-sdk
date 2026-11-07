@@ -188,6 +188,7 @@ const ROOT_EXPORTS = [
 const NODE_EXPORTS = [
   'createDirectoryFolioRegistry',
   'createDirectoryCapture',
+  'createDirectoryTokenCache',
   'createDirectoryUploadArchive',
   'createNodeHttpsTransport',
 ] as const

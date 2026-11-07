@@ -38,7 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SII_UPLOAD_REJECTED.details.status` is a number.
 - Injectable HTTP transport (`createFetchTransport`, `createNodeHttpsTransport` with TLS
   verification on by default; `tls.ca` adds to Node's bundled roots instead of replacing
-  them), token cache, retry policy with backoff, HTTP capture with
+  them), token cache (`createMemoryTokenCache`, and `createDirectoryTokenCache` from
+  `dte-sdk/node`: tokens and portal sessions on disk, one owner-only file per key that also
+  holds the key, read only when it is a regular file of the same user and without blocking,
+  shared by that user's processes, never throwing), retry policy with backoff, HTTP capture with
   redaction (`createMemoryCapture`, `createDirectoryCapture`) and upload archive
   (`createMemoryUploadArchive`, `createDirectoryUploadArchive`; a duplicate answer is kept
   as `<trackId>-<kind>-duplicate-<timestamp>` and archived replies and SOAP fault reasons have
@@ -133,7 +136,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Four entries.** `dte-sdk` keeps documents, stamps, signatures, envelopes, books and the web services client over
   `fetch`, and reaches no `node:` module, so it bundles for the browser with no configuration. `dte-sdk/node` holds
-  `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive` and `createDirectoryFolioRegistry`.
+  `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache` and
+  `createDirectoryFolioRegistry`.
   `dte-sdk/portal` holds the portal, the folio registry, the register, the MIPYME backup and the certification sets.
   `dte-sdk/pdf` holds the printed samples. One `DteError` crosses them. Why and the measurements:
   `docs/decisions/entry-points.md`.
