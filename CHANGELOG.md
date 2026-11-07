@@ -150,7 +150,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files are skipped. `findLatestCafFile` gives the first, and `resolveCafFile` the newest with `required` free folios in
   a `FolioRegistry` (or in its whole range without one), with its registry `scope`, or null. Types `CafFile`,
   `FindCafFilesOptions`, `ResolveCafFileOptions`, `ResolvedCafFile`. `dte-sdk/node` limit to 8 kB.
-- The SII office of each commune (`dte-sdk/pdf`): `SII_OFFICES` (306 commune names in 37 offices) and
+- The SII office of each commune (`dte-sdk/pdf`): `SII_OFFICES` (355 commune names in 40 offices) and
   `siiOfficeForCommune`, which ignores case, surrounding spaces and accents. `renderPrintedSample` and the batch
   functions print the office of the issuer's commune when `siiOffice` is not given, and `S.I.I. - SANTIAGO CENTRO` only
   for a commune the table lacks. `dte-sdk/pdf` limit to 11 kB.
@@ -284,6 +284,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Every official commune has its SII office.** `SII_OFFICES` covered 306 names in 37 offices, and 49 of the 346
+  official communes had none, so a printed sample of an issuer in Talcahuano, Chimbarongo or San Vicente got the
+  default legend. They are now placed by the jurisdiction of the SII unit that serves each: under the office the table
+  gives to the commune where that unit sits, or under a new office named after it (`S.I.I. - TALCAHUANO`,
+  `S.I.I. - PANGUIPULLI`, `S.I.I. - CHAITÉN`); the official spellings of names it had (Llay-Llay, Treguaco, Mostazal,
+  Saavedra) go with them, and Quemchi, which two units serve, goes with the one that serves fewer communes. No existing
+  name changed office: 355 names in 40 offices.
 - **The proportionality factor of the register reads with a decimal comma.** `dcvFctProp` reportedly comes as a text
   with spaces and a decimal comma (`" 1,0000"`, `"0,8532"`), which `fetchRegisterSummary` read as no factor. It now
   reads that form too; a value outside 0 to 1 is not a factor, so it is null and stays in `raw`.

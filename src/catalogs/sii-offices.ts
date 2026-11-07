@@ -1,12 +1,22 @@
 /**
  * EN: The SII office of each commune, keyed by the legend printed under the type box of a printed sample
  * (`S.I.I. - {office}`), each with the communes it serves, written lowercase, without accents and with single spaces:
- * 306 commune names in 37 offices, gathered from the SII office directory (sii.cl/ayudas/asistencia/oficinas) as field
- * behaviour keeps them.
+ * 355 commune names in 40 offices. The first 306, in 37 offices, were gathered from the SII office directory
+ * (sii.cl/ayudas/asistencia/oficinas) as field behaviour keeps them, spelling variants included. The other 49 are the
+ * official communes that list left out, placed by the jurisdiction of the SII unit that serves each: under the office
+ * the table already gives to the commune where that unit sits, or under a new office named after it (Talcahuano,
+ * Panguipulli, Chaitén); an official spelling of a name already listed (Llay-Llay, Treguaco, Mostazal, Saavedra) goes
+ * with that name. A commune two units serve (Quemchi) goes with the unit that sits in it, else with the one that
+ * serves fewer communes.
  * ES: La oficina del SII de cada comuna, por la leyenda que va bajo el recuadro de una muestra impresa
  * (`S.I.I. - {oficina}`), cada una con las comunas que atiende, escritas en minúsculas, sin tildes y con un solo espacio:
- * 306 nombres de comuna en 37 oficinas, reunidos del directorio de oficinas del SII (sii.cl/ayudas/asistencia/oficinas)
- * como los guarda el comportamiento de campo.
+ * 355 nombres de comuna en 40 oficinas. Los primeros 306, en 37 oficinas, se reunieron del directorio de oficinas del
+ * SII (sii.cl/ayudas/asistencia/oficinas) como los guarda el comportamiento de campo, variantes de escritura incluidas.
+ * Los otros 49 son las comunas oficiales que esa lista omitía, ubicadas por la jurisdicción de la unidad del SII que
+ * atiende a cada una: bajo la oficina que la tabla ya da a la comuna donde está esa unidad, o bajo una oficina nueva con
+ * su nombre (Talcahuano, Panguipulli, Chaitén); una escritura oficial de un nombre ya listado (Llay-Llay, Treguaco,
+ * Mostazal, Saavedra) va con ese nombre. Una comuna que atienden dos unidades (Quemchi) va con la unidad que está en
+ * ella, si no con la que atiende menos comunas.
  */
 export const SII_OFFICES: Readonly<Record<string, readonly string[]>> = {
   'S.I.I. - ARICA': ['arica', 'camarones', 'putre', 'general lagos'],
@@ -24,6 +34,12 @@ export const SII_OFFICES: Readonly<Record<string, readonly string[]>> = {
     'ovalle',
     'illapel',
     'salamanca',
+    'canela',
+    'los vilos',
+    'combarbala',
+    'monte patria',
+    'punitaqui',
+    'rio hurtado',
   ],
   'S.I.I. - COQUIMBO': ['coquimbo'],
   'S.I.I. - VALPARAÍSO': [
@@ -47,7 +63,7 @@ export const SII_OFFICES: Readonly<Record<string, readonly string[]>> = {
   'S.I.I. - VIÑA DEL MAR': ['vina del mar', 'concon', 'quintero', 'puchuncavi'],
   'S.I.I. - SAN ANTONIO': ['san antonio', 'santo domingo', 'navidad', 'cartagena', 'el tabo', 'el quisco', 'algarrobo'],
   'S.I.I. - LOS ANDES': ['los andes', 'calle larga', 'san esteban', 'rinconada'],
-  'S.I.I. - SAN FELIPE': ['san felipe', 'panquehue', 'catemu', 'putaendo', 'llay llay'],
+  'S.I.I. - SAN FELIPE': ['san felipe', 'panquehue', 'catemu', 'putaendo', 'llay llay', 'llay-llay', 'santa maria'],
   'S.I.I. - VILLA ALEMANA': ['villa alemana', 'quilpue'],
   'S.I.I. - SANTIAGO CENTRO': ['santiago'],
   'S.I.I. - SANTIAGO ORIENTE': ['las condes', 'lo barnechea', 'vitacura'],
@@ -73,6 +89,7 @@ export const SII_OFFICES: Readonly<Record<string, readonly string[]>> = {
     'melipilla',
     'alhue',
     'san pedro',
+    'maria pinto',
   ],
   'S.I.I. - SANTIAGO SUR': [
     'san miguel',
@@ -107,6 +124,23 @@ export const SII_OFFICES: Readonly<Record<string, readonly string[]>> = {
     'san fernando',
     'santa cruz',
     'pichilemu',
+    'las cabras',
+    'mostazal',
+    'peumo',
+    'pichidegua',
+    'san vicente',
+    'la estrella',
+    'litueche',
+    'marchihue',
+    'paredones',
+    'chepica',
+    'chimbarongo',
+    'lolol',
+    'nancagua',
+    'palmilla',
+    'peralillo',
+    'placilla',
+    'pumanque',
   ],
   'S.I.I. - TALCA': [
     'talca',
@@ -124,6 +158,12 @@ export const SII_OFFICES: Readonly<Record<string, readonly string[]>> = {
     'longavi',
     'parral',
     'cauquenes',
+    'chanco',
+    'pelluhue',
+    'colbun',
+    'retiro',
+    'villa alegre',
+    'yerbas buenas',
   ],
   'S.I.I. - CURICÓ': [
     'curico',
@@ -153,6 +193,7 @@ export const SII_OFFICES: Readonly<Record<string, readonly string[]>> = {
     'tirua',
     'curanilahue',
     'los alamos',
+    'contulmo',
   ],
   'S.I.I. - LOS ÁNGELES': [
     'los angeles',
@@ -203,6 +244,8 @@ export const SII_OFFICES: Readonly<Record<string, readonly string[]>> = {
     'villarrica',
     'pucon',
     'curarrehue',
+    'saavedra',
+    'renaico',
   ],
   'S.I.I. - VALDIVIA': [
     'valdivia',
@@ -234,6 +277,11 @@ export const SII_OFFICES: Readonly<Record<string, readonly string[]>> = {
     'chonchi',
     'quellon',
     'dalcahue',
+    'curaco de velez',
+    'puqueldon',
+    'queilen',
+    'quemchi',
+    'quinchao',
   ],
   'S.I.I. - OSORNO': [
     'osorno',
@@ -254,6 +302,7 @@ export const SII_OFFICES: Readonly<Record<string, readonly string[]>> = {
     'cisnes',
     'lago verde',
     'guaitecas',
+    "o'higgins",
   ],
   'S.I.I. - PUNTA ARENAS': [
     'punta arenas',
@@ -268,6 +317,7 @@ export const SII_OFFICES: Readonly<Record<string, readonly string[]>> = {
     'primavera',
     'timaukel',
     'puerto williams',
+    'antartica',
   ],
   'S.I.I. - CHILLÁN': [
     'chillan',
@@ -291,7 +341,11 @@ export const SII_OFFICES: Readonly<Record<string, readonly string[]>> = {
     'niquen',
     'san fabian',
     'san nicolas',
+    'treguaco',
   ],
+  'S.I.I. - TALCAHUANO': ['talcahuano', 'hualpen'],
+  'S.I.I. - PANGUIPULLI': ['panguipulli'],
+  'S.I.I. - CHAITÉN': ['chaiten', 'futaleufu', 'palena'],
 }
 
 const normalize = (commune: string): string => commune.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')

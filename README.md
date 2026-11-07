@@ -798,8 +798,8 @@ The printed sample follows the SII printed-samples manual: one page 21.5 cm wide
 and 33 cm, the red type box with the RUT, the type name and the folio, issuer, date, receiver, references, detail,
 totals, the acknowledgement box and `CEDIBLE` mark on the transferable copy (33, 34, 43, 46 and sale guides), and the
 PDF417 stamp of the TED with its legends. The legend under the type box is `siiOffice` when given; otherwise the office
-of the issuer's commune (`CmnaOrigen`), looked up with `siiOfficeForCommune` in `SII_OFFICES` (306 commune names in 37
-offices, ignoring case, surrounding spaces and accents), and `S.I.I. - SANTIAGO CENTRO` for a commune the table lacks.
+of the issuer's commune (`CmnaOrigen`), looked up with `siiOfficeForCommune` in `SII_OFFICES` (355 commune names in 40
+offices, every official commune included, ignoring case, surrounding spaces and accents), and `S.I.I. - SANTIAGO CENTRO` for a commune the table lacks.
 The stamp encodes the signed bytes exactly (`renderTedBarcode` gives the PNG
 alone). It needs Node and the optional peers `pdf-lib` and `bwip-js`, which are loaded on first use: without them
 the render functions throw `DEPENDENCY_UNAVAILABLE`. Failures of a batch come back as data (`failures[].code`), never as thrown errors; a folio that is not a run
