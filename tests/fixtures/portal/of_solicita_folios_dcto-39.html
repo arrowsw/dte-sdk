@@ -1,0 +1,150 @@
+<!-- Captured in the SII certification environment on 2026-11-06; company, RUT and representative replaced with fictitious data. -->
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"><html>
+<head>
+<title>Solicitud de Timbraje Electr&oacute;nico de Documentos</title>
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+<script type="text/javascript" src="https://zeus.sii.cl/admin/barranav.js">
+</script>
+<script type="text/javascript" src="/cvc/dte/validadte.js">
+</script>
+<STYLE TYPE="text/css">
+ .titulo  {
+  font-family: arial,helvetica;
+  font-style: bold;
+  font-size: 14pt;
+  text-decoration: none;
+  color: #000000;
+ }
+ .texto  {
+  font-family: arial,helvetica;
+  font-style: normal;
+  font-size: 10pt;
+  text-decoration: none;
+  color: #000000;
+ }
+ .reporte  {
+  font-family: arial,helvetica;
+  font-style: normal;
+  font-size: 7.5pt;
+  text-decoration: none;
+  color: #000000;
+ }
+</STYLE>
+<body link="#003399">
+<center><div><table border="0" width="920">
+<tr><td width="920">
+<script type="text/javascript">mostrar();</script></td></tr>
+<tr><td width="920"><p align="justify"><br>
+<font color="#000000" face="Arial" size="4"><strong><B>
+SOLICITUD DE TIMBRAJE ELECTRONICO DE DOCUMENTOS
+</b></strong></font><br>
+<font class="texto">En esta p&aacute;gina podr&aacute; solicitar rangos de numeraci&oacute;n para utilizar en los Documentos Tributarios Electr&oacute;nicos autorizados para los contribuyentes.</font>
+</p></td></tr>
+<tr>
+<td height="40"><hr>
+</td>
+</tr>
+</table></div></center>
+<script language="JavaScript" type="text/javascript">
+<!--
+function volver()
+{
+  history.go(-2);
+}
+function changeRegregion(ruta){
+document.form1.action=ruta + 'of_solicita_folios_dcto';
+document.form1.submit();
+}
+function changeRut(){
+document.form1.elements['FOLIOS_DISP'].value='';
+document.form1.elements['MAX_AUTOR'].value='';
+}
+function Limpieza(form){
+form.FOLIOS_DISP.value = '';
+form.MAX_AUTOR.value = '';
+form.RUT_EMP.value = '';
+form.DV_EMP.value = '';
+form.COD_DOCTO.value='-1';
+form.CANT_DOCTOS.value='';
+}
+function Limpieza_sin(form){
+form.RUT_EMP.value = '';
+form.DV_EMP.value = '';
+form.COD_DOCTO.value='-1';
+form.CANT_DOCTOS.value='';
+}
+function noBack(){window.history.forward()}
+noBack();
+window.onload=noBack;
+window.onpageshow=function(evt){if(evt.persisted)noBack()}
+window.onunload=function(){void(0)}
+document.oncontextmenu = function(){return false}
+//-->
+</script>
+</head>
+<center><table border=0>
+<tr><td width="630">
+<p align="justify"><font class="texto">A trav&eacute;s de esta aplicaci&oacute;n usted puede solicitar
+ Timbraje de Documentos v&iacute;a Internet.   Para lo cual, deber&aacute; completar los siguientes datos :
+</font></p></td></tr></table>
+<FORM NAME="form1" METHOD="POST" ACTION="/cvc_cgi/dte/of_confirma_folio" onSubmit="return validapag(0)"> 
+<table border="0" width="630" cellspacing=1>
+<tr><td width="400">
+<font class="texto">
+RUT Empresa
+</font></td><td width="220">
+<INPUT NAME="RUT_EMP" readonly="readonly"  value = "76543210" TYPE=Text SIZE=8 MAXLENGTH=8 > - 
+<INPUT NAME="DV_EMP"  readonly="readonly"  value = "3" TYPE=Text SIZE=1 MAXLENGTH=1 onBlur="this.value=this.value.toUpperCase()">
+<input name="FOLIO_INICIAL" type="hidden" value="0">
+</td></tr>
+<tr><td width="330">
+<font class="texto">
+Seleccione el Documento a Timbrar
+</font></td><td>
+<SELECT name = COD_DOCTO onChange ="changeRegregion('/cvc_cgi/dte/');" >
+      <option selected value="-1">NINGUNO</option>
+      <option value="33">FACTURA ELECTRONICA (COD. 33)</option>
+      <option value="34">FACTURA NO AFECTA O EXENTA ELECTRONICA (COD. 34)</option>
+      <option value="39" selected>BOLETA ELECTRONICA(COD. 39)</option>
+      <option value="41">BOLETA EXENTA ELECTRONICA (COD. 41)</option>
+      <option value="43">LIQUIDACION FACTURA ELECTRONICA (COD. 43)</option>
+      <option value="46">FACTURA COMPRA ELECTRONICA (COD. 46)</option>
+      <option value="52">GUIA DESPACHO ELECTRONICA (COD. 52)</option>
+      <option value="56">NOTA DEBITO ELECTRONICA (COD. 56)</option>
+      <option value="61">NOTA CREDITO ELECTRONICA (COD. 61)</option>
+      <option value="110">FACTURA DE EXPORTACION ELECTRONICA (COD. 110)</option>
+      <option value="111">NOTA DE DEBITO EXPORTACION ELECTRONICA (COD. 111)</option>
+      <option value="112">NOTA DE CREDITO EXPORTACION ELECTRONICA (COD. 112)</option>
+</SELECT>
+</td></tr>
+<tr><td width="260">
+<INPUT NAME="AFECTO_IVA" TYPE=HIDDEN value="S">
+<INPUT NAME="ANOTACION" TYPE=HIDDEN value="N">
+<INPUT NAME="CON_CREDITO" TYPE=HIDDEN value="0">
+<INPUT NAME="CON_AJUSTE" TYPE=HIDDEN value="0">
+<INPUT NAME="FACTOR" TYPE=HIDDEN value="">
+<font class="texto"><b>Ingrese N° de Folios a Timbrar 
+</b></font></td><td>
+<input name="CANT_DOCTOS" type=text size=8 maxlength=8>
+</td></tr></table><br><br>
+&nbsp;&nbsp;<INPUT NAME="ACEPTAR" TYPE=SUBMIT MAXLENGTH=20 VALUE="Solicitar Numeraci&oacute;n">&nbsp;&nbsp; 
+<input type="button" name="NEW" value="  Volver  " onClick="volver(1);">
+ <tr><table BORDER=0>
+<tr><td width="630">
+<tr><td width="630">
+<p align="justify"><font class="texto">
+ Mediante la presente solicitud declaro conocer y aceptar las condiciones que el SII establece para la autorizaci&oacute;n de Timbraje de Documentos Electr&oacute;nicos.
+ </td></tr>
+ </table></center>
+</font></p></td></tr>
+</table></center>
+<script type="text/javascript">document.form1.RUT_EMP.focus()</script>
+<div id="certifica" style="position:absolute; width:0; height:0; z-index:6;top: 0; left: 0; visibility: hidden">
+<script type="text/javascript" src="/admin/certifica_dte.js">
+</script>
+<script type="text/javascript">
+certifica(14484,'Cert','auttim');
+</script>
+</div>
+</body>
+</html>
