@@ -257,6 +257,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The test set is read in the case field behaviour reads it.** `EXENTO` in the name of an invoice item, `ANULA` in the
+  reason of a basic-set note and `MODIFICA MONTO` in a reason count in capitals only, and so do the words that keep a
+  row of a case from being an item (`DOCUMENTO`, `REFERENCIA` or `RAZON` opening the row, `ITEM`, `CANTIDAD` or
+  `UNITARIO` in its first part). They were matched in any case, so a word in lower case changed the documents sent: a
+  "Servicio exento" line was exempt, a note whose reason said "anula" took the items of the cancelled case, the value of
+  a two-part row under "modifica monto" was read as a price, and an item named "Razones varias" was dropped.
 - A receipt (39, 41) with a reference was written with the invoice shape of `Referencia` (`FchRef`), which the receipts
   schema does not allow. Receipts now take `receiptReferences`, and `references` on a receipt is refused with
   `INVALID_OPTION`, as is `receiptReferences` on any other type. The official `EnvioBOLETA_v11.xsd` is in the test

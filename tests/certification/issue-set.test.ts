@@ -73,7 +73,7 @@ describe('the basic set', () => {
       discountAmount: 28000,
       amount: 172000,
     })
-    expect(second.items[1]).toMatchObject({ name: 'Servicio exento de instalacion', exemptIndicator: 1, amount: 20000 })
+    expect(second.items[1]).toMatchObject({ name: 'Servicio EXENTO de instalacion', exemptIndicator: 1, amount: 20000 })
     expect(second.globalAdjustments).toEqual([
       {
         lineNumber: 1,
