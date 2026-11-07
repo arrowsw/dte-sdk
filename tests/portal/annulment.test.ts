@@ -382,11 +382,11 @@ describe('annulFolios', () => {
   test('final answers are remembered and transient ones are not', async () => {
     const received = await signedIn([
       entry,
-      twice(unusedRangesPage([[1, 2]])),
+      twice(unusedRangesPage([[2, 2]])),
       respond('af_anular3', ANNUL_FORM),
-      respond('af_anular', page('fue anulado y ya esta')),
+      respond('af_anular', page('el folio ya fue anulado')),
     ])
-    expect((await annulFolios(received.portal, { type: 33, all: true })).knownAnnulled).toEqual(['1-2'])
+    expect((await annulFolios(received.portal, { type: 33, all: true })).knownAnnulled).toEqual(['2-2'])
     const transient = await signedIn([
       entry,
       twice(unusedRangesPage([[1, 2]])),
@@ -431,7 +431,7 @@ describe('annulFolios', () => {
     )
     const result = await annulFolios(harness.portal, { type: 33, all: true })
     expect(result.rejected).toEqual([
-      { from: 1, to: 2, count: 2, reason: 'refused' },
+      { from: 1, to: 2, count: 2, reason: 'unknown' },
       { from: 3, to: 4, count: 2, reason: 'transport' },
     ])
     expect(lines).toContain('sii portal stopped annulling: the SII keeps refusing')
@@ -455,7 +455,7 @@ describe('annulFolios', () => {
       respond('af_anular', page('la anulacion no procede'), ANNUL_OK, page('la anulacion no procede')),
     ])
     const result = await annulFolios(harness.portal, { type: 33, all: true })
-    expect(result.rejected.map((entryItem) => entryItem.reason)).toEqual(['refused', 'alreadyAnnulled', 'refused'])
+    expect(result.rejected.map((entryItem) => entryItem.reason)).toEqual(['unknown', 'alreadyAnnulled', 'unknown'])
     expect(result.annulled).toEqual([{ from: 5, to: 6, count: 2 }])
   })
 

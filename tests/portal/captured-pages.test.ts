@@ -1,5 +1,5 @@
 // The page parsers over the folio pages of the SII certification environment (see tests/fixtures/portal/).
-import { isAnnulmentAccepted, nextPageButton, parseUnusedRanges } from '../../src/portal/pages/annulment'
+import { annulmentAnswer, nextPageButton, parseUnusedRanges } from '../../src/portal/pages/annulment'
 import {
   isCertificateNotEnabledPage,
   isRepresentationChoice,
@@ -82,7 +82,7 @@ describe('annulment', () => {
   })
 
   test('the answer that annulled folio 114', () => {
-    expect(isAnnulmentAccepted(capturedPage('af_anular-ok'))).toBe(true)
+    expect(annulmentAnswer(capturedPage('af_anular-ok'))).toBe('accepted')
   })
 })
 

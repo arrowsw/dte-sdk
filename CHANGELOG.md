@@ -271,6 +271,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An annulment answer is read only by its own words.** Every page of the annulment says it is for folios "que no han
+  sido recepcionados por el SII", and the listings say "ningún folio haya sido recepcionado": those sentences are
+  taken out before an answer is read. Before, any answer `annulFolios` did not know read as a conflict and then as
+  `received`, which is final, so the folios went into `knownAnnulled` and were never tried again. An answer now counts
+  only by a concrete sentence ("ha autorizado la anulación" or the heading `SOLICITUD ANULACION DE FOLIOS`, received,
+  annulled before, error 500), and anything else is `unknown`, which is not final and never enters `knownAnnulled`.
+  The `refused` reason is gone: it came from loose words that matched every page. A single folio whose answer is a
+  conflict keeps that answer instead of being sent again, and a range `af_anular3` reports as annulled before is
+  `alreadyAnnulled` only for the folios that page lists ("Folio Inicial Anulado", "Folio Final Anulado"), the rest of
+  it `unknown`.
 - **The test set is read in the case field behaviour reads it.** `EXENTO` in the name of an invoice item, `ANULA` in the
   reason of a basic-set note and `MODIFICA MONTO` in a reason count in capitals only, and so do the words that keep a
   row of a case from being an item (`DOCUMENTO`, `REFERENCIA` or `RAZON` opening the row, `ITEM`, `CANTIDAD` or
