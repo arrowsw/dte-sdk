@@ -24,7 +24,7 @@ describe('createDirectoryTokenCache', () => {
     await cache.set('production:rest:0123abcd', { token: 't', expiresAt: 1 })
     expect((await readdir(dir)).sort()).toEqual(['portal-0123abcd.json', 'production-rest-0123abcd.json'])
     const file = join(dir, 'portal-0123abcd.json')
-    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual(entry)
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ key: 'portal:0123abcd', ...entry })
     expect((await stat(file)).mode & 0o777).toBe(0o600)
     expect((await stat(dir)).mode & 0o077).toBe(0)
   })
@@ -35,6 +35,20 @@ describe('createDirectoryTokenCache', () => {
     await cache.set('../escape/..\\x y', entry)
     expect(await readdir(dir)).toEqual(['---escape----x-y.json'])
     await expect(cache.get('../escape/..\\x y')).resolves.toEqual(entry)
+  })
+
+  test('two keys that share a file name never get each other token', async () => {
+    const dir = await temp.make('dte-sdk-cache-')
+    const logger = recordingLogger()
+    const cache = createDirectoryTokenCache({ dir, logger })
+    await cache.set('tenant:a', entry)
+    await expect(cache.get('tenant-a')).resolves.toBeNull()
+    await expect(cache.get('tenant:a')).resolves.toEqual(entry)
+    await writeFile(join(dir, 'unnamed.json'), JSON.stringify(entry))
+    await expect(cache.get('unnamed')).resolves.toBeNull()
+    expect(logger.lines).toEqual(
+      Array(2).fill(['warn', 'token cache failed', { operation: 'get', reason: 'not an entry of this key' }]),
+    )
   })
 
   test('set replaces the entry of a key and delete removes it; deleting what is not there is fine', async () => {
