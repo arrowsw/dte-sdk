@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-07
+
 ### Added
 
 - Core issuance: `createDocument`, `stampDocument` (TED), `signDocument` (enveloped XMLDSig),
@@ -304,6 +306,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Jest, ESLint, Prettier, size-limit, Stryker, CI and tag-triggered publish)
   and a single `hello()` export that returns `'dte-sdk is coming'`.
 
-[Unreleased]: https://github.com/arrowsw/dte-sdk/compare/v0.0.2...HEAD
+[Unreleased]: https://github.com/arrowsw/dte-sdk/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.1.0
 [0.0.2]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.0.2
 [0.0.1]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.0.1
