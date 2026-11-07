@@ -3,7 +3,8 @@ import { mkdir, open, readdir, readFile, stat, symlink, writeFile } from 'node:f
 import { join } from 'node:path'
 import { loadNodeFs } from '../../src/sii/node-fs'
 import { createDirectoryTokenCache } from '../../src/sii/node-token-cache'
-import { recordingLogger } from '../support/sii-client'
+import { getToken } from '../../src/sii/auth'
+import { authRoutes, recordingLogger, SOAP_TOKEN, testSii } from '../support/sii-client'
 import { createTempDirs } from '../support/temp-dir'
 
 const temp = createTempDirs()
@@ -235,5 +236,14 @@ describe('createDirectoryTokenCache', () => {
     await mkdir(dir, { mode: 0o750 })
     await createDirectoryTokenCache({ dir }).set('k', entry)
     expect((await stat(dir)).mode & 0o777).toBe(0o750)
+  })
+
+  test('a restarted SII client takes the token from the directory and asks the SII for nothing', async () => {
+    const dir = await temp.make('dte-sdk-cache-')
+    const first = testSii(authRoutes(), { tokenCache: createDirectoryTokenCache({ dir }) })
+    await expect(getToken(first.sii, 'soap')).resolves.toBe(SOAP_TOKEN)
+    const restarted = testSii(authRoutes(), { tokenCache: createDirectoryTokenCache({ dir }) })
+    await expect(getToken(restarted.sii, 'soap')).resolves.toBe(SOAP_TOKEN)
+    expect(restarted.fake.requests).toEqual([])
   })
 })
