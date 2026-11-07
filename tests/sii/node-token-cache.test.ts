@@ -58,14 +58,50 @@ describe('createDirectoryTokenCache', () => {
     await writeFile(join(dir, 'broken.json'), 'not json')
     await writeFile(join(dir, 'shape.json'), JSON.stringify({ token: 1, expiresAt: 'x' }))
     await writeFile(join(dir, 'nan.json'), JSON.stringify({ token: 't', expiresAt: null }))
+    await writeFile(join(dir, 'null.json'), 'null')
     await expect(cache.get('broken')).resolves.toBeNull()
     await expect(cache.get('shape')).resolves.toBeNull()
     await expect(cache.get('nan')).resolves.toBeNull()
-    expect(logger.lines.map(([level, message]) => [level, message])).toEqual([
-      ['warn', 'token cache failed'],
-      ['warn', 'token cache failed'],
-      ['warn', 'token cache failed'],
-    ])
+    await expect(cache.get('null')).resolves.toBeNull()
+    expect(logger.lines).toEqual(
+      Array(4).fill(['warn', 'token cache failed', { operation: 'get', reason: 'not a cache entry' }]),
+    )
+  })
+
+  test('a corrupt file is never quoted in the log, and a temp file left behind is never followed', async () => {
+    const dir = await temp.make('dte-sdk-cache-')
+    const logger = recordingLogger()
+    const cache = createDirectoryTokenCache({ dir, logger })
+    await writeFile(join(dir, 'k.json'), '{"token":"SECRET-COOKIE",')
+    await expect(cache.get('k')).resolves.toBeNull()
+    expect(JSON.stringify(logger.lines)).not.toContain('SECRET')
+    expect(logger.lines).toEqual([['warn', 'token cache failed', { operation: 'get', reason: 'not a cache entry' }]])
+    await cache.set('k', entry)
+    await expect(cache.get('k')).resolves.toEqual(entry)
+    expect((await readdir(dir)).filter((name) => name.endsWith('.tmp'))).toEqual([])
+  })
+
+  test('two writers of one key never share a temp file, and a rename that fails leaves none behind', async () => {
+    const dir = await temp.make('dte-sdk-cache-')
+    const cache = createDirectoryTokenCache({ dir })
+    await Promise.all([cache.set('k', entry), cache.set('k', { ...entry, token: 'other' })])
+    const stored = await cache.get('k')
+    expect(['other', entry.token]).toContain(stored?.token)
+    expect((await readdir(dir)).filter((name) => name.endsWith('.tmp'))).toEqual([])
+    const logger = recordingLogger()
+    const modules = await loadNodeFs()
+    const failing = createDirectoryTokenCache({ dir, logger }, async () => ({
+      ...modules,
+      fs: {
+        ...modules.fs,
+        rename: async () => {
+          throw new Error('rename refused')
+        },
+      } as typeof modules.fs,
+    }))
+    await failing.set('j', entry)
+    expect(logger.lines).toEqual([['warn', 'token cache failed', { operation: 'set', reason: 'rename refused' }]])
+    expect((await readdir(dir)).filter((name) => name.startsWith('j'))).toEqual([])
   })
 
   test('never throws: a failure is a miss, reported to the logger with the operation', async () => {
