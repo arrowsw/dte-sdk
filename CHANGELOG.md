@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The public registry of authorized issuers.** `queryAuthorizedIssuer(sii, { rut })` asks `ee_empresa_rut` on
+  maullin or palena, with no certificate and no session, and returns the business name, the resolution of the
+  environment (`resolutionNumber`, `resolutionDate`: the `NroResol` and `FchResol` of the cover, number 0 in
+  certification), the regional office and each document type with the days it was authorized and deauthorized. A RUT
+  that is not an issuer throws `SII_PORTAL_REJECTED` with `rejection: 'companyNotAuthorized'`; labels that moved leave
+  their fields null, and a page with neither a name nor document types throws `SII_PORTAL_UNEXPECTED_PAGE`. It is in
+  the root entry, which fits it under its 32 kB limit.
 - Core issuance: `createDocument`, `stampDocument` (TED), `signDocument` (enveloped XMLDSig),
   `issueDocument`, `createEnvelope`/`signEnvelope` (`EnvioDTE`, `EnvioBOLETA`), verification
   helpers (`verifyTed`, `verifyDocumentSignature`, `verifyEnvelopeSignature`).

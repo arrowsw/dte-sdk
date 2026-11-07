@@ -355,3 +355,6 @@ export type {
   ReceiverStatus,
   ReceiverStatusResult,
 } from './sii/claims'
+export { queryAuthorizedIssuer } from './sii/issuer-registry'
+export type { AuthorizedIssuer, IssuerRegistryClient } from './sii/issuer-registry'
+export type { AuthorizedDocumentType, IssuerRegistryEntry } from './portal/pages/issuer-registry'

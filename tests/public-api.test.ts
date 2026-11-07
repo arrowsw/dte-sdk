@@ -132,6 +132,7 @@ const ROOT_EXPORTS = [
   'parseSoapResponse',
   'parseXml',
   'parseXmlWithoutNamespaces',
+  'queryAuthorizedIssuer',
   'queryDocumentStatus',
   'queryReceptionDate',
   'queryTransferable',

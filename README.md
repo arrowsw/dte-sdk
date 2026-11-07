@@ -253,6 +253,14 @@ available: `getSeed`/`getToken`, `uploadBook`, `uploadFolioConsumption`, `queryU
 `queryDocumentStatus`, `folioReceived`, `listClaimEvents`, `queryTransferable`,
 `queryReceptionDate`, `receiverStatus`.
 
+`queryAuthorizedIssuer(sii, { rut })` asks the public registry of authorized issuers of the SII
+(`ee_empresa_rut`) for a RUT: its business name, the resolution of the environment, which is the
+`NroResol` and `FchResol` of every cover (number 0 in certification), and the document types it
+may issue. The registry asks for no certificate and no session, so any object with
+`environment`, `transport`, `capture`, `logger`, `now`, `retry` and `sleep` will do as well as a
+client. A RUT that is not an authorized issuer throws `SII_PORTAL_REJECTED` with
+`rejection: 'companyNotAuthorized'`.
+
 Options worth knowing:
 
 - `transport`: `fetch` by default; `createNodeHttpsTransport({ tls })` from `dte-sdk/node` for a custom CA
