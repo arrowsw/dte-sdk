@@ -205,7 +205,7 @@ export const stampingRoutes = (): FakeRoute[] => {
       reply: (request) => {
         const type = /COD_DOCTO=(\d+)/.exec(request.text)
         if (type !== null) box.type = Number(type[1])
-        return { body: quotaForm() }
+        return { body: quotaForm(undefined, undefined, box.type) }
       },
     },
     { url: `${MAULLIN}/of_confirma_folio`, method: 'POST', reply: () => ({ body: cafXml(box.type) }) },

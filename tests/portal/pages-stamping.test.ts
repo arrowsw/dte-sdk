@@ -5,12 +5,15 @@ import {
   hasCaf,
   hasCaptcha,
   hasDownloadError,
+  isRequestForm,
   mentionsAuthorizedRange,
   offersDocumentType,
   quotaFields,
+  selectedDocumentType,
   stampableTypes,
   stampingBlockReason,
 } from '../../src/portal/pages/stamping'
+import { capturedPage } from '../support/captured-pages'
 import {
   BOLETA_OPTION,
   FACTURA_OPTION,
@@ -30,6 +33,7 @@ test.each([
   ['inPersonRequired', 'no cumple con los requisitos y requiere la asistencia de un funcionario'],
   ['userWithoutPermission', 'no tiene permiso en empresa'],
   ['userWithoutPermission', 'no est&aacute; autorizado para operar en la empresa'],
+  ['userWithoutPermission', 'Usuario no est&aacute; autorizado para solicitar timbraje para esta empresa'],
   ['activityVerificationPending', 'no registra Verificaci&oacute;n de Actividades'],
 ])('%s has more than one wording', (rejection, text) => {
   expect(hardRejection(page(text))).toBe(rejection)
@@ -111,4 +115,22 @@ test('an already authorized range, with or without its numbers', () => {
   expect(mentionsAuthorizedRange(page('ya fue autorizado'))).toBe(true)
   expect(authorizedRange(page('ya fue autorizado'))).toBeNull()
   expect(mentionsAuthorizedRange('nada')).toBe(false)
+})
+
+test('the type the selector chose is the last option marked, as a browser takes it', () => {
+  expect(selectedDocumentType(capturedPage('of_solicita_folios_dcto-33'))).toBe(33)
+  expect(selectedDocumentType(capturedPage('of_solicita_folios_dcto-39'))).toBe(39)
+  expect(selectedDocumentType(capturedPage('of_solicita_folios_dcto'))).toBeNull()
+  expect(selectedDocumentType(typeSelector(FACTURA_OPTION))).toBeNull()
+  expect(selectedDocumentType(page('sin selector'))).toBeNull()
+  expect(selectedDocumentType(quotaForm(1, 0, 61))).toBe(61)
+})
+
+test('the request form is told from the confirmation of the initial folio by its button', () => {
+  expect(isRequestForm(capturedPage('of_solicita_folios_dcto-33'))).toBe(true)
+  expect(isRequestForm(capturedPage('of_solicita_folios_dcto'))).toBe(true)
+  expect(isRequestForm(capturedPage('of_confirma_folio'))).toBe(false)
+  expect(isRequestForm(capturedPage('of_genera_folio'))).toBe(false)
+  expect(isRequestForm(page('<input name=ACEPTAR value="Solicitar Numeración">'))).toBe(true)
+  expect(isRequestForm(page('sin boton'))).toBe(false)
 })

@@ -13,9 +13,11 @@ import {
   hasCaf,
   hasCaptcha,
   hasDownloadError,
+  isRequestForm,
   mentionsAuthorizedRange,
   offersDocumentType,
   quotaFields,
+  selectedDocumentType,
   stampableTypes,
   stampingBlockReason,
   type QuotaFields,
@@ -127,8 +129,34 @@ const startRequest = async (
 
 type QuotaStep = { readonly page: PortalPage; readonly atQuota: boolean }
 
-// The word `of_solicita_folios_dcto` may only be inside a script: the real form action is what says where to go. With
-// the selector, `CANT_DOCTOS` goes empty: a number there makes the SII omit `MAX_AUTOR` and `CONTROL` and reject later.
+// The quota form posts to `of_confirma_folio` with the type asked for chosen in its selector. The selector page of the
+// company posts there too, with `-1 NINGUNO` chosen and no quota fields: read as the quota form, it would report a type
+// the SII is not rationing.
+const isQuotaFormFor = (html: string, type: number): boolean =>
+  formAction(html)?.includes(CONFIRM) === true && selectedDocumentType(html) === type
+
+// Choosing the type reloads the selector page, as its `onChange` does. `CANT_DOCTOS` goes empty: a number there makes
+// the SII omit `MAX_AUTOR` and `CONTROL` and reject later.
+const chooseType = async (
+  context: PortalContext,
+  page: PortalPage,
+  type: number,
+  company: Company,
+): Promise<QuotaStep> => {
+  if (!offersDocumentType(page.html, type))
+    throw rejected(context, 'typeNotEnabled', { type, portalMessage: portalMessageOf(page.html) })
+  const chosen = await submitForm(context, `${SELECTOR}.type`, `${PATH}${SELECTOR}`, page.url, {
+    ...inputValues(page.html),
+    ...company,
+    COD_DOCTO: String(type),
+    CANT_DOCTOS: '',
+  })
+  return { page: chosen, atQuota: isQuotaFormFor(chosen.html, type) }
+}
+
+// The word `of_solicita_folios_dcto` may only be inside a script: the real form action is what says where to go. Only
+// the form of the type asked for is the quota form; a page with the selector and another type, or none, chosen is
+// reloaded with the type, and any other page is not the quota form and goes back for the caller to read.
 const reachQuotaForm = async (
   context: PortalContext,
   page: PortalPage,
@@ -136,24 +164,17 @@ const reachQuotaForm = async (
   company: Company,
 ): Promise<QuotaStep> => {
   if (hardRejection(page.html) !== null) return { page, atQuota: false }
-  const action = formAction(page.html)
-  if (action?.includes(CONFIRM)) return { page, atQuota: true }
+  if (isQuotaFormFor(page.html, type)) return { page, atQuota: true }
+  if (stampableTypes(page.html) !== null) return chooseType(context, page, type, company)
   if (!page.html.includes(SELECTOR)) return { page, atQuota: false }
-  const second = await submitForm(context, SELECTOR, action ?? `${PATH}${SELECTOR}`, page.url, {
+  const second = await submitForm(context, SELECTOR, formAction(page.html) ?? `${PATH}${SELECTOR}`, page.url, {
     ...inputValues(page.html),
     ...company,
   })
-  if (hardRejection(second.html) !== null) return { page: second, atQuota: false }
-  if (!second.html.includes('COD_DOCTO')) return { page: second, atQuota: true }
-  if (!offersDocumentType(second.html, type))
-    throw rejected(context, 'typeNotEnabled', { type, portalMessage: portalMessageOf(second.html) })
-  const third = await submitForm(context, `${SELECTOR}.type`, `${PATH}${SELECTOR}`, second.url, {
-    ...inputValues(second.html),
-    ...company,
-    COD_DOCTO: String(type),
-    CANT_DOCTOS: '',
-  })
-  return { page: third, atQuota: hardRejection(third.html) === null }
+  if (hardRejection(second.html) !== null || stampableTypes(second.html) === null)
+    return { page: second, atQuota: false }
+  if (isQuotaFormFor(second.html, type)) return { page: second, atQuota: true }
+  return chooseType(context, second, type, company)
 }
 
 const retryDownload = async (
@@ -196,7 +217,27 @@ const generate = async (context: PortalContext, page: PortalPage): Promise<Porta
   return download(context, answer)
 }
 
-const confirm = async (context: PortalContext, page: PortalPage): Promise<PortalPage> => {
+const rejectionDetails = (rejection: PortalRejection, html: string, type: number, quota: QuotaFields) => ({
+  type,
+  portalMessage: (rejection === 'stampingBlocked' ? stampingBlockReason(html) : null) ?? portalMessageOf(html),
+  maxAuthorized: quota.maxAuthorized,
+  availableFolios: quota.availableFolios,
+})
+
+// After a request was sent, the request form again says nothing about it: the SII may have granted the folios or not.
+// It is never sent a second time; a refusal it states is that refusal, and otherwise the outcome is uncertain.
+const assertNotRequestForm = (context: PortalContext, page: PortalPage, type: number, quota: QuotaFields): void => {
+  if (!isRequestForm(page.html)) return
+  const rejection = hardRejection(page.html) ?? 'stampingUncertain'
+  throw rejected(context, rejection, rejectionDetails(rejection, page.html, type, quota))
+}
+
+const confirm = async (
+  context: PortalContext,
+  page: PortalPage,
+  type: number,
+  quota: QuotaFields,
+): Promise<PortalPage> => {
   const fields = inputValues(page.html)
   const answer = await submitForm(
     context,
@@ -209,9 +250,12 @@ const confirm = async (context: PortalContext, page: PortalPage): Promise<Portal
       ACEPTAR: 'Confirmar Folio Inicial',
     },
   )
+  assertNotRequestForm(context, answer, type, quota)
   return answer.html.includes(GENERATE) ? generate(context, answer) : answer
 }
 
+// The page is the quota form, so its action is known. An answer that posts to `of_confirma_folio` is the confirmation of
+// the initial folio unless its button says it is the request form again.
 const stamp = async (
   context: PortalContext,
   page: PortalPage,
@@ -220,14 +264,15 @@ const stamp = async (
   company: Company,
 ): Promise<PortalPage> => {
   const quantity = quota.maxAuthorized === null ? input.quantity : Math.min(input.quantity, quota.maxAuthorized)
-  const answer = await submitForm(context, CONFIRM, formAction(page.html) ?? `${PATH}${CONFIRM}`, page.url, {
+  const answer = await submitForm(context, CONFIRM, formAction(page.html)!, page.url, {
     ...inputValues(page.html),
     ...company,
     COD_DOCTO: String(input.type),
     CANT_DOCTOS: String(quantity),
     ACEPTAR: 'Solicitar Numeración',
   })
-  if (answer.html.includes(CONFIRM)) return confirm(context, answer)
+  assertNotRequestForm(context, answer, input.type, quota)
+  if (answer.html.includes(CONFIRM)) return confirm(context, answer, input.type, quota)
   return answer.html.includes(GENERATE) ? generate(context, answer) : answer
 }
 
@@ -242,13 +287,6 @@ const obtained = (page: PortalPage, quota: QuotaFields, recovered: boolean): Obt
     recovered,
   }
 }
-
-const rejectionDetails = (rejection: PortalRejection, html: string, type: number, quota: QuotaFields) => ({
-  type,
-  portalMessage: (rejection === 'stampingBlocked' ? stampingBlockReason(html) : null) ?? portalMessageOf(html),
-  maxAuthorized: quota.maxAuthorized,
-  availableFolios: quota.availableFolios,
-})
 
 // The SII has the range and only the file was lost: a late download often still answers it.
 const recoverAuthorizedRange = async (
@@ -357,6 +395,8 @@ export const queryFolioQuotaInSession = async (
       return { unrestricted: false, blocked: true, maxAuthorized: null, availableFolios: null }
     if (rejection !== null)
       throw rejected(context, rejection, { type: input.type, portalMessage: portalMessageOf(page.html) })
+    // A page that is not the quota form of the type is never read as an unrationed type.
+    if (!atQuota && mustAuthenticate(page.html)) throw sessionExpired(context, SELECTOR)
     if (!atQuota) throw unexpectedPage(context, ENTRY, page.html)
     const quota = quotaFields(page.html)
     return { unrestricted: quota.maxAuthorized === null, blocked: false, ...quota }
@@ -367,14 +407,18 @@ export const queryFolioQuotaInSession = async (
 
 /**
  * EN: Reads how many folios the SII authorizes for a type, stopping at the form that shows it: nothing is stamped and
- * the quota does not move. `MAX_AUTOR` and `FOLIOS_DISP` appear only while the SII rations the type.
+ * the quota does not move. `MAX_AUTOR` and `FOLIOS_DISP` appear only while the SII rations the type. That form is the
+ * one whose selector has the type chosen; the page of the company, with no type chosen, is reloaded with it, and a last
+ * page that is not that form throws instead of reading as an unrationed type.
  * ES: Lee cuántos folios autoriza el SII para un tipo, deteniéndose en el formulario que lo muestra: no se timbra nada y
- * el cupo no se mueve. `MAX_AUTOR` y `FOLIOS_DISP` aparecen solo mientras el SII raciona el tipo.
+ * el cupo no se mueve. `MAX_AUTOR` y `FOLIOS_DISP` aparecen solo mientras el SII raciona el tipo. Ese formulario es el
+ * que tiene el tipo elegido en su selector; la página de la empresa, sin tipo elegido, se recarga con él, y una última
+ * página que no es ese formulario lanza en vez de leerse como un tipo sin racionar.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: document type and company. ES: tipo de documento y empresa.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: the quota. ES: el cupo.
- * @throws {DteError} EN: `SII_PORTAL_REJECTED` for any refusal but the stamping block, session and transport codes. ES: `SII_PORTAL_REJECTED` para cualquier rechazo salvo el bloqueo de timbraje, códigos de sesión y de transporte.
+ * @throws {DteError} EN: `SII_PORTAL_REJECTED` for any refusal but the stamping block, `SII_PORTAL_UNEXPECTED_PAGE`, session and transport codes. ES: `SII_PORTAL_REJECTED` para cualquier rechazo salvo el bloqueo de timbraje, `SII_PORTAL_UNEXPECTED_PAGE`, códigos de sesión y de transporte.
  */
 export const queryFolioQuota = (
   portal: PortalClient,
@@ -385,9 +429,13 @@ export const queryFolioQuota = (
 
 /**
  * EN: Requests a range of folios and downloads its CAF through the five portal steps. A rejection can arrive at any
- * step. With the effective maximum exceeded and no `minQuantity`, it asks once more for one folio.
+ * step. With the effective maximum exceeded and no `minQuantity`, it asks once more for one folio. When the SII answers
+ * the request with the request form again, nothing is sent a second time: it throws `SII_PORTAL_REJECTED` with
+ * `stampingUncertain`, since the folios may have been granted, and `listReobtainableRanges` says whether they were.
  * ES: Solicita un rango de folios y descarga su CAF por los cinco pasos del portal. Un rechazo puede llegar en cualquier
- * paso. Si se excede el máximo efectivo y no hay `minQuantity`, pide una vez más por un folio.
+ * paso. Si se excede el máximo efectivo y no hay `minQuantity`, pide una vez más por un folio. Si el SII responde la
+ * solicitud con el formulario de solicitud otra vez, no se envía nada de nuevo: lanza `SII_PORTAL_REJECTED` con
+ * `stampingUncertain`, porque los folios pudieron otorgarse, y `listReobtainableRanges` dice si se otorgaron.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: type, quantity and company. ES: tipo, cantidad y empresa.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.

@@ -246,8 +246,9 @@ export const requestCafInBatches = (
         minQuantity: 1,
         ...company,
       }).catch((error: unknown) => asRefusal(error))
+      // An uncertain request is said as such: read as the cap, it would invite asking again for what may be granted.
       if ('rejection' in outcome) {
-        return covered === 0
+        return covered === 0 || outcome.rejection === 'stampingUncertain'
           ? refusalResult(cafs, outcome.rejection, { ...outcome.details, ...current })
           : { complete: false, cafs, granted: covered, ...current, rejection: 'quotaCapReached', portalMessage: null }
       }

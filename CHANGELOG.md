@@ -271,6 +271,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Stamping reads the quota form of the type, and never sends a request twice.** The page of the company, with only
+  `-1 NINGUNO` chosen, also posts to `of_confirma_folio`, so `queryFolioQuota` could report a type as unrationed and
+  `requestCaf` could skip choosing the type. A page is now the quota form only when the type asked for is the option its
+  selector has chosen; otherwise the type is chosen first, and a last page that is not that form (a login page, an
+  unknown page) throws `SII_PORTAL_SESSION_EXPIRED` or `SII_PORTAL_UNEXPECTED_PAGE`. The request form itself posts to
+  `of_confirma_folio` with `FOLIO_INICIAL` 0 too: when the SII shows it again after a request, its button ("Solicitar
+  Numeración", not "Confirmar Folio Inicial") tells it apart, nothing is sent a second time, and the new rejection
+  `stampingUncertain` says to check the reobtainable ranges before asking again; a refusal the page states is that
+  refusal. `requestCafInBatches` reports `stampingUncertain` as such instead of as `quotaCapReached`. "No está autorizado
+  para solicitar timbraje" reads as `userWithoutPermission`. The `dte-sdk/portal` size limit goes from 72 kB to 74 kB.
 - **An annulment answer is read only by its own words.** Every page of the annulment says it is for folios "que no han
   sido recepcionados por el SII", and the listings say "ningún folio haya sido recepcionado": those sentences are
   taken out before an answer is read. Before, any answer `annulFolios` did not know read as a conflict and then as

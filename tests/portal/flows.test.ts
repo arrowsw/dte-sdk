@@ -311,6 +311,20 @@ describe('requestCafInBatches', () => {
     })
   })
 
+  test('an uncertain request after a grant is said as such, not as the cap', async () => {
+    const harness = await signedIn([
+      entry,
+      replies('of_solicita_folios_dcto', quotaForm(3, 0), quotaForm(3, 0), quotaForm(3, 0), quotaForm(3, 0)),
+      replies('of_confirma_folio', CAF_XML, quotaForm(3, 0)),
+    ])
+    await expect(requestCafInBatches(harness.portal, { type: 33, quantity: 200 })).resolves.toMatchObject({
+      complete: false,
+      granted: 100,
+      cafs: [expect.anything()],
+      rejection: 'stampingUncertain',
+    })
+  })
+
   test('a rejection at a later reading keeps what was obtained', async () => {
     const harness = await signedIn([
       entry,

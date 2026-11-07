@@ -1,12 +1,17 @@
 // The stamping, annulment and reobtention flows over a fake portal that serves the pages of the SII certification
 // environment (tests/fixtures/portal/) as the bytes the portal sends.
+import { readFileSync } from 'node:fs'
+import { PORTAL_REJECTIONS } from '../../src/catalogs/portal'
 import { annulFolios } from '../../src/portal/annulment'
+import { queryFolioQuota, requestCaf } from '../../src/portal/stamping'
 import type { FakeReply, FakeRoute } from '../support/fake-sii'
 import { capturedBytes, capturedPage } from '../support/captured-pages'
-import { MAULLIN, signedIn } from '../support/portal'
+import { fixturePath } from '../support/fixtures'
+import { failure, MAULLIN, signedIn } from '../support/portal'
 import { page } from '../support/portal-pages'
 
 const HTML = { 'content-type': 'text/html' }
+const CAF_XML = readFileSync(fixturePath('caf-33.xml'), 'latin1')
 const served = (name: string): FakeReply => ({ headers: HTML, body: capturedBytes(name) })
 const get = (name: string, reply: FakeReply): FakeRoute => ({ url: `${MAULLIN}/${name}`, method: 'GET', reply })
 const post = (name: string, ...replies: readonly FakeReply[]): FakeRoute => ({
@@ -121,5 +126,159 @@ describe('annulment', () => {
     ])
     expect(result.knownAnnulled).toEqual(['110-111'])
     expect(capturedPage('af_anular3-ya-anulado')).toContain('Folio Inicial Anulado')
+  })
+})
+
+describe('stamping', () => {
+  const entry = get('of_solicita_folios', served('of_solicita_folios'))
+  // The company page first, with no type chosen; choosing the type reloads it as the quota form of the type.
+  const selector = (...typePages: readonly string[]) =>
+    post('of_solicita_folios_dcto', served('of_solicita_folios_dcto'), ...typePages.map(served))
+  const generation = [
+    post('of_genera_folio', served('of_genera_archivo')),
+    post('of_genera_archivo', { body: CAF_XML }),
+  ]
+
+  test('the company page is no quota form: the type is chosen first, and its quota is what is read', async () => {
+    const harness = await signedIn([
+      entry,
+      selector('of_solicita_folios_dcto-33'),
+      post('of_confirma_folio', served('of_genera_folio')),
+      ...generation,
+    ])
+    const result = await requestCaf(harness.portal, { type: 33, quantity: 5 })
+    expect(result).toMatchObject({ maxAuthorized: 2, availableFolios: 1, recovered: false })
+    const [, chosen] = harness.posted('of_solicita_folios_dcto')
+    expect(chosen).toMatchObject({ RUT_EMP: '76543210', DV_EMP: '3', COD_DOCTO: '33', CANT_DOCTOS: '' })
+    expect(harness.posted('of_confirma_folio')).toEqual([
+      expect.objectContaining({ COD_DOCTO: '33', CANT_DOCTOS: '2', FOLIO_INICIAL: '0', MAX_AUTOR: '2' }),
+    ])
+    expect(harness.posted('of_genera_folio')[0]).toMatchObject({
+      FOLIO_INI: '114',
+      FOLIO_FIN: '114',
+      CANT_DOCTOS: '1',
+      ACEPTAR: 'Obtener Folios',
+    })
+    expect(harness.posted('of_genera_archivo')[0]).toMatchObject({
+      FOLIO_INI: '114',
+      FOLIO_FIN: '114',
+      FECHA: '2026-11-07',
+      ACEPTAR: 'AQUI',
+    })
+  })
+
+  test('the quota is read from the form of the type, never from the company page', async () => {
+    const rationed = await signedIn([entry, selector('of_solicita_folios_dcto-33')])
+    await expect(queryFolioQuota(rationed.portal, { type: 33 })).resolves.toEqual({
+      unrestricted: false,
+      blocked: false,
+      maxAuthorized: 2,
+      availableFolios: 1,
+    })
+    // The page of receipts has no `</FORM>`, and its type is not rationed.
+    const receipts = await signedIn([entry, selector('of_solicita_folios_dcto-39')])
+    await expect(queryFolioQuota(receipts.portal, { type: 39 })).resolves.toEqual({
+      unrestricted: true,
+      blocked: false,
+      maxAuthorized: null,
+      availableFolios: null,
+    })
+  })
+
+  test('a last page that is not the form of the type is never an unrationed type', async () => {
+    const login = await signedIn([entry, selector('autenticacion')])
+    expect(await failure(queryFolioQuota(login.portal, { type: 33 }))).toMatchObject({
+      code: 'SII_PORTAL_SESSION_EXPIRED',
+    })
+    const unknown = await signedIn([entry, selector('of_solicita_folios')])
+    expect(await failure(queryFolioQuota(unknown.portal, { type: 33 }))).toMatchObject({
+      code: 'SII_PORTAL_UNEXPECTED_PAGE',
+    })
+    // The type that was asked for is not the one the page chose.
+    const other = await signedIn([entry, selector('of_solicita_folios_dcto-39')])
+    expect(await failure(queryFolioQuota(other.portal, { type: 33 }))).toMatchObject({
+      code: 'SII_PORTAL_UNEXPECTED_PAGE',
+    })
+    const notChosen = await signedIn([entry, selector('of_solicita_folios_dcto')])
+    expect(await failure(requestCaf(notChosen.portal, { type: 33, quantity: 1 }))).toMatchObject({
+      code: 'SII_PORTAL_UNEXPECTED_PAGE',
+    })
+    expect(notChosen.posted('of_confirma_folio')).toEqual([])
+  })
+
+  test('the request form shown again is never sent a second time: the outcome is uncertain', async () => {
+    const harness = await signedIn([
+      entry,
+      selector('of_solicita_folios_dcto-33'),
+      post('of_confirma_folio', served('of_solicita_folios_dcto-33')),
+    ])
+    const error = await failure(requestCaf(harness.portal, { type: 33, quantity: 2 }))
+    expect(error).toMatchObject({
+      code: 'SII_PORTAL_REJECTED',
+      details: { rejection: 'stampingUncertain', type: 33, maxAuthorized: 2, availableFolios: 1 },
+    })
+    expect(harness.posted('of_confirma_folio')).toHaveLength(1)
+    expect(PORTAL_REJECTIONS.stampingUncertain).toContain('reobtener')
+  })
+
+  test('the request form shown again with a refusal on it is that refusal', async () => {
+    const refused = capturedPage('of_solicita_folios_dcto-33').replace(
+      '<FORM NAME="form1"',
+      '<p>Usuario no est&aacute; autorizado para solicitar timbraje para esta empresa.</p><FORM NAME="form1"',
+    )
+    const harness = await signedIn([
+      entry,
+      selector('of_solicita_folios_dcto-33'),
+      post('of_confirma_folio', { body: refused }),
+    ])
+    expect(await failure(requestCaf(harness.portal, { type: 33, quantity: 2 }))).toMatchObject({
+      details: { rejection: 'userWithoutPermission' },
+    })
+    expect(harness.posted('of_confirma_folio')).toHaveLength(1)
+  })
+
+  test('the confirmation of the initial folio is confirmed, and the request form after it is uncertain too', async () => {
+    const confirmed = await signedIn([
+      entry,
+      selector('of_solicita_folios_dcto-33'),
+      post('of_confirma_folio', served('of_confirma_folio'), served('of_genera_folio')),
+      ...generation,
+    ])
+    await expect(requestCaf(confirmed.portal, { type: 33, quantity: 2 })).resolves.toMatchObject({ granted: 100 })
+    expect(confirmed.posted('of_confirma_folio')[1]).toMatchObject({
+      FOLIO_INICIAL: '1',
+      CANT_DOCTOS: '2',
+      ACEPTAR: 'Confirmar Folio Inicial',
+    })
+    const again = await signedIn([
+      entry,
+      selector('of_solicita_folios_dcto-33'),
+      post('of_confirma_folio', served('of_confirma_folio'), served('of_solicita_folios_dcto-33')),
+    ])
+    expect(await failure(requestCaf(again.portal, { type: 33, quantity: 2 }))).toMatchObject({
+      details: { rejection: 'stampingUncertain' },
+    })
+    expect(again.posted('of_confirma_folio')).toHaveLength(2)
+  })
+
+  test('a block, a repeated request and an excess, as the pages say them', async () => {
+    const blocked = await signedIn([entry, selector('no-autoriza-timbraje')])
+    await expect(queryFolioQuota(blocked.portal, { type: 33 })).resolves.toMatchObject({ blocked: true })
+    const excess = await signedIn([
+      entry,
+      selector('of_solicita_folios_dcto-33'),
+      post('of_confirma_folio', served('maximo-excedido')),
+    ])
+    expect(await failure(requestCaf(excess.portal, { type: 33, quantity: 2, minQuantity: 2 }))).toMatchObject({
+      details: { rejection: 'quotaInsufficient' },
+    })
+    const repeated = await signedIn([
+      entry,
+      selector('of_solicita_folios_dcto-33'),
+      post('of_confirma_folio', served('ya-autorizado')),
+      post('of_genera_archivo', { body: CAF_XML }),
+    ])
+    await expect(requestCaf(repeated.portal, { type: 33, quantity: 2 })).resolves.toMatchObject({ recovered: true })
+    expect(repeated.posted('of_genera_archivo')[0]).toMatchObject({ FOLIO_INI: '114', FOLIO_FIN: '115' })
   })
 })

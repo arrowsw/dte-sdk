@@ -163,6 +163,7 @@ export type PortalRejection =
   | 'quotaCapReached'
   | 'foliosShort'
   | 'noAnnullableFolios'
+  | 'stampingUncertain'
   | 'rangeAlreadyAuthorized'
   | 'rangeAnnulled'
   | 'reobtainFormMissing'
@@ -215,6 +216,8 @@ export const PORTAL_REJECTIONS: Readonly<Record<PortalRejection, string>> = {
   foliosShort: 'El SII otorgó menos folios de los requeridos.',
   noAnnullableFolios:
     'El timbraje está limitado y no quedan folios anulables: hay que emitir con los folios timbrados o esperar a que el SII recalcule el tope.',
+  stampingUncertain:
+    'El SII volvió a mostrar el formulario de solicitud sin entregar folios ni decir por qué: no se sabe si autorizó el rango. No se envió de nuevo; antes de pedir otra vez, revisa los rangos que se pueden reobtener.',
   rangeAlreadyAuthorized:
     'El SII ya autorizó ese rango en una solicitud anterior y no devolvió el archivo: se puede reobtener desde el portal.',
   rangeAnnulled: 'El rango está anulado: el SII rechazaría cualquier documento emitido con esos folios.',
