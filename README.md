@@ -72,10 +72,9 @@ every field.
 
 ## Status
 
-The version on npm (0.0.2) is a placeholder with no API. Everything in this README lives on the
-[`canary`](https://github.com/arrowsw/dte-sdk/tree/canary) branch and ships in 0.1.0, the first release with a public
-API. Every area planned for 0.1.0 is written; what is left before the release is running it against the real SII.
-Version 1.0.0 will be the first one recommended for production.
+0.1.0 is the first release with a public API, and every area this README describes ships in it. Releases before 1.0.0
+come out as the work lands, without waiting for the runs against the real SII; those runs come before 1.0.0, the first
+version recommended for production.
 
 Every area is tested against synthetic SII answers, with a 100 % coverage gate in CI. Those tests cannot show how the
 real SII answers, so this table says what has met it so far:
@@ -84,18 +83,19 @@ real SII answers, so this table says what has met it so far:
 | -------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Documents, stamps, signatures and envelopes                    | `dte-sdk`        | Not sent yet                                                                                                                                                                    |
 | SII web services client                                        | `dte-sdk`        | Not run yet ([issue 8](https://github.com/arrowsw/dte-sdk/issues/8))                                                                                                            |
+| Public registry of authorized issuers                          | `dte-sdk`        | Not run yet                                                                                                                                                                     |
 | SII books                                                      | `dte-sdk`        | Not sent yet; they validate against the official schemas in the tests                                                                                                           |
 | Portal session and company data                                | `dte-sdk/portal` | Login, logout, taxpayer data and the refusal pages, for a company not enrolled as an issuer                                                                                     |
-| Folios and CAF requests                                        | `dte-sdk/portal` | Not seen yet: they need an enrolled company                                                                                                                                     |
+| Folios and CAF requests                                        | `dte-sdk/portal` | Not run yet: they need an enrolled company; the tests replay the pages the certification environment served to one                                                              |
 | Purchase and sales register, MIPYME backup                     | `dte-sdk/portal` | Read-only requests answered for a company with no documents; rows, downloads and writes not seen yet                                                                            |
 | Certification sets, runner, exchange and upload of the samples | `dte-sdk/portal` | Not run yet; the exchange answers validate against the official schemas in the tests                                                                                            |
 | Certification of receipts (boletas)                            | `dte-sdk/portal` | Not run yet: it needs a company enrolled in the receipts application; the receipts envelope and the folio consumption report validate against the official schemas in the tests |
 | Printed samples                                                | `dte-sdk/pdf`    | Not reviewed by the SII yet                                                                                                                                                     |
 
-Still to come before 0.1.0: the live runs tracked in [issue 8](https://github.com/arrowsw/dte-sdk/issues/8). Also
-open: the detail calls of the purchase and sales register, to be compared against real answers
-([issue 14](https://github.com/arrowsw/dte-sdk/issues/14)), and the improvements of the certification runner set aside
-to keep it to field behaviour, to be weighed after the first real certification
+Still to come before 1.0.0: running every area against the real SII, starting with the live runs tracked in
+[issue 8](https://github.com/arrowsw/dte-sdk/issues/8). Also open: the detail calls of the purchase and sales register,
+to be compared against real answers ([issue 14](https://github.com/arrowsw/dte-sdk/issues/14)), and the improvements of
+the certification runner set aside to keep it to field behaviour, to be weighed after the first real certification
 ([issue 29](https://github.com/arrowsw/dte-sdk/issues/29)).
 
 Out of scope: export documents (110, 111 and 112), fee receipts (boletas de honorarios), the assignment of invoices
@@ -105,22 +105,6 @@ Out of scope: export documents (110, 111 and 112), fee receipts (boletas de hono
 
 ```bash
 npm install dte-sdk
-```
-
-Until 0.1.0 is published, that command installs the 0.0.2 placeholder. To try the API described here, build the
-package from `canary`:
-
-```bash
-git clone https://github.com/arrowsw/dte-sdk.git
-cd dte-sdk
-npm install
-npm pack   # builds and writes dte-sdk-0.0.2.tgz
-```
-
-and install that file in your project:
-
-```bash
-npm install ../dte-sdk/dte-sdk-0.0.2.tgz
 ```
 
 Node ≥ 22.12. The package ships ES modules only, and a CommonJS project loads it with `require()` just the same. Printed
