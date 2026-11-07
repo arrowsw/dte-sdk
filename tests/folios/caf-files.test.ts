@@ -135,7 +135,7 @@ describe('findCafFiles', () => {
     const base = { dir: 'x', type: 33, issuerRut: ISSUER_RUT } as const
     expect((await failure(findCafFiles({ ...base, dir: '' }, load))).details).toEqual({ field: 'dir' })
     expect((await failure(findCafFiles({ ...base, type: 99 as 33 }, load))).code).toBe('INVALID_DOCUMENT_TYPE')
-    const rut = await failure(findCafFiles({ ...base, issuerRut: '76543210-0' }, load))
+    const rut = await failure(findCafFiles({ ...base, issuerRut: '12345678-9' }, load))
     expect(rut.code).toBe('INVALID_RUT')
     expect(rut.details).toEqual({ field: 'issuerRut' })
     expect(load).not.toHaveBeenCalled()
