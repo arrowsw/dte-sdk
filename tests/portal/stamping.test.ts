@@ -123,17 +123,25 @@ describe('requestCaf', () => {
     expect(third).toMatchObject({ COD_DOCTO: '33', CANT_DOCTOS: '', CONTROL: 'S' })
   })
 
-  test('a selector page without a form action, and a page with no selector at all, still go on', async () => {
+  test('a selector page without a form action still goes on, but a page with no selector is not the quota form', async () => {
     const start = page('<script>x="of_solicita_folios_dcto"</script>')
     const noAction = await signedIn([
+      entry,
+      { url: `${MAULLIN}/of_solicita_folios_dcto`, reply: [{ body: start }, { body: quotaForm(5, 0) }] },
+      route('of_confirma_folio', CAF_XML),
+    ])
+    await expect(requestCaf(noAction.portal, { type: 33, quantity: 3 })).resolves.toMatchObject({ granted: 100 })
+    const noSelector = await signedIn([
       entry,
       {
         url: `${MAULLIN}/of_solicita_folios_dcto`,
         reply: [{ body: start }, { body: page('sigue /cvc_cgi/dte/of_confirma_folio') }],
       },
-      route('of_confirma_folio', CAF_XML),
     ])
-    await expect(requestCaf(noAction.portal, { type: 33, quantity: 3 })).resolves.toMatchObject({ granted: 100 })
+    expect(await failure(requestCaf(noSelector.portal, { type: 33, quantity: 3 }))).toMatchObject({
+      code: 'SII_PORTAL_UNEXPECTED_PAGE',
+    })
+    expect(noSelector.posted('of_confirma_folio')).toEqual([])
   })
 
   test('default actions apply when the portal omits them', async () => {

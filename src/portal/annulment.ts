@@ -5,13 +5,13 @@ import { assertPositive, type CallOverrides } from '../sii/client'
 import { isRetryablePortalError, resolvePortalCompany, type PortalClient } from './client'
 import { formAction, inputValues, namedForm } from './html'
 import {
-  annulmentRefusal,
+  annulledBefore,
+  annulmentAnswer,
   isAlreadyAnnulled,
-  isAnnulmentAccepted,
-  isAnnulmentConflict,
   nextPageButton,
   parseUnusedRanges,
   uniqueRanges,
+  type AnnulmentAnswer,
   type AnnulmentRejectionReason,
   type UnusedFolioRange,
 } from './pages/annulment'
@@ -94,13 +94,13 @@ export type AnnulFoliosInput = {
 export type AnnulmentResult = {
   /** EN: Folios annulled. ES: Folios anulados. */
   readonly annulled: readonly FolioSpan[]
-  /** EN: Folios not annulled, and why. `alreadyAnnulled` and `received` are expected results, not refusals. ES: Folios no anulados y por qué. `alreadyAnnulled` y `received` son resultados esperados, no negativas. */
+  /** EN: Folios not annulled, and why. `alreadyAnnulled` and `received` are expected results, not refusals; `unknown` is an answer the SII gave in no known words, so those folios may be annulled or not. ES: Folios no anulados y por qué. `alreadyAnnulled` y `received` son resultados esperados, no negativas; `unknown` es una respuesta del SII sin palabras conocidas, así que esos folios pueden estar anulados o no. */
   readonly rejected: readonly (FolioSpan & { readonly reason: AnnulmentRejectionReason })[]
   /** EN: Sum of `annulled`. ES: Suma de `annulled`. */
   readonly totalAnnulled: number
   /** EN: Sum of `rejected`. ES: Suma de `rejected`. */
   readonly totalRejected: number
-  /** EN: `from-to` keys that are final: persist it and pass it back, because the portal keeps listing them forever. ES: Claves `desde-hasta` definitivas: guárdalas y devuélvelas, porque el portal las sigue listando para siempre. */
+  /** EN: `from-to` keys that are final (annulled, `alreadyAnnulled` or `received`): persist it and pass it back, because the portal keeps listing them forever. Nothing the SII answered in unknown words goes here. ES: Claves `desde-hasta` definitivas (anuladas, `alreadyAnnulled` o `received`): guárdalas y devuélvelas, porque el portal las sigue listando para siempre. Nada que el SII haya respondido con palabras desconocidas va aquí. */
   readonly knownAnnulled: readonly string[]
 }
 
@@ -241,13 +241,44 @@ const attempt = async (
   }
 }
 
-const isFinal = (reason: AnnulmentRejectionReason): boolean => reason === 'alreadyAnnulled' || reason === 'received'
-const isRefusal = (reason: AnnulmentRejectionReason): boolean => !isFinal(reason)
+const isFinal = (reason: AnnulmentAnswer | 'transport'): boolean =>
+  reason === 'alreadyAnnulled' || reason === 'received'
 
 type Tally = {
   readonly annulled: FolioSpan[]
   readonly rejected: (FolioSpan & { readonly reason: AnnulmentRejectionReason })[]
   readonly known: Set<string>
+}
+
+// Writes down what the SII answered for some folios, and returns the refusals it adds to the count; `null` resets it.
+// Only a final answer goes into the memory: after any other the folios may or may not be annulled, so they are tried
+// again by a later run instead of being left out of issuing for good.
+const record = (tally: Tally, span: FolioSpan, answer: AnnulmentAnswer | 'transport'): number | null => {
+  if (answer === 'accepted') {
+    tally.annulled.push(span)
+    tally.known.add(`${span.from}-${span.to}`)
+    return null
+  }
+  tally.rejected.push({ ...span, reason: answer })
+  if (!isFinal(answer)) return 1
+  tally.known.add(`${span.from}-${span.to}`)
+  return 0
+}
+
+// `af_anular3` said the range was annulled before. The page lists the folios it means ("Folio Inicial Anulado 114
+// Folio Final Anulado 114"): those are `alreadyAnnulled`, and about the rest of the span it says nothing. A page with
+// no such list speaks for the whole span.
+const recordAnnulledBefore = (tally: Tally, span: FolioSpan, html: string): number => {
+  const before = annulledBefore(html)
+  if (before.length === 0) return record(tally, span, 'alreadyAnnulled')!
+  const parts: (FolioSpan & { readonly answer: AnnulmentAnswer })[] = []
+  for (let folio = span.from; folio <= span.to; folio += 1) {
+    const answer = before.some((range) => range.from <= folio && folio <= range.to) ? 'alreadyAnnulled' : 'unknown'
+    const last = parts[parts.length - 1]
+    if (last?.answer === answer) parts[parts.length - 1] = { ...last, to: folio, count: last.count + 1 }
+    else parts.push({ from: folio, to: folio, count: 1, answer })
+  }
+  return parts.reduce((refusals, { answer, ...part }) => Math.max(refusals, record(tally, part, answer)!), 0)
 }
 
 const annulOneByOne = async (
@@ -267,16 +298,7 @@ const annulOneByOne = async (
       { ...fields, FOLIO_INI_A: String(folio), FOLIO_FIN_A: String(folio) },
       at(context, 'af_anular3'),
     )
-    if (answer === null) {
-      tally.rejected.push({ ...one, reason: 'transport' })
-    } else if (isAnnulmentAccepted(answer.html)) {
-      tally.annulled.push(one)
-      tally.known.add(`${folio}-${folio}`)
-    } else {
-      const reason = annulmentRefusal(answer.html)
-      tally.rejected.push({ ...one, reason })
-      if (isFinal(reason)) tally.known.add(`${folio}-${folio}`)
-    }
+    record(tally, one, answer === null ? 'transport' : annulmentAnswer(answer.html))
   }
 }
 
@@ -310,15 +332,8 @@ const annulRange = async (
     },
     at(context, 'af_anular2'),
   )
-  if (entryForm === null) {
-    tally.rejected.push({ ...span, reason: 'transport' })
-    return 1
-  }
-  if (isAlreadyAnnulled(entryForm.html)) {
-    tally.rejected.push({ ...span, reason: 'alreadyAnnulled' })
-    tally.known.add(`${from}-${to}`)
-    return 0
-  }
+  if (entryForm === null) return record(tally, span, 'transport')
+  if (isAlreadyAnnulled(entryForm.html)) return recordAnnulledBefore(tally, span, entryForm.html)
   const fields = {
     ...inputValues(entryForm.html),
     FOLIO_INI_A: String(from),
@@ -326,23 +341,12 @@ const annulRange = async (
     MOTIVO: input.reason ?? DEFAULT_REASON,
   }
   const answer = await attempt(context, 'af_anular', 'af_anular', entryForm.url, fields, at(context, 'af_anular3'))
-  if (answer === null) {
-    tally.rejected.push({ ...span, reason: 'transport' })
-    return 1
-  }
-  if (isAnnulmentAccepted(answer.html)) {
-    tally.annulled.push(span)
-    tally.known.add(`${from}-${to}`)
-    return null
-  }
-  if (isAnnulmentConflict(answer.html)) {
-    await annulOneByOne(context, span, fields, entryForm.url, tally)
-    return 0
-  }
-  const reason = annulmentRefusal(answer.html)
-  tally.rejected.push({ ...span, reason })
-  if (isFinal(reason)) tally.known.add(`${from}-${to}`)
-  return isRefusal(reason) ? 1 : 0
+  const outcome = answer === null ? 'transport' : annulmentAnswer(answer.html)
+  // Part of the range was annulled or received before, and the SII refuses the whole range: it goes folio by folio. A
+  // single folio already has its answer, and sending it again would only ask the same thing twice.
+  if (!isFinal(outcome) || span.count === 1) return record(tally, span, outcome)
+  await annulOneByOne(context, span, fields, entryForm.url, tally)
+  return 0
 }
 
 const sum = (spans: readonly FolioSpan[]): number => spans.reduce((total, span) => total + span.count, 0)

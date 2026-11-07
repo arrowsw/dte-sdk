@@ -1,4 +1,4 @@
-import { formBlocks, inputTags, inputValues, stripTags } from '../html'
+import { bodyText, formBlocks, inputTags, inputValues, stripTags } from '../html'
 
 /**
  * EN: A stamped range with unused folios, as the annulment page lists it. Annulled ranges stay on this list forever.
@@ -16,10 +16,14 @@ export type UnusedFolioRange = {
 }
 
 /**
- * EN: How the SII answered an attempt to annul.
- * ES: Cómo respondió el SII un intento de anulación.
+ * EN: Why folios were not annulled: `alreadyAnnulled` and `received` are what the SII said about them and are final;
+ * `siiError`, `transport` and `unknown` (an answer that is none of those) are not, since the SII may have annulled them
+ * all the same.
+ * ES: Por qué no se anularon unos folios: `alreadyAnnulled` y `received` son lo que el SII dijo de ellos y son
+ * definitivos; `siiError`, `transport` y `unknown` (una respuesta que no es ninguna de esas) no lo son, porque el SII
+ * pudo haberlos anulado igual.
  */
-export type AnnulmentRejectionReason = 'alreadyAnnulled' | 'received' | 'refused' | 'siiError' | 'transport' | 'unknown'
+export type AnnulmentRejectionReason = 'alreadyAnnulled' | 'received' | 'siiError' | 'transport' | 'unknown'
 
 const firstInteger = (value: string | undefined): number | null => {
   const match = /(\d+)/.exec(value ?? '')
@@ -96,48 +100,61 @@ export const nextPageButton = (html: string): { readonly page: number | null } |
   return { page: page === null ? null : Number(page[1]) }
 }
 
-/**
- * EN: `af_anular3` says the range was annulled before. "anteriormente" comes in several wordings.
- * ES: `af_anular3` dice que el rango ya se anuló. "anteriormente" viene en varias redacciones.
- */
-export const isAlreadyAnnulled = (html: string): boolean =>
-  html.includes('ya ha sido efectuado') ||
-  html.includes('ya fue anulado') ||
-  html.includes('efectuado anteriormente') ||
-  /anulad[oa]\s+anteriormente/i.test(html)
+// Every page of the procedure describes it: "folios que no han sido recepcionados por el SII", "siempre y cuando no
+// hayan sido recepcionados", "siempre y cuando ningún folio haya sido recepcionado". Read as an answer, any page would
+// say "recepcionado", so these sentences go before anything is classified.
+const PROCEDURE_SENTENCES =
+  /(?:no\s+(?:han|hayan)\s+sido|ningun\s+folio\s+haya\s+sido)\s+recepcionad[oa]s?\s+por\s+el\s+sii/g
+
+// What a page of the procedure answers: its readable text, lowercase and without accents, without those sentences.
+const answerText = (html: string): string =>
+  bodyText(html).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(PROCEDURE_SENTENCES, ' ')
+
+const saysAlreadyAnnulled = (text: string): boolean =>
+  text.includes('ya ha sido efectuado') ||
+  text.includes('ya fue anulado') ||
+  text.includes('efectuado anteriormente') ||
+  /anulad[oa]\s+anteriormente/.test(text)
 
 /**
- * EN: The SII authorized the annulment.
- * ES: El SII autorizó la anulación.
+ * EN: `af_anular3` says the range was annulled before, with no form to send. "anteriormente" comes in several wordings;
+ * the certification environment said "ha sido anulado anteriormente" on 2026-11-07.
+ * ES: `af_anular3` dice que el rango ya se anuló, sin formulario que enviar. "anteriormente" viene en varias
+ * redacciones; el ambiente de certificación dijo "ha sido anulado anteriormente" el 07-11-2026.
  */
-export const isAnnulmentAccepted = (html: string): boolean =>
-  html.includes('ha autorizado la anulaci') || html.includes('SOLICITUD ANULACION DE FOLIOS')
+export const isAlreadyAnnulled = (html: string): boolean => saysAlreadyAnnulled(answerText(html))
 
 /**
- * EN: The whole range cannot go: part of it was annulled or received before, so it goes folio by folio.
- * ES: El rango completo no puede: parte de él ya se anuló o recibió, así que se sigue folio por folio.
+ * EN: The folios that page says were annulled before ("Folio Inicial Anulado", "Folio Final Anulado"); empty when it
+ * does not list them.
+ * ES: Los folios que esa página dice que se anularon antes ("Folio Inicial Anulado", "Folio Final Anulado"); vacío si
+ * no los lista.
  */
-export const isAnnulmentConflict = (html: string): boolean =>
-  html.includes('ya ha sido efectuado') ||
-  html.includes('ya fue anulado') ||
-  html.includes('efectuado anteriormente') ||
-  html.includes('recepcionad')
+export const annulledBefore = (html: string): readonly { readonly from: number; readonly to: number }[] =>
+  Array.from(answerText(html).matchAll(/folio inicial anulado (\d+) folio final anulado (\d+)/g), ([, from, to]) => ({
+    from: Number(from),
+    to: Number(to),
+  }))
 
 /**
- * EN: Why an annulment was not accepted.
- * ES: Por qué una anulación no se aceptó.
+ * EN: What the SII answered to an annulment: only a concrete sentence counts, and anything else is `unknown`.
+ * ES: Lo que respondió el SII a una anulación: solo cuenta una frase concreta, y cualquier otra cosa es `unknown`.
  */
-export const annulmentRefusal = (html: string): AnnulmentRejectionReason => {
-  const text = html.toLowerCase()
+export type AnnulmentAnswer = 'accepted' | Exclude<AnnulmentRejectionReason, 'transport'>
+
+/**
+ * EN: Classifies the answer of `af_anular`. An annulment is "ha autorizado la anulación" or the heading `SOLICITUD
+ * ANULACION DE FOLIOS`, as the certification environment answered on 2026-11-07; the heading is compared as is, in
+ * uppercase and without accents, so the title of another page of the procedure cannot pass for it.
+ * ES: Clasifica la respuesta de `af_anular`. Una anulación es "ha autorizado la anulación" o el encabezado `SOLICITUD
+ * ANULACION DE FOLIOS`, como respondió el ambiente de certificación el 07-11-2026; el encabezado se compara tal cual, en
+ * mayúsculas y sin tilde, para que el título de otra página del trámite no pase por él.
+ */
+export const annulmentAnswer = (html: string): AnnulmentAnswer => {
+  const text = answerText(html)
+  if (text.includes('ha autorizado la anulacion') || html.includes('SOLICITUD ANULACION DE FOLIOS')) return 'accepted'
   if (text.includes('recepcionad')) return 'received'
-  if (
-    text.includes('ya fue anulado') ||
-    text.includes('anulado anteriormente') ||
-    text.includes('ya ha sido efectuado anteriormente') ||
-    (text.includes('anulad') && text.includes('ya'))
-  )
-    return 'alreadyAnnulled'
-  if (text.includes('anulaci') && text.includes('no')) return 'refused'
+  if (saysAlreadyAnnulled(text)) return 'alreadyAnnulled'
   if (text.includes('error 500') || text.includes('internal server error')) return 'siiError'
   return 'unknown'
 }

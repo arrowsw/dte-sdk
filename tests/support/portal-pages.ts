@@ -58,12 +58,15 @@ export const FACTURA_OPTION = '<option value="33">FACTURA ELECTRONICA</option>'
 export const BOLETA_OPTION = '<option value=39>BOLETA ELECTRONICA</option>'
 export const NO_TYPES_OPTION = '<option value="-1">SIN DOCUMENTOS</option>'
 
-export const quotaForm = (maxAuthorized?: number, available?: number): string =>
+// The quota form of a type: it posts to `of_confirma_folio` with the type chosen in its selector, after `-1 NINGUNO`,
+// which the SII marks as well.
+export const quotaForm = (maxAuthorized?: number, available?: number, type = 33): string =>
   page(`<form action="/cvc_cgi/dte/of_confirma_folio" method=post>
+<select name=COD_DOCTO><option selected value="-1">NINGUNO</option><option value="${type}" selected>TIPO ${type}</option></select>
 <input type=hidden name=RUT_EMP value=76543210><input type=hidden name=CONTROL value=S>
 ${maxAuthorized === undefined ? '' : `<input type=hidden name=MAX_AUTOR value=${maxAuthorized}>`}
 ${available === undefined ? '' : `<input type=hidden name=FOLIOS_DISP value="${available}">`}
-<input name=CANT_DOCTOS></form>`)
+<input name=CANT_DOCTOS><input type=submit name=ACEPTAR value="Solicitar Numeraci&oacute;n"></form>`)
 
 export const CONFIRM_PAGE = page(
   `<form action="/cvc_cgi/dte/of_confirma_folio" method=post><input type=hidden name=FOLIO_INICIAL value=""><input type=hidden name=KEY value=c></form>`,
@@ -114,14 +117,20 @@ export const ANNUL_FORM = page(
 )
 export const ANNUL_OK = page('<p>SOLICITUD ANULACION DE FOLIOS. El SII ha autorizado la anulaci&oacute;n</p>')
 
+// The entry of the reobtention, with its query form and selector; every page of the procedure carries its heading.
+export const REOBTAIN_ENTRY = page(
+  '<b>REOBTENCION DE FOLIOS</b><form name="form1" action="/cvc_cgi/dte/rf_reobtencion2_folios"><input name="RUT_EMP"><select name = COD_DOCTO><OPTION value="33">FACTURA ELECTRONICA</select></form>',
+)
+
 export const reobtainListPage = (ranges: readonly (readonly [number, number])[]): string =>
   page(
-    ranges
-      .map(
-        ([from, to], index) =>
-          `<form name="frm${index}" action="/cvc_cgi/dte/rf_reobtencion3_folios"><input type=hidden name="FOLIO_INI" value="${from}"><input type=hidden name="FOLIO_FIN" value="${to}"><input type=hidden name="COD_DOCTO" value="33"></form>`,
-      )
-      .join('\n'),
+    '<b>REOBTENCION DE FOLIOS</b>' +
+      ranges
+        .map(
+          ([from, to], index) =>
+            `<form name="frm${index}" action="/cvc_cgi/dte/rf_reobtencion3_folios"><input type=hidden name="FOLIO_INI" value="${from}"><input type=hidden name="FOLIO_FIN" value="${to}"><input type=hidden name="COD_DOCTO" value="33"></form>`,
+        )
+        .join('\n'),
   )
 
 export const reobtainDetailPage = (from: number, annulled = false): string =>

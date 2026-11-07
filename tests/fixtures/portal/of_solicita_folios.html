@@ -1,0 +1,86 @@
+<!-- Captured in the SII certification environment on 2026-11-06; company, RUT and representative replaced with fictitious data. -->
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"><html>
+<head>
+<title>Solicitud de Timbraje Electr&oacute;nico de Documentos</title>
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+<script type="text/javascript" src="https://zeus.sii.cl/admin/barranav.js">
+</script>
+<script type="text/javascript" src="/cvc/dte/validadte.js">
+</script>
+<STYLE TYPE="text/css">
+ .titulo  {
+  font-family: arial,helvetica;
+  font-style: bold;
+  font-size: 14pt;
+  text-decoration: none;
+  color: #000000;
+ }
+ .texto  {
+  font-family: arial,helvetica;
+  font-style: normal;
+  font-size: 10pt;
+  text-decoration: none;
+  color: #000000;
+ }
+ .reporte  {
+  font-family: arial,helvetica;
+  font-style: normal;
+  font-size: 7.5pt;
+  text-decoration: none;
+  color: #000000;
+ }
+</STYLE>
+<script type="text/javascript">
+<!--
+function volver(pagina)
+{
+  history.go(-pagina);
+}
+//-->
+</script>
+</head>
+<body link="#003399">
+<center><div><table border="0" width="920">
+<tr><td width="920">
+<script type="text/javascript">mostrar();</script></td></tr>
+<tr><td width="920"><p align="justify"><br>
+<font color="#000000" face="Arial" size="4"><strong><B>
+SOLICITUD DE TIMBRAJE ELECTRONICO DE DOCUMENTOS
+</b></strong></font><br>
+<font class="texto">En esta p&aacute;gina Usted podrá solicitar autorizaci&oacute;n del rango de folios a utilizar para los Documentos Tributarios Electr&oacute;nicos autorizados de un contribuyente.</font>
+</p></td></tr>
+<tr>
+<td height="40"><hr>
+</td>
+</tr>
+</table></div></center>
+<center><table border=0>
+<tr><td WIDTH="950">
+<font CLASS="texto"><p align="justify">Para continuar debe digitar el Rut del Contribuyente que solicita timbrar
+ documentos electrónicos:
+</p></font></td></tr></table></center>
+<form name="form1" method="post" action="/cvc_cgi/dte/of_solicita_folios_dcto" onSubmit="return validarut()">
+<center><table border="0" WIDTH="550" CELLSPACING=1>
+<tr><td width="260">
+<font CLASS="texto">
+<b>RUT del contribuyente:
+</b></font></td><td width="220"><br>
+<input name="RUT_EMP" type="text" size=8 maxlength=8 > - 
+<input name="DV_EMP"  type="text" size=1 maxlength=1 onBlur="this.value=this.value.toUpperCase()">
+</td></tr></table><br>
+</td></tr>
+<tr><td align="center">
+<p align="center"><INPUT NAME="ACEPTAR" TYPE=SUBMIT MAXLENGTH=20 VALUE="Continuar">&nbsp;&nbsp; 
+<input type="reset" value="Limpiar">
+<input type="button" name="NEW" value="  Salir  " onClick="volver(1);">
+</form>
+<script type="text/javascript">document.form1.RUT_EMP.focus()</script>
+<div id="certifica" style="position:absolute; width:0; height:0; z-index:6;top: 0; left: 0; visibility: hidden">
+<script type="text/javascript" src="/admin/certifica_dte.js">
+</script>
+<script type="text/javascript">
+certifica(14484,'Cert','autcau');
+</script>
+</div>
+</body>
+</html>

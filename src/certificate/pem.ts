@@ -18,10 +18,10 @@ export type PemCertificateInput = {
 
 /**
  * EN: Builds a `Certificate` from PEM strings (e.g. after `openssl pkcs12 -nodes`). Verifies the key matches the
- * certificate and that it is still valid.
+ * certificate and that it is valid now: not expired, and not before its `notBefore`.
  * ES: Construye un `Certificate` desde strings PEM (p. ej. tras `openssl pkcs12 -nodes`). Verifica que la llave
- * corresponda al certificado y que esté vigente.
- * @throws {DteError} EN: `CERT_INVALID`, `CERT_EXPIRED`. ES: `CERT_INVALID`, `CERT_EXPIRED`.
+ * corresponda al certificado y que esté vigente ahora: no vencido, y no antes de su `notBefore`.
+ * @throws {DteError} EN: `CERT_INVALID`, `CERT_EXPIRED`, `CERT_NOT_YET_VALID`. ES: `CERT_INVALID`, `CERT_EXPIRED`, `CERT_NOT_YET_VALID`.
  */
 export const loadCertificateFromPem = (
   input: PemCertificateInput,
@@ -39,6 +39,8 @@ export const loadCertificateFromPem = (
     throw new DteError('CERT_INVALID', { reason: 'private key does not match the certificate' })
   if (!options.allowExpired && isCertificateExpired(parsed, { now: options.now }))
     throw new DteError('CERT_EXPIRED', { expiresAt: parsed.notAfter })
+  if (!options.allowExpired && (options.now ?? new Date()).getTime() < parsed.notBefore.getTime())
+    throw new DteError('CERT_NOT_YET_VALID', { validFrom: parsed.notBefore })
   return {
     privateKeyPem: input.privateKeyPem,
     certificatePem: input.certificatePem,

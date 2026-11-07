@@ -35,9 +35,9 @@ export type Certificate = {
  * ES: Opciones comunes a los cargadores de certificado.
  */
 export type LoadCertificateOptions = {
-  /** EN: Clock for the expiry check (tests). ES: Reloj para el chequeo de vigencia (tests). */
+  /** EN: Clock for the validity check (tests). ES: Reloj para el chequeo de vigencia (tests). */
   readonly now?: Date
-  /** EN: Load an expired certificate instead of throwing `CERT_EXPIRED`. ES: Cargar un certificado vencido en vez de lanzar `CERT_EXPIRED`. */
+  /** EN: Load a certificate outside its validity period (expired, or not valid yet) instead of throwing `CERT_EXPIRED` or `CERT_NOT_YET_VALID`. ES: Cargar un certificado fuera de su vigencia (vencido, o aún no vigente) en vez de lanzar `CERT_EXPIRED` o `CERT_NOT_YET_VALID`. */
   readonly allowExpired?: boolean
 }
 

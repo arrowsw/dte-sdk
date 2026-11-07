@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 
 const SCANNED_PREFIXES = ['src/', 'tests/', 'scripts/', 'README.md', 'llms.txt', 'CHANGELOG.md', 'docs/']
-const TEXT_EXTENSIONS = /\.(ts|js|mjs|cjs|json|md|xml|yml|yaml|txt)$/
+const TEXT_EXTENSIONS = /\.(ts|js|mjs|cjs|json|md|xml|html|yml|yaml|txt)$/
 
 // Documentation and SII constants only. Adding one is a deliberate decision: ask whose it is first.
 const ALLOWED_RUTS = new Set([

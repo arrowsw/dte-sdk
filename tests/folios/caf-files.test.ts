@@ -67,13 +67,14 @@ describe('findCafFiles', () => {
   test('an expired CAF counts as expired one day before it lapses, by the given clock', async () => {
     const dir = await temp.make('dte-sdk-caf-')
     await put(dir, 'caf.xml', cafXml(33))
-    // Authorized 2026-10-31: six months later rolls over to 2027-05-01 at 04:00 UTC, so it is left out once less than a day is left.
+    // Authorized 2026-10-31: April has no 31st, so it expires on 2027-04-30 at 04:00 UTC, and it is left out once less
+    // than a day is left.
     const at = (iso: string) => () => new Date(iso)
     await expect(
-      findCafFiles({ dir, type: 33, issuerRut: ISSUER_RUT, now: at('2027-04-30T04:00:00Z') }),
+      findCafFiles({ dir, type: 33, issuerRut: ISSUER_RUT, now: at('2027-04-29T04:00:00Z') }),
     ).resolves.toHaveLength(1)
     await expect(
-      findCafFiles({ dir, type: 33, issuerRut: ISSUER_RUT, now: at('2027-04-30T04:01:00Z') }),
+      findCafFiles({ dir, type: 33, issuerRut: ISSUER_RUT, now: at('2027-04-29T04:01:00Z') }),
     ).resolves.toHaveLength(0)
   })
 

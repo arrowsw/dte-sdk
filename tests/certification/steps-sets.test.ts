@@ -51,8 +51,9 @@ import {
   ANNUL_OK,
   page,
   quotaForm,
-  REJECTION_PAGES,
   refusedPage,
+  REJECTION_PAGES,
+  REOBTAIN_ENTRY,
   REOBTAIN_RESOLUTION,
   reobtainDetailPage,
   reobtainListPage,
@@ -150,7 +151,7 @@ describe('folio needs', () => {
 
 describe('prepareFolios', () => {
   // With the stamping blocked the SII is asked for ranges to download before anything else; none are listed.
-  const noRanges = [get('rf_reobtencion1_folios', page('form')), post('rf_reobtencion2_folios', page('nothing listed'))]
+  const noRanges = [get('rf_reobtencion1_folios', REOBTAIN_ENTRY), post('rf_reobtencion2_folios', reobtainListPage([]))]
   const quota = (...bodies: readonly string[]) => post('of_solicita_folios_dcto', ...bodies)
   const confirm = (...bodies: readonly string[]) => post('of_confirma_folio', ...bodies)
 
@@ -349,7 +350,7 @@ describe('prepareFolios', () => {
     const harness = await certificationHarness([
       stampEntry,
       quota(quotaForm(1, 9)),
-      get('rf_reobtencion1_folios', page('form')),
+      get('rf_reobtencion1_folios', REOBTAIN_ENTRY),
       post('rf_reobtencion2_folios', reobtainListPage([[1, 100]])),
       post('rf_reobtencion3_folios', reobtainDetailPage(1)),
       post('rf_genera_folio', REOBTAIN_RESOLUTION),
@@ -372,7 +373,7 @@ describe('prepareFolios', () => {
     const harness = await certificationHarness([
       stampEntry,
       quota(...repeat(quotaForm(1, 9), 5)),
-      get('rf_reobtencion1_folios', page('form')),
+      get('rf_reobtencion1_folios', REOBTAIN_ENTRY),
       post('rf_reobtencion2_folios', reobtainListPage([[1, 100]])),
       post('rf_reobtencion3_folios', reobtainDetailPage(1)),
       confirm(cafXml(33, { from: 1, to: 1 }), cafXml(33, { from: 2, to: 2 })),
@@ -444,7 +445,7 @@ describe('prepareFolios', () => {
     test('which covers the need and ends it', async () => {
       const harness = await certificationHarness([
         ...blocked,
-        get('rf_reobtencion1_folios', page('form')),
+        get('rf_reobtencion1_folios', REOBTAIN_ENTRY),
         post('rf_reobtencion2_folios', reobtainListPage([[1, 100]])),
         post('rf_reobtencion3_folios', reobtainDetailPage(1)),
         post('rf_genera_folio', REOBTAIN_RESOLUTION),
@@ -461,8 +462,8 @@ describe('prepareFolios', () => {
       const harness = await certificationHarness([
         stampEntry,
         quota(quotaForm(), REJECTION_PAGES.personWithPendingIssues, quotaForm(), quotaForm()),
-        get('rf_reobtencion1_folios', page('form')),
-        post('rf_reobtencion2_folios', page('nothing listed')),
+        get('rf_reobtencion1_folios', REOBTAIN_ENTRY),
+        post('rf_reobtencion2_folios', reobtainListPage([])),
         ...annulment,
         confirm(CAF_XML),
       ])
@@ -495,7 +496,7 @@ describe('prepareFolios', () => {
       reply: [...replies],
     })
     const reobtainRoutes = (range: readonly [number, number], archive: string) => [
-      get('rf_reobtencion1_folios', page('form')),
+      get('rf_reobtencion1_folios', REOBTAIN_ENTRY),
       post('rf_reobtencion2_folios', reobtainListPage([[...range]])),
       post('rf_reobtencion3_folios', reobtainDetailPage(range[0])),
       post('rf_genera_folio', REOBTAIN_RESOLUTION),
@@ -601,7 +602,7 @@ describe('prepareFolios', () => {
       const harness = await certificationHarness([
         { ...stampEntry, reply: repeat({ body: STAMP_ENTRY }, 10) },
         quota(...repeat(quotaForm(1, 9), 8)),
-        get('rf_reobtencion1_folios', page('form')),
+        get('rf_reobtencion1_folios', REOBTAIN_ENTRY),
         post('rf_reobtencion2_folios', reobtainListPage([[10, 11]])),
         post('rf_reobtencion3_folios', reobtainDetailPage(10)),
         confirm(one(1), one(2), one(3)),
@@ -658,7 +659,7 @@ describe('prepareFolios', () => {
     const harness = await certificationHarness([
       stampEntry,
       quota(REJECTION_PAGES.stampingBlocked),
-      get('rf_reobtencion1_folios', page('form')),
+      get('rf_reobtencion1_folios', REOBTAIN_ENTRY),
       post('rf_reobtencion2_folios', reobtainListPage([[1, 100]])),
       post('rf_reobtencion3_folios', reobtainDetailPage(1)),
       post('rf_genera_folio', REOBTAIN_RESOLUTION),
@@ -754,7 +755,7 @@ describe('prepareFolios', () => {
     const harness = await certificationHarness([
       stampEntry,
       quota(REJECTION_PAGES.stampingBlocked, quotaForm(), quotaForm()),
-      get('rf_reobtencion1_folios', page('form')),
+      get('rf_reobtencion1_folios', REOBTAIN_ENTRY),
       post('rf_reobtencion2_folios', reobtainListPage([[10, 12]])),
       post('rf_reobtencion3_folios', reobtainDetailPage(10)),
       post('rf_genera_folio', REOBTAIN_RESOLUTION),
@@ -786,7 +787,7 @@ describe('prepareFolios', () => {
     const harness = await certificationHarness([
       stampEntry,
       quota(REJECTION_PAGES.stampingBlocked, quotaForm(), quotaForm()),
-      get('rf_reobtencion1_folios', page('form')),
+      get('rf_reobtencion1_folios', REOBTAIN_ENTRY),
       post('rf_reobtencion2_folios', reobtainListPage([[101, 200]])),
       post('rf_reobtencion3_folios', reobtainDetailPage(101)),
       post('rf_genera_folio', REOBTAIN_RESOLUTION),

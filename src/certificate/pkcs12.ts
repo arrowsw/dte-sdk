@@ -55,7 +55,7 @@ const orderChain = (leaf: ForgeCertificate, certificates: readonly ForgeCertific
  * llave cifradas o planas, detección de la hoja por llave, cadena ordenada hoja → raíz, RUT desde el certificado.
  * @param bytes EN: file contents. ES: contenido del archivo.
  * @param password EN: PKCS#12 password. ES: contraseña del PKCS#12.
- * @throws {DteError} EN: `CERT_PASSWORD_WRONG`, `CERT_INVALID`, `CERT_EXPIRED`. ES: los mismos códigos.
+ * @throws {DteError} EN: `CERT_PASSWORD_WRONG`, `CERT_INVALID`, `CERT_EXPIRED`, `CERT_NOT_YET_VALID`. ES: los mismos códigos.
  */
 export const loadCertificateFromPkcs12 = (
   bytes: Uint8Array,

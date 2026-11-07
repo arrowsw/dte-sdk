@@ -1,6 +1,7 @@
 import { CLAIM_ACTIONS, isClaimAction, transferabilityOf, type ClaimAction } from '../catalogs/claim-codes'
 import { DteError } from '../errors'
 import { splitSiiRut, toSiiRut, type SiiRut } from '../model/rut'
+import { toIsoDate } from '../time/chile'
 import { decodeXmlEntities, extractTagContent } from '../xml/parse'
 import { withToken } from './auth'
 import { redactText } from './capture'
@@ -362,4 +363,71 @@ export const receiverStatus = async (
   if (events.length === 0) return { status: NO_EVENT_CODES.includes(code) ? 'none' : 'unknown', lastEvent: null, code }
   const lastEvent = latestEvent(events)
   return { status: EVENT_STATUS.get(lastEvent.code) ?? 'unknown', lastEvent, code }
+}
+
+/**
+ * EN: The receiver's answer to a document, Ley 19.983 included: `annulled` (a credit note annulled it, `NCA`),
+ * `claimed` (`RCD`, `RFP`, `RFT`), `accepted` (`ACD`), `tacitlyAccepted` (eight calendar days after the SII received it
+ * with none of those), `goodsReceived` (`ERM`, with the eight days still running) or `pending`.
+ * ES: La respuesta del receptor a un documento, con la Ley 19.983: `annulled` (una nota de crédito lo anuló, `NCA`),
+ * `claimed` (`RCD`, `RFP`, `RFT`), `accepted` (`ACD`), `tacitlyAccepted` (ocho días corridos después de que el SII lo
+ * recibió sin ninguno de esos), `goodsReceived` (`ERM`, con los ocho días aún corriendo) o `pending`.
+ */
+export type ReceiverAnswer = 'annulled' | 'claimed' | 'accepted' | 'tacitlyAccepted' | 'goodsReceived' | 'pending'
+
+/**
+ * EN: `receiverAnswer` result.
+ * ES: Resultado de `receiverAnswer`.
+ */
+export type ReceiverAnswerResult = {
+  /** EN: The answer. ES: La respuesta. */
+  readonly answer: ReceiverAnswer
+  /** EN: Last day to claim, YYYY-MM-DD: the day of the SII reception plus eight; null without a reception date. ES: Último día para reclamar, AAAA-MM-DD: el día de la recepción en el SII más ocho; null sin fecha de recepción. */
+  readonly claimDeadline: string | null
+}
+
+const CLAIMED: readonly string[] = ['RCD', 'RFP', 'RFT']
+const CLAIM_DAYS = 8
+
+/**
+ * EN: The receiver's answer from the events of `listClaimEvents` and the reception date of `queryReceptionDate`, with
+ * no request: `NCA` comes first, then a claim, then `ACD`; past the deadline with none of them the document is
+ * accepted by law (Ley 19.983), and before it `ERM` is goods received and anything else pending. `PAG` and `ENC`
+ * change nothing. `receiverStatus` keeps reading the latest event only.
+ * ES: La respuesta del receptor desde los eventos de `listClaimEvents` y la fecha de recepción de `queryReceptionDate`,
+ * sin ninguna petición: primero `NCA`, luego un reclamo, luego `ACD`; pasado el plazo sin ninguno de ellos el documento
+ * queda aceptado por ley (Ley 19.983), y antes de eso `ERM` es recibo de mercaderías y cualquier otra cosa pendiente.
+ * `PAG` y `ENC` no cambian nada. `receiverStatus` sigue leyendo solo el último evento.
+ * @param events EN: the events, in any order. ES: los eventos, en cualquier orden.
+ * @param receivedAt EN: `receivedAt` of `queryReceptionDate` (its date is what counts), or null. ES: `receivedAt` de `queryReceptionDate` (cuenta su fecha), o null.
+ * @param today EN: today in Chile, YYYY-MM-DD, as `chileDate()` gives it. ES: hoy en Chile, AAAA-MM-DD, como lo da `chileDate()`.
+ * @returns EN: the answer and the deadline to claim. ES: la respuesta y el plazo para reclamar.
+ * @throws {DteError} EN: `INVALID_DATE` when `today` is not a date. ES: `INVALID_DATE` si `today` no es una fecha.
+ */
+export const receiverAnswer = (
+  events: readonly Pick<ClaimEvent, 'code'>[],
+  receivedAt: string | null,
+  today: string,
+): ReceiverAnswerResult => {
+  const day = toIsoDate(today, 'today')
+  const received = /^(\d{4})-(\d{2})-(\d{2})/.exec(receivedAt ?? '')
+  const claimDeadline =
+    received === null
+      ? null
+      : new Date(Date.UTC(Number(received[1]), Number(received[2]) - 1, Number(received[3]) + CLAIM_DAYS))
+          .toISOString()
+          .slice(0, 10)
+  const has = (codes: readonly string[]): boolean => events.some((event) => codes.includes(event.code))
+  const answer: ReceiverAnswer = has(['NCA'])
+    ? 'annulled'
+    : has(CLAIMED)
+      ? 'claimed'
+      : has(['ACD'])
+        ? 'accepted'
+        : claimDeadline !== null && day > claimDeadline
+          ? 'tacitlyAccepted'
+          : has(['ERM'])
+            ? 'goodsReceived'
+            : 'pending'
+  return { answer, claimDeadline }
 }

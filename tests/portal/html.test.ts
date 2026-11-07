@@ -68,8 +68,12 @@ test('forms by position, name and action', () => {
 test('select options, or null without the select', () => {
   const html = `<SELECT name = COD onChange="x()"><option value="33">FACTURA</option><option value=39 selected>BOLETA<option>nada</select>`
   expect(selectOptions(html, 'COD')).toEqual([
-    { value: '33', label: 'FACTURA' },
-    { value: '39', label: 'BOLETA' },
+    { value: '33', label: 'FACTURA', selected: false },
+    { value: '39', label: 'BOLETA', selected: true },
+  ])
+  expect(selectOptions('<select name=A><option selected value=1>x<option value="selected">y</select>', 'A')).toEqual([
+    { value: '1', label: 'x', selected: true },
+    { value: 'selected', label: 'y', selected: false },
   ])
   expect(selectOptions(html, 'OTHER')).toBeNull()
 })

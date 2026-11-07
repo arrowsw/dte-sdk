@@ -1,12 +1,12 @@
 import {
-  annulmentRefusal,
+  annulledBefore,
+  annulmentAnswer,
   isAlreadyAnnulled,
-  isAnnulmentAccepted,
-  isAnnulmentConflict,
   nextPageButton,
   parseUnusedRanges,
   uniqueRanges,
 } from '../../src/portal/pages/annulment'
+import { capturedPage } from '../support/captured-pages'
 import { ANNUL_OK, page, unusedRangesPage } from '../support/portal-pages'
 
 test('ranges come from the hidden fields of each form, once each', () => {
@@ -66,25 +66,51 @@ test.each([
   expect(isAlreadyAnnulled(page(text))).toBe(expected)
 })
 
-test('accepted and conflict', () => {
-  expect(isAnnulmentAccepted(ANNUL_OK)).toBe(true)
-  expect(isAnnulmentAccepted(page('ha autorizado la anulaci&oacute;n'))).toBe(true)
-  expect(isAnnulmentAccepted(page('no'))).toBe(false)
-  for (const text of ['ya ha sido efectuado', 'ya fue anulado', 'efectuado anteriormente', 'folio recepcionado'])
-    expect(isAnnulmentConflict(page(text))).toBe(true)
-  expect(isAnnulmentConflict(page('otra'))).toBe(false)
+test.each([
+  [ANNUL_OK, 'accepted'],
+  [page('ha autorizado la anulaci&oacute;n'), 'accepted'],
+  [page('folio recepcionado'), 'received'],
+  [page('YA FUE ANULADO'), 'alreadyAnnulled'],
+  [page('anulado anteriormente'), 'alreadyAnnulled'],
+  [page('ya ha sido efectuado anteriormente'), 'alreadyAnnulled'],
+  [page('Error 500'), 'siiError'],
+  [page('Internal Server Error'), 'siiError'],
+  [page('la anulacion no procede'), 'unknown'],
+  [page('fue anulada y ya esta'), 'unknown'],
+  [page('xxx'), 'unknown'],
+] as const)('answer %#: %s', (html, answer) => {
+  expect(annulmentAnswer(html)).toBe(answer)
 })
 
-test.each([
-  ['folio recepcionado', 'received'],
-  ['YA FUE ANULADO', 'alreadyAnnulled'],
-  ['anulado anteriormente', 'alreadyAnnulled'],
-  ['ya ha sido efectuado anteriormente', 'alreadyAnnulled'],
-  ['fue anulada y ya esta', 'alreadyAnnulled'],
-  ['la anulacion no procede', 'refused'],
-  ['Error 500', 'siiError'],
-  ['Internal Server Error', 'siiError'],
-  ['xxx', 'unknown'],
-] as const)('refusal %s', (text, reason) => {
-  expect(annulmentRefusal(text)).toBe(reason)
+describe('the pages of the procedure, as the certification environment serves them', () => {
+  test.each([
+    ['af_anular-ok', 'accepted'],
+    ['af_anular-recepcionado', 'received'],
+    ['af_anular3-ya-anulado', 'alreadyAnnulled'],
+    ['af_anular1', 'unknown'],
+    ['af_anular2', 'unknown'],
+    ['af_anular2-pagina2', 'unknown'],
+    ['af_anular3', 'unknown'],
+    ['af_anular3-114', 'unknown'],
+  ] as const)('%s reads as %s', (name, answer) => {
+    expect(annulmentAnswer(capturedPage(name))).toBe(answer)
+  })
+
+  test('the sentences that describe the procedure are not an answer, in any case or accent', () => {
+    for (const sentence of [
+      'folios que no han sido recepcionados por el SII',
+      'siempre y cuando no hayan sido recepcionados por el SII',
+      'siempre y cuando ning&uacute;n folio haya sido recepcionado por el SII',
+      'NINGUN FOLIO HAYA SIDO RECEPCIONADO POR EL SII',
+    ])
+      expect(annulmentAnswer(page(sentence))).toBe('unknown')
+    expect(annulmentAnswer(page('no han sido recepcionados por el SII. El folio 3 fue recepcionado'))).toBe('received')
+  })
+
+  test('only the form page that was annulled before reads as such, and it lists its folios', () => {
+    expect(isAlreadyAnnulled(capturedPage('af_anular3-ya-anulado'))).toBe(true)
+    expect(isAlreadyAnnulled(capturedPage('af_anular3-114'))).toBe(false)
+    expect(annulledBefore(capturedPage('af_anular3-ya-anulado'))).toEqual([{ from: 114, to: 114 }])
+    expect(annulledBefore(page('anulado anteriormente'))).toEqual([])
+  })
 })
