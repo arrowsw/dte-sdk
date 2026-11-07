@@ -104,6 +104,27 @@ describe('createDirectoryTokenCache', () => {
     expect((await readdir(dir)).filter((name) => name.startsWith('j'))).toEqual([])
   })
 
+  test('a write that fails halfway, as on a full disk, leaves no temp file with the cookies behind', async () => {
+    const dir = await temp.make('dte-sdk-cache-')
+    const logger = recordingLogger()
+    const modules = await loadNodeFs()
+    const cache = createDirectoryTokenCache({ dir, logger }, async () => ({
+      ...modules,
+      fs: {
+        ...modules.fs,
+        writeFile: async (file: string, data: string) => {
+          await modules.fs.writeFile(file, data.slice(0, 20))
+          throw new Error('ENOSPC: no space left on device')
+        },
+      } as typeof modules.fs,
+    }))
+    await cache.set('k', entry)
+    expect(logger.lines).toEqual([
+      ['warn', 'token cache failed', { operation: 'set', reason: 'ENOSPC: no space left on device' }],
+    ])
+    expect(await readdir(dir)).toEqual([])
+  })
+
   test('never throws: a failure is a miss, reported to the logger with the operation', async () => {
     const file = join(await temp.make('dte-sdk-cache-'), 'a-file')
     await writeFile(file, 'x')

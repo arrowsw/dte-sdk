@@ -84,11 +84,14 @@ export const createDirectoryTokenCache = (
         const { fs, file: path } = await file(key)
         await fs.mkdir(options.dir, { recursive: true, mode: DIRECTORY_MODE })
         const temp = `${path}.${crypto.randomUUID()}.tmp`
-        await fs.writeFile(temp, JSON.stringify(value), { encoding: 'utf8', mode: FILE_MODE, flag: 'wx' })
-        await fs.rename(temp, path).catch(async (error: unknown) => {
+        // A write cut short (a full disk) leaves part of the cookies in the temp file, so it goes as a failed rename does.
+        try {
+          await fs.writeFile(temp, JSON.stringify(value), { encoding: 'utf8', mode: FILE_MODE, flag: 'wx' })
+          await fs.rename(temp, path)
+        } catch (error) {
           await fs.rm(temp, { force: true })
           throw error
-        })
+        }
       }),
     delete: (key) =>
       guarded('delete', undefined, async () => {
