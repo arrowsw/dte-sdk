@@ -2,10 +2,7 @@
   <h1>dte-sdk: Chilean electronic tax documents (DTE) with TypeScript.</h1>
 
 [![npm version](https://img.shields.io/npm/v/dte-sdk?color=000&label=npm)](https://www.npmjs.com/package/dte-sdk)
-[![downloads](https://img.shields.io/npm/dm/dte-sdk?color=000)](https://www.npmjs.com/package/dte-sdk)
-[![bundle size](https://deno.bundlejs.com/badge?q=dte-sdk&treeshake=[*])](https://bundlejs.com/?q=dte-sdk)
 [![types included](https://img.shields.io/npm/types/dte-sdk?color=000)](https://www.npmjs.com/package/dte-sdk)
-![dependencies](https://img.shields.io/badge/dependencies-4-000)
 [![license](https://img.shields.io/npm/l/dte-sdk?color=000)](./LICENSE)
 
 </div>

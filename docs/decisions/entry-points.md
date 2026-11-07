@@ -8,7 +8,7 @@ D40 and D41 of the design specs). Tracks [issue #5](https://github.com/arrowsw/d
 | Entry            | Holds                                                                                                                                             | Size     | Reaches `node:`   |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ----------------- |
 | `dte-sdk`        | Documents, stamps, signatures, envelopes, books, SII web services client over `fetch`                                                             | 30.06 kB | No                |
-| `dte-sdk/node`   | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry` | 4.54 kB  | Yes, on first use |
+| `dte-sdk/node`   | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry` | 4.47 kB  | Yes, on first use |
 | `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, certification sets and runner                                                                    | 55.86 kB | Yes, on first use |
 | `dte-sdk/pdf`    | Printed samples; `pdf-lib` and `bwip-js` are optional peers                                                                                       | 8.32 kB  | Yes, on first use |
 
