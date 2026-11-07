@@ -51,7 +51,7 @@ describe('an invoice', () => {
     expect(text).toContain('R.U.T.: 76.543.210-3')
     expect(text).toContain('FACTURA ELECTRÓNICA')
     expect(text).toContain('N° 7')
-    expect(text).toContain('S.I.I. - SANTIAGO CENTRO')
+    expect(text).toContain('S.I.I. - ÑUÑOA')
     expect(text).toContain('Comercial Andina SpA')
     expect(text).toContain('Casa Matriz: Av. Los Aromos 1540, Ñuñoa')
     expect(text).toContain('Fecha Emisión: 2026-11-15')
@@ -104,6 +104,18 @@ describe('an invoice', () => {
     expect(custom).toContain('S.I.I. - SANTIAGO ORIENTE')
     expect(custom).toContain('Res. Ex. SII N° 80 del 2014')
     expect(custom).not.toContain('SANTIAGO CENTRO')
+    expect(custom).not.toContain('S.I.I. - ÑUÑOA')
+  })
+
+  test("without an office the one of the issuer's commune is printed, and Santiago Centro when the table lacks it", async () => {
+    const office = async (commune: string) =>
+      (await pdfText(await render({ ...invoiceDoc, issuer: { ...invoiceDoc.issuer, commune } }))).match(
+        /S\.I\.I\. - [^\n]+/,
+      )?.[0]
+    await expect(office('LAS CONDES')).resolves.toBe('S.I.I. - SANTIAGO ORIENTE')
+    await expect(office('Chillán Viejo')).resolves.toBe('S.I.I. - CHILLÁN')
+    await expect(office('Atlantis')).resolves.toBe('S.I.I. - SANTIAGO CENTRO')
+    await expect(office('')).resolves.toBe('S.I.I. - SANTIAGO CENTRO')
   })
 
   test('the default resolution takes the year from the system clock when no clock is given', async () => {

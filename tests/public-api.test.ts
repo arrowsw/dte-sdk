@@ -187,6 +187,9 @@ const ROOT_EXPORTS = [
 
 const NODE_EXPORTS = [
   'createDirectoryFolioRegistry',
+  'findCafFiles',
+  'findLatestCafFile',
+  'resolveCafFile',
   'createDirectoryCapture',
   'createDirectoryUploadArchive',
   'createNodeHttpsTransport',
@@ -315,6 +318,7 @@ const PORTAL_EXPORTS = [
 ] as const
 
 const PDF_EXPORTS = [
+  'SII_OFFICES',
   'findEnvelopeFiles',
   'needsTransferableCopy',
   'parsePrintableDocuments',
@@ -322,6 +326,7 @@ const PDF_EXPORTS = [
   'renderPrintedSample',
   'renderPrintedSamples',
   'renderTedBarcode',
+  'siiOfficeForCommune',
   'writePrintedSamples',
 ] as const
 

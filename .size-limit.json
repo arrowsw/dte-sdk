@@ -21,6 +21,6 @@
     "name": "dte-sdk/pdf (min + brotli)",
     "path": "dist/pdf.min.js",
     "ignore": ["node-forge", "@xmldom/xmldom", "fast-xml-parser", "rut.ts", "pdf-lib", "bwip-js", "node:*"],
-    "limit": "10 kB"
+    "limit": "11 kB"
   }
 ]

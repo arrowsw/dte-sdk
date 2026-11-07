@@ -128,6 +128,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `receiptsTrackIdRefused`, `receiptsComplianceRefused`. `dte-sdk/portal` limit to 68 kB.
 - `receiptReferences` on `DocumentInput` and `Document`, with `ReceiptReferenceInput`, `ReceiptReference` and
   `SiiReferenciaBoleta`: the reference of a receipt (39, 41) as the receipts schema defines it.
+- CAF files on disk (`dte-sdk/node`): `findCafFiles` lists the usable CAF files of a type and company below a directory
+  (five folder levels deep), newest first by modification time: `.xml` files that parse as a CAF of that `TD`, whose
+  `RE` is the company (read from the file, never from its folder) and that have not expired; unreadable folders and
+  files are skipped. `findLatestCafFile` gives the first, and `resolveCafFile` the newest with `required` free folios in
+  a `FolioRegistry` (or in its whole range without one), with its registry `scope`, or null. Types `CafFile`,
+  `FindCafFilesOptions`, `ResolveCafFileOptions`, `ResolvedCafFile`.
+- The SII office of each commune (`dte-sdk/pdf`): `SII_OFFICES` (306 commune names in 37 offices) and
+  `siiOfficeForCommune`, which ignores case, surrounding spaces and accents. `renderPrintedSample` and the batch
+  functions print the office of the issuer's commune when `siiOffice` is not given, and `S.I.I. - SANTIAGO CENTRO` only
+  for a commune the table lacks. `dte-sdk/pdf` limit to 11 kB.
 
 ### Changed
 
