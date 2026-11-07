@@ -63,7 +63,7 @@ describe('the basic set', () => {
     ])
     expect(byNumber(2).items).toEqual([
       { name: 'Pintura blanca', quantity: 40, unitPrice: 5000, discount: '14%' },
-      { name: 'Servicio exento de instalacion', quantity: 1, unitPrice: 20000 },
+      { name: 'Servicio EXENTO de instalacion', quantity: 1, unitPrice: 20000 },
     ])
     expect(byNumber(2).globalDiscountPercent).toBe(7)
     expect(byNumber(3).items).toEqual([{ name: 'Cemento', quantity: 10, unit: 'SACO', unitPrice: 8000 }])
@@ -368,8 +368,20 @@ describe('item rows', () => {
     expect(parseItems('Solo')).toEqual([])
   })
 
-  test('the MODIFICA MONTO reason is matched without regard to case', () => {
-    expect(parseItems('Caja\t5000', 'modifica monto')).toEqual([{ name: 'Caja', quantity: 1, unitPrice: 5000 }])
+  test('the MODIFICA MONTO reason counts in capitals only: in another case the value of a two-part row is a quantity', () => {
+    expect(parseItems('Caja\t5000', 'modifica monto')).toEqual([{ name: 'Caja', quantity: 5000 }])
+  })
+
+  test('the words that keep a row from being an item count in capitals only', () => {
+    expect(parseItems('Razones varias  2  1500')).toEqual([{ name: 'Razones varias', quantity: 2, unitPrice: 1500 }])
+    expect(parseItems('Documentos  1  500')).toEqual([{ name: 'Documentos', quantity: 1, unitPrice: 500 }])
+    expect(parseItems('Referencias  3')).toEqual([{ name: 'Referencias', quantity: 3 }])
+    expect(parseItems('Item  5')).toEqual([{ name: 'Item', quantity: 5 }])
+    expect(parseItems('Cantidad adicional  1  500')).toEqual([
+      { name: 'Cantidad adicional', quantity: 1, unitPrice: 500 },
+    ])
+    expect(parseItems('Precio unitario  5')).toEqual([{ name: 'Precio unitario', quantity: 5 }])
+    expect(parseItems('RAZONES VARIAS  2  1500')).toEqual([])
   })
 
   test('MODIFICA MONTO turns the value of a two-part row into the new price', () => {

@@ -38,7 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SII_UPLOAD_REJECTED.details.status` is a number.
 - Injectable HTTP transport (`createFetchTransport`, `createNodeHttpsTransport` with TLS
   verification on by default; `tls.ca` adds to Node's bundled roots instead of replacing
-  them), token cache, retry policy with backoff, HTTP capture with
+  them), token cache (`createMemoryTokenCache`, and `createDirectoryTokenCache` from
+  `dte-sdk/node`: tokens and portal sessions on disk, one owner-only file per key that also
+  holds the key, read only when it is a regular file of the same user and without blocking,
+  shared by that user's processes, never throwing), retry policy with backoff, HTTP capture with
   redaction (`createMemoryCapture`, `createDirectoryCapture`) and upload archive
   (`createMemoryUploadArchive`, `createDirectoryUploadArchive`; a duplicate answer is kept
   as `<trackId>-<kind>-duplicate-<timestamp>` and archived replies and SOAP fault reasons have
@@ -133,7 +136,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RE` is the company (read from the file, never from its folder) and that have not expired; unreadable folders and
   files are skipped. `findLatestCafFile` gives the first, and `resolveCafFile` the newest with `required` free folios in
   a `FolioRegistry` (or in its whole range without one), with its registry `scope`, or null. Types `CafFile`,
-  `FindCafFilesOptions`, `ResolveCafFileOptions`, `ResolvedCafFile`.
+  `FindCafFilesOptions`, `ResolveCafFileOptions`, `ResolvedCafFile`. `dte-sdk/node` limit to 8 kB.
 - The SII office of each commune (`dte-sdk/pdf`): `SII_OFFICES` (306 commune names in 37 offices) and
   `siiOfficeForCommune`, which ignores case, surrounding spaces and accents. `renderPrintedSample` and the batch
   functions print the office of the issuer's commune when `siiOffice` is not given, and `S.I.I. - SANTIAGO CENTRO` only
@@ -143,7 +146,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Four entries.** `dte-sdk` keeps documents, stamps, signatures, envelopes, books and the web services client over
   `fetch`, and reaches no `node:` module, so it bundles for the browser with no configuration. `dte-sdk/node` holds
-  `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive` and `createDirectoryFolioRegistry`.
+  `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`,
+  `createDirectoryFolioRegistry` and the search for CAF files on disk.
   `dte-sdk/portal` holds the portal, the folio registry, the register, the MIPYME backup and the certification sets.
   `dte-sdk/pdf` holds the printed samples. One `DteError` crosses them. Why and the measurements:
   `docs/decisions/entry-points.md`.
@@ -267,6 +271,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The test set is read in the case field behaviour reads it.** `EXENTO` in the name of an invoice item, `ANULA` in the
+  reason of a basic-set note and `MODIFICA MONTO` in a reason count in capitals only, and so do the words that keep a
+  row of a case from being an item (`DOCUMENTO`, `REFERENCIA` or `RAZON` opening the row, `ITEM`, `CANTIDAD` or
+  `UNITARIO` in its first part). They were matched in any case, so a word in lower case changed the documents sent: a
+  "Servicio exento" line was exempt, a note whose reason said "anula" took the items of the cancelled case, the value of
+  a two-part row under "modifica monto" was read as a price, and an item named "Razones varias" was dropped.
 - A receipt (39, 41) with a reference was written with the invoice shape of `Referencia` (`FchRef`), which the receipts
   schema does not allow. Receipts now take `receiptReferences`, and `references` on a receipt is refused with
   `INVALID_OPTION`, as is `receiptReferences` on any other type. The official `EnvioBOLETA_v11.xsd` is in the test

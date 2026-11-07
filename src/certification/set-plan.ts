@@ -182,7 +182,8 @@ const invoiceItem = (item: TestCaseItem): PlannedItem =>
     quantity: item.quantity,
     unitPrice: item.unitPrice ?? 0,
     discountPercent: percent(item.discount),
-    exempt: item.name.toUpperCase().includes('EXENTO') ? true : undefined,
+    // The field reads the word as the text gives it, in capitals: "Servicio exento" is not exempt.
+    exempt: item.name.includes('EXENTO') ? true : undefined,
   })
 
 const exemptItem = (item: TestCaseItem, withUnit: boolean): PlannedItem =>
@@ -231,7 +232,8 @@ const basicPlan = (set: TestSet, kind: 'basic' | 'exempt'): BasicSetPlan | Exemp
       : testCase.items.length > 0
         ? testCase.items.map(plainItem)
         : [reasonLine(testCase)]
-    const cancels = cancelTakesItems && testCase.reasonText.toUpperCase().includes('ANULA')
+    // As in the simulation, a cancellation counts in capitals only: a lower-case "anula" keeps the note's own items.
+    const cancels = cancelTakesItems && testCase.reasonText.includes('ANULA')
     return note(testCase, items, cancels ? testCase.referencedCase : null)
   }
   const creditNotes = ofType(set, 61).map((testCase) => noteOf(testCase, !exempt))

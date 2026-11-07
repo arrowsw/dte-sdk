@@ -66,6 +66,8 @@ is field behaviour is not fixed: it is recorded for the issue of D104.
   samples portal still discovers, with the known pair as the fallback.
 - **5b-2, section 7, "settled" 6** said field behaviour scans the book history on after a year that cannot be read. It
   does not: such a year counts as empty, as it already did here.
+- **5b-1, section 3.2 ("matching is case-insensitive").** Not for every word: `EXENTO` in an item's name, `ANULA` and
+  `MODIFICA MONTO` in a reason, and the words that keep a row from being an item count in capitals only (section 3.1).
 
 ### D100. Five plans, one pull request each, in order
 
@@ -142,6 +144,11 @@ issue of D104.
   exempt notes take the unit `UN` on their default branch; the debit note of the purchase set takes the items of the
   credit note before it; every case of the guide set is a guide; a receiver's line of business is cut to 40
   characters, in the sets and in the simulation.
+- **Reading the set.** A few words count in capitals only, as the field reads them: `EXENTO` in the name of an invoice
+  item makes it exempt; `ANULA` in the reason of a basic-set note takes the items of the case it cancels; `MODIFICA
+  MONTO` in a reason makes the value of a two-part row the new price; and a row that opens with `DOCUMENTO`,
+  `REFERENCIA` or `RAZON`, or whose first part is `ITEM` or holds `CANTIDAD` or `UNITARIO`, is not an item. The kind of
+  a set, the type of a document, the `CodRef` of a reason and the other labels are read in any case.
 - **Uploading.** D101.
 - **Declaring.** The form is read by its quoted, upper-case attributes; the post goes even when no row has a field;
   the answer is classified on the page as it came (a lost session reads as "not processed yet"; "ENVIO CON ERRORES O

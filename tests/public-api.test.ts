@@ -191,6 +191,7 @@ const NODE_EXPORTS = [
   'findLatestCafFile',
   'resolveCafFile',
   'createDirectoryCapture',
+  'createDirectoryTokenCache',
   'createDirectoryUploadArchive',
   'createNodeHttpsTransport',
 ] as const

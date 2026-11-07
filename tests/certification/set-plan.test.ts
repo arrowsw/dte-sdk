@@ -20,7 +20,7 @@ test('the basic set: invoices with exempt items and discounts, notes with codes,
       caseId: id(2),
       items: [
         { name: 'Pintura blanca', quantity: 40, unitPrice: 5000, discountPercent: 14 },
-        { name: 'Servicio exento de instalacion', quantity: 1, unitPrice: 20000, exempt: true },
+        { name: 'Servicio EXENTO de instalacion', quantity: 1, unitPrice: 20000, exempt: true },
       ],
       globalDiscountPercent: 7,
     },
@@ -70,6 +70,28 @@ test('the basic set: invoices with exempt items and discounts, notes with codes,
       itemsFromCase: null,
     },
   ])
+})
+
+test('an invoice item is exempt only when its name says EXENTO in capitals', () => {
+  const text = `SET BASICO - NUMERO DE ATENCION: 1\nCASO 1-1\nDOCUMENTO FACTURA ELECTRONICA\nServicio exento  1  1000\nServicio EXENTO  1  2000\n`
+  expect(planCertificationSets(parseTestSetText(text)).basic!.invoices[0].items).toEqual([
+    { name: 'Servicio exento', quantity: 1, unitPrice: 1000 },
+    { name: 'Servicio EXENTO', quantity: 1, unitPrice: 2000, exempt: true },
+  ])
+})
+
+test('only a reason that says ANULA in capitals takes the items of the case it cancels', () => {
+  const text = (reason: string) =>
+    `SET BASICO - NUMERO DE ATENCION: 1\nCASO 1-1\nDOCUMENTO FACTURA ELECTRONICA\nCemento  10  8000\nCASO 1-2\nDOCUMENTO NOTA DE CREDITO ELECTRONICA\nREFERENCIA CASO 1-1\nRAZON REFERENCIA ${reason}\n`
+  expect(planCertificationSets(parseTestSetText(text('ANULA FACTURA'))).basic!.creditNotes[0].itemsFromCase).toBe('1-1')
+  expect(planCertificationSets(parseTestSetText(text('anula factura'))).basic!.creditNotes[0]).toEqual({
+    caseId: '1-2',
+    referencedCase: '1-1',
+    referenceCode: 1,
+    reasonText: 'anula factura',
+    items: [{ name: 'anula factura', quantity: 1, unitPrice: 0 }],
+    itemsFromCase: null,
+  })
 })
 
 test('the exempt set: every item exempt, units on invoices, notes may have no items', () => {
