@@ -271,6 +271,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Portal pages that declare UTF-8 only in a `<meta>` are read as UTF-8.** The login pages of herculesr say
+  `charset=UTF-8` in the page and not in the header, and a page without a charset in its header was always decoded as
+  Latin-1, so what they said reached `details.portalMessage` garbled ("AutenticaciÃ³n"). With no charset in the header,
+  the first 1024 bytes are now read for a `<meta>` that declares UTF-8; a charset in the header still decides.
 - **A CAF authorized at the end of a month expires on the last day of the sixth month.** `cafExpiresAt` let the day run
   over into the next month: a CAF authorized on 2026-08-31 expired on 2027-03-03 instead of 2027-02-28, so it could
   stamp documents the SII rejects with `CAF-3-517`. The day is now kept within the month (2027-08-31 gives

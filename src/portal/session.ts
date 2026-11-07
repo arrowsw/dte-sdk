@@ -119,12 +119,22 @@ export const formEncode = (fields: Readonly<Record<string, string>>): string =>
     .map(([name, value]) => `${encodeURIComponent(name)}=${encodeURIComponent(value)}`)
     .join('&')
 
-const portalEncoding = (response: Pick<HttpResponse, 'headers'>): BodyEncoding =>
-  /charset=utf-?8/i.test(response.headers['content-type'] ?? '') ? 'utf8' : 'latin1'
+const UTF8 = /charset\s*=\s*["']?utf-?8/i
+const META_UTF8 = /<meta\b[^>]*charset\s*=\s*["']?utf-?8/i
+
+// The old portal is Latin-1. A charset in the header decides; without one, a page may still declare UTF-8 in a
+// `<meta>`, as the login pages of herculesr do (measured on 2026-11-06), and its first bytes are read for it.
+const portalEncoding = (response: Pick<HttpResponse, 'headers' | 'body'>): BodyEncoding => {
+  const contentType = response.headers['content-type'] ?? ''
+  const utf8 = /charset=/i.test(contentType)
+    ? UTF8.test(contentType)
+    : META_UTF8.test(decodeBody(response.body.subarray(0, 1024), 'latin1'))
+  return utf8 ? 'utf8' : 'latin1'
+}
 
 const encodingOf =
   (context: PortalContext) =>
-  (response: Pick<HttpResponse, 'headers'>): BodyEncoding =>
+  (response: Pick<HttpResponse, 'headers' | 'body'>): BodyEncoding =>
     context.verbatim === undefined ? portalEncoding(response) : 'utf8'
 
 // The jar is flat, so the URL is all that keeps the session on the SII: no cookie goes to another host or in clear text,
