@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-08
+
 ### Added
 
 - **A catalog of the register's document codes and the statuses of each operation.** `REGISTER_DOCUMENT_CODES` lists the
@@ -378,7 +380,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Jest, ESLint, Prettier, size-limit, Stryker, CI and tag-triggered publish)
   and a single `hello()` export that returns `'dte-sdk is coming'`.
 
-[Unreleased]: https://github.com/arrowsw/dte-sdk/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/arrowsw/dte-sdk/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.2.0
 [0.1.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.1.0
 [0.0.2]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.0.2
 [0.0.1]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.0.1
