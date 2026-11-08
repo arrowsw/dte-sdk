@@ -9,7 +9,7 @@ D40 and D41 of the design specs). Tracks [issue #5](https://github.com/arrowsw/d
 |---|---|---|---|
 | `dte-sdk` | Documents, stamps, signatures, envelopes, books, SII web services client over `fetch`, public registry of issuers | 31.54 kB | No |
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile` | 6.34 kB | Yes, on first use |
-| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, certification sets and runner | 72.28 kB | Yes, on first use |
+| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, certification sets and runner | 72.99 kB | Yes, on first use |
 | `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 10.70 kB | Yes, on first use |
 
 Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
@@ -22,7 +22,7 @@ of data that the renderer needs for its default office, so it fits neither the r
 pages of the certification environment, also on 2026-11-07, took `dte-sdk/portal` from 71.59 kB to 72.28 kB, over its
 72 kB limit, which went to 74 kB. The public registry of issuers, a plain call with no certificate or session, went to
 the root with the receiver's answer, which took it to 31.54 kB; the communes the office table lacked took `dte-sdk/pdf`
-to 10.70 kB.
+to 10.70 kB. The catalog of the register's document codes took `dte-sdk/portal` from 72.28 kB to 72.99 kB, under its limit.
 
 ## Why
 

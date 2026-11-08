@@ -437,6 +437,10 @@ await downloadMipymeBackup(portal, {
 | How a purchase is classified, and changing it                                     | `fetchPurchaseDocument` and the writes | `complementoscvui`       |
 | The full XML of a document                                                        | `downloadMipymeBackup`                 | MIPYME backup            |
 
+- **The register's codes and statuses are data.** `REGISTER_DOCUMENT_CODES` and `registerDocumentCode(code)` say, for each
+  of the 49 document codes, which sides of the register show it, whether it is a DTE, its sign in the totals, whether
+  it is listed per document and whether the buyer withholds the VAT. `REGISTER_ACCOUNTING_STATUSES` gives the accounting
+  statuses of each side: four for purchases, only `registered` for sales.
 - **A refused month reads as empty.** Response codes are not looked at, so `listPeriodDocuments` and
   `fetchRegisterSummary` cannot tell a month the SII refuses to show from one with no movement. `raw` holds each row as the
   SII sent it. The row names come from the SII's client code and have not been seen with real documents: an absent field is
