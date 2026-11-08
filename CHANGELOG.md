@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A catalog of the register's document codes and the statuses of each operation.** `REGISTER_DOCUMENT_CODES` lists the
+  49 codes of the purchase and sales register in `dte-sdk/portal`, and `registerDocumentCode(code)` finds one or gives
+  `undefined`. Each entry has the SII label, the sides where it appears (`operations`), whether it is a DTE
+  (`electronic`), whether it reaches the register (`inRegister`, false for dispatch guides 50 and 52), its `sign` in the
+  totals (-1 for credit notes and decreases), whether the register lists it document by document (`perDocument`) and
+  whether the buyer withholds the VAT (`buyerWithholdsVat`: 29, 45 and 46). Guides outside the register, the sign and
+  the 906 summary-only flag are inferred where the SII does not state them, and the JSDoc says so.
+  `REGISTER_ACCOUNTING_STATUSES` gives the statuses each side can hold: all four for purchases, only `registered` for
+  sales. Nothing that exists changed. `dte-sdk/portal` went from 72.28 kB to 72.99 kB, under its 74 kB limit.
+
 ## [0.1.0] - 2026-11-07
 
 ### Added

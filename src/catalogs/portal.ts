@@ -117,6 +117,22 @@ export type RegisterOperation = 'purchase' | 'sale'
 export type AccountingStatus = 'registered' | 'pending' | 'notIncluded' | 'claimed'
 
 /**
+ * EN: The accounting statuses each side of the register can hold. `registered` is a document in the register.
+ * `pending` is a purchase whose receipt acknowledgement from the buyer is still missing. `claimed` is a purchase claimed
+ * within 8 days, which cannot move to another status. `notIncluded` is a purchase the taxpayer chose to leave out. Sales
+ * take only `registered`: no SII source describes other sales states.
+ * ES: Los estados contables que puede tener cada lado del registro. `registered` (REGISTRO) es un documento en el
+ * registro. `pending` (PENDIENTE) es una compra a la que aún le falta el acuse de recibo del comprador. `claimed`
+ * (RECLAMADO) es una compra reclamada dentro de 8 días, que no puede cambiar de estado. `notIncluded` (NO_INCLUIR) es
+ * una compra que el contribuyente decidió dejar fuera. Las ventas solo toman `registered`: ninguna fuente del SII
+ * describe otros estados de venta.
+ */
+export const REGISTER_ACCOUNTING_STATUSES: Readonly<Record<RegisterOperation, readonly AccountingStatus[]>> = {
+  purchase: ['registered', 'pending', 'notIncluded', 'claimed'],
+  sale: ['registered'],
+}
+
+/**
  * EN: `operacion` of the period documents per direction.
  * ES: `operacion` de los documentos de un período según la dirección: 1 emitidos, 2 recibidos.
  */

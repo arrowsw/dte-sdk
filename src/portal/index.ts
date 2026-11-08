@@ -6,7 +6,9 @@
  * solicitudes de CAF, el registro de compras y ventas, el respaldo MIPYME), los sets de certificación y el proceso de
  * certificación. Solo Node: `fetch` no puede presentar un certificado de cliente.
  */
-export { PORTAL_REJECTIONS, portalRejectionMessage } from '../catalogs/portal'
+export { PORTAL_REJECTIONS, portalRejectionMessage, REGISTER_ACCOUNTING_STATUSES } from '../catalogs/portal'
+export { REGISTER_DOCUMENT_CODES, registerDocumentCode } from '../catalogs/register-codes'
+export type { RegisterDocumentCode } from '../catalogs/register-codes'
 export type { AccountingStatus, DocumentDirection, PortalRejection, RegisterOperation } from '../catalogs/portal'
 export { createPortalClient, DEFAULT_PORTAL_RETRY_POLICY, isRetryablePortalError } from './client'
 export type { PortalClient, PortalClientOptions } from './client'
