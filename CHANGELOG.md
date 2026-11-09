@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`createDirectoryFolioRegistry` writes its ledger for the owner only.** It created `dir` and `folios.json` with the
+  default modes, so with the usual umask other users of the machine could read the companies' RUTs, their track ids and
+  what callers keep in `extra`, and it saved through a temp file of fixed name, `folios.json.tmp`, opened without
+  `O_EXCL`, so whatever sat at that name, a symlink included, was written through. It now saves as
+  `createDirectoryTokenCache` does: `dir` is created for the owner only (0700), while one that exists keeps its
+  permissions, and each save writes a temp file of its own, created exclusively and readable by the owner only (0600),
+  renames it over `folios.json` and removes it when the write or the rename fails. A `folios.json` written before
+  becomes owner-only on its next save. On Windows, where files have no such mode, the permissions of `dir` decide.
+  `dte-sdk/node` went from 6.39 kB to 6.41 kB; the other entries did not change.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added
