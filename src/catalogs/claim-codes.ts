@@ -1,3 +1,5 @@
+import type { DocumentType } from './document-types'
+
 /**
  * EN: Actions of the acceptance/claim registry, English name → SII code (`accionDoc`).
  * ES: `accionDoc` — Acciones del Registro de Aceptación/Reclamo: ACD acepta contenido, RCD reclama contenido,
@@ -23,6 +25,28 @@ export type ClaimActionCode = (typeof CLAIM_ACTIONS)[ClaimAction]
  */
 export const isClaimAction = (value: unknown): value is ClaimAction =>
   typeof value === 'string' && Object.keys(CLAIM_ACTIONS).includes(value)
+
+/**
+ * EN: Document types the acceptance/claim registry accepts: invoices (33), exempt invoices (34) and settlement invoices
+ * (43). `ClaimDocumentType` is derived from this list.
+ * ES: `tipoDoc` — Tipos de documento que acepta el Registro de Aceptación/Reclamo: factura (33), factura exenta (34) y
+ * liquidación factura (43). `ClaimDocumentType` se deriva de esta lista.
+ */
+export const CLAIM_DOCUMENT_TYPES = [33, 34, 43] as const satisfies readonly DocumentType[]
+
+/**
+ * EN: Document types the registry accepts.
+ * ES: `tipoDoc` — Tipos de documento que acepta el registro: 33, 34 y 43.
+ */
+export type ClaimDocumentType = (typeof CLAIM_DOCUMENT_TYPES)[number]
+
+/**
+ * EN: Type guard: true when `value` is a document type the registry accepts, so a list of documents can be filtered by it.
+ * ES: Guarda de tipo: true cuando `value` es un tipo de documento que acepta el registro, para filtrar una lista de
+ * documentos por él.
+ */
+export const isClaimDocumentType = (value: unknown): value is ClaimDocumentType =>
+  typeof value === 'number' && (CLAIM_DOCUMENT_TYPES as readonly number[]).includes(value)
 
 /**
  * EN: Event codes the registry reports (`codEvento`), including the ones the receiver does not register: the credit-note

@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The verification of received documents.** `verifyReceivedDocuments(xml, { environment?, siiKeys? })` takes a `DTE`,
+  `EnvioDTE` or `EnvioBOLETA` as a supplier sent it and checks the envelope's own signature and, for each document: its
+  XMLDSig signature; its TED, whose `FRMT` must verify with the key of the CAF the TED carries and whose `DD` must agree
+  with the header (issuer, type, folio, date, receiver and total); that CAF against the document (issuer, type, folio
+  inside the range); and the SII's signature over the CAF (`FRMA`) with the SII key of its `IDK`, accepting only the key
+  of `environment` (production by default): a certification CAF is `invalid` in production, with the mismatch
+  `environment`. Each check is data, and each document and the whole input get a `status` of `valid`, `invalid` or
+  `unchecked`, the last for a CAF whose `IDK` has no known key. A document signed before it went into the envelope, with
+  other namespaces in scope, is checked where it sits and, failing that, on its own, and each document is read from its
+  element in the parsed input, never from a cut of the text, so what is checked is the element the envelope's signature
+  covers and what is reported; `xml` is that element written out, which reads back and verifies the same but is not the
+  input byte for byte, so an archive keeps the input's own bytes. The stamp is read from its elements alone: the `DD`
+  and the `DA` are written from the elements whose fields are compared, flattened, with their texts escaped the SII's
+  way or with only `&`, `<` and `>` escaped, and a stamp is read only when its structure leaves no doubt (one plain
+  `TED` holding a `DD` and then an `FRMT`, one `CAF` with one `DA` and one `FRMA` in the `DD`); anything else is a
+  failed check. Malformed input throws `XML_PARSE_FAILED` or `ENVELOPE_EMPTY`, and so do a DOCTYPE, a prefixed `DTE` or
+  `Documento`, and an envelope with other than one `SetDTE`. Not checked: whose certificate signed, and whether the CAF
+  had expired.
+- **The SII's CAF keys.** `SII_CAF_KEYS` gives the 512-bit keys 100 (certification) and 300 (production) with which the
+  SII signs every CAF, from the SII's certificates as CryptoSys and LibreDTE publish them, the same bytes in both, and
+  `verifyCafSignature(cafXml, { environment?, siiKeys? })` checks the `FRMA` of one CAF, by the same rule for the
+  environment. It reads no DOCTYPE, as `verifyReceivedDocuments` reads none, and throws `CAF_INVALID` for one. The tests
+  sign test CAFs with a test SII key pair (`npm run fixtures:sii`); the two keys met real CAFs only in a check by hand,
+  outside the tests: the CAF of the example the SII publishes for key 100, production CAFs of real documents for key 300.
+- **The claim registry's document types at runtime.** `CLAIM_DOCUMENT_TYPES` (33, 34 and 43) and the guard
+  `isClaimDocumentType` come from `dte-sdk`, so documents can be filtered by them; `ClaimDocumentType` is derived from
+  the list and stays exported.
+- `dte-sdk` went from 31.54 kB to 33.87 kB, over its 32 kB limit, which went to 34 kB, and `dte-sdk/portal` from 73.82 kB
+  to 73.88 kB.
+
+### Fixed
+
+- **`verifyEnveloped` checks only the signature it computes.** It took the first `Reference` and the first `DigestValue`
+  of `SignedInfo` and did not read the algorithms. A `SignedInfo` with more than one `Reference`, a `DigestValue`
+  outside the one `Reference`, a digest other than SHA-1 or a transform other than enveloped-signature or C14N 1.0 now
+  fails `digestValid`, with `referenceId` null when there is more than one `Reference`; a canonicalization other than
+  C14N 1.0 or a signature method other than RSA-SHA1 fails `signatureValid`, so a signature declaring exclusive C14N no
+  longer verifies. `verifyDocumentSignature`, `verifyEnvelopeSignature` and the books' `verify*Signature` share it; the
+  signatures dte-sdk makes pass as before.
+- **`parseCaf` keeps only the CAF it reads.** It cut the `<CAF>` block every TED carries from the text with a pattern,
+  while its fields came from the parsed file, which reads no markup inside comments, instructions, CDATA or attribute
+  values, so a copy of a CAF written in one of them before the real one became the block kept, unlike the CAF
+  `verifyCafSignature` checks. The text must now hold one `<CAF` and one `</CAF`, and a DOCTYPE is refused; both throw `CAF_INVALID`. A CAF
+  as the SII issues it reads as before.
+
 ## [0.3.0] - 2026-11-08
 
 ### Added

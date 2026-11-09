@@ -29,6 +29,8 @@ every field.
 - 🔏 **TED + XMLDSig** — the electronic stamp signed with the CAF key and the
   enveloped signature the SII validates, byte for byte.
 - ✉️ **Envelopes** — `EnvioDTE` and `EnvioBOLETA` with cover and signed `SetDTE`.
+- 📥 **Received documents** — the signature, the stamp and the CAF of every document a supplier
+  sends, and the SII's signature over that CAF.
 - 🪪 **Certificates** — PKCS#12 (`.pfx`/`.p12`, legacy and modern) or PEM; the
   holder RUT is read from the certificate.
 - 📡 **SII web services** — seed/token, `DTEUpload` and the receipts REST API, envelope and
@@ -60,6 +62,7 @@ every field.
 - [Entry points](#entry-points)
 - [Quick start](#quick-start)
 - [Step by step](#step-by-step)
+- [Received documents](#received-documents)
 - [SII web services](#sii-web-services)
 - [SII books](#sii-books)
 - [SII portal and folios](#sii-portal-and-folios)
@@ -86,6 +89,7 @@ real SII answers, so this table says what has met it so far:
 | Area                                                           | Entry            | Against the real SII                                                                                                                                                            |
 | -------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Documents, stamps, signatures and envelopes                    | `dte-sdk`        | Not sent yet                                                                                                                                                                    |
+| Verification of received documents                             | `dte-sdk`        | Not run on a supplier's document yet; the tests sign test CAFs with a test SII key, and the SII's keys met real CAFs only in a check by hand                                    |
 | SII web services client                                        | `dte-sdk`        | Not run yet ([issue 8](https://github.com/arrowsw/dte-sdk/issues/8))                                                                                                            |
 | Public registry of authorized issuers                          | `dte-sdk`        | Not run yet                                                                                                                                                                     |
 | SII books                                                      | `dte-sdk`        | Not sent yet; they validate against the official schemas in the tests                                                                                                           |
@@ -123,7 +127,7 @@ npm install pdf-lib bwip-js
 
 | Import from      | What it holds                                                                                                                                                                                                             | Runs on                                                        |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `dte-sdk`        | Documents, stamps, signatures, envelopes, books and the SII web services client over `fetch`                                                                                                                              | Node, Bun, Deno; bundles for the browser with no configuration |
+| `dte-sdk`        | Documents, stamps, signatures, envelopes, books, the verification of received documents and the SII web services client over `fetch`                                                                                      | Node, Bun, Deno; bundles for the browser with no configuration |
 | `dte-sdk/node`   | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`                  | Node                                                           |
 | `dte-sdk/portal` | SII portal, folios and CAF requests, the folio registry, purchase and sales register, MIPYME backup, activity verification, and certification: sets, runner, exchange, upload of the samples and the receipts application | Node                                                           |
 | `dte-sdk/pdf`    | Printed samples and the SII office of each commune (`SII_OFFICES`, `siiOfficeForCommune`)                                                                                                                                 | Node, with `pdf-lib` and `bwip-js` installed                   |
@@ -215,6 +219,68 @@ verifyDocumentSignature(signed.xml) // { digestValid: true, signatureValid: true
 
 Every function that depends on "now" accepts `{ now: Date }`, so tests are deterministic.
 
+## Received documents
+
+```typescript
+import { readFileSync } from 'node:fs'
+import { decodeLatin1, isClaimDocumentType, verifyReceivedDocuments } from 'dte-sdk'
+
+// Decode the bytes with the encoding the XML declaration names: ISO-8859-1 for the SII's documents
+// In production by default: a document stamped with a certification CAF comes back invalid
+const { envelope, documents, status } = verifyReceivedDocuments(decodeLatin1(readFileSync('EnvioDTE.xml')))
+
+status // 'valid' | 'invalid' | 'unchecked': the worst of the envelope and its documents
+envelope?.valid // the envelope's own signature; envelope is null for a single DTE
+documents[0] // { type: 33, folio: 1234, issuerRut: '10000004-0', totalAmount: 119000, signature, ted, caf, status, xml, … }
+const toAnswer = documents.filter((doc) => doc.status === 'valid' && isClaimDocumentType(doc.type))
+```
+
+`verifyReceivedDocuments` takes a `DTE`, an `EnvioDTE` or an `EnvioBOLETA` as a supplier sent it. Each document is
+checked three ways, and its `status` is `invalid` when a check fails, `unchecked` when none fails but the CAF's `IDK`
+has no known key, and `valid` otherwise:
+
+- **`signature`**: its XMLDSig signature over `Documento` (or `Liquidacion`), with `found`, `digestValid` and
+  `signatureValid`. It proves the document is intact with respect to the certificate it carries, not whose that
+  certificate is.
+- **`ted`**: the stamp. Its `FRMT` must verify with the key of the CAF the TED carries, over the `DD` as ISO-8859-1
+  bytes, and its `DD` must agree with the header: `mismatches` names what differs among the issuer, the type, the folio,
+  the date, the receiver and the total. `RSR` and `IT1` are free text each issuer folds its own way, and are not compared.
+- **`caf`**: the CAF in the stamp, against the document (`mismatches`: another issuer, another type, a folio outside its
+  range) and against the SII: `siiSignature` checks its `FRMA`, the SII's signature over `DA`, with the SII key its
+  `IDK` names.
+
+`SII_CAF_KEYS` holds the keys 100 (certification) and 300 (production) that sign every CAF, taken from the SII's
+certificates as CryptoSys and LibreDTE publish them, the same bytes in both. Only the key of `environment` is accepted,
+`production` by default: a CAF signed with the other one is `invalid`, with the mismatch `environment` and
+`caf.environment` saying which it is, so a certification document never passes for a production one. Pass
+`environment: 'certification'` to check documents of the certification environment. `siiKeys` replaces the key
+material; spread `SII_CAF_KEYS` to add a key. `verifyCafSignature(cafXml, { environment })` checks the `FRMA` of a
+single CAF the same way; to check the CAF your own TEDs will carry, pass it `parseCaf(file).xml`, the block `parseCaf`
+keeps.
+
+- **A document that fails a check is a result, not an error.** Malformed XML, another root, an envelope without
+  exactly one `SetDTE` and a `DTE` without its `Documento` throw `XML_PARSE_FAILED`; an envelope without documents throws
+  `ENVELOPE_EMPTY`.
+- **What is checked is what is reported.** Each document is read from its element in the parsed input, never from a cut
+  of the text: its signature is checked over forms written from that element and its fields and stamp are read from
+  it. `xml` is that element written out: the same elements, attributes, text and comments, which read back and verify
+  the same, but not the input byte for byte (a CDATA section becomes escaped text, a character reference the character,
+  an empty element `<X/>`). To archive a received document, keep the bytes of the input itself, not `xml`. A document is often signed before it goes into an envelope, with other namespaces in scope:
+  its signature is checked where it sits and, failing that, on its own, with the SII namespace and as written; the
+  forms differ only in namespace declarations, never in content. A signature passes only with one `Reference`, SHA-1,
+  RSA-SHA1, C14N 1.0 and no transform but enveloped-signature or C14N 1.0.
+- **The stamp is read from its elements alone.** The `FRMT` and the `FRMA` are checked over the `DD` and the `DA` written
+  from the very elements whose fields are compared: flattened, the form the SII signs, with their texts escaped the
+  SII's way or with only `&`, `<` and `>` escaped (so `&#xC1;` reads as `Á`). A stamp is read only when its structure
+  leaves no doubt: one `TED`, plain (no prefix, no namespace declaration, no comment, CDATA or instruction), holding a
+  `DD` and then an `FRMT` and nothing else, and one `CAF` with one `DA` and one `FRMA` in the `DD`; anything else is a
+  failed check. A DOCTYPE, which the parsers read differently, is refused with `XML_PARSE_FAILED`, as are a prefixed
+  `DTE` or `Documento`.
+- **Not checked:** whose certificate signed, and whether the CAF had expired when the document was stamped.
+- **Not run on a supplier's document yet.** The tests sign test CAFs with a test SII key pair. The two SII keys were
+  checked once by hand, outside the tests: key 100 verifies the CAF of the example the SII publishes, and key 300
+  verified production CAFs carried by real documents.
+
 ## SII web services
 
 ```typescript
@@ -240,7 +306,8 @@ The client is plain data: every operation is a free function that takes it first
 obtained and renewed for you (one cache per environment, channel and certificate). Also
 available: `getSeed`/`getToken`, `uploadBook`, `uploadFolioConsumption`, `queryUploadStatus`,
 `queryDocumentStatus`, `folioReceived`, `listClaimEvents`, `queryTransferable`,
-`queryReceptionDate`, `receiverStatus`.
+`queryReceptionDate`, `receiverStatus`. `CLAIM_DOCUMENT_TYPES` (33, 34 and 43) and `isClaimDocumentType` say which
+documents the registry takes.
 
 `receiverAnswer(events, receivedAt, today)` reads what the receiver answered, with no request:
 the events of `listClaimEvents`, the `receivedAt` of `queryReceptionDate` and today in Chile

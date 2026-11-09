@@ -69,13 +69,15 @@ export { RECEPTION_STATUS, classifyReceptionStatus, receptionStatusMessage } fro
 export type { ReceptionStatusClass } from './catalogs/reception-status'
 export {
   CLAIM_ACTIONS,
+  CLAIM_DOCUMENT_TYPES,
   CLAIM_EVENT_CODES,
   CLAIM_RESPONSE_CODES,
   claimResponseMessage,
+  isClaimDocumentType,
   TRANSFERABILITY_CODES,
   transferabilityMessage,
 } from './catalogs/claim-codes'
-export type { ClaimAction, ClaimActionCode } from './catalogs/claim-codes'
+export type { ClaimAction, ClaimActionCode, ClaimDocumentType } from './catalogs/claim-codes'
 
 export { toSiiRut, isSiiRut, splitSiiRut } from './model/rut'
 export type { SiiRut } from './model/rut'
@@ -145,6 +147,17 @@ export { signDocument, verifyDocumentSignature } from './document/sign'
 export type { SignedDocument } from './document/sign'
 export { issueDocument } from './document/issue'
 export type { IssueDocumentInput } from './document/issue'
+export { verifyReceivedDocuments } from './document/verify-received'
+export type {
+  VerifyReceivedDocumentsOptions,
+  ReceivedDocumentsVerification,
+  ReceivedDocument,
+  ReceivedSignatureCheck,
+  ReceivedTedCheck,
+  ReceivedCafCheck,
+  TedMismatch,
+  CafMismatch,
+} from './document/verify-received'
 
 export { buildXml } from './xml/build'
 export { parseXml, parseXmlWithoutNamespaces, extractTagContent, decodeXmlEntities } from './xml/parse'
@@ -174,6 +187,8 @@ export { parseCaf } from './caf/parse'
 export type { Caf } from './caf/parse'
 export { cafExpiresAt, isCafExpired, isFolioInRange, assertFolioInRange, availableFolios } from './caf/validity'
 export { signWithCaf, verifyWithCaf } from './caf/sign'
+export { SII_CAF_KEYS, verifyCafSignature } from './caf/sii-signature'
+export type { SiiCafKeys, CafSignatureOptions, VerificationStatus } from './caf/sii-signature'
 
 export { stampDocument, verifyTed, buildDdString, buildTedXml, tedText } from './ted/build'
 export type { Ted, StampedDocument, StampOptions } from './ted/build'
@@ -351,7 +366,6 @@ export {
   receiverAnswer,
 } from './sii/claims'
 export type {
-  ClaimDocumentType,
   ClaimDocumentInput,
   RegisterClaimInput,
   ClaimResult,

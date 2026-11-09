@@ -58,12 +58,17 @@ const integer = (value: string | undefined, reason: string): number => {
 }
 
 /**
- * EN: Parses a CAF XML file as downloaded from the SII. Validates structure, type, range and key.
- * ES: Parsea un archivo CAF XML tal como se descarga del SII. Valida estructura, tipo, rango y llave.
- * @throws {DteError} EN: `CAF_INVALID`, `INVALID_RUT`. ES: `CAF_INVALID`, `INVALID_RUT`.
+ * EN: Parses a CAF XML file as downloaded from the SII. Validates structure, type, range and key, and that the text
+ * holds one `<CAF` and one `</CAF`, so the `<CAF>` block kept for the TED is the CAF its fields are read from.
+ * ES: Parsea un archivo CAF XML tal como se descarga del SII. Valida estructura, tipo, rango y llave, y que el texto
+ * tenga un `<CAF` y un `</CAF`, para que el bloque `<CAF>` que se guarda para el TED sea el CAF del que se leen sus
+ * campos.
+ * @throws {DteError} EN: `CAF_INVALID`, also for a DOCTYPE or another `<CAF` or `</CAF` anywhere in the text, such as in a comment; `INVALID_RUT`. ES: `CAF_INVALID`, también para un DOCTYPE u otro `<CAF` o `</CAF` en cualquier parte del texto, como en un comentario; `INVALID_RUT`.
  */
 export const parseCaf = (xml: string): Caf => {
   if (typeof xml !== 'string' || xml.trim() === '') throw invalid('empty')
+  // The parsers read a DOCTYPE differently, so none is read, as in verifyCafSignature.
+  if (/<!DOCTYPE/i.test(xml)) throw invalid('a DOCTYPE is not read')
   const tree = (() => {
     try {
       return parseXml(xml)
@@ -93,6 +98,10 @@ export const parseCaf = (xml: string): Caf => {
   } catch {
     throw invalid('RSASK is not a PEM private key')
   }
+  // The block every TED carries is cut from the text, while the fields come from the parsed file, which reads no markup
+  // inside comments, instructions, CDATA or attribute values: with one `<CAF` and one `</CAF` in the whole text, the
+  // block cut is the element read, never a copy written in one of them.
+  if (xml.split('<CAF').length !== 2 || xml.split('</CAF').length !== 2) throw invalid('expected one <CAF> block')
   const block = /<CAF[^>]*>[\s\S]*?<\/CAF>/.exec(xml)?.[0]
   if (block === undefined) throw invalid('missing <CAF> block')
   const authorizationDate = textOf(data, 'FA')?.trim() ?? ''

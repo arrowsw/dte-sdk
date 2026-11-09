@@ -34,6 +34,8 @@ const EXPECTED_FUNCTIONS: Record<string, readonly string[]> = {
     'createEnvelope',
     'signEnvelope',
     'verifyEnvelopeSignature',
+    'verifyReceivedDocuments',
+    'verifyCafSignature',
     'buildEnvelopeXml',
     'buildDocumentXml',
     'toSiiDocument',

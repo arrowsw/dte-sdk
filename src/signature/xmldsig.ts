@@ -174,11 +174,11 @@ export const signRootElement = ({
  * íntegros respecto del certificado embebido en `KeyInfo`; que ese certificado sea del firmante esperado es otro chequeo.
  */
 export type SignatureVerification = {
-  /** EN: `Reference/@URI` without `#`, or null when the signature carries no reference. ES: `Reference/@URI` sin `#`, o null si la firma no trae referencia. */
+  /** EN: `Reference/@URI` without `#`, or null when `SignedInfo` carries no reference, or more than one. ES: `Reference/@URI` sin `#`, o null si `SignedInfo` no trae referencia, o trae más de una. */
   readonly referenceId: string | null
-  /** EN: The referenced element is unique, sits next to `Signature` under the root, has the expected tag and still hashes to `DigestValue`. ES: El elemento referenciado es único, está junto a `Signature` bajo el raíz, tiene la etiqueta esperada y sigue produciendo el `DigestValue`. */
+  /** EN: `SignedInfo` holds one `Reference`, with SHA-1, no transform but enveloped-signature or C14N 1.0, and the only `DigestValue`; the element it references is unique, sits next to `Signature` under the root, has the expected tag and still hashes to that `DigestValue`. ES: `SignedInfo` tiene una sola `Reference`, con SHA-1, sin transformadas salvo enveloped-signature o C14N 1.0, y el único `DigestValue`; el elemento que referencia es único, está junto a `Signature` bajo el raíz, tiene la etiqueta esperada y sigue produciendo ese `DigestValue`. */
   readonly digestValid: boolean
-  /** EN: `SignatureValue` verifies with the embedded certificate. ES: `SignatureValue` verifica con el certificado embebido. */
+  /** EN: `SignedInfo` declares C14N 1.0 and RSA-SHA1, and `SignatureValue` verifies with the embedded certificate. ES: `SignedInfo` declara C14N 1.0 y RSA-SHA1, y `SignatureValue` verifica con el certificado embebido. */
   readonly signatureValid: boolean
   /** EN: Both checks passed. ES: Pasaron ambos chequeos. */
   readonly valid: boolean
@@ -196,6 +196,41 @@ const descendantsAndSelf = (element: Element): readonly Element[] => [
 ]
 
 const textOf = (parent: Element, tag: string): string | null => parent.getElementsByTagName(tag)[0]?.textContent ?? null
+
+// The one child named `tag`, or undefined when there is none or more than one.
+const onlyChild = (parent: Element | undefined, tag: string): Element | undefined => {
+  const matches = parent === undefined ? [] : elementChildren(parent).filter((child) => child.tagName === tag)
+  return matches.length === 1 ? matches[0] : undefined
+}
+
+const algorithmOf = (parent: Element | undefined, tag: string): string | null | undefined =>
+  onlyChild(parent, tag)?.getAttribute('Algorithm')
+
+const ALLOWED_TRANSFORMS: readonly (string | null)[] = [ENVELOPED_SIGNATURE, C14N_ALGORITHM]
+
+/**
+ * EN: The one `Reference` of a `SignedInfo`, when it is the kind this verifier computes: SHA-1, no transform but the
+ * enveloped-signature one and C14N 1.0 (both leave a sibling element as it is), and the only `DigestValue` of the
+ * `SignedInfo` inside it. Anything else could make a check of the first reference pass while another one is not
+ * checked, or claim an algorithm that is not the one computed.
+ * ES: La única `Reference` de un `SignedInfo`, cuando es del tipo que calcula este verificador: SHA-1, ninguna
+ * transformada salvo enveloped-signature y C14N 1.0 (ambas dejan intacto un elemento hermano), y dentro de ella el único
+ * `DigestValue` del `SignedInfo`. Otra cosa podría hacer pasar el chequeo de la primera referencia sin chequear otra, o
+ * declarar un algoritmo que no es el calculado.
+ */
+const soleReference = (signedInfo: Element): Element | undefined => {
+  const reference = onlyChild(signedInfo, 'Reference')
+  const transformLists =
+    reference === undefined ? [] : elementChildren(reference).filter((c) => c.tagName === 'Transforms')
+  const transforms = transformLists.flatMap(elementChildren)
+  const shaped =
+    transformLists.length <= 1 &&
+    transforms.every((t) => t.tagName === 'Transform' && ALLOWED_TRANSFORMS.includes(t.getAttribute('Algorithm'))) &&
+    algorithmOf(reference, 'DigestMethod') === SHA1_ALGORITHM &&
+    signedInfo.getElementsByTagName('DigestValue').length === 1 &&
+    onlyChild(reference, 'DigestValue') !== undefined
+  return shaped ? reference : undefined
+}
 
 /**
  * EN: Locates the element a `Reference` points to, resisting signature wrapping: the `ID` must be unique in the whole
@@ -215,11 +250,17 @@ const referencedElement = (root: Element, referenceId: string | null, elementTag
  * EN: Verifies the enveloped signature that is a direct child of `rootTag`: locates the signed element by the `ID`
  * named in `Reference/@URI` (see `referencedElement`), recomputes its digest and checks `SignatureValue` with the
  * `X509Certificate` carried in `KeyInfo`. A reference that is missing, ambiguous, misplaced or not an `elementTag`
- * yields `digestValid: false` instead of throwing, so wrapped or duplicated elements never verify.
+ * yields `digestValid: false` instead of throwing, so wrapped or duplicated elements never verify. Only the signature
+ * this computes passes: one `Reference`, holding the only `DigestValue`, with SHA-1 and no transform but
+ * enveloped-signature or C14N 1.0 (else `digestValid: false`), under C14N 1.0 and RSA-SHA1 (else
+ * `signatureValid: false`).
  * ES: Verifica la firma envuelta que es hija directa de `rootTag`: ubica el elemento firmado por el `ID` que nombra
  * `Reference/@URI` (ver `referencedElement`), recalcula su digest y comprueba `SignatureValue` con el
  * `X509Certificate` que viene en `KeyInfo`. Una referencia ausente, ambigua, mal ubicada o que no es un `elementTag`
- * da `digestValid: false` en vez de lanzar, así que un elemento envuelto o duplicado nunca verifica.
+ * da `digestValid: false` en vez de lanzar, así que un elemento envuelto o duplicado nunca verifica. Solo pasa la firma
+ * que esto calcula: una `Reference`, con el único `DigestValue`, con SHA-1 y sin transformadas salvo
+ * enveloped-signature o C14N 1.0 (si no, `digestValid: false`), bajo C14N 1.0 y RSA-SHA1 (si no,
+ * `signatureValid: false`).
  * @throws {DteError} EN: `XML_PARSE_FAILED` (malformed XML or wrong root), `SIGNATURE_NOT_FOUND` (no `Signature` under the root or no `SignedInfo` in it). ES: `XML_PARSE_FAILED` (XML malformado o raíz incorrecta), `SIGNATURE_NOT_FOUND` (sin `Signature` bajo el raíz o sin `SignedInfo` dentro).
  */
 export const verifyEnveloped = (
@@ -234,13 +275,15 @@ export const verifyEnveloped = (
   if (signature === undefined) throw new DteError('SIGNATURE_NOT_FOUND', { field: target.rootTag })
   const signedInfo = firstChildElement(signature, 'SignedInfo')
   if (signedInfo === undefined) throw new DteError('SIGNATURE_NOT_FOUND', { field: 'SignedInfo' })
-  const storedDigest = (textOf(signedInfo, 'DigestValue') ?? '').replace(/\s+/g, '')
+  const reference = soleReference(signedInfo)
+  const storedDigest = (onlyChild(reference, 'DigestValue')?.textContent ?? '').replace(/\s+/g, '')
   const signatureValue = (textOf(signature, 'SignatureValue') ?? '').replace(/\s+/g, '')
   const certificateBase64 = (textOf(signature, 'X509Certificate') ?? '').replace(/\s+/g, '')
-  const referenceUri = firstChildElement(signedInfo, 'Reference')?.getAttribute('URI')
+  const referenceUri = onlyChild(signedInfo, 'Reference')?.getAttribute('URI')
   const referenceId = referenceUri ? referenceUri.replace(/^#/, '') : null
   const element = referencedElement(root, referenceId, target.elementTag)
-  const digestValid = element !== null && sha1Base64(canonicalizeElement(element), 'utf8') === storedDigest
+  const digestValid =
+    reference !== undefined && element !== null && sha1Base64(canonicalizeElement(element), 'utf8') === storedDigest
   const certificatePem = `-----BEGIN CERTIFICATE-----\n${wrapBase64(certificateBase64)}\n-----END CERTIFICATE-----\n`
   const publicKey = (() => {
     try {
@@ -249,7 +292,12 @@ export const verifyEnveloped = (
       return null
     }
   })()
+  const signedWithRsaSha1 =
+    algorithmOf(signedInfo, 'CanonicalizationMethod') === C14N_ALGORITHM &&
+    algorithmOf(signedInfo, 'SignatureMethod') === RSA_SHA1_ALGORITHM
   const signatureValid =
-    publicKey !== null && rsaSha1VerifyBase64(publicKey, canonicalizeElement(signedInfo), 'utf8', signatureValue)
+    signedWithRsaSha1 &&
+    publicKey !== null &&
+    rsaSha1VerifyBase64(publicKey, canonicalizeElement(signedInfo), 'utf8', signatureValue)
   return { referenceId, digestValid, signatureValid, valid: digestValid && signatureValid }
 }

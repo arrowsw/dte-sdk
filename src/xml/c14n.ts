@@ -5,10 +5,18 @@ const ELEMENT_NODE = 1
 const TEXT_NODE = 3
 const CDATA_NODE = 4
 
-const canonicalText = (text: string): string =>
+/**
+ * EN: A text node's value as canonical XML writes it: `&`, `<`, `>` and CR escaped.
+ * ES: El valor de un nodo de texto como lo escribe XML canónico: `&`, `<`, `>` y CR escapados.
+ */
+export const canonicalText = (text: string): string =>
   text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\r/g, '&#xD;')
 
-const canonicalAttribute = (value: string): string =>
+/**
+ * EN: An attribute value as canonical XML writes it: `&`, `<`, `"`, tab, LF and CR escaped, so it reads back the same.
+ * ES: Un valor de atributo como lo escribe XML canónico: `&`, `<`, `"`, tabulación, LF y CR escapados, así se lee igual.
+ */
+export const canonicalAttribute = (value: string): string =>
   value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
