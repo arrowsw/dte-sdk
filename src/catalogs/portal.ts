@@ -48,10 +48,10 @@ export const RCV_HOSTS: Readonly<Record<Environment, string>> = {
 export const rcvAppUrl = (environment: Environment, app: string): string => `https://${RCV_HOSTS[environment]}/${app}/`
 
 /**
- * EN: One JSON service of the RCV.
- * ES: Un servicio JSON del RCV.
+ * EN: One JSON service behind an SII facade, as the RCV apps and the activity verification app have.
+ * ES: Un servicio JSON detrás de una fachada del SII, como los de las apps del RCV y de la app de verificación de actividades.
  */
-export type RcvService = {
+export type FacadeService = {
   /** EN: App visited first, which leaves the session token in the jar. ES: App que se visita primero, y que deja el token de sesión en la bolsa. */
   readonly entryApp: string
   /** EN: App the calls belong to. ES: App a la que pertenecen las llamadas. */
@@ -62,13 +62,17 @@ export type RcvService = {
   readonly namespace: string
   /** EN: The envelope carries a fixed `transactionId` and a `page`, instead of a UUID and null. ES: El sobre lleva `transactionId` fijo y `page`, en vez de un UUID y null. */
   readonly paged: boolean
+  /** EN: The app exists only on the production host, so a client of any environment reads it there. ES: La app existe solo en el host de producción, así que un cliente de cualquier ambiente la lee ahí. */
+  readonly productionOnly?: boolean
+  /** EN: The envelope leaves `page` out, as the app's own client does, instead of sending null. ES: El sobre omite `page`, como lo hace el cliente de la propia app, en vez de enviar null. */
+  readonly omitsPage?: boolean
 }
 
 /**
  * EN: The three RCV services: the documents of a period, the official register and the purchase complements.
  * ES: Los tres servicios del RCV: los documentos de un período, el registro oficial y los complementos de compra.
  */
-export const RCV_SERVICES: Readonly<Record<'documents' | 'register' | 'complements', RcvService>> = {
+export const RCV_SERVICES: Readonly<Record<'documents' | 'register' | 'complements', FacadeService>> = {
   documents: {
     entryApp: 'consemitidosinternetui',
     app: 'consemitidosinternetui',
@@ -90,6 +94,22 @@ export const RCV_SERVICES: Readonly<Record<'documents' | 'register' | 'complemen
     namespace: 'cl.sii.sdi.lob.diii.dcv.data.api.interfaces.compcompra.FacadeServiceCompCompra',
     paged: true,
   },
+}
+
+/**
+ * EN: The SII's "Consulta estado de verificación y acreditación" app, measured on 2026-11-08: it exists only in production,
+ * and its own client sends no `page` in the envelope.
+ * ES: La app "Consulta estado de verificación y acreditación" del SII, medida el 2026-11-08: existe solo en producción, y su
+ * propio cliente no envía `page` en el sobre.
+ */
+export const ACTIVITY_VERIFICATION_SERVICE: FacadeService = {
+  entryApp: 'verificacionactividadesinternetui',
+  app: 'verificacionactividadesinternetui',
+  facade: 'services/data/facadeService',
+  namespace: 'cl.sii.sdi.lob.did.verificacionactividades.data.api.interfaces.FacadeService',
+  paged: false,
+  productionOnly: true,
+  omitsPage: true,
 }
 
 /**
@@ -173,6 +193,7 @@ export type PortalRejection =
   | 'userWithoutPermission'
   | 'personWithPendingIssues'
   | 'activityVerificationPending'
+  | 'activityVerificationRefused'
   | 'typeNotEnabled'
   | 'quotaInsufficient'
   | 'quotaExceeded'
@@ -222,6 +243,8 @@ export const PORTAL_REJECTIONS: Readonly<Record<PortalRejection, string>> = {
     'La persona autenticada tiene situaciones pendientes con el SII y no puede hacer trámites de factura electrónica. No se resuelve reintentando: debe regularizarlas en el SII.',
   activityVerificationPending:
     'El RUT no registra Verificación de Actividades para este tipo de documento: se realiza en línea en sii.cl. No aplica a boletas.',
+  activityVerificationRefused:
+    'El SII no entregó el estado de la Verificación de Actividades: respondió con un código de error, y lo que dijo va en `details.portalMessage` cuando dijo algo.',
   typeNotEnabled:
     'El SII no ofrece este tipo de documento para timbraje con este RUT: falta certificarlo o habilitarlo. Reintentar no lo arregla.',
   quotaInsufficient:

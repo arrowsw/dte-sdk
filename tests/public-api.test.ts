@@ -304,6 +304,7 @@ const PORTAL_EXPORTS = [
   'fetchRegisterSummary',
   'fetchTaxpayerData',
   'isRetryablePortalError',
+  'listAccreditationDocuments',
   'listFolioRanges',
   'listPeriodDocuments',
   'listPurchaseTypes',
@@ -321,6 +322,7 @@ const PORTAL_EXPORTS = [
   'requestCaf',
   'requestCafExact',
   'requestCafInBatches',
+  'unstable_fetchActivityVerification',
 ] as const
 
 const PDF_EXPORTS = [

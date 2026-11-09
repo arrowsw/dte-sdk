@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { loadCertificateFromPkcs12 } from '../../src/certificate/pkcs12'
 import { isDteError } from '../../src/errors'
 import { createPortalClient } from '../../src/portal/client'
+import { listAccreditationDocuments, unstable_fetchActivityVerification } from '../../src/portal/activity-verification'
 import { fetchCompanyResolution, fetchTaxpayerData } from '../../src/portal/company'
 import { listFolioRanges } from '../../src/portal/annulment'
 import { downloadMipymeBackup } from '../../src/portal/backup'
@@ -13,7 +14,8 @@ import { listStampableTypes, queryFolioQuota } from '../../src/portal/stamping'
  * Live smoke against the SII portal. Never runs in CI: it needs a real certificate enabled as a login method at sii.cl.
  *   SII_LIVE=1 SII_CERT_PFX=/path/to/cert.pfx SII_CERT_PASSWORD=… SII_COMPANY_RUT=… npx jest tests/live/portal
  * It only reads: nothing here stamps or annuls, because those spend folios and quota, and nothing changes the register.
- * The MIPYME backup reads production even from this certification client. Nothing from here is committed.
+ * The MIPYME backup and the activity verification read production even from this certification client. Nothing from here
+ * is committed.
  */
 const env = process.env
 const enabled =
@@ -70,6 +72,11 @@ guarded('live: portal', () => {
   test('MIPYME backup of one day, keeping nothing', async () => {
     const day = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
     await answered(downloadMipymeBackup(portal!, { from: day, to: day, onChunk: () => undefined }))
+  }, 120000)
+
+  test('activity verification and its documents, read only, on production', async () => {
+    await answered(unstable_fetchActivityVerification(portal!))
+    await expect(listAccreditationDocuments(portal!)).resolves.not.toHaveLength(0)
   }, 120000)
 
   test('a closed session logs in again on demand', async () => {
