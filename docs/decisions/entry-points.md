@@ -27,6 +27,8 @@ The activity verification, on 2026-11-08, took it to 73.82 kB, still under its l
 The verification of received documents, on 2026-11-09, took `dte-sdk` from 31.54 kB to 33.87 kB, over its 32 kB limit,
 which went to 34 kB, and the stricter checks it brought (the signature, and the `<CAF>` block `parseCaf` keeps) took
 `dte-sdk/portal` to 73.88 kB.
+Returning the CAFs a batch request already holds, with its check of the quantity, took `dte-sdk/portal` to 73.95 kB,
+still under its limit.
 
 ## Why
 

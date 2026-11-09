@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     only by a later trip, where it would now read as a `failure` with CAFs in hand.
   - **The certification's `prepareFolios`** keeps those CAFs in the state and then throws the failure's code, with
     `type`, `operation` and `step`, the code it threw before this change, instead of `FOLIO_OUT_OF_RANGE`.
+  - **Size:** `dte-sdk/portal` went from 73.88 kB to 73.95 kB, under its 74 kB limit.
 
 ### Fixed
 
