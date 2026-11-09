@@ -75,9 +75,10 @@ every field.
 
 ## Status
 
-0.1.0 was the first release with a public API. 0.2.0 adds the catalog of the register's document codes, and every area
-this README describes ships in it. Releases before 1.0.0 come out as the work lands, without waiting for the runs
-against the real SII; those runs come before 1.0.0, the first version recommended for production.
+0.1.0 was the first release with a public API. 0.2.0 added the catalog of the register's document codes, and 0.3.0 adds
+the activity verification, still unstable. Every area this README describes ships in 0.3.0. Releases before 1.0.0 come
+out as the work lands, without waiting for the runs against the real SII; those runs come before 1.0.0, the first
+version recommended for production.
 
 Every area is tested against synthetic SII answers, with a 100 % coverage gate in CI. Those tests cannot show how the
 real SII answers, so this table says what has met it so far:
