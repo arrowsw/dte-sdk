@@ -76,9 +76,12 @@ export type ReceivedTedCheck = {
 }
 
 /**
- * EN: A field of the document the CAF must cover.
- * ES: Un campo del documento que el CAF debe cubrir: `issuerRut` (`RE` frente a `RUTEmisor`), `documentType` (`TD`
- * frente a `TipoDTE`), `folio` (`Folio` dentro de `RNG`).
+ * EN: What the CAF must match: `issuerRut` (`RE` against `RUTEmisor`), `documentType` (`TD` against `TipoDTE`),
+ * `folio` (`Folio` inside `RNG`), and `environment` (the environment of the SII key its `IDK` names against the
+ * `environment` option).
+ * ES: Lo que el CAF debe cumplir: `issuerRut` (`RE` frente a `RUTEmisor`), `documentType` (`TD` frente a `TipoDTE`),
+ * `folio` (`Folio` dentro de `RNG`) y `environment` (el ambiente de la llave del SII que nombra su `IDK` frente a la
+ * opción `environment`).
  */
 export type CafMismatch = 'issuerRut' | 'documentType' | 'folio' | 'environment'
 
@@ -101,7 +104,7 @@ export type ReceivedCafCheck = {
   readonly range: { readonly from: number; readonly to: number } | null
   /** EN: Authorization date as written, `YYYY-MM-DD` in the SII's CAFs. ES: `DA/FA` — Fecha de autorización tal como viene, `AAAA-MM-DD` en los CAF del SII. */
   readonly authorizationDate: string | null
-  /** EN: What the CAF does not cover of the document: another issuer, another type, a folio outside its range. ES: Lo que el CAF no cubre del documento: otro emisor, otro tipo, un folio fuera de su rango. */
+  /** EN: What the CAF does not cover of the document: another issuer, another type, a folio outside its range, or a CAF of the other environment than the `environment` option. ES: Lo que el CAF no cubre del documento: otro emisor, otro tipo, un folio fuera de su rango, o un CAF del otro ambiente que la opción `environment`. */
   readonly mismatches: readonly CafMismatch[]
   /** EN: The SII's signature over `DA` (`FRMA`): `unchecked` when no SII key is known for `keyId`. ES: La firma del SII sobre `DA` (`FRMA`): `unchecked` si no se conoce la llave del SII para `keyId`. */
   readonly siiSignature: VerificationStatus
@@ -116,7 +119,7 @@ export type ReceivedCafCheck = {
  * enteros.
  */
 export type ReceivedDocument = {
-  /** EN: The `<DTE>` written from its element (`writeXml`): the elements, attributes, own namespace declarations, text, comments and instructions of the input, which read back and verify the same, but not the input byte for byte (a CDATA section becomes escaped text, a character reference the character, an empty element `<X/>`); the namespaces it inherits from the envelope are not added. ES: El `<DTE>` escrito desde su elemento (`writeXml`): los elementos, atributos, declaraciones de namespace propias, texto, comentarios e instrucciones de la entrada, que se leen y verifican igual, pero no la entrada byte a byte (una sección CDATA pasa a texto escapado, una referencia de carácter al carácter, un elemento vacío a `<X/>`); no se agregan los namespaces que hereda del sobre. */
+  /** EN: The `<DTE>` written from its element (`writeXml`): the elements, attributes, own namespace declarations, text, comments and instructions of the input, which read back and verify the same, but not the input byte for byte (a CDATA section becomes escaped text, a character reference the character, an empty element `<X/>`); the namespaces it inherits from the envelope are not added. To archive a received document, keep the input's own bytes, since this is a rewrite. ES: El `<DTE>` escrito desde su elemento (`writeXml`): los elementos, atributos, declaraciones de namespace propias, texto, comentarios e instrucciones de la entrada, que se leen y verifican igual, pero no la entrada byte a byte (una sección CDATA pasa a texto escapado, una referencia de carácter al carácter, un elemento vacío a `<X/>`); no se agregan los namespaces que hereda del sobre. Para archivar un documento recibido, guarda los bytes de la propia entrada, porque esto es una reescritura. */
   readonly xml: string
   /** EN: `ID` of the signed element. ES: `Documento/@ID` (o `Liquidacion/@ID`) — `ID` del elemento firmado. */
   readonly id: string | null

@@ -7,7 +7,7 @@ D40 and D41 of the design specs). Tracks [issue #5](https://github.com/arrowsw/d
 
 | Entry | Holds | Size | Reaches `node:` |
 |---|---|---|---|
-| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 33.78 kB | No |
+| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 33.82 kB | No |
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile` | 6.34 kB | Yes, on first use |
 | `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 73.81 kB | Yes, on first use |
 | `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 10.70 kB | Yes, on first use |
@@ -24,7 +24,7 @@ pages of the certification environment, also on 2026-11-07, took `dte-sdk/portal
 the root with the receiver's answer, which took it to 31.54 kB; the communes the office table lacked took `dte-sdk/pdf`
 to 10.70 kB. The catalog of the register's document codes took `dte-sdk/portal` from 72.28 kB to 72.99 kB, under its limit.
 The activity verification, on 2026-11-08, took it to 73.82 kB, still under its limit.
-The verification of received documents, on 2026-11-09, took `dte-sdk` from 31.54 kB to 33.78 kB, over its 32 kB limit,
+The verification of received documents, on 2026-11-09, took `dte-sdk` from 31.54 kB to 33.82 kB, over its 32 kB limit,
 which went to 34 kB, and the stricter signature check it brought took `dte-sdk/portal` to 73.81 kB.
 
 ## Why

@@ -20,12 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   other namespaces in scope, is checked where it sits and, failing that, on its own, and each document is read from its
   element in the parsed input, never from a cut of the text, so what is checked is the element the envelope's signature
   covers and what is reported; `xml` is that element written out, which reads back and verifies the same but is not the
-  input byte for byte. The stamp is read from its elements alone: the `DD` and the `DA` are written from the elements
-  whose fields are compared, flattened, with their texts escaped the SII's way or with only `&`, `<` and `>` escaped,
-  and a stamp is read only when its structure leaves no doubt (one plain `TED` holding a `DD` and then an `FRMT`, one
-  `CAF` with one `DA` and one `FRMA` in the `DD`); anything else is a failed check. Malformed input throws
-  `XML_PARSE_FAILED` or `ENVELOPE_EMPTY`, and so do a DOCTYPE, a prefixed `DTE` or `Documento`, and an envelope with
-  other than one `SetDTE`. Not checked: whose certificate signed, and whether the CAF had expired.
+  input byte for byte, so an archive keeps the input's own bytes. The stamp is read from its elements alone: the `DD`
+  and the `DA` are written from the elements whose fields are compared, flattened, with their texts escaped the SII's
+  way or with only `&`, `<` and `>` escaped, and a stamp is read only when its structure leaves no doubt (one plain
+  `TED` holding a `DD` and then an `FRMT`, one `CAF` with one `DA` and one `FRMA` in the `DD`); anything else is a
+  failed check. Malformed input throws `XML_PARSE_FAILED` or `ENVELOPE_EMPTY`, and so do a DOCTYPE, a prefixed `DTE` or
+  `Documento`, and an envelope with other than one `SetDTE`. Not checked: whose certificate signed, and whether the CAF
+  had expired.
 - **The SII's CAF keys.** `SII_CAF_KEYS` gives the 512-bit keys 100 (certification) and 300 (production) with which the
   SII signs every CAF, from the SII's certificates as CryptoSys and LibreDTE publish them, the same bytes in both, and
   `verifyCafSignature(cafXml, { environment?, siiKeys? })` checks the `FRMA` of one CAF, by the same rule for the
@@ -35,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The claim registry's document types at runtime.** `CLAIM_DOCUMENT_TYPES` (33, 34 and 43) and the guard
   `isClaimDocumentType` come from `dte-sdk`, so documents can be filtered by them; `ClaimDocumentType` is derived from
   the list and stays exported.
-- `dte-sdk` went from 31.54 kB to 33.78 kB, over its 32 kB limit, which went to 34 kB, and `dte-sdk/portal` from 73.82 kB
+- `dte-sdk` went from 31.54 kB to 33.82 kB, over its 32 kB limit, which went to 34 kB, and `dte-sdk/portal` from 73.82 kB
   to 73.81 kB.
 
 ### Fixed

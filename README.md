@@ -264,7 +264,7 @@ single CAF the same way.
   of the text: its signature is checked over forms written from that element and its fields and stamp are read from
   it. `xml` is that element written out: the same elements, attributes, text and comments, which read back and verify
   the same, but not the input byte for byte (a CDATA section becomes escaped text, a character reference the character,
-  an empty element `<X/>`). A document is often signed before it goes into an envelope, with other namespaces in scope:
+  an empty element `<X/>`). To archive a received document, keep the bytes of the input itself, not `xml`. A document is often signed before it goes into an envelope, with other namespaces in scope:
   its signature is checked where it sits and, failing that, on its own, with the SII namespace and as written; the
   forms differ only in namespace declarations, never in content. A signature passes only with one `Reference`, SHA-1,
   RSA-SHA1, C14N 1.0 and no transform but enveloped-signature or C14N 1.0.

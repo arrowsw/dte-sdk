@@ -7,6 +7,7 @@ import {
 } from '../src/document/verify-received'
 import { createEnvelope } from '../src/envelope/create'
 import { signEnvelope } from '../src/envelope/sign'
+import { verifyDocumentSignature } from '../src/document/sign'
 import { issueDocument } from '../src/document/issue'
 import { FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from './support/fixtures'
 import {
@@ -609,6 +610,32 @@ describe('verifyReceivedDocuments: the node checked is the node read', () => {
     expect(result.documents).toHaveLength(1)
     expect(result.documents[0]).toMatchObject({ folio: 1, status: 'valid' })
     expect(result.status).toBe('valid')
+  })
+
+  // xmldom turns a raw NEL or LS into a line feed, in text and in attribute values, so the forms written from an
+  // element must keep them as references.
+  test.each([
+    ['NEL', '&#x85;'],
+    ['LS', '&#x2028;'],
+  ])('a %s reference stays itself in text and attribute values, both ways', (_label, reference) => {
+    const signedWith = (text: string, attribute: string): string =>
+      signedElsewhere(issued(1), ` xmlns="${SII_NS}"`, (xml) =>
+        xml.replace('<GiroRecep>Comercio</GiroRecep>', `<GiroRecep nota="a${attribute}b">Comer${text}cio</GiroRecep>`),
+      )
+    // A line feed swapped for the reference after signing, in the text or in the attribute, fails.
+    const signedWithLf = signedWith('\n', '&#xA;')
+    for (const tampered of [
+      signedWithLf.replace('Comer\ncio', `Comer${reference}cio`),
+      signedWithLf.replace('a&#xA;b', `a${reference}b`),
+    ]) {
+      expect(tampered).not.toBe(signedWithLf)
+      expect(verifyDocumentSignature(tampered).valid).toBe(false)
+      expect(only(tampered).signature.valid).toBe(false)
+    }
+    // A document signed with the reference itself verifies, and its xml keeps it.
+    const genuine = only(signedWith(reference, reference))
+    expect(genuine.status).toBe('valid')
+    expect(genuine.xml).toContain(`<GiroRecep nota="a${reference}b">Comer${reference}cio</GiroRecep>`)
   })
 
   test('a closing DTE tag in a comment, an instruction or a CDATA section inside the document is only text', () => {
