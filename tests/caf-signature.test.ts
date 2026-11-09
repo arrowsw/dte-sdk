@@ -103,6 +103,10 @@ describe('verifyCafSignature', () => {
       '<CAF version="1.0" xmlns:x="u"><x:DA><IDK>100</IDK></x:DA><FRMA algoritmo="SHA1withRSA">AA==</FRMA></CAF>',
     ],
     ['an IDK that is not a number', fixtureText('caf-33-signed.xml').replace('<IDK>100</IDK>', '<IDK>cien</IDK>')],
+    [
+      'a DOCTYPE, as in verifyReceivedDocuments',
+      fixtureText('caf-33-signed.xml').replace('<AUTORIZACION>', '<!DOCTYPE AUTORIZACION><AUTORIZACION>'),
+    ],
   ])('%s is CAF_INVALID', (_label, xml) => {
     expect(() => verifyCafSignature(xml, options)).toThrow(DteError)
     try {
@@ -118,6 +122,15 @@ describe('verifyCafSignature', () => {
     ['a second FRMA', (xml: string) => xml.replace('</CAF>', '<FRMA algoritmo="SHA1withRSA">AA==</FRMA></CAF>')],
   ])('%s is CAF_INVALID, whichever one is genuine', (_label, edit) => {
     expect(() => verifyCafSignature(edit(fixtureText('caf-33-signed.xml')), options)).toThrow(DteError)
+  })
+
+  test('a file whose CAF passes is the CAF parseCaf reads, or parseCaf refuses it', () => {
+    const file = fixtureText('caf-33-signed.xml')
+    const decoy = '<CAF version="1.0"><DA><IDK>100</IDK></DA><FRMA algoritmo="SHA1withRSA">AA==</FRMA></CAF>'
+    const commented = file.replace('<CAF', `<!-- ${decoy} --><CAF`)
+    expect(verifyCafSignature(commented, options)).toBe('valid')
+    expect(() => parseCaf(commented)).toThrow(DteError)
+    expect(verifyCafSignature(parseCaf(file).xml, options)).toBe('valid')
   })
 
   test('a value that is not a string is CAF_INVALID', () => {

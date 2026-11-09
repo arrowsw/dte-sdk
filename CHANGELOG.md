@@ -30,14 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The SII's CAF keys.** `SII_CAF_KEYS` gives the 512-bit keys 100 (certification) and 300 (production) with which the
   SII signs every CAF, from the SII's certificates as CryptoSys and LibreDTE publish them, the same bytes in both, and
   `verifyCafSignature(cafXml, { environment?, siiKeys? })` checks the `FRMA` of one CAF, by the same rule for the
-  environment. The tests sign test CAFs with a test SII key pair (`npm run fixtures:sii`); the two keys met real CAFs
-  only in a check by hand, outside the tests: the CAF of the example the SII publishes for key 100, production CAFs of
-  real documents for key 300.
+  environment. It reads no DOCTYPE, as `verifyReceivedDocuments` reads none, and throws `CAF_INVALID` for one. The tests
+  sign test CAFs with a test SII key pair (`npm run fixtures:sii`); the two keys met real CAFs only in a check by hand,
+  outside the tests: the CAF of the example the SII publishes for key 100, production CAFs of real documents for key 300.
 - **The claim registry's document types at runtime.** `CLAIM_DOCUMENT_TYPES` (33, 34 and 43) and the guard
   `isClaimDocumentType` come from `dte-sdk`, so documents can be filtered by them; `ClaimDocumentType` is derived from
   the list and stays exported.
-- `dte-sdk` went from 31.54 kB to 33.82 kB, over its 32 kB limit, which went to 34 kB, and `dte-sdk/portal` from 73.82 kB
-  to 73.81 kB.
+- `dte-sdk` went from 31.54 kB to 33.87 kB, over its 32 kB limit, which went to 34 kB, and `dte-sdk/portal` from 73.82 kB
+  to 73.88 kB.
 
 ### Fixed
 
@@ -48,6 +48,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   C14N 1.0 or a signature method other than RSA-SHA1 fails `signatureValid`, so a signature declaring exclusive C14N no
   longer verifies. `verifyDocumentSignature`, `verifyEnvelopeSignature` and the books' `verify*Signature` share it; the
   signatures dte-sdk makes pass as before.
+- **`parseCaf` keeps only the CAF it reads.** It cut the `<CAF>` block every TED carries from the text with a pattern,
+  while its fields came from the parsed file, which reads no markup inside comments, instructions, CDATA or attribute
+  values, so a copy of a CAF written in one of them before the real one became the block kept, unlike the CAF
+  `verifyCafSignature` checks. The text must now hold one `<CAF` and one `</CAF`, and a DOCTYPE is refused; both throw `CAF_INVALID`. A CAF
+  as the SII issues it reads as before.
 
 ## [0.3.0] - 2026-11-08
 

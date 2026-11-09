@@ -24,8 +24,9 @@ pages of the certification environment, also on 2026-11-07, took `dte-sdk/portal
 the root with the receiver's answer, which took it to 31.54 kB; the communes the office table lacked took `dte-sdk/pdf`
 to 10.70 kB. The catalog of the register's document codes took `dte-sdk/portal` from 72.28 kB to 72.99 kB, under its limit.
 The activity verification, on 2026-11-08, took it to 73.82 kB, still under its limit.
-The verification of received documents, on 2026-11-09, took `dte-sdk` from 31.54 kB to 33.82 kB, over its 32 kB limit,
-which went to 34 kB, and the stricter signature check it brought took `dte-sdk/portal` to 73.81 kB.
+The verification of received documents, on 2026-11-09, took `dte-sdk` from 31.54 kB to 33.87 kB, over its 32 kB limit,
+which went to 34 kB, and the stricter checks it brought (the signature, and the `<CAF>` block `parseCaf` keeps) took
+`dte-sdk/portal` to 73.88 kB.
 
 ## Why
 

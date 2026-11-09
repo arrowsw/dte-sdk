@@ -69,6 +69,30 @@ describe('parseCaf', () => {
     expectCode(() => parseCaf(caf33.replace('</CAF>', '</CAF >')), 'CAF_INVALID')
   })
 
+  // A decoy that reads as the same CAF but is not its bytes: the TEDs would carry a CAF whose FRMA fails.
+  const decoy = () => parseCaf(caf33).xml.replace('<RE>76543210-3</RE>', '<RE> 76543210-3 </RE>')
+  test.each([
+    ['another CAF in a comment', () => caf33.replace('<CAF', '<!-- <CAF version="1.0"><DA/></CAF> --><CAF')],
+    ['a CAF start tag in a comment', () => caf33.replace('<CAF', '<!-- <CAF> --><CAF')],
+    ['a copy in a comment', () => caf33.replace('<AUTORIZACION>', `<!-- ${decoy()} --><AUTORIZACION>`)],
+    ['a copy in an instruction', () => caf33.replace('<AUTORIZACION>', `<?note ${decoy()}?><AUTORIZACION>`)],
+    ['a copy in CDATA', () => caf33.replace('<AUTORIZACION>', `<AUTORIZACION><NOTE><![CDATA[${decoy()}]]></NOTE>`)],
+    ['a copy in an attribute', () => caf33.replace('<AUTORIZACION>', `<AUTORIZACION note='${decoy()}'>`)],
+    ['a copy in the XML declaration', () => `<?xml version="1.0" encoding='${decoy()}'?>\n${caf33}`],
+    ['an end tag in a comment', () => caf33.replace('</AUTORIZACION>', '<!-- </CAF> --></AUTORIZACION>')],
+  ])('refuses a text with another <CAF or </CAF: %s', (_label, file) => {
+    expectCode(() => parseCaf(file()), 'CAF_INVALID')
+  })
+
+  test('reads a CAF beside a comment that holds no CAF block', () => {
+    const commented = caf33.replace('<AUTORIZACION>', '<!-- downloaded from the SII --><AUTORIZACION>')
+    expect(parseCaf(commented)).toEqual(parseCaf(caf33))
+  })
+
+  test('refuses a DOCTYPE', () => {
+    expectCode(() => parseCaf(caf33.replace('<AUTORIZACION>', '<!DOCTYPE AUTORIZACION><AUTORIZACION>')), 'CAF_INVALID')
+  })
+
   test('issuer RUT is mandatory; issuer name and SII signature default to empty', () => {
     expectCode(() => parseCaf(caf33.replace(/<RE>[^<]*<\/RE>/, '')), 'INVALID_RUT')
     const bare = parseCaf(caf33.replace(/<RS>[^<]*<\/RS>/, '').replace(/<FRMA[^>]*>[^<]*<\/FRMA>/, ''))

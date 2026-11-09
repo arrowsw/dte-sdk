@@ -129,9 +129,11 @@ export const checkCafBlock = (block: CafBlock, keys: SiiCafKeys): VerificationSt
  * `readCaf`: un `CAF`, un `DA` y una `FRMA`, los dos últimos hijos directos del primero. `unchecked` si no se conoce
  * llave para ese `IDK`: `SII_CAF_KEYS` tiene la 100 y la 300. `invalid` para un CAF del otro ambiente que
  * `environment` (producción por defecto), sea cual sea su firma.
- * @throws {DteError} EN: `CAF_INVALID` when the text is not XML or `readCaf` finds no CAF in it. ES: `CAF_INVALID` si el texto no es XML o `readCaf` no encuentra un CAF en él.
+ * @throws {DteError} EN: `CAF_INVALID` when the text is not XML, holds a DOCTYPE, or `readCaf` finds no CAF in it. ES: `CAF_INVALID` si el texto no es XML, trae un DOCTYPE o `readCaf` no encuentra un CAF en él.
  */
 export const verifyCafSignature = (cafXml: string, options: CafSignatureOptions = {}): VerificationStatus => {
+  // As in verifyReceivedDocuments and parseCaf: the parsers read a DOCTYPE differently, so none is read.
+  if (/<!DOCTYPE/i.test(cafXml)) throw new DteError('CAF_INVALID', { reason: 'a DOCTYPE is not read' })
   const root = (() => {
     try {
       return parseXmlDom(cafXml).documentElement

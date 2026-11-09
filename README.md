@@ -255,7 +255,8 @@ certificates as CryptoSys and LibreDTE publish them, the same bytes in both. Onl
 `caf.environment` saying which it is, so a certification document never passes for a production one. Pass
 `environment: 'certification'` to check documents of the certification environment. `siiKeys` replaces the key
 material; spread `SII_CAF_KEYS` to add a key. `verifyCafSignature(cafXml, { environment })` checks the `FRMA` of a
-single CAF the same way.
+single CAF the same way; to check the CAF your own TEDs will carry, pass it `parseCaf(file).xml`, the block `parseCaf`
+keeps.
 
 - **A document that fails a check is a result, not an error.** Malformed XML, another root, an envelope without
   exactly one `SetDTE` and a `DTE` without its `Documento` throw `XML_PARSE_FAILED`; an envelope without documents throws
