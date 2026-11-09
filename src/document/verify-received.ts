@@ -1,9 +1,7 @@
 import {
   checkCafBlock,
-  readCafBlock,
-  signedTextForms,
+  readCaf,
   SII_CAF_KEYS,
-  startTags,
   type CafBlock,
   type SiiCafKeys,
   type VerificationStatus,
@@ -12,6 +10,17 @@ import { rsaSha1VerifyBase64 } from '../crypto/rsa'
 import { DteError } from '../errors'
 import { toSiiRut } from '../model/rut'
 import { verifyEnveloped, type SignatureVerification } from '../signature/xmldsig'
+import {
+  child,
+  childElements,
+  declarationsOf,
+  descendants,
+  integer,
+  isPlain,
+  named,
+  signedForms,
+  textAt,
+} from '../xml/elements'
 import { escapeXmlAttribute } from '../xml/escape'
 import { parseXmlDom } from '../xml/parse'
 
@@ -52,9 +61,9 @@ export type TedMismatch = 'issuerRut' | 'documentType' | 'folio' | 'issueDate' |
  * ES: `TED` — El timbre electrónico, chequeado.
  */
 export type ReceivedTedCheck = {
-  /** EN: One `TED` sits in the signed element and holds exactly a `DD` and then an `FRMT`, with no other `DD` or `FRMT` tag and no comment, CDATA or instruction inside. ES: Hay un solo `TED` en el elemento firmado y tiene exactamente un `DD` y luego una `FRMT`, sin otra etiqueta `DD` ni `FRMT` y sin comentarios, CDATA ni instrucciones dentro. */
+  /** EN: One `TED` in the document, by local name, sits in the signed element, is plain (no prefix, no namespace declaration, no comment, CDATA or instruction) and holds exactly a `DD` and then an `FRMT`, with no other `DD` or `FRMT` inside. ES: Hay un solo `TED` en el documento, por nombre local, está en el elemento firmado, es simple (sin prefijos, sin declaraciones de namespace, sin comentarios, CDATA ni instrucciones) y tiene exactamente un `DD` y luego una `FRMT`, sin otro `DD` ni `FRMT` dentro. */
   readonly found: boolean
-  /** EN: `FRMT` verifies with the `RSAPK` of the CAF the TED carries, over the `DD` as ISO-8859-1 bytes: as written, flattened, or with its texts written the SII's way. ES: `FRMT` verifica con la `RSAPK` del CAF que trae el TED, sobre el `DD` en bytes ISO-8859-1: tal como viene, aplanado, o con sus textos escritos a la manera del SII. */
+  /** EN: `FRMT` verifies with the `RSAPK` of the CAF the TED carries, over the `DD` written from its element as ISO-8859-1 bytes: flattened, its texts escaped the SII's way or with only `&`, `<` and `>` escaped. ES: `FRMT` verifica con la `RSAPK` del CAF que trae el TED, sobre el `DD` escrito desde su elemento en bytes ISO-8859-1: aplanado, con sus textos escapados a la manera del SII o con solo `&`, `<` y `>` escapados. */
   readonly signatureValid: boolean
   /** EN: The `DD` fields that differ from the header, or that one of the two lacks. `RSR` and `IT1` are free text each issuer folds and cuts its own way, and are not compared. ES: Los campos del `DD` que difieren del encabezado, o que falta en uno de los dos. `RSR` e `IT1` son texto libre que cada emisor pliega y corta a su manera, y no se comparan. */
   readonly mismatches: readonly TedMismatch[]
@@ -74,7 +83,7 @@ export type CafMismatch = 'issuerRut' | 'documentType' | 'folio'
  * ES: `TED/DD/CAF` — El CAF que trae el TED, chequeado contra el documento y contra la firma del SII.
  */
 export type ReceivedCafCheck = {
-  /** EN: The `DD` holds one `CAF` with one `DA` and one `FRMA` as its direct children, and the `DA` has `RE`, `TD`, `RNG`, `RSAPK` and `IDK`; when false every other field is null or empty and the status is `invalid`. ES: El `DD` tiene un solo `CAF` con un `DA` y una `FRMA` como hijos directos, y el `DA` tiene `RE`, `TD`, `RNG`, `RSAPK` e `IDK`; si es false, los demás campos son null o vacíos y el estado es `invalid`. */
+  /** EN: The stamp was found and its `DD` holds one `CAF`, `DA` and `FRMA` by local name, the `CAF` a direct child of the `DD` with the other two as its direct children, and the `DA` has `RE`, `TD`, `RNG`, `RSAPK` and `IDK`; when false every other field is null or empty and the status is `invalid`. ES: Se encontró el timbre y su `DD` tiene un solo `CAF`, `DA` y `FRMA` por nombre local, el `CAF` hijo directo del `DD` con los otros dos como hijos directos suyos, y el `DA` tiene `RE`, `TD`, `RNG`, `RSAPK` e `IDK`; si es false, los demás campos son null o vacíos y el estado es `invalid`. */
   readonly found: boolean
   /** EN: Id of the SII key that signed it; 100 marks certification and 300 production. ES: `DA/IDK` — Id de la llave del SII que lo firmó; 100 marca certificación y 300 producción. */
   readonly keyId: number | null
@@ -150,31 +159,27 @@ const NOT_FOUND: ReceivedSignatureCheck = {
   valid: false,
 }
 
-// An element's text in the input: comments, CDATA sections and processing instructions are matched whole and skipped,
-// so a tag inside one of them is never taken for an element.
-const elementPattern = (tag: string): RegExp =>
-  new RegExp(
-    `<!--[\\s\\S]*?-->|<!\\[CDATA\\[[\\s\\S]*?\\]\\]>|<\\?[\\s\\S]*?\\?>|<${tag}(?:\\s[^>]*)?(?<!/)>[\\s\\S]*?</${tag}\\s*>`,
-    'g',
-  )
-const DTE_PATTERN = elementPattern('DTE')
-const TED_PATTERN = elementPattern('TED')
-const elementTexts = (text: string, pattern: RegExp, tag: string): readonly string[] =>
-  Array.from(text.matchAll(pattern), (match) => match[0]).filter((match) => match.startsWith(`<${tag}`))
+// Where each line of the input starts, by the line breaks xmldom counts once it has normalized them (CR LF, CR NEL, CR,
+// LF, NEL and LS): the line and column xmldom records for an element then map back to its offset in the input.
+const lineStarts = (text: string): readonly number[] => [
+  0,
+  ...Array.from(text.matchAll(/\r\n|\r\x85|[\n\r\x85\u{2028}]/gu), (match) => match.index + match[0].length),
+]
 
-const childElements = (parent: Element): readonly Element[] =>
-  Array.from(parent.childNodes).filter((node): node is Element => node.nodeType === 1)
+type Located = Element & { readonly lineNumber: number; readonly columnNumber: number }
 
-const child = (parent: Element | undefined, tag: string): Element | undefined =>
-  parent === undefined ? undefined : childElements(parent).find((element) => element.tagName === tag)
+const offsetOf = (starts: readonly number[], element: Element): number =>
+  starts[(element as Located).lineNumber - 1] + (element as Located).columnNumber - 1
 
-const textAt = (parent: Element | undefined, ...path: readonly string[]): string | null => {
-  const element = path.reduce<Element | undefined>(child, parent)
-  const text = element?.textContent?.trim()
-  return text === undefined || text === '' ? null : text
+// Just past the first `</DTE>` after `start`, or the end of the text. A DTE holds no DTE, so that is its own closing
+// tag, unless the text sits in a comment, CDATA, an instruction or an attribute inside it: the text is then cut where
+// something is still open, and does not parse.
+const endOf = (text: string, start: number): number => {
+  const closing = /<\/DTE[ \t\n\r\x85\u{2028}]*>/gu
+  closing.lastIndex = start
+  const match = closing.exec(text)
+  return match === null ? text.length : match.index + match[0].length
 }
-
-const integer = (text: string | null): number | null => (text !== null && /^\d+$/.test(text) ? Number(text) : null)
 
 const rutKey = (rut: string): string => {
   try {
@@ -190,11 +195,6 @@ const worst = (statuses: readonly VerificationStatus[]): VerificationStatus =>
   statuses.includes('invalid') ? 'invalid' : statuses.includes('unchecked') ? 'unchecked' : 'valid'
 
 const passed = (valid: boolean): VerificationStatus => (valid ? 'valid' : 'invalid')
-
-const declarationsOf = (element: Element): readonly (readonly [string, string])[] =>
-  Array.from(element.attributes)
-    .filter((attribute) => attribute.name === 'xmlns' || attribute.name.startsWith('xmlns:'))
-    .map((attribute) => [attribute.name, attribute.value] as const)
 
 // The namespace declarations in scope at an element from its ancestors, the nearest winning.
 const inheritedDeclarations = (element: Element): ReadonlyMap<string, string> => {
@@ -218,7 +218,7 @@ const withDeclarations = (dte: string, declarations: readonly (readonly [string,
  * (el ejemplo que publica el SII está firmado sin namespace alguno). Difieren solo en los namespaces declarados en el
  * raíz, que no llevan contenido.
  */
-const signedForms = (dte: string, element: Element): readonly string[] => {
+const namespaceForms = (dte: string, element: Element): readonly string[] => {
   const own = new Map(declarationsOf(element))
   const inPlace = withDeclarations(
     dte,
@@ -286,7 +286,8 @@ const tedMismatches = (dd: Element, header: Header): readonly TedMismatch[] => {
   return (Object.keys(differs) as TedMismatch[]).filter((field) => differs[field])
 }
 
-const checkCaf = (da: Element, block: CafBlock, header: Header, keys: SiiCafKeys): ReceivedCafCheck => {
+const checkCaf = (block: CafBlock, header: Header, keys: SiiCafKeys): ReceivedCafCheck => {
+  const { da } = block
   const issuerRut = textAt(da, 'RE')
   const documentType = integer(textAt(da, 'TD'))
   const from = integer(textAt(da, 'RNG', 'D'))
@@ -313,65 +314,60 @@ const checkCaf = (da: Element, block: CafBlock, header: Header, keys: SiiCafKeys
   }
 }
 
-const UNREAD_MARKUP = /<!--|<!\[CDATA\[|<\?/
-const DD_BLOCK = /<DD(?:\s[^>]*)?>[\s\S]*?<\/DD\s*>/
 const NO_STAMP = { ted: NO_TED, caf: NO_CAF } as const
 
+// The DD, the FRMT's value and nothing else: the TED holds a DD and then an FRMT, and no other DD or FRMT inside.
+const stampParts = (ted: Element): { readonly dd: Element; readonly signature: string } | undefined => {
+  const [dd, frmt, ...others] = childElements(ted)
+  const inside = descendants(ted)
+  const signature = String(frmt?.textContent).replace(/\s+/g, '')
+  return dd?.tagName === 'DD' &&
+    frmt?.tagName === 'FRMT' &&
+    others.length === 0 &&
+    named(inside, 'DD').length === 1 &&
+    named(inside, 'FRMT').length === 1 &&
+    signature !== ''
+    ? { dd, signature }
+    : undefined
+}
+
 /**
- * EN: Checks the stamp and its CAF, taking every signed text from the element its fields are read from. A stamp is read
- * only when its structure leaves no doubt: one `TED`, a direct child of the signed element, holding a `DD` and then an
- * `FRMT` and nothing else, with no other `DD` or `FRMT` tag and nothing the DOM does not read (comments, CDATA,
- * instructions). Its CAF is read only when the `DD` holds one `CAF`, one `DA` and one `FRMA` tag, the `CAF` a direct
- * child of the `DD` and the other two direct children of the `CAF`; otherwise there is no CAF and no key to verify the
+ * EN: Checks the stamp and its CAF from their elements alone: the signed bytes are written from the `DD` and the `DA`
+ * whose fields are read (`signedForms`), never searched for in the text. A stamp is read only when its structure leaves
+ * no doubt: one `TED` in the document by local name, a direct child of the signed element, plain (`isPlain`: no
+ * prefix, no namespace declaration, no comment, CDATA or instruction), holding a `DD` and then an `FRMT` and nothing
+ * else. Its CAF is read as `readCaf` reads it inside the `DD`; otherwise there is no CAF and no key to verify the
  * `FRMT` with.
- * ES: Chequea el timbre y su CAF, tomando cada texto firmado del elemento del que se leen sus campos. Un timbre se lee
- * solo cuando su estructura no deja dudas: un `TED`, hijo directo del elemento firmado, con un `DD` y luego una `FRMT`
- * y nada más, sin otra etiqueta `DD` ni `FRMT` y sin nada que el DOM no lea (comentarios, CDATA, instrucciones). Su CAF
- * se lee solo cuando el `DD` tiene una etiqueta `CAF`, una `DA` y una `FRMA`, el `CAF` hijo directo del `DD` y las otras
- * dos hijas directas del `CAF`; si no, no hay CAF ni llave con que verificar la `FRMT`.
+ * ES: Chequea el timbre y su CAF solo desde sus elementos: los bytes firmados se escriben desde el `DD` y el `DA` cuyos
+ * campos se leen (`signedForms`), nunca se buscan en el texto. Un timbre se lee solo cuando su estructura no deja dudas:
+ * un `TED` en el documento por nombre local, hijo directo del elemento firmado, simple (`isPlain`: sin prefijos, sin
+ * declaraciones de namespace, sin comentarios, CDATA ni instrucciones), con un `DD` y luego una `FRMT` y nada más. Su
+ * CAF se lee como lo lee `readCaf` dentro del `DD`; si no, no hay CAF ni llave con que verificar la `FRMT`.
  */
 const checkStamp = (
-  dte: string,
   root: Element,
   signed: Element,
   header: Header,
   keys: SiiCafKeys,
 ): { readonly ted: ReceivedTedCheck; readonly caf: ReceivedCafCheck } => {
-  const elements = Array.from(root.getElementsByTagName('TED'))
-  const texts = elementTexts(dte, TED_PATTERN, 'TED')
-  const tedText = texts.length === 1 && !UNREAD_MARKUP.test(texts[0]) ? texts[0] : ''
-  const [dd, frmt, ...others] =
-    elements.length === 1 && elements[0].parentNode === signed ? childElements(elements[0]) : []
-  const ddText = DD_BLOCK.exec(tedText)?.[0]
-  const signature = frmt?.textContent?.replace(/\s+/g, '') ?? ''
-  if (
-    dd?.tagName !== 'DD' ||
-    frmt?.tagName !== 'FRMT' ||
-    others.length > 0 ||
-    startTags(tedText, 'DD') !== 1 ||
-    startTags(tedText, 'FRMT') !== 1 ||
-    ddText === undefined ||
-    signature === ''
-  )
-    return NO_STAMP
-  const caf = child(dd, 'CAF')
-  const da = child(caf, 'DA')
-  const block = child(caf, 'FRMA') === undefined ? null : readCafBlock(ddText)
-  const keyDa = block === null ? undefined : da
-  const key = { modulus: textAt(keyDa, 'RSAPK', 'M') ?? '', exponent: textAt(keyDa, 'RSAPK', 'E') ?? '' }
-  const signatureValid = signedTextForms(ddText).some((data) => rsaSha1VerifyBase64(key, data, 'latin1', signature))
-  const mismatches = tedMismatches(dd, header)
+  const teds = named(descendants(root), 'TED')
+  const parts = teds.length === 1 && teds[0].parentNode === signed && isPlain(teds[0]) ? stampParts(teds[0]) : undefined
+  if (parts === undefined) return NO_STAMP
+  const block = readCaf(parts.dd)
+  const key = { modulus: textAt(block?.da, 'RSAPK', 'M') ?? '', exponent: textAt(block?.da, 'RSAPK', 'E') ?? '' }
+  const signatureValid = signedForms(parts.dd).some((data) => rsaSha1VerifyBase64(key, data, 'latin1', parts.signature))
+  const mismatches = tedMismatches(parts.dd, header)
   return {
     ted: { found: true, signatureValid, mismatches, valid: signatureValid && mismatches.length === 0 },
-    caf: block === null || da === undefined ? NO_CAF : checkCaf(da, block, header, keys),
+    caf: block === null ? NO_CAF : checkCaf(block, header, keys),
   }
 }
 
 const verifyDocument = (dte: string, element: Element, index: number, keys: SiiCafKeys): ReceivedDocument => {
-  const forms = signedForms(dte, element)
+  const forms = namespaceForms(dte, element)
   const root = parseXmlDom(forms[0]).documentElement
-  const signedElements = childElements(root).filter((node) => SIGNED_ELEMENTS.includes(node.tagName))
-  if (signedElements.length !== 1)
+  const signedElements = childElements(root).filter((node) => SIGNED_ELEMENTS.includes(node.localName))
+  if (signedElements.length !== 1 || signedElements[0].tagName !== signedElements[0].localName)
     throw new DteError('XML_PARSE_FAILED', {
       field: 'Documento',
       index,
@@ -380,7 +376,7 @@ const verifyDocument = (dte: string, element: Element, index: number, keys: SiiC
   const signed = signedElements[0]
   const header = readHeader(signed)
   const signature = checkSignature(root, forms, signed.tagName)
-  const { ted, caf } = checkStamp(dte, root, signed, header, keys)
+  const { ted, caf } = checkStamp(root, signed, header, keys)
   return {
     xml: dte,
     id: signed.getAttribute('ID') || null,
@@ -399,26 +395,31 @@ const checkEnvelope = (xml: string, root: Element): ReceivedSignatureCheck =>
 
 /**
  * EN: Verifies the documents of a `DTE`, `EnvioDTE` or `EnvioBOLETA` as received from a supplier, and the envelope's
- * own signature. Each document is found in the input with the exact text its signature covers, and checked for: its
+ * own signature. Each document is taken from the input where its element starts, with the exact text its signature
+ * covers, and checked for: its
  * XMLDSig signature; its TED, whose `FRMT` must verify with the key of the CAF the TED carries and whose `DD` must
  * agree with the header; that CAF against the document (the issuer, the type, the folio inside the range); and the
  * SII's signature over the CAF (`FRMA`) with the SII key of its `IDK` (`SII_CAF_KEYS`, or `siiKeys`). A document that
  * fails a check is a result, not an error; a CAF whose `IDK` has no known key leaves the document `unchecked`. Pure:
  * no clock, no network. Not checked: who owns the signing certificate, and whether the CAF had expired.
  * ES: Verifica los documentos de un `DTE`, `EnvioDTE` o `EnvioBOLETA` tal como llega de un proveedor, y la firma del
- * propio sobre. Cada documento se ubica en la entrada con el texto exacto que cubre su firma, y se chequea: su firma
+ * propio sobre. Cada documento se toma de la entrada donde empieza su elemento, con el texto exacto que cubre su firma,
+ * y se chequea: su firma
  * XMLDSig; su TED, cuya `FRMT` debe verificar con la llave del CAF que trae el TED y cuyo `DD` debe coincidir con el
  * encabezado; ese CAF contra el documento (el emisor, el tipo, el folio dentro del rango); y la firma del SII sobre el
  * CAF (`FRMA`) con la llave del SII de su `IDK` (`SII_CAF_KEYS`, o `siiKeys`). Un documento que falla un chequeo es un
  * resultado, no un error; un CAF cuyo `IDK` no tiene llave conocida deja el documento `unchecked`. Pura: sin reloj ni
  * red. No se chequea: de quién es el certificado que firma, ni si el CAF estaba vencido.
- * @throws {DteError} EN: `XML_PARSE_FAILED` for empty or malformed XML, another root, an envelope without exactly one `SetDTE`, a `DTE` out of place or a `DTE` without one `Documento` or `Liquidacion`; `ENVELOPE_EMPTY` for an envelope without documents. ES: `XML_PARSE_FAILED` para XML vacío o malformado, otro raíz, un sobre sin exactamente un `SetDTE`, un `DTE` fuera de lugar o un `DTE` sin un `Documento` o `Liquidacion`; `ENVELOPE_EMPTY` para un sobre sin documentos.
+ * @throws {DteError} EN: `XML_PARSE_FAILED` for empty or malformed XML, a DOCTYPE, another root, an envelope without exactly one `SetDTE`, a `DTE` out of place or prefixed, or a `DTE` without one unprefixed `Documento` or `Liquidacion`; `ENVELOPE_EMPTY` for an envelope without documents. ES: `XML_PARSE_FAILED` para XML vacío o malformado, un DOCTYPE, otro raíz, un sobre sin exactamente un `SetDTE`, un `DTE` fuera de lugar o con prefijo, o un `DTE` sin un `Documento` o `Liquidacion` sin prefijo; `ENVELOPE_EMPTY` para un sobre sin documentos.
  */
 export const verifyReceivedDocuments = (
   xml: string,
   options: VerifyReceivedDocumentsOptions = {},
 ): ReceivedDocumentsVerification => {
   if (typeof xml !== 'string' || xml.trim() === '') throw new DteError('XML_PARSE_FAILED', { reason: 'empty' })
+  // The parsers read a DOCTYPE differently (xmldom takes markup in an entity for elements), so none is read.
+  if (/<!DOCTYPE/i.test(xml))
+    throw new DteError('XML_PARSE_FAILED', { field: 'DOCTYPE', reason: 'a DOCTYPE is not read' })
   const dom = parseXmlDom(xml)
   const root = dom.documentElement
   const rootTag = ROOTS.find((tag) => tag === root.tagName)
@@ -434,11 +435,17 @@ export const verifyReceivedDocuments = (
     throw new DteError('XML_PARSE_FAILED', { field: 'SetDTE', reason: 'expected one SetDTE' })
   const set = sets[0]
   const placed = set === undefined ? [root] : childElements(set).filter((element) => element.tagName === 'DTE')
-  const total = dom.getElementsByTagName('DTE').length
+  const total = named([root, ...descendants(root)], 'DTE').length
   if (total === 0) throw new DteError('ENVELOPE_EMPTY', { field: 'SetDTE' })
-  const texts = elementTexts(xml, DTE_PATTERN, 'DTE')
-  if (placed.length !== total || texts.length !== total)
+  // Each DTE's text is taken from where its element starts, so the text checked is the element the envelope's
+  // signature covers.
+  const starts = lineStarts(xml)
+  if (placed.length !== total || placed.some((element) => !xml.startsWith('<DTE', offsetOf(starts, element))))
     throw new DteError('XML_PARSE_FAILED', { field: 'DTE', reason: 'a DTE out of place' })
+  const texts = placed.map((element) => {
+    const start = offsetOf(starts, element)
+    return xml.slice(start, endOf(xml, start))
+  })
   const keys = options.siiKeys ?? SII_CAF_KEYS
   const documents = texts.map((text, index) => verifyDocument(text, placed[index], index, keys))
   const envelope = rootTag === 'DTE' ? null : checkEnvelope(xml, root)

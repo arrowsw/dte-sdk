@@ -171,12 +171,13 @@ const signatureOf = (signedInfo: string, canonicalSignedInfo: string): string =>
 /**
  * A `<DTE>` signed again the way other software may sign it: with only the namespaces `declarations` puts on its root
  * (none, or only the SII's), so its digest covers neither `xmlns:xsi` nor, with none, `xmlns`. `edit` changes the
- * document before it is signed.
+ * document before it is signed, and `editSignedInfo` the `SignedInfo` before it is signed.
  */
 export const signedElsewhere = (
   doc: SignedDocument,
   declarations: string,
   edit: (xml: string) => string = (xml) => xml,
+  editSignedInfo: (signedInfo: string) => string = (signedInfo) => signedInfo,
 ): string => {
   const unsigned = edit(
     doc.xml.replace(/<Signature[\s\S]*<\/Signature>/, '').replace(/^<DTE[^>]*>/, `<DTE${declarations} version="1.0">`),
@@ -186,7 +187,10 @@ export const signedElsewhere = (
   const id = element.getAttribute('ID')!
   // The SignedInfo is canonicalized with the namespaces of the root it was signed under.
   const canonical = buildSignedInfo(id, digest, { expandTags: true, includeXsi: declarations.includes('xmlns:xsi') })
-  const signature = signatureOf(buildSignedInfo(id, digest, { includeXsi: false }), canonical)
+  const signature = signatureOf(
+    editSignedInfo(buildSignedInfo(id, digest, { includeXsi: false })),
+    editSignedInfo(canonical),
+  )
   return unsigned.replace('</DTE>', `${signature}</DTE>`)
 }
 

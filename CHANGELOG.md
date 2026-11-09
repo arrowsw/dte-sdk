@@ -16,11 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against the document (issuer, type, folio inside the range); and the SII's signature over the CAF (`FRMA`) with the
   SII key of its `IDK`. Each check is data, and each document and the whole input get a `status` of `valid`, `invalid`
   or `unchecked`, the last for a CAF whose `IDK` has no known key. A document signed before it went into the envelope,
-  with other namespaces in scope, is checked where it sits and, failing that, on its own; the `DD` and the `DA` are
-  checked as written, flattened, and with their texts escaped the SII's way. A stamp is read only when its structure
-  leaves no doubt about which bytes are signed (a `DD` and then an `FRMT` in the `TED`, one `CAF` with one `DA` and one
-  `FRMA` in the `DD`); anything else is a failed check. Malformed input, an envelope with other than one `SetDTE`
-  included, throws `XML_PARSE_FAILED` or `ENVELOPE_EMPTY`. Not checked: whose certificate signed, and whether the CAF had expired.
+  with other namespaces in scope, is checked where it sits and, failing that, on its own, and each document's text is
+  taken from where the parser found its element, so it is the element the envelope's signature covers. The stamp is read
+  from its elements alone: the `DD` and the `DA` are written from the elements whose fields are compared, flattened,
+  with their texts escaped the SII's way or with only `&`, `<` and `>` escaped, and a stamp is read only when its
+  structure leaves no doubt (one plain `TED` holding a `DD` and then an `FRMT`, one `CAF` with one `DA` and one `FRMA`
+  in the `DD`); anything else is a failed check. Malformed input throws `XML_PARSE_FAILED` or `ENVELOPE_EMPTY`, and so
+  do a DOCTYPE, a prefixed `DTE` or `Documento`, and an envelope with other than one `SetDTE`. Not checked: whose
+  certificate signed, and whether the CAF had expired.
 - **The SII's CAF keys.** `SII_CAF_KEYS` gives the 512-bit keys 100 (certification) and 300 (production) with which the
   SII signs every CAF, from the SII's certificates as CryptoSys and LibreDTE publish them, the same bytes in both, and
   `verifyCafSignature(cafXml, { siiKeys? })` checks the `FRMA` of one CAF. The tests sign test CAFs with a test SII key
@@ -29,7 +32,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The claim registry's document types at runtime.** `CLAIM_DOCUMENT_TYPES` (33, 34 and 43) and the guard
   `isClaimDocumentType` come from `dte-sdk`, so documents can be filtered by them; `ClaimDocumentType` is derived from
   the list and stays exported.
-- `dte-sdk` went from 31.54 kB to 33.61 kB, over its 32 kB limit, which went to 34 kB.
+- `dte-sdk` went from 31.54 kB to 33.73 kB, over its 32 kB limit, which went to 34 kB, and `dte-sdk/portal` from 73.82 kB
+  to 73.79 kB.
+
+### Fixed
+
+- **`verifyEnveloped` checks only the signature it computes.** It took the first `Reference` and the first
+  `DigestValue` of `SignedInfo` and did not read the algorithms. A `SignedInfo` with more than one `Reference`, a
+  `DigestValue` outside the one `Reference`, a digest other than SHA-1 or a transform other than enveloped-signature or
+  C14N 1.0 now fails `digestValid`, and a canonicalization other than C14N 1.0 or a signature method other than
+  RSA-SHA1 fails `signatureValid`. `verifyDocumentSignature`, `verifyEnvelopeSignature` and the books' `verify*Signature`
+  share it; the signatures dte-sdk makes pass as before.
 
 ## [0.3.0] - 2026-11-08
 

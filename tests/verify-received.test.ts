@@ -131,6 +131,20 @@ describe('verifyReceivedDocuments: each check on its own', () => {
     expect(document.status).toBe('invalid')
   })
 
+  test('a document whose SignedInfo carries a second Reference fails its signature', () => {
+    const xml = signedElsewhere(
+      issued(1),
+      ` xmlns="${SII_NS}" xmlns:xsi="${XSI_NS}"`,
+      (text) => text,
+      (signedInfo) =>
+        signedInfo.replace(
+          /<Reference[\s\S]*<\/Reference>/,
+          (reference) => `${reference}${reference.replace(/URI="[^"]*"/, 'URI="#Otro"')}`,
+        ),
+    )
+    expect(only(xml).signature).toMatchObject({ found: true, referenceId: null, digestValid: false, valid: false })
+  })
+
   test('a document without a signature is a failed check, not an error', () => {
     const document = only(issued(1).xml.replace(/<Signature[\s\S]*<\/Signature>/, ''))
     expect(document.signature).toEqual({
@@ -446,6 +460,47 @@ describe('verifyReceivedDocuments: the bytes checked are the bytes read', () => 
     expect(document.status).toBe('invalid')
   })
 
+  test.each([
+    ['a prefixed DD beside the real one', `<x:DD xmlns:x="${SII_NS}">${dd.slice(4, -5)}</x:DD>${forgedDd}${frmt}`],
+    ['the genuine DD prefixed, as the only DD', `<x:DD xmlns:x="${SII_NS}">${dd.slice(4, -5)}</x:DD>${frmt}`],
+    ['a namespace declared inside the TED', `${forgedDd.replace('<DD>', `<DD xmlns="${SII_NS}">`)}${frmt}`],
+    ['a name that begins like DD', `<DDX>${dd.slice(4, -5)}</DDX>${forgedDd}${frmt}`],
+    ['a CDATA section in the DD', `${dd.replace(/<TSTED>([^<]*)</, '<TSTED><![CDATA[$1]]><')}${frmt}`],
+  ])('%s is no stamp', (_label, content) => {
+    expect(only(forged(`<TED version="1.0">${content}</TED>`)).ted).toMatchObject({ found: false, valid: false })
+  })
+
+  test('a prefixed CAF beside the forged one makes the TED no stamp', () => {
+    const prefixed = `<x:CAF xmlns:x="${SII_NS}">${caf.slice(caf.indexOf('>') + 1, -6)}</x:CAF>${forgedCaf.xml}`
+    const document = only(stampedWith(1, forgedCaf, { fields: { caf: prefixed } }).xml)
+    expect(document.ted).toMatchObject({ found: false, valid: false })
+    expect(document.caf.found).toBe(false)
+  })
+
+  test('a self-closing DD is a stamp with nothing to verify', () => {
+    const document = only(forged(`<TED version="1.0"><DD/>${frmt}</TED>`))
+    expect(document.ted).toMatchObject({ found: true, signatureValid: false, valid: false })
+    expect(document.caf.found).toBe(false)
+  })
+
+  test('a prefixed TED beside the real one is no stamp', () => {
+    const ted = /<TED[\s\S]*<\/TED>/.exec(genuine.xml)![0]
+    const prefixed = `<x:TED xmlns:x="${SII_NS}" version="1.0">${dd}${frmt}</x:TED>`
+    expect(only(forged(`${ted}${prefixed}`)).ted.found).toBe(false)
+  })
+
+  test('a genuine DD in an attribute value is only text: the DD read is the one checked', () => {
+    const document = only(
+      forged(`<TED version="1.0">${forgedDd}${frmt.replace('<FRMT ', `<FRMT nota="${dd.replace(/"/g, "'")}" `)}</TED>`),
+    )
+    expect(document.ted).toMatchObject({ found: true, signatureValid: false, valid: false })
+  })
+
+  test('an attribute on the DD is part of the bytes checked', () => {
+    const document = only(forged(`<TED version="1.0">${dd.replace('<DD>', '<DD nota="x">')}${frmt}</TED>`))
+    expect(document.ted).toMatchObject({ found: true, signatureValid: false, valid: false })
+  })
+
   // A DD signed with a CAF key the forger holds, carrying a genuine CAF for its FRMA and a forged one for its fields.
   const forgedCaf = signedCaf({ tamperAfterSigning: true })
   const withCaf = (cafPart: string): string => stampedWith(1, forgedCaf, { fields: { caf: cafPart } }).xml
@@ -458,11 +513,47 @@ describe('verifyReceivedDocuments: the bytes checked are the bytes read', () => 
     ['a second FRMA in the CAF', forgedCaf.xml.replace('</CAF>', `${frma}</CAF>`)],
     ['a DA inside another child of the CAF', caf.replace(/<DA>[\s\S]*<\/DA>/, (value) => `<X>${value}</X>`)],
     ['an FRMA inside another child of the CAF', caf.replace(/<FRMA[\s\S]*<\/FRMA>/, (value) => `<X>${value}</X>`)],
+    ['a name that begins like CAF holding a genuine DA', `<CAFE>${da}</CAFE>${forgedCaf.xml}`],
+    ['a self-closing CAF', '<CAF version="1.0"/>'],
   ])('%s is no CAF, and the stamp cannot verify', (_label, cafPart) => {
     const document = only(withCaf(cafPart))
     expect(document.ted).toMatchObject({ found: true, signatureValid: false, valid: false })
     expect(document.caf).toMatchObject({ found: false, siiSignature: 'invalid', status: 'invalid' })
     expect(document.status).toBe('invalid')
+  })
+})
+
+describe('verifyReceivedDocuments: each text is its element', () => {
+  test('a DTE hidden in an attribute value, beside a real one the text cannot see, is not paired with it', () => {
+    const real = issued(1).xml
+    const forged = issued(2).xml
+    // The validator and xmldom accept `<` in an attribute value; `/>` in one hides a start tag from a reader of text.
+    const hidden = real.replace('<DTE ', '<DTE nota="/>" ')
+    const xml = envelopeAround([hidden]).replace(
+      '<Caratula version="1.0">',
+      () => `<Caratula nota="${forged.replace(/"/g, "'")}" version="1.0">`,
+    )
+    const result = verify(xml)
+    expect(result.documents).toHaveLength(1)
+    expect(result.documents[0]).toMatchObject({ xml: hidden, folio: 1 })
+  })
+
+  // Searching the text for each `<DTE` took quadratic time: 0.2 MB of these took 3 s, so 2 MB would take minutes.
+  test('megabytes of start and closing tags in attribute values are read in linear time', () => {
+    const xml = envelopeOf([issued(1)]).replace(
+      '</SetDTE>',
+      `<Extra a="${'<DTE '.repeat(200000)}" b="${'</DTE'.repeat(200000)}" c="${'<TED <DD <CAF '.repeat(70000)}"/></SetDTE>`,
+    )
+    expect(xml.length).toBeGreaterThan(2_900_000)
+    const started = Date.now()
+    expect(verify(xml).documents).toHaveLength(1)
+    expect(Date.now() - started).toBeLessThan(5000)
+  }, 15000)
+
+  test('positions hold across CR LF, a byte order mark and characters outside the BMP', () => {
+    const { xml } = issued(1)
+    const crlf = `\u{FEFF}<?xml version="1.0" encoding="ISO-8859-1"?>\r\n<!-- \u{1F600} -->\r\n${xml}\r\n`
+    expect(verify(crlf).documents[0]).toMatchObject({ xml, status: 'valid' })
   })
 })
 
@@ -513,11 +604,39 @@ describe('verifyReceivedDocuments: malformed input throws', () => {
         ),
     ],
     [
-      'an empty DTE',
-      (xml: string) => xml.replace('<Caratula version="1.0">', '<DTE version="1.0"/><Caratula version="1.0">'),
+      'a prefixed DTE',
+      (xml: string) => xml.replace('</SetDTE>', `<x:DTE xmlns:x="${SII_NS}" version="1.0"/></SetDTE>`),
     ],
   ])('%s is XML_PARSE_FAILED', (_label, edit) => {
     expectFailure(() => verify(edit(envelopeOf([issued(1)]))), 'XML_PARSE_FAILED', { field: 'DTE' })
+  })
+
+  test.each([
+    [
+      'before the others',
+      (xml: string) => xml.replace('<Caratula version="1.0">', '<DTE version="1.0"/><Caratula version="1.0">'),
+    ],
+    ['after the others', (xml: string) => xml.replace('</SetDTE>', '<DTE version="1.0"/></SetDTE>')],
+  ])('an empty DTE %s is XML_PARSE_FAILED', (_label, edit) => {
+    expectFailure(() => verify(edit(envelopeOf([issued(1)]))), 'XML_PARSE_FAILED')
+  })
+
+  test.each([
+    ['an internal subset that declares an entity', '<!DOCTYPE EnvioDTE [<!ENTITY e "<DTE/>">]>'],
+    ['an external id', '<!DOCTYPE EnvioDTE SYSTEM "EnvioDTE.dtd">'],
+  ])('a DOCTYPE with %s is XML_PARSE_FAILED, before it is parsed', (_label, doctype) => {
+    const xml = envelopeOf([issued(1)]).replace('<EnvioDTE ', `${doctype}<EnvioDTE `)
+    expectFailure(() => verify(xml), 'XML_PARSE_FAILED', { field: 'DOCTYPE' })
+  })
+
+  test('a Documento with a prefix is XML_PARSE_FAILED, beside the real one or alone', () => {
+    const { xml } = issued(1)
+    const prefixed = xml.replace('</Documento>', `</Documento><x:Documento xmlns:x="${SII_NS}" ID="Otro"/>`)
+    expectFailure(() => verify(prefixed), 'XML_PARSE_FAILED', { field: 'Documento' })
+    const alone = xml
+      .replace('<Documento ', `<x:Documento xmlns:x="${SII_NS}" `)
+      .replace('</Documento>', '</x:Documento>')
+    expectFailure(() => verify(alone), 'XML_PARSE_FAILED', { field: 'Documento' })
   })
 
   test('a DTE without one Documento or Liquidacion is XML_PARSE_FAILED, with its index', () => {

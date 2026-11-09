@@ -1,6 +1,6 @@
 import { loadCertificateFromPem } from '../src/certificate/pem'
 import { sha1Base64 } from '../src/crypto/digest'
-import { rsaSha1VerifyBase64 } from '../src/crypto/rsa'
+import { rsaSha1SignBase64, rsaSha1VerifyBase64 } from '../src/crypto/rsa'
 import { DteError } from '../src/errors'
 import { buildSignedInfo, signEnveloped, signRootElement, verifyEnveloped } from '../src/signature/xmldsig'
 import { canonicalizeElement, findElement } from '../src/xml/c14n'
@@ -167,6 +167,82 @@ describe('verifyEnveloped resists signature wrapping', () => {
     expect(() => verifyEnveloped(noSignedInfo, target)).toThrow(
       expect.objectContaining({ code: 'SIGNATURE_NOT_FOUND', details: { field: 'SignedInfo' } }),
     )
+  })
+})
+
+describe('verifyEnveloped checks the one Reference and the algorithms it computes', () => {
+  const target = { elementTag: 'Documento', rootTag: 'DTE' }
+  const { xml: signed, signature } = signEnveloped({ xml, elementTag: 'Documento', rootTag: 'DTE', certificate })
+  // The SignedInfo edited and signed again, so only what the edit says can make the check fail.
+  const resigned = (edit: (signedInfo: string) => string): string => {
+    const edited = signed.replace(/<SignedInfo[\s\S]*<\/SignedInfo>/, (signedInfo) => edit(signedInfo))
+    const signedInfo = parseXmlDom(edited).getElementsByTagName('SignedInfo')[0]
+    const value = rsaSha1SignBase64(certificate.privateKeyPem, canonicalizeElement(signedInfo), 'utf8')
+    return edited.replace(/<SignatureValue>[\s\S]*?<\/SignatureValue>/, `<SignatureValue>${value}</SignatureValue>`)
+  }
+  const transform = (algorithm: string): string => `<Transform Algorithm="${algorithm}"/>`
+  const C14N = 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315'
+  const ENVELOPED = 'http://www.w3.org/2000/09/xmldsig#enveloped-signature'
+
+  test.each([
+    ['as signed', (s: string) => s],
+    ['with the C14N transform the SII example uses', (s: string) => s.replace(transform(ENVELOPED), transform(C14N))],
+    [
+      'with both transforms',
+      (s: string) => s.replace(transform(ENVELOPED), `${transform(ENVELOPED)}${transform(C14N)}`),
+    ],
+    ['without transforms', (s: string) => s.replace(/<Transforms>[\s\S]*<\/Transforms>/, '')],
+  ])('a SignedInfo %s verifies', (_label, edit) => {
+    expect(verifyEnveloped(resigned(edit), target)).toEqual({
+      referenceId: 'DTE_T33F1',
+      digestValid: true,
+      signatureValid: true,
+      valid: true,
+    })
+  })
+
+  test('a second Reference is not left unchecked: no reference is taken', () => {
+    const twice = resigned((s) =>
+      s.replace(/<Reference[\s\S]*<\/Reference>/, (reference) => `${reference}${reference}`),
+    )
+    expect(verifyEnveloped(twice, target)).toEqual({
+      referenceId: null,
+      digestValid: false,
+      signatureValid: true,
+      valid: false,
+    })
+  })
+
+  test.each([
+    [
+      'a DigestValue outside the Reference, ahead of a wrong one inside it',
+      (s: string) =>
+        s
+          .replace(`<DigestValue>${signature.digestValue}</DigestValue>`, '<DigestValue>AAAA</DigestValue>')
+          .replace('<Reference ', `<DigestValue>${signature.digestValue}</DigestValue><Reference `),
+    ],
+    ['SHA-256 declared as the digest', (s: string) => s.replace('xmldsig#sha1', 'xmlenc#sha256')],
+    [
+      'an XPath transform',
+      (s: string) => s.replace(transform(ENVELOPED), transform('http://www.w3.org/TR/1999/REC-xpath-19991116')),
+    ],
+    ['a second Transforms', (s: string) => s.replace(/<Transforms>[\s\S]*<\/Transforms>/, (list) => `${list}${list}`)],
+    ['another element among the transforms', (s: string) => s.replace('</Transforms>', '<Otro/></Transforms>')],
+  ])('%s fails the digest', (_label, edit) => {
+    const result = verifyEnveloped(resigned(edit), target)
+    expect(result).toMatchObject({ digestValid: false, signatureValid: true, valid: false })
+  })
+
+  test.each([
+    ['exclusive canonicalization', (s: string) => s.replace(C14N, 'http://www.w3.org/2001/10/xml-exc-c14n#')],
+    ['RSA-SHA256', (s: string) => s.replace('xmldsig#rsa-sha1', 'xmldsig-more#rsa-sha256')],
+    [
+      'a second SignatureMethod',
+      (s: string) => s.replace(/<SignatureMethod[^>]*\/>/, (method) => `${method}${method}`),
+    ],
+  ])('%s declared in SignedInfo fails the signature', (_label, edit) => {
+    const result = verifyEnveloped(resigned(edit), target)
+    expect(result).toMatchObject({ digestValid: true, signatureValid: false, valid: false })
   })
 })
 

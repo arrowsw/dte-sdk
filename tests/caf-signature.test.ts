@@ -65,14 +65,31 @@ describe('verifyCafSignature', () => {
     ['no CAF block', '<AUTORIZACION/>'],
     ['a CAF without DA', '<CAF version="1.0"><FRMA algoritmo="SHA1withRSA">AA==</FRMA></CAF>'],
     ['a CAF without FRMA', fixtureText('caf-33-signed.xml').replace(/<FRMA[^>]*>[^<]*<\/FRMA>/, '')],
-    ['an empty CAF element', '<CAF version="1.0"/><DA><IDK>100</IDK></DA><FRMA algoritmo="SHA1withRSA">AA==</FRMA>'],
+    ['text that is not XML', 'no es XML'],
+    [
+      'an empty CAF element',
+      '<A><CAF version="1.0"/><DA><IDK>100</IDK></DA><FRMA algoritmo="SHA1withRSA">AA==</FRMA></A>',
+    ],
     [
       'a DA outside the CAF',
-      '<CAF version="1.0"><FRMA algoritmo="SHA1withRSA">AA==</FRMA></CAF><DA><IDK>100</IDK></DA>',
+      '<A><CAF version="1.0"><FRMA algoritmo="SHA1withRSA">AA==</FRMA></CAF><DA><IDK>100</IDK></DA></A>',
     ],
     [
       'an FRMA outside the CAF',
-      '<CAF version="1.0"><DA><IDK>100</IDK></DA></CAF><FRMA algoritmo="SHA1withRSA">AA==</FRMA>',
+      '<A><CAF version="1.0"><DA><IDK>100</IDK></DA></CAF><FRMA algoritmo="SHA1withRSA">AA==</FRMA></A>',
+    ],
+    [
+      'a CAF nested deeper',
+      '<A><X><CAF version="1.0"><DA><IDK>100</IDK></DA><FRMA algoritmo="SHA1withRSA">AA==</FRMA></CAF></X></A>',
+    ],
+    ['an empty FRMA', '<CAF version="1.0"><DA><IDK>100</IDK></DA><FRMA algoritmo="SHA1withRSA"> </FRMA></CAF>'],
+    [
+      'a comment in the CAF',
+      '<CAF version="1.0"><!-- x --><DA><IDK>100</IDK></DA><FRMA algoritmo="SHA1withRSA">AA==</FRMA></CAF>',
+    ],
+    [
+      'a prefixed DA',
+      '<CAF version="1.0" xmlns:x="u"><x:DA><IDK>100</IDK></x:DA><FRMA algoritmo="SHA1withRSA">AA==</FRMA></CAF>',
     ],
     ['an IDK that is not a number', fixtureText('caf-33-signed.xml').replace('<IDK>100</IDK>', '<IDK>cien</IDK>')],
   ])('%s is CAF_INVALID', (_label, xml) => {

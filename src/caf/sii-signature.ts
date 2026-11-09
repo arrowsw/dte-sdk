@@ -1,6 +1,7 @@
 import { rsaSha1VerifyBase64, type RsaPublicKeyParts } from '../crypto/rsa'
 import { DteError } from '../errors'
-import { escapeXmlText } from '../xml/escape'
+import { descendants, integer, isPlain, named, signedForms, textAt } from '../xml/elements'
+import { parseXmlDom } from '../xml/parse'
 
 /**
  * EN: Outcome of a check that may have to be skipped: `unchecked` when what it needs is missing, such as the SII key of
@@ -58,98 +59,71 @@ export type CafSignatureOptions = {
 }
 
 /**
- * EN: The parts of a `<CAF>` block the SII signature needs, as written.
- * ES: Las partes de un bloque `<CAF>` que necesita la firma del SII, tal como vienen.
+ * EN: The parts of a CAF the SII signature needs, read from its elements.
+ * ES: Las partes de un CAF que necesita la firma del SII, leídas de sus elementos.
  */
 export type CafBlock = {
-  /** EN: The `<DA>…</DA>` text. ES: `DA` — El texto `<DA>…</DA>`. */
-  readonly da: string
+  /** EN: The `DA` element. ES: `DA` — El elemento `DA`. */
+  readonly da: Element
   /** EN: `FRMA`, base64, without whitespace. ES: `FRMA` — En base64, sin espacios. */
   readonly signature: string
   /** EN: `DA/IDK`. ES: `DA/IDK` — Identificador de la llave del SII. */
   readonly keyId: number
 }
 
-const CAF_BLOCK = /<CAF(?:\s[^>]*)?>[\s\S]*?<\/CAF\s*>/
-const DA_BLOCK = /<DA>[\s\S]*?<\/DA\s*>/
-const FRMA_VALUE = /<FRMA(?:\s[^>]*)?>([^<]*)<\/FRMA\s*>/
-const IDK_VALUE = /<IDK>\s*(\d+)\s*<\/IDK>/
-
 /**
- * EN: How many start tags (or empty-element tags) of `tag` a text holds, whatever their attributes.
- * ES: Cuántas etiquetas de inicio (o de elemento vacío) de `tag` tiene un texto, con cualquier atributo.
+ * EN: The CAF `scope` holds, read only when there is no doubt about it: exactly one `CAF`, one `DA` and one `FRMA` in
+ * `scope` by local name, whatever their prefix; the `CAF` is `scope` or a direct child of it, is plain (`isPlain`), and
+ * has the `DA` and the `FRMA` as direct children; the `DA` has a numeric `IDK` and the `FRMA` a value. Null otherwise.
+ * ES: El CAF que contiene `scope`, leído solo cuando no hay dudas: exactamente un `CAF`, un `DA` y una `FRMA` en
+ * `scope` por nombre local, con cualquier prefijo; el `CAF` es `scope` o un hijo directo suyo, es simple (`isPlain`) y
+ * tiene el `DA` y la `FRMA` como hijos directos; el `DA` tiene un `IDK` numérico y la `FRMA` un valor. Null si no.
  */
-export const startTags = (text: string, tag: string): number => text.split(new RegExp(`<${tag}[\\s/>]`)).length - 1
-
-/**
- * EN: The `DA`, `FRMA` and `IDK` of the `<CAF>` block of a text, or null when the text holds other than one `CAF`, one
- * `DA` and one `FRMA` tag, or lacks the `IDK`: with a second one, the bytes checked could be other than the bytes read.
- * ES: El `DA`, la `FRMA` y el `IDK` del bloque `<CAF>` de un texto, o null si el texto no tiene exactamente una
- * etiqueta `CAF`, una `DA` y una `FRMA`, o le falta el `IDK`: con una segunda, los bytes chequeados podrían no ser los
- * bytes leídos.
- */
-export const readCafBlock = (text: string): CafBlock | null => {
-  if (['CAF', 'DA', 'FRMA'].some((tag) => startTags(text, tag) !== 1)) return null
-  const caf = CAF_BLOCK.exec(text)?.[0]
-  const da = caf === undefined ? undefined : DA_BLOCK.exec(caf)?.[0]
-  const signature = caf === undefined ? undefined : FRMA_VALUE.exec(caf)?.[1]
-  const keyId = da === undefined ? undefined : IDK_VALUE.exec(da)?.[1]
-  if (da === undefined || signature === undefined || keyId === undefined) return null
-  return { da, signature: signature.replace(/\s+/g, ''), keyId: Number(keyId) }
-}
-
-const ENTITIES: Readonly<Record<string, string>> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }
-
-// Character references up to U+FFFF and the five entities; `fromCharCode` never throws.
-const decodeReferences = (text: string): string =>
-  text.replace(/&#x([0-9a-fA-F]{1,4});|&#(\d{1,5});|&(amp|lt|gt|quot|apos);/g, (_, hex, decimal, name) =>
-    hex !== undefined
-      ? String.fromCharCode(parseInt(hex, 16))
-      : decimal !== undefined
-        ? String.fromCharCode(Number(decimal))
-        : ENTITIES[name],
-  )
-
-/**
- * EN: The texts the SII-style signature of an element (`DA` under `FRMA`, `DD` under `FRMT`) may cover, in the order to
- * try them: as written; flattened, with no whitespace between tags, the form the SII signs; and flattened with every
- * text written the SII's way, the five XML entities escaped and any other character as itself, for a file whose writer
- * escaped otherwise (`&#xC1;` for `Á`). The signature is over their ISO-8859-1 bytes.
- * ES: Los textos que puede cubrir la firma al estilo del SII de un elemento (`DA` bajo `FRMA`, `DD` bajo `FRMT`), en el
- * orden en que se prueban: tal como viene; aplanado, sin espacios entre etiquetas, la forma que firma el SII; y aplanado
- * con cada texto escrito a la manera del SII, las cinco entidades XML escapadas y todo otro carácter tal cual, para un
- * archivo cuyo escritor escapó de otra forma (`&#xC1;` por `Á`). La firma es sobre sus bytes ISO-8859-1.
- */
-export const signedTextForms = (xml: string): readonly string[] => {
-  const flat = xml.replace(/>\s+</g, '><')
-  const rewritten = flat.replace(/>([^<]+)</g, (_, text: string) => `>${escapeXmlText(decodeReferences(text))}<`)
-  return [...new Set([xml, flat, rewritten])]
+export const readCaf = (scope: Element): CafBlock | null => {
+  const elements = [scope, ...descendants(scope)]
+  const [caf, ...otherCafs] = named(elements, 'CAF')
+  const [da, ...otherDas] = named(elements, 'DA')
+  const [frma, ...otherFrmas] = named(elements, 'FRMA')
+  const single = caf !== undefined && da !== undefined && frma !== undefined
+  if (!single || otherCafs.length + otherDas.length + otherFrmas.length > 0) return null
+  const keyId = integer(textAt(da, 'IDK'))
+  const signature = String(frma.textContent).replace(/\s+/g, '')
+  const placed = (caf === scope || caf.parentNode === scope) && da.parentNode === caf && frma.parentNode === caf
+  return placed && isPlain(caf) && keyId !== null && signature !== '' ? { da, signature, keyId } : null
 }
 
 /**
- * EN: Checks the `FRMA` of a CAF block with the SII key of its `IDK`, over the forms of `signedTextForms` of its `DA`.
- * ES: Chequea la `FRMA` de un bloque CAF con la llave del SII de su `IDK`, sobre las formas de `signedTextForms` de su
- * `DA`.
+ * EN: Checks the `FRMA` of a CAF with the SII key of its `IDK`, over the forms of `signedForms` of its `DA`.
+ * ES: Chequea la `FRMA` de un CAF con la llave del SII de su `IDK`, sobre las formas de `signedForms` de su `DA`.
  */
 export const checkCafBlock = (block: CafBlock, keys: SiiCafKeys): VerificationStatus => {
   const key = keys[block.keyId]
   if (key === undefined) return 'unchecked'
-  return signedTextForms(block.da).some((data) => rsaSha1VerifyBase64(key, data, 'latin1', block.signature))
+  return signedForms(block.da).some((data) => rsaSha1VerifyBase64(key, data, 'latin1', block.signature))
     ? 'valid'
     : 'invalid'
 }
 
 /**
  * EN: Verifies the SII signature of a CAF (`FRMA`, SHA1withRSA over the `DA`) with the SII key its `IDK` names. Takes
- * a CAF file as the SII issues it or the `<CAF>` block a TED carries: a text with one `CAF`, one `DA` and one `FRMA`.
- * `unchecked` when no key is known for that `IDK`: `SII_CAF_KEYS` has 100 and 300.
+ * a CAF file as the SII issues it or the `<CAF>` block a TED carries, read as `readCaf` reads it: one `CAF`, one `DA`
+ * and one `FRMA`, the last two direct children of the first. `unchecked` when no key is known for that `IDK`:
+ * `SII_CAF_KEYS` has 100 and 300.
  * ES: Verifica la firma del SII sobre un CAF (`FRMA`, SHA1withRSA sobre el `DA`) con la llave del SII que nombra su
- * `IDK`. Recibe un archivo CAF tal como lo emite el SII o el bloque `<CAF>` que trae un TED: un texto con un `CAF`, un
- * `DA` y una `FRMA`. `unchecked` si no se conoce llave para ese `IDK`: `SII_CAF_KEYS` tiene la 100 y la 300.
- * @throws {DteError} EN: `CAF_INVALID` when the text holds other than one `CAF`, one `DA` and one `FRMA`, or no numeric `IDK`. ES: `CAF_INVALID` si el texto no tiene exactamente un `CAF`, un `DA` y una `FRMA`, o no tiene un `IDK` numérico.
+ * `IDK`. Recibe un archivo CAF tal como lo emite el SII o el bloque `<CAF>` que trae un TED, leído como lo lee
+ * `readCaf`: un `CAF`, un `DA` y una `FRMA`, los dos últimos hijos directos del primero. `unchecked` si no se conoce
+ * llave para ese `IDK`: `SII_CAF_KEYS` tiene la 100 y la 300.
+ * @throws {DteError} EN: `CAF_INVALID` when the text is not XML or `readCaf` finds no CAF in it. ES: `CAF_INVALID` si el texto no es XML o `readCaf` no encuentra un CAF en él.
  */
 export const verifyCafSignature = (cafXml: string, options: CafSignatureOptions = {}): VerificationStatus => {
-  const block = typeof cafXml === 'string' ? readCafBlock(cafXml) : null
-  if (block === null) throw new DteError('CAF_INVALID', { reason: 'expected one CAF, DA and FRMA, and an IDK' })
+  const root = (() => {
+    try {
+      return parseXmlDom(cafXml).documentElement
+    } catch {
+      return null
+    }
+  })()
+  const block = root === null ? null : readCaf(root)
+  if (block === null) throw new DteError('CAF_INVALID', { reason: 'expected one CAF, with one DA and one FRMA' })
   return checkCafBlock(block, options.siiKeys ?? SII_CAF_KEYS)
 }
