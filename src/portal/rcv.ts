@@ -2,22 +2,19 @@ import {
   ACCOUNTING_STATES,
   DOCUMENT_OPERATIONS,
   RCV_SERVICES,
-  rcvAppUrl,
   REGISTER_OPERATIONS,
   type AccountingStatus,
   type DocumentDirection,
-  type RcvService,
   type RegisterOperation,
 } from '../catalogs/portal'
 import { DteError } from '../errors'
 import { splitSiiRut, toSiiRut } from '../model/rut'
-import { redactText } from '../sii/capture'
 import type { CallOverrides } from '../sii/client'
 import { isPeriod } from '../time/chile'
 import { resolvePortalCompany, siiCodeOf, type PortalClient } from './client'
+import { callService, openService, readService } from './facade'
 import {
   changeMessageOf,
-  parseRcvAnswer,
   periodDocumentsOf,
   periodSummaryOf,
   purchaseDocumentOf,
@@ -29,15 +26,7 @@ import {
   type RcvObject,
   type RegisterSummary,
 } from './pages/rcv'
-import {
-  ensurePage,
-  portalRequest,
-  rejected,
-  unexpectedPage,
-  withFreshSessionRetry,
-  withPortalSession,
-  type PortalContext,
-} from './session'
+import { rejected, withPortalSession, type PortalContext } from './session'
 
 /**
  * EN: What `listPeriodDocuments` needs.
@@ -112,55 +101,6 @@ const periodDigits = (period: string): string => period.replace('-', '')
 
 const companyOf = (portal: PortalClient, companyRut?: string): { readonly body: string; readonly verifier: string } =>
   splitSiiRut(resolvePortalCompany(portal, companyRut))
-
-// The app leaves the token in the jar; the phase 4 session handles the login it may ask for.
-const openService = async (context: PortalContext, service: RcvService): Promise<string> => {
-  const page = await ensurePage(context, service.entryApp, rcvAppUrl(context.portal.environment, service.entryApp))
-  const { TOKEN, CSESSIONID } = context.state.cookies
-  const token = TOKEN || CSESSIONID
-  if (!token) throw unexpectedPage(context, 'token', page.html)
-  return token
-}
-
-const callService = async (
-  context: PortalContext,
-  token: string,
-  service: RcvService,
-  method: string,
-  data: unknown,
-): Promise<RcvObject> => {
-  const appUrl = rcvAppUrl(context.portal.environment, service.app)
-  const page = await portalRequest(context, method, 'POST', `${appUrl}${service.facade}/${method}`, {
-    json: {
-      metaData: {
-        namespace: `${service.namespace}/${method}`,
-        conversationId: token,
-        transactionId: service.paged ? '1' : context.portal.randomId(),
-        page: service.paged ? { pageSize: 1, pageIndex: 1 } : null,
-      },
-      data,
-    },
-    referer: appUrl,
-  })
-  const answer = parseRcvAnswer(page.html)
-  if (answer === null) throw unexpectedPage(context, method, redactText(page.html))
-  return answer
-}
-
-type ServiceCall = (method: string, data: unknown) => Promise<RcvObject>
-
-// One POST per call unless the caller opts in, while the login and the visit to the app keep their retries. A read that
-// meets an expired session or an unreadable page starts over once with a fresh session.
-const readService = <T>(
-  context: PortalContext,
-  service: RcvService,
-  read: (call: ServiceCall) => Promise<T>,
-): Promise<T> =>
-  withFreshSessionRetry(context, async () => {
-    const token = await openService(context, service)
-    const once: PortalContext = { ...context, overrides: { retry: false, ...context.overrides } }
-    return read((method, data) => callService(once, token, service, method, data))
-  })
 
 const complementFields = (
   portal: PortalClient,

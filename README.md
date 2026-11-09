@@ -40,6 +40,8 @@ every field.
   quota, CAF requests, annulment and re-obtaining, and a local folio registry.
 - 🗂️ **Purchase and sales register and MIPYME backup** — the documents and official summaries of
   a period, purchase reclassification, and the XML of issued and received documents.
+- 🔎 **Activity verification** — the status of the verification the SII requires before issuing
+  documents with VAT, unstable for now, and the documents it takes to accredit an activity.
 - 🎓 **Certification** — the SII test sets parsed and issued, their books, the simulation, the
   exchange answers, and a resumable runner over the certification portals; and the certification
   of receipts (boletas), an application of its own, as pieces to chain.
@@ -62,6 +64,7 @@ every field.
 - [SII books](#sii-books)
 - [SII portal and folios](#sii-portal-and-folios)
 - [Purchase and sales register and MIPYME backup](#purchase-and-sales-register-and-mipyme-backup)
+- [Activity verification](#activity-verification)
 - Certification: [test sets, simulation and books](#certification-test-sets-simulation-and-books),
   [the runner](#certification-the-runner),
   [the exchange and the printed samples](#certification-the-exchange-and-the-printed-samples),
@@ -88,6 +91,7 @@ real SII answers, so this table says what has met it so far:
 | Portal session and company data                                | `dte-sdk/portal` | Login, logout, taxpayer data and the refusal pages, for a company not enrolled as an issuer                                                                                     |
 | Folios and CAF requests                                        | `dte-sdk/portal` | Not run yet: they need an enrolled company; the tests replay the pages the certification environment served to one                                                              |
 | Purchase and sales register, MIPYME backup                     | `dte-sdk/portal` | Read-only requests answered for a company with no documents; rows, downloads and writes not seen yet                                                                            |
+| Activity verification                                          | `dte-sdk/portal` | Read once, for a company whose verification was pending; an approved one not seen yet, so the read stays unstable                                                               |
 | Certification sets, runner, exchange and upload of the samples | `dte-sdk/portal` | Not run yet; the exchange answers validate against the official schemas in the tests                                                                                            |
 | Certification of receipts (boletas)                            | `dte-sdk/portal` | Not run yet: it needs a company enrolled in the receipts application; the receipts envelope and the folio consumption report validate against the official schemas in the tests |
 | Printed samples                                                | `dte-sdk/pdf`    | Not reviewed by the SII yet                                                                                                                                                     |
@@ -116,12 +120,12 @@ npm install pdf-lib bwip-js
 
 ## Entry points
 
-| Import from      | What it holds                                                                                                                                                                                            | Runs on                                                        |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `dte-sdk`        | Documents, stamps, signatures, envelopes, books and the SII web services client over `fetch`                                                                                                             | Node, Bun, Deno; bundles for the browser with no configuration |
-| `dte-sdk/node`   | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile` | Node                                                           |
-| `dte-sdk/portal` | SII portal, folios and CAF requests, the folio registry, purchase and sales register, MIPYME backup, and certification: sets, runner, exchange, upload of the samples and the receipts application       | Node                                                           |
-| `dte-sdk/pdf`    | Printed samples and the SII office of each commune (`SII_OFFICES`, `siiOfficeForCommune`)                                                                                                                | Node, with `pdf-lib` and `bwip-js` installed                   |
+| Import from      | What it holds                                                                                                                                                                                                             | Runs on                                                        |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `dte-sdk`        | Documents, stamps, signatures, envelopes, books and the SII web services client over `fetch`                                                                                                                              | Node, Bun, Deno; bundles for the browser with no configuration |
+| `dte-sdk/node`   | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`                  | Node                                                           |
+| `dte-sdk/portal` | SII portal, folios and CAF requests, the folio registry, purchase and sales register, MIPYME backup, activity verification, and certification: sets, runner, exchange, upload of the samples and the receipts application | Node                                                           |
+| `dte-sdk/pdf`    | Printed samples and the SII office of each commune (`SII_OFFICES`, `siiOfficeForCommune`)                                                                                                                                 | Node, with `pdf-lib` and `bwip-js` installed                   |
 
 `DteError` and `isDteError` come from `dte-sdk` and recognize what every entry throws.
 
@@ -456,6 +460,33 @@ await downloadMipymeBackup(portal, {
   `onChunk` for long histories, so the XML does not stay in memory.
 - **Known defect:** a two-day range with more than 20 documents downloads only its first day, while `total` counts both.
 - **`backupNoData` is definitive.** `backupCaptcha` and `backupIndeterminate` mean try later, never in a loop.
+
+## Activity verification
+
+The SII verifies a company's activities before it lets the company issue documents with VAT. These read that
+verification on the same session as the rest of the portal.
+
+```typescript
+import { unstable_fetchActivityVerification, listAccreditationDocuments } from 'dte-sdk/portal'
+
+const { requests, messages } = await unstable_fetchActivityVerification(portal)
+// requests[0]: { status: 'PAC', statusDescription: 'PENDIENTE DE ACREDITACIÓN', preliminaryResult: 'CONDICIONADA',
+//                finalResult: null, requestedOn: '2026-11-05', accreditationDeadline: null, … }
+
+const documents = await listAccreditationDocuments(portal) // [{ category: 'general', code: 1, description: '…' }, …]
+```
+
+- **`unstable_fetchActivityVerification` is unstable.** Its shape may change in any release, a patch included. It has
+  been read once against the real SII, for a company whose verification was pending, and the codes of an approved one
+  are not known yet: nothing here says by itself whether the company may issue documents with VAT. Once an approved
+  verification has been read, it becomes `fetchActivityVerification`.
+- **It asks for the company, not for the session.** The SII's own page shows the verification of whoever logged in. This
+  sends the company's RUT, and the SII answered a session of its legal representative. A request of another RUT throws
+  `SII_PORTAL_UNEXPECTED_PAGE` with `step: 'otherTaxpayer'` instead of passing as the company's.
+- **Officials, comments and the address never come out.** The SII sends them; dte-sdk drops them, and there is no `raw`.
+- **No requests means the company never asked** for the verification. An error code from the SII throws
+  `activityVerificationRefused`, with its words in `details.portalMessage`.
+- **Both read production from any client,** because the app exists only there.
 
 ## Certification: test sets, simulation and books
 

@@ -1,10 +1,10 @@
 /**
  * EN: dte-sdk/portal entry: the certificate-authenticated SII portal (session, company data, folios and CAF requests, the
- * purchase and sales register, the MIPYME backup), the certification sets and the certification runner. Node only: `fetch`
- * cannot present a client certificate.
+ * purchase and sales register, the MIPYME backup, the activity verification), the certification sets and the certification
+ * runner. Node only: `fetch` cannot present a client certificate.
  * ES: Entrada dte-sdk/portal: el portal del SII autenticado con certificado (sesión, datos de la empresa, folios y
- * solicitudes de CAF, el registro de compras y ventas, el respaldo MIPYME), los sets de certificación y el proceso de
- * certificación. Solo Node: `fetch` no puede presentar un certificado de cliente.
+ * solicitudes de CAF, el registro de compras y ventas, el respaldo MIPYME, la verificación de actividades), los sets de
+ * certificación y el proceso de certificación. Solo Node: `fetch` no puede presentar un certificado de cliente.
  */
 export { PORTAL_REJECTIONS, portalRejectionMessage, REGISTER_ACCOUNTING_STATUSES } from '../catalogs/portal'
 export { REGISTER_DOCUMENT_CODES, registerDocumentCode } from '../catalogs/register-codes'
@@ -66,6 +66,15 @@ export type {
   RegisterSummary,
   RegisterSummaryRow,
 } from './pages/rcv'
+export { listAccreditationDocuments, unstable_fetchActivityVerification } from './activity-verification'
+export type { ActivityVerificationInput } from './activity-verification'
+export type {
+  AccreditationDocument,
+  AccreditationDocumentCategory,
+  ActivityVerification,
+  ActivityVerificationMessage,
+  ActivityVerificationRequest,
+} from './pages/activity-verification'
 export { downloadMipymeBackup } from './backup'
 export type { MipymeBackup, MipymeBackupChunk, MipymeBackupInput, MipymeDownloadedChunk } from './backup'
 export { cafFingerprint, createFolioRegistry, createMemoryFolioRegistry } from '../folios/registry'

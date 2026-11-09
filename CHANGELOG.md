@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The activity verification, unstable.** `unstable_fetchActivityVerification(portal, { companyRut? })` in
+  `dte-sdk/portal` reads the SII's "Consulta estado de verificación y acreditación", the verification the SII requires
+  before a company issues documents with VAT. It gives the company's `requests` (number, kind, reason, preliminary and
+  final result, status code and description, request date and accreditation deadline as `YYYY-MM-DD`, procedure status
+  and whether a certificate exists) and the SII's `messages`, each saying whether it blocks. Officials, comments and the
+  address never come out, and there is no `raw`. The SII's own page shows whoever logged in; this sends the company's
+  RUT, and a request of another RUT throws `SII_PORTAL_UNEXPECTED_PAGE` with `step: 'otherTaxpayer'`. An SII error code
+  throws the new rejection `activityVerificationRefused`. It is unstable because it was read once against the real SII,
+  on 2026-11-08, for a pending verification: its shape may change in any release, a patch included, and it becomes
+  `fetchActivityVerification` once an approved verification has been read.
+- **The documents that accredit an activity.** `listAccreditationDocuments(portal)` gives the SII's catalog from the
+  same app: `category` (`general` or `specific`), `code` and `description`, with codes that repeat across categories.
+- Both read production whatever the client's environment, because the app exists only there. `dte-sdk/portal` went
+  from 72.99 kB to 73.82 kB, under its 74 kB limit.
+
 ## [0.2.0] - 2026-11-08
 
 ### Added
