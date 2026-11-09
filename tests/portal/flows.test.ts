@@ -8,6 +8,7 @@ import {
   ANNUL_ENTRY,
   ANNUL_FORM,
   ANNUL_OK,
+  AUTH_PAGE,
   page,
   quotaForm,
   refusedPage,
@@ -75,6 +76,7 @@ describe('requestCafExact', () => {
       availableFolios: 6,
       rejection: 'quotaInsufficient',
       portalMessage: expect.any(String),
+      failure: null,
       knownAnnulled: [],
     })
     expect(harness.urls().some((url) => url.includes('af_anular'))).toBe(false)
@@ -267,6 +269,7 @@ describe('requestCafInBatches', () => {
       availableFolios: 3,
       rejection: 'quotaCapReached',
       portalMessage: null,
+      failure: null,
     })
     const blocked = await signedIn([entry, replies('of_solicita_folios_dcto', REJECTION_PAGES.stampingBlocked)])
     await expect(requestCafInBatches(blocked.portal, { type: 33, quantity: 3 })).resolves.toMatchObject({
@@ -353,6 +356,102 @@ describe('requestCafInBatches', () => {
     expect((await failure(requestCafInBatches(harness.portal, { type: 33, quantity: 3 }))).code).toBe(
       'SII_PORTAL_UNEXPECTED_PAGE',
     )
+  })
+
+  test.each([0, -1, 100.5, Number.NaN])(
+    'a quantity of %p throws INVALID_OPTION before anything goes out',
+    async (quantity) => {
+      const harness = await signedIn([])
+      const error = await failure(requestCafInBatches(harness.portal, { type: 33, quantity }))
+      expect(error).toMatchObject({ code: 'INVALID_OPTION', details: { field: 'quantity' } })
+      expect(harness.fake.requests).toHaveLength(0)
+    },
+  )
+
+  test('a failure at the first trip, with nothing obtained, stays an error', async () => {
+    const harness = await signedIn([
+      entry,
+      replies('of_solicita_folios_dcto', quotaForm(3, 0), quotaForm(3, 0)),
+      replies('of_confirma_folio', new DteError('TRANSPORT_FAILED', { reason: 'ECONNRESET' })),
+    ])
+    expect((await failure(requestCafInBatches(harness.portal, { type: 33, quantity: 200 }))).code).toBe(
+      'TRANSPORT_FAILED',
+    )
+  })
+
+  test('a transport failure at a later reading returns what was obtained, with the failure', async () => {
+    const harness = await signedIn([
+      entry,
+      replies(
+        'of_solicita_folios_dcto',
+        quotaForm(3, 0),
+        quotaForm(3, 0),
+        new DteError('TRANSPORT_FAILED', { reason: 'ECONNRESET' }),
+      ),
+      replies('of_confirma_folio', CAF_XML),
+    ])
+    await expect(requestCafInBatches(harness.portal, { type: 33, quantity: 200 })).resolves.toEqual({
+      complete: false,
+      cafs: [expect.objectContaining({ xml: CAF_XML, granted: 100 })],
+      granted: 100,
+      maxAuthorized: 3,
+      availableFolios: 0,
+      rejection: null,
+      portalMessage: null,
+      failure: { code: 'TRANSPORT_FAILED', operation: 'queryFolioQuota' },
+    })
+  })
+
+  test('a session that expires at a later request returns what was obtained, with the quota of that trip', async () => {
+    const harness = await signedIn([
+      entry,
+      replies('of_solicita_folios_dcto', quotaForm(3, 0), quotaForm(3, 0), quotaForm(2, 100), quotaForm(2, 100)),
+      replies('of_confirma_folio', CAF_XML, AUTH_PAGE),
+    ])
+    await expect(requestCafInBatches(harness.portal, { type: 33, quantity: 200 })).resolves.toEqual({
+      complete: false,
+      cafs: [expect.objectContaining({ xml: CAF_XML, granted: 100 })],
+      granted: 100,
+      maxAuthorized: 2,
+      availableFolios: 100,
+      rejection: null,
+      portalMessage: null,
+      failure: { code: 'SII_PORTAL_SESSION_EXPIRED', operation: 'requestCaf' },
+    })
+    expect(harness.posted('of_confirma_folio')).toHaveLength(2)
+  })
+
+  test('a later failure that is not a DteError is a bug and stays an error', async () => {
+    const harness = await signedIn([
+      entry,
+      replies('of_solicita_folios_dcto', quotaForm(3, 0), quotaForm(3, 0), new Error('bug')),
+      replies('of_confirma_folio', CAF_XML),
+    ])
+    await expect(requestCafInBatches(harness.portal, { type: 33, quantity: 200 })).rejects.toThrow('bug')
+  })
+
+  test('the caller abort throws with nothing obtained, and returns what was obtained after a grant', async () => {
+    const nothing = await signedIn([
+      entry,
+      replies('of_solicita_folios_dcto', quotaForm(3, 0), quotaForm(3, 0)),
+      replies('of_confirma_folio', new DteError('REQUEST_ABORTED')),
+    ])
+    expect((await failure(requestCafInBatches(nothing.portal, { type: 33, quantity: 200 }))).code).toBe(
+      'REQUEST_ABORTED',
+    )
+    const some = await signedIn([
+      entry,
+      replies('of_solicita_folios_dcto', quotaForm(3, 0), quotaForm(3, 0), quotaForm(3, 0), quotaForm(3, 0)),
+      replies('of_confirma_folio', CAF_XML, new DteError('REQUEST_ABORTED')),
+    ])
+    const result = await requestCafInBatches(some.portal, { type: 33, quantity: 200 })
+    expect(result).toMatchObject({
+      complete: false,
+      granted: 100,
+      rejection: null,
+      failure: { code: 'REQUEST_ABORTED', operation: 'requestCaf' },
+    })
+    expect(result.cafs).toHaveLength(1)
   })
 })
 

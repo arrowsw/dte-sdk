@@ -839,6 +839,23 @@ describe('prepareFolios', () => {
     expect(capped.details).toMatchObject({ reason: 'unusedFoliosBlock', rejection: 'companyNotAuthorized' })
   })
 
+  test('a batch that fails after a grant ends the step with its code, and what it obtained stays in the state', async () => {
+    const harness = await certificationHarness([
+      stampEntry,
+      post(
+        'of_solicita_folios_dcto',
+        quotaForm(1, 0),
+        quotaForm(1, 0),
+        new DteError('TRANSPORT_FAILED', { reason: 'ECONNRESET' }),
+      ),
+      confirm(cafXml(33, { from: 1, to: 1 })),
+    ])
+    const error = await failure(prepareFolios(harness.deps, stateWith(), { needs: { 33: 2 } }))
+    expect(error.code).toBe('TRANSPORT_FAILED')
+    expect(error.details).toEqual({ type: 33, operation: 'requestCafInBatches', step: 'queryFolioQuota' })
+    expect((await harness.store.load())?.cafs).toEqual([cafXml(33, { from: 1, to: 1 })])
+  })
+
   test('folios of this run the SII never received come back; received ones stay used; an expired CAF is skipped', async () => {
     const harness = await certificationHarness([
       {
