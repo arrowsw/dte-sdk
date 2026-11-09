@@ -108,7 +108,7 @@ const assertDocumentType = (type: unknown): void => {
   if (!isDocumentType(type)) throw new DteError('INVALID_DOCUMENT_TYPE', { field: 'type' })
 }
 
-const assertQuantity = (value: number, field: string): void => {
+export const assertQuantity = (value: number, field: string): void => {
   if (!Number.isInteger(value) || value < 1) throw new DteError('INVALID_OPTION', { field })
 }
 

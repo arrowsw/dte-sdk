@@ -358,6 +358,16 @@ describe('requestCafInBatches', () => {
     )
   })
 
+  test.each([0, -1, 100.5, Number.NaN])(
+    'a quantity of %p throws INVALID_OPTION before anything goes out',
+    async (quantity) => {
+      const harness = await signedIn([])
+      const error = await failure(requestCafInBatches(harness.portal, { type: 33, quantity }))
+      expect(error).toMatchObject({ code: 'INVALID_OPTION', details: { field: 'quantity' } })
+      expect(harness.fake.requests).toHaveLength(0)
+    },
+  )
+
   test('a failure at the first trip, with nothing obtained, stays an error', async () => {
     const harness = await signedIn([
       entry,

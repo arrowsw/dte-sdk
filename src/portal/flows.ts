@@ -7,7 +7,13 @@ import { annulFoliosInSession } from './annulment'
 import type { PortalClient } from './client'
 import { listReobtainableInSession, reobtainCafInSession, type ReobtainableRange } from './reobtain'
 import { withPortalSession, type PortalContext } from './session'
-import { queryFolioQuotaInSession, requestCafInSession, type FolioQuota, type ObtainedCaf } from './stamping'
+import {
+  assertQuantity,
+  queryFolioQuotaInSession,
+  requestCafInSession,
+  type FolioQuota,
+  type ObtainedCaf,
+} from './stamping'
 
 const DEFAULT_MAX_BATCHES = 4
 const DEFAULT_MAX_CHECKS_PER_RANGE = 30
@@ -238,6 +244,8 @@ export const requestCafInBatches = (
   overrides?: CallOverrides,
 ): Promise<FolioFlowResult> =>
   withPortalSession(portal, 'requestCafInBatches', overrides, async (context) => {
+    // Checked once before anything goes out: a later trip would only meet it with CAFs in hand, as a failure.
+    assertQuantity(input.quantity, 'quantity')
     const company = input.companyRut === undefined ? {} : { companyRut: input.companyRut }
     const maxBatches = input.maxBatches ?? DEFAULT_MAX_BATCHES
     const batch = async (
