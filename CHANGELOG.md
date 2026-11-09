@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-09
+
 ### Changed
 
 - **`requestCafInBatches` returns the CAFs it already holds when a later trip fails, in a result callers have not seen
@@ -485,7 +487,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Jest, ESLint, Prettier, size-limit, Stryker, CI and tag-triggered publish)
   and a single `hello()` export that returns `'dte-sdk is coming'`.
 
-[Unreleased]: https://github.com/arrowsw/dte-sdk/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/arrowsw/dte-sdk/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.5.0
 [0.4.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.4.0
 [0.3.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.3.0
 [0.2.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.2.0

@@ -1,6 +1,6 @@
 {
   "name": "dte-sdk",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "description": "TypeScript SDK for Chilean electronic tax documents (DTE): build, stamp (TED), sign and envelope DTEs for the SII, and talk to the SII web services (upload, status, acceptance/claims).",
   "author": "arrowsw",
