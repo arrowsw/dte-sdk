@@ -147,6 +147,17 @@ export { signDocument, verifyDocumentSignature } from './document/sign'
 export type { SignedDocument } from './document/sign'
 export { issueDocument } from './document/issue'
 export type { IssueDocumentInput } from './document/issue'
+export { verifyReceivedDocuments } from './document/verify-received'
+export type {
+  VerifyReceivedDocumentsOptions,
+  ReceivedDocumentsVerification,
+  ReceivedDocument,
+  ReceivedSignatureCheck,
+  ReceivedTedCheck,
+  ReceivedCafCheck,
+  TedMismatch,
+  CafMismatch,
+} from './document/verify-received'
 
 export { buildXml } from './xml/build'
 export { parseXml, parseXmlWithoutNamespaces, extractTagContent, decodeXmlEntities } from './xml/parse'
@@ -176,6 +187,8 @@ export { parseCaf } from './caf/parse'
 export type { Caf } from './caf/parse'
 export { cafExpiresAt, isCafExpired, isFolioInRange, assertFolioInRange, availableFolios } from './caf/validity'
 export { signWithCaf, verifyWithCaf } from './caf/sign'
+export { SII_CAF_KEYS, verifyCafSignature } from './caf/sii-signature'
+export type { SiiCafKeys, CafSignatureOptions, VerificationStatus } from './caf/sii-signature'
 
 export { stampDocument, verifyTed, buildDdString, buildTedXml, tedText } from './ted/build'
 export type { Ted, StampedDocument, StampOptions } from './ted/build'

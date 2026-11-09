@@ -9,9 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The verification of received documents.** `verifyReceivedDocuments(xml, { siiKeys? })` takes a `DTE`, `EnvioDTE` or
+  `EnvioBOLETA` as a supplier sent it and checks the envelope's own signature and, for each document, found with the
+  exact text its signature covers: its XMLDSig signature; its TED, whose `FRMT` must verify with the key of the CAF the
+  TED carries and whose `DD` must agree with the header (issuer, type, folio, date, receiver and total); that CAF
+  against the document (issuer, type, folio inside the range); and the SII's signature over the CAF (`FRMA`) with the
+  SII key of its `IDK`. Each check is data, and each document and the whole input get a `status` of `valid`, `invalid`
+  or `unchecked`, the last for a CAF whose `IDK` has no known key. A document signed before it went into the envelope,
+  with other namespaces in scope, is checked where it sits and, failing that, on its own; the `DD` and the `DA` are
+  checked as written, flattened, and with their texts escaped the SII's way. Malformed input throws `XML_PARSE_FAILED`
+  or `ENVELOPE_EMPTY`. Not checked: whose certificate signed, and whether the CAF had expired.
+- **The SII's CAF keys.** `SII_CAF_KEYS` gives the 512-bit keys 100 (certification) and 300 (production) with which the
+  SII signs every CAF, from the SII's certificates as CryptoSys and LibreDTE publish them, the same bytes in both, and
+  `verifyCafSignature(cafXml, { siiKeys? })` checks the `FRMA` of one CAF. The tests sign test CAFs with a test SII key
+  pair (`npm run fixtures:sii`); the two keys met real CAFs only in a check by hand, outside the tests: the CAF of the
+  example the SII publishes for key 100, production CAFs of real documents for key 300.
 - **The claim registry's document types at runtime.** `CLAIM_DOCUMENT_TYPES` (33, 34 and 43) and the guard
   `isClaimDocumentType` come from `dte-sdk`, so documents can be filtered by them; `ClaimDocumentType` is derived from
   the list and stays exported.
+- `dte-sdk` went from 31.54 kB to 33.48 kB, over its 32 kB limit, which went to 34 kB.
 
 ## [0.3.0] - 2026-11-08
 
