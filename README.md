@@ -79,8 +79,9 @@ every field.
 ## Status
 
 0.1.0 was the first release with a public API. 0.2.0 added the catalog of the register's document codes, 0.3.0 the
-activity verification, still unstable, and 0.4.0 adds the verification of received documents. Every area this README
-describes ships in 0.4.0. Releases before 1.0.0 come out as the work lands, without waiting for the runs against the
+activity verification, still unstable, and 0.4.0 the verification of received documents. 0.5.0 keeps the CAFs a batch
+request already holds when a later trip fails, and writes the folio registry for its owner only. Every area this README
+describes ships in 0.5.0. Releases before 1.0.0 come out as the work lands, without waiting for the runs against the
 real SII; those runs come before 1.0.0, the first version recommended for production.
 
 Every area is tested against synthetic SII answers, with a 100 % coverage gate in CI. Those tests cannot show how the
@@ -418,6 +419,11 @@ present a client certificate.
 - **To lift a block, issue with the folios you have.** `reobtainFolios` gets lost CAFs back without spending quota.
   `requestCafInBatches` is for a small `MAX_AUTOR` with nothing unused, and `requestCafExact` wants one CAF for the
   whole quantity.
+- **A batch cut short keeps what it got.** Once `requestCafInBatches` holds a CAF, a later trip that fails with
+  anything but a refusal (a transport failure, a timeout, an expired session, a block, `CAF_INVALID`, your abort) ends
+  the flow with the CAFs, `complete: false`, `rejection: null` and `failure: { code, operation }`. Read `failure` as
+  well as `rejection`. A failed `requestCaf` may have been granted all the same, so check `listReobtainableRanges`
+  before asking again.
 - **A grant can be smaller than asked.** `requestCaf` caps at `MAX_AUTOR` and, past the effective maximum with no
   `minQuantity`, asks for one folio, so read `granted`. `minQuantity` and `requestCafExact` are the strict forms.
 - **Annulling cannot be undone** and counts against the quota for six months. `annulFolios` needs `range`,
@@ -438,7 +444,8 @@ after the last one reserved, or from the lowest one reserved and not sent, never
 a free one below that point. With `{ lowestFree: true }` it hands out the lowest free folio of the whole range, which is
 what the certification run asks for; use it only when the registry records every folio the range has spent. A service
 with its own database implements `FolioRegistry` with its own transactions, the option included if it is to back a
-certification run.
+certification run. `createDirectoryFolioRegistry` keeps `folios.json` for its owner only, as the token cache does: the
+ledger holds the companies' RUTs, their track ids and what you keep in `extra`.
 
 To pick the CAF file to issue with, `dte-sdk/node` searches a directory, and its folders down to five levels below it,
 for CAF files. `findCafFiles({ dir, type, issuerRut })` lists the usable ones newest first (by modification time):
