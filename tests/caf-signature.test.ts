@@ -65,6 +65,15 @@ describe('verifyCafSignature', () => {
     ['no CAF block', '<AUTORIZACION/>'],
     ['a CAF without DA', '<CAF version="1.0"><FRMA algoritmo="SHA1withRSA">AA==</FRMA></CAF>'],
     ['a CAF without FRMA', fixtureText('caf-33-signed.xml').replace(/<FRMA[^>]*>[^<]*<\/FRMA>/, '')],
+    ['an empty CAF element', '<CAF version="1.0"/><DA><IDK>100</IDK></DA><FRMA algoritmo="SHA1withRSA">AA==</FRMA>'],
+    [
+      'a DA outside the CAF',
+      '<CAF version="1.0"><FRMA algoritmo="SHA1withRSA">AA==</FRMA></CAF><DA><IDK>100</IDK></DA>',
+    ],
+    [
+      'an FRMA outside the CAF',
+      '<CAF version="1.0"><DA><IDK>100</IDK></DA></CAF><FRMA algoritmo="SHA1withRSA">AA==</FRMA>',
+    ],
     ['an IDK that is not a number', fixtureText('caf-33-signed.xml').replace('<IDK>100</IDK>', '<IDK>cien</IDK>')],
   ])('%s is CAF_INVALID', (_label, xml) => {
     expect(() => verifyCafSignature(xml, options)).toThrow(DteError)
@@ -73,6 +82,14 @@ describe('verifyCafSignature', () => {
     } catch (error) {
       expect((error as DteError).code).toBe('CAF_INVALID')
     }
+  })
+
+  test.each([
+    ['a second CAF', (xml: string) => xml.replace('<AUTORIZACION>', `<AUTORIZACION><X>${parseCaf(xml).xml}</X>`)],
+    ['a second DA', (xml: string) => xml.replace('</CAF>', '<DA><IDK>300</IDK></DA></CAF>')],
+    ['a second FRMA', (xml: string) => xml.replace('</CAF>', '<FRMA algoritmo="SHA1withRSA">AA==</FRMA></CAF>')],
+  ])('%s is CAF_INVALID, whichever one is genuine', (_label, edit) => {
+    expect(() => verifyCafSignature(edit(fixtureText('caf-33-signed.xml')), options)).toThrow(DteError)
   })
 
   test('a value that is not a string is CAF_INVALID', () => {

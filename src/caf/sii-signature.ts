@@ -76,10 +76,20 @@ const FRMA_VALUE = /<FRMA(?:\s[^>]*)?>([^<]*)<\/FRMA\s*>/
 const IDK_VALUE = /<IDK>\s*(\d+)\s*<\/IDK>/
 
 /**
- * EN: The `DA`, `FRMA` and `IDK` of the first `<CAF>` block of a text, or null when one of them is missing.
- * ES: El `DA`, la `FRMA` y el `IDK` del primer bloque `<CAF>` de un texto, o null si falta alguno.
+ * EN: How many start tags (or empty-element tags) of `tag` a text holds, whatever their attributes.
+ * ES: Cuántas etiquetas de inicio (o de elemento vacío) de `tag` tiene un texto, con cualquier atributo.
+ */
+export const startTags = (text: string, tag: string): number => text.split(new RegExp(`<${tag}[\\s/>]`)).length - 1
+
+/**
+ * EN: The `DA`, `FRMA` and `IDK` of the `<CAF>` block of a text, or null when the text holds other than one `CAF`, one
+ * `DA` and one `FRMA` tag, or lacks the `IDK`: with a second one, the bytes checked could be other than the bytes read.
+ * ES: El `DA`, la `FRMA` y el `IDK` del bloque `<CAF>` de un texto, o null si el texto no tiene exactamente una
+ * etiqueta `CAF`, una `DA` y una `FRMA`, o le falta el `IDK`: con una segunda, los bytes chequeados podrían no ser los
+ * bytes leídos.
  */
 export const readCafBlock = (text: string): CafBlock | null => {
+  if (['CAF', 'DA', 'FRMA'].some((tag) => startTags(text, tag) !== 1)) return null
   const caf = CAF_BLOCK.exec(text)?.[0]
   const da = caf === undefined ? undefined : DA_BLOCK.exec(caf)?.[0]
   const signature = caf === undefined ? undefined : FRMA_VALUE.exec(caf)?.[1]
@@ -131,15 +141,15 @@ export const checkCafBlock = (block: CafBlock, keys: SiiCafKeys): VerificationSt
 
 /**
  * EN: Verifies the SII signature of a CAF (`FRMA`, SHA1withRSA over the `DA`) with the SII key its `IDK` names. Takes
- * a CAF file as the SII issues it or the `<CAF>` block a TED carries; the first `<CAF>` block of the text is the one
- * checked. `unchecked` when no key is known for that `IDK`: `SII_CAF_KEYS` has 100 and 300.
+ * a CAF file as the SII issues it or the `<CAF>` block a TED carries: a text with one `CAF`, one `DA` and one `FRMA`.
+ * `unchecked` when no key is known for that `IDK`: `SII_CAF_KEYS` has 100 and 300.
  * ES: Verifica la firma del SII sobre un CAF (`FRMA`, SHA1withRSA sobre el `DA`) con la llave del SII que nombra su
- * `IDK`. Recibe un archivo CAF tal como lo emite el SII o el bloque `<CAF>` que trae un TED; se chequea el primer bloque
- * `<CAF>` del texto. `unchecked` si no se conoce llave para ese `IDK`: `SII_CAF_KEYS` tiene la 100 y la 300.
- * @throws {DteError} EN: `CAF_INVALID` when there is no `<CAF>` block with a `DA`, an `FRMA` and a numeric `IDK`. ES: `CAF_INVALID` si no hay un bloque `<CAF>` con `DA`, `FRMA` e `IDK` numérico.
+ * `IDK`. Recibe un archivo CAF tal como lo emite el SII o el bloque `<CAF>` que trae un TED: un texto con un `CAF`, un
+ * `DA` y una `FRMA`. `unchecked` si no se conoce llave para ese `IDK`: `SII_CAF_KEYS` tiene la 100 y la 300.
+ * @throws {DteError} EN: `CAF_INVALID` when the text holds other than one `CAF`, one `DA` and one `FRMA`, or no numeric `IDK`. ES: `CAF_INVALID` si el texto no tiene exactamente un `CAF`, un `DA` y una `FRMA`, o no tiene un `IDK` numérico.
  */
 export const verifyCafSignature = (cafXml: string, options: CafSignatureOptions = {}): VerificationStatus => {
   const block = typeof cafXml === 'string' ? readCafBlock(cafXml) : null
-  if (block === null) throw new DteError('CAF_INVALID', { reason: 'missing CAF/DA, FRMA or IDK' })
+  if (block === null) throw new DteError('CAF_INVALID', { reason: 'expected one CAF, DA and FRMA, and an IDK' })
   return checkCafBlock(block, options.siiKeys ?? SII_CAF_KEYS)
 }

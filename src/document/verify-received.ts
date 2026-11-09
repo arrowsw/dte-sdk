@@ -3,6 +3,8 @@ import {
   readCafBlock,
   signedTextForms,
   SII_CAF_KEYS,
+  startTags,
+  type CafBlock,
   type SiiCafKeys,
   type VerificationStatus,
 } from '../caf/sii-signature'
@@ -50,7 +52,7 @@ export type TedMismatch = 'issuerRut' | 'documentType' | 'folio' | 'issueDate' |
  * ES: `TED` — El timbre electrónico, chequeado.
  */
 export type ReceivedTedCheck = {
-  /** EN: One `TED` sits in the signed element, with a `DD` and an `FRMT`, and no comment, CDATA or instruction inside. ES: Hay un solo `TED` en el elemento firmado, con `DD` y `FRMT`, y sin comentarios, CDATA ni instrucciones dentro. */
+  /** EN: One `TED` sits in the signed element and holds exactly a `DD` and then an `FRMT`, with no other `DD` or `FRMT` tag and no comment, CDATA or instruction inside. ES: Hay un solo `TED` en el elemento firmado y tiene exactamente un `DD` y luego una `FRMT`, sin otra etiqueta `DD` ni `FRMT` y sin comentarios, CDATA ni instrucciones dentro. */
   readonly found: boolean
   /** EN: `FRMT` verifies with the `RSAPK` of the CAF the TED carries, over the `DD` as ISO-8859-1 bytes: as written, flattened, or with its texts written the SII's way. ES: `FRMT` verifica con la `RSAPK` del CAF que trae el TED, sobre el `DD` en bytes ISO-8859-1: tal como viene, aplanado, o con sus textos escritos a la manera del SII. */
   readonly signatureValid: boolean
@@ -72,7 +74,7 @@ export type CafMismatch = 'issuerRut' | 'documentType' | 'folio'
  * ES: `TED/DD/CAF` — El CAF que trae el TED, chequeado contra el documento y contra la firma del SII.
  */
 export type ReceivedCafCheck = {
-  /** EN: The TED carries a CAF with `RE`, `TD`, `RNG`, `RSAPK`, `IDK` and `FRMA`; when false every other field is null or empty and the status is `invalid`. ES: El TED trae un CAF con `RE`, `TD`, `RNG`, `RSAPK`, `IDK` y `FRMA`; si es false, los demás campos son null o vacíos y el estado es `invalid`. */
+  /** EN: The `DD` holds one `CAF` with one `DA` and one `FRMA` as its direct children, and the `DA` has `RE`, `TD`, `RNG`, `RSAPK` and `IDK`; when false every other field is null or empty and the status is `invalid`. ES: El `DD` tiene un solo `CAF` con un `DA` y una `FRMA` como hijos directos, y el `DA` tiene `RE`, `TD`, `RNG`, `RSAPK` e `IDK`; si es false, los demás campos son null o vacíos y el estado es `invalid`. */
   readonly found: boolean
   /** EN: Id of the SII key that signed it; 100 marks certification and 300 production. ES: `DA/IDK` — Id de la llave del SII que lo firmó; 100 marca certificación y 300 producción. */
   readonly keyId: number | null
@@ -284,16 +286,13 @@ const tedMismatches = (dd: Element, header: Header): readonly TedMismatch[] => {
   return (Object.keys(differs) as TedMismatch[]).filter((field) => differs[field])
 }
 
-const checkCaf = (dd: Element, ddText: string, header: Header, keys: SiiCafKeys): ReceivedCafCheck => {
-  const da = child(child(dd, 'CAF'), 'DA')
-  const block = readCafBlock(ddText)
+const checkCaf = (da: Element, block: CafBlock, header: Header, keys: SiiCafKeys): ReceivedCafCheck => {
   const issuerRut = textAt(da, 'RE')
   const documentType = integer(textAt(da, 'TD'))
   const from = integer(textAt(da, 'RNG', 'D'))
   const to = integer(textAt(da, 'RNG', 'H'))
   const hasKey = textAt(da, 'RSAPK', 'M') !== null && textAt(da, 'RSAPK', 'E') !== null
-  if (block === null || issuerRut === null || documentType === null || from === null || to === null || !hasKey)
-    return NO_CAF
+  if (issuerRut === null || documentType === null || from === null || to === null || !hasKey) return NO_CAF
   const differs: Readonly<Record<CafMismatch, boolean>> = {
     issuerRut: !sameRut(issuerRut, header.issuerRut),
     documentType: documentType !== header.type,
@@ -314,6 +313,23 @@ const checkCaf = (dd: Element, ddText: string, header: Header, keys: SiiCafKeys)
   }
 }
 
+const UNREAD_MARKUP = /<!--|<!\[CDATA\[|<\?/
+const DD_BLOCK = /<DD(?:\s[^>]*)?>[\s\S]*?<\/DD\s*>/
+const NO_STAMP = { ted: NO_TED, caf: NO_CAF } as const
+
+/**
+ * EN: Checks the stamp and its CAF, taking every signed text from the element its fields are read from. A stamp is read
+ * only when its structure leaves no doubt: one `TED`, a direct child of the signed element, holding a `DD` and then an
+ * `FRMT` and nothing else, with no other `DD` or `FRMT` tag and nothing the DOM does not read (comments, CDATA,
+ * instructions). Its CAF is read only when the `DD` holds one `CAF`, one `DA` and one `FRMA` tag, the `CAF` a direct
+ * child of the `DD` and the other two direct children of the `CAF`; otherwise there is no CAF and no key to verify the
+ * `FRMT` with.
+ * ES: Chequea el timbre y su CAF, tomando cada texto firmado del elemento del que se leen sus campos. Un timbre se lee
+ * solo cuando su estructura no deja dudas: un `TED`, hijo directo del elemento firmado, con un `DD` y luego una `FRMT`
+ * y nada más, sin otra etiqueta `DD` ni `FRMT` y sin nada que el DOM no lea (comentarios, CDATA, instrucciones). Su CAF
+ * se lee solo cuando el `DD` tiene una etiqueta `CAF`, una `DA` y una `FRMA`, el `CAF` hijo directo del `DD` y las otras
+ * dos hijas directas del `CAF`; si no, no hay CAF ni llave con que verificar la `FRMT`.
+ */
 const checkStamp = (
   dte: string,
   root: Element,
@@ -323,20 +339,31 @@ const checkStamp = (
 ): { readonly ted: ReceivedTedCheck; readonly caf: ReceivedCafCheck } => {
   const elements = Array.from(root.getElementsByTagName('TED'))
   const texts = elementTexts(dte, TED_PATTERN, 'TED')
-  const tedText = texts.length === 1 && !/<!--|<!\[CDATA\[|<\?/.test(texts[0]) ? texts[0] : undefined
-  const ddText = tedText === undefined ? undefined : /<DD>[\s\S]*?<\/DD\s*>/.exec(tedText)?.[0]
-  const signature = tedText === undefined ? undefined : /<FRMT(?:\s[^>]*)?>([^<]*)<\/FRMT\s*>/.exec(tedText)?.[1]
-  const dd = child(elements[0], 'DD')
-  if (elements.length !== 1 || elements[0].parentNode !== signed || ddText === undefined || !signature || !dd)
-    return { ted: NO_TED, caf: NO_CAF }
-  const da = child(child(dd, 'CAF'), 'DA')
-  const key = { modulus: textAt(da, 'RSAPK', 'M') ?? '', exponent: textAt(da, 'RSAPK', 'E') ?? '' }
-  const value = signature.replace(/\s+/g, '')
-  const signatureValid = signedTextForms(ddText).some((data) => rsaSha1VerifyBase64(key, data, 'latin1', value))
+  const tedText = texts.length === 1 && !UNREAD_MARKUP.test(texts[0]) ? texts[0] : ''
+  const [dd, frmt, ...others] =
+    elements.length === 1 && elements[0].parentNode === signed ? childElements(elements[0]) : []
+  const ddText = DD_BLOCK.exec(tedText)?.[0]
+  const signature = frmt?.textContent?.replace(/\s+/g, '') ?? ''
+  if (
+    dd?.tagName !== 'DD' ||
+    frmt?.tagName !== 'FRMT' ||
+    others.length > 0 ||
+    startTags(tedText, 'DD') !== 1 ||
+    startTags(tedText, 'FRMT') !== 1 ||
+    ddText === undefined ||
+    signature === ''
+  )
+    return NO_STAMP
+  const caf = child(dd, 'CAF')
+  const da = child(caf, 'DA')
+  const block = child(caf, 'FRMA') === undefined ? null : readCafBlock(ddText)
+  const keyDa = block === null ? undefined : da
+  const key = { modulus: textAt(keyDa, 'RSAPK', 'M') ?? '', exponent: textAt(keyDa, 'RSAPK', 'E') ?? '' }
+  const signatureValid = signedTextForms(ddText).some((data) => rsaSha1VerifyBase64(key, data, 'latin1', signature))
   const mismatches = tedMismatches(dd, header)
   return {
     ted: { found: true, signatureValid, mismatches, valid: signatureValid && mismatches.length === 0 },
-    caf: checkCaf(dd, ddText, header, keys),
+    caf: block === null || da === undefined ? NO_CAF : checkCaf(da, block, header, keys),
   }
 }
 
@@ -385,7 +412,7 @@ const checkEnvelope = (xml: string, root: Element): ReceivedSignatureCheck =>
  * CAF (`FRMA`) con la llave del SII de su `IDK` (`SII_CAF_KEYS`, o `siiKeys`). Un documento que falla un chequeo es un
  * resultado, no un error; un CAF cuyo `IDK` no tiene llave conocida deja el documento `unchecked`. Pura: sin reloj ni
  * red. No se chequea: de quién es el certificado que firma, ni si el CAF estaba vencido.
- * @throws {DteError} EN: `XML_PARSE_FAILED` for empty or malformed XML, another root, an envelope without `SetDTE`, a `DTE` out of place or a `DTE` without one `Documento` or `Liquidacion`; `ENVELOPE_EMPTY` for an envelope without documents. ES: `XML_PARSE_FAILED` para XML vacío o malformado, otro raíz, un sobre sin `SetDTE`, un `DTE` fuera de lugar o un `DTE` sin un `Documento` o `Liquidacion`; `ENVELOPE_EMPTY` para un sobre sin documentos.
+ * @throws {DteError} EN: `XML_PARSE_FAILED` for empty or malformed XML, another root, an envelope without exactly one `SetDTE`, a `DTE` out of place or a `DTE` without one `Documento` or `Liquidacion`; `ENVELOPE_EMPTY` for an envelope without documents. ES: `XML_PARSE_FAILED` para XML vacío o malformado, otro raíz, un sobre sin exactamente un `SetDTE`, un `DTE` fuera de lugar o un `DTE` sin un `Documento` o `Liquidacion`; `ENVELOPE_EMPTY` para un sobre sin documentos.
  */
 export const verifyReceivedDocuments = (
   xml: string,
@@ -401,9 +428,11 @@ export const verifyReceivedDocuments = (
       root: root.tagName,
       reason: 'expected DTE, EnvioDTE or EnvioBOLETA',
     })
-  const set = rootTag === 'DTE' ? undefined : child(root, 'SetDTE')
-  if (rootTag !== 'DTE' && set === undefined)
-    throw new DteError('XML_PARSE_FAILED', { field: 'SetDTE', reason: 'missing SetDTE' })
+  // One SetDTE, so the one the envelope's signature covers is the one whose documents are read.
+  const sets = rootTag === 'DTE' ? [] : childElements(root).filter((element) => element.tagName === 'SetDTE')
+  if (rootTag !== 'DTE' && sets.length !== 1)
+    throw new DteError('XML_PARSE_FAILED', { field: 'SetDTE', reason: 'expected one SetDTE' })
+  const set = sets[0]
   const placed = set === undefined ? [root] : childElements(set).filter((element) => element.tagName === 'DTE')
   const total = dom.getElementsByTagName('DTE').length
   if (total === 0) throw new DteError('ENVELOPE_EMPTY', { field: 'SetDTE' })

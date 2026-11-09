@@ -411,6 +411,61 @@ describe('verifyReceivedDocuments: the inputs it takes', () => {
   })
 })
 
+describe('verifyReceivedDocuments: the bytes checked are the bytes read', () => {
+  const genuine = issued(1)
+  const dd = /<DD>[\s\S]*<\/DD>/.exec(genuine.xml)![0]
+  const frmt = /<FRMT[\s\S]*<\/FRMT>/.exec(genuine.xml)![0]
+  const caf = /<CAF[\s\S]*<\/CAF>/.exec(dd)![0]
+  const da = /<DA>[\s\S]*<\/DA>/.exec(caf)![0]
+  const frma = /<FRMA[\s\S]*<\/FRMA>/.exec(caf)![0]
+  // The amount a forger wants, in the header and in a DD of their own; the genuine DD and its signature ride along.
+  const forgedDd = dd.replace('<MNT>172550</MNT>', '<MNT>999</MNT>')
+  const forged = (ted: string): string =>
+    signedElsewhere(genuine, ` xmlns="${SII_NS}" xmlns:xsi="${XSI_NS}"`, (text) =>
+      text.replace(/<TED[\s\S]*<\/TED>/, () => ted).replace('<MntTotal>172550</MntTotal>', '<MntTotal>999</MntTotal>'),
+    )
+
+  test('the genuine stamp, put back the same way, passes', () => {
+    const document = only(forged(`<TED version="1.0">${dd}${frmt}</TED>`))
+    expect(document.ted).toEqual({ ...VALID_TED, mismatches: ['totalAmount'], valid: false })
+    expect(only(signedElsewhere(genuine, ` xmlns="${SII_NS}" xmlns:xsi="${XSI_NS}"`)).status).toBe('valid')
+  })
+
+  test.each([
+    ['a genuine DD inside another child of the TED', `<X>${dd}</X>${forgedDd}${frmt}`],
+    ['a second DD before the genuine one', `${forgedDd}${dd}${frmt}`],
+    ['a second DD after the genuine one', `${dd}${forgedDd}${frmt}`],
+    ['a genuine DD after the FRMT', `${forgedDd}${frmt}<X>${dd}</X>`],
+    ['a second FRMT', `${forgedDd}${frmt}${frmt}`],
+    ['the FRMT before the DD', `${frmt}${forgedDd}`],
+    ['another child in the TED', `${forgedDd}${frmt}<X/>`],
+  ])('%s is no stamp', (_label, content) => {
+    const document = only(forged(`<TED version="1.0">${content}</TED>`))
+    expect(document.ted).toMatchObject({ found: false, valid: false })
+    expect(document.caf).toMatchObject({ found: false, status: 'invalid' })
+    expect(document.status).toBe('invalid')
+  })
+
+  // A DD signed with a CAF key the forger holds, carrying a genuine CAF for its FRMA and a forged one for its fields.
+  const forgedCaf = signedCaf({ tamperAfterSigning: true })
+  const withCaf = (cafPart: string): string => stampedWith(1, forgedCaf, { fields: { caf: cafPart } }).xml
+
+  test.each([
+    ['a genuine CAF inside another child of the DD', `<X>${caf}</X>${forgedCaf.xml}`],
+    ['a second CAF', `${forgedCaf.xml}${caf}`],
+    ['a genuine DA inside the DD, outside the CAF', `<X>${da}</X>${forgedCaf.xml}`],
+    ['a second DA in the CAF', forgedCaf.xml.replace('<DA>', `${da}<DA>`)],
+    ['a second FRMA in the CAF', forgedCaf.xml.replace('</CAF>', `${frma}</CAF>`)],
+    ['a DA inside another child of the CAF', caf.replace(/<DA>[\s\S]*<\/DA>/, (value) => `<X>${value}</X>`)],
+    ['an FRMA inside another child of the CAF', caf.replace(/<FRMA[\s\S]*<\/FRMA>/, (value) => `<X>${value}</X>`)],
+  ])('%s is no CAF, and the stamp cannot verify', (_label, cafPart) => {
+    const document = only(withCaf(cafPart))
+    expect(document.ted).toMatchObject({ found: true, signatureValid: false, valid: false })
+    expect(document.caf).toMatchObject({ found: false, siiSignature: 'invalid', status: 'invalid' })
+    expect(document.status).toBe('invalid')
+  })
+})
+
 describe('verifyReceivedDocuments: malformed input throws', () => {
   test.each([
     ['empty text', ''],
@@ -434,6 +489,13 @@ describe('verifyReceivedDocuments: malformed input throws', () => {
 
   test('an envelope without SetDTE is XML_PARSE_FAILED', () => {
     expectFailure(() => verify(`<EnvioDTE xmlns="${SII_NS}" version="1.0"/>`), 'XML_PARSE_FAILED', { field: 'SetDTE' })
+  })
+
+  test('an envelope with a second SetDTE is XML_PARSE_FAILED, whichever one is signed', () => {
+    const xml = envelopeOf([issued(1)])
+    const set = /<SetDTE[\s\S]*<\/SetDTE>/.exec(xml)![0]
+    const decoy = set.replace(/ ID="[^"]*"/, ' ID="Otro"')
+    expectFailure(() => verify(xml.replace(set, () => `${decoy}${set}`)), 'XML_PARSE_FAILED', { field: 'SetDTE' })
   })
 
   test('an envelope without documents is ENVELOPE_EMPTY', () => {

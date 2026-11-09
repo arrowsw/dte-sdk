@@ -253,13 +253,15 @@ certificates as CryptoSys and LibreDTE publish them, the same bytes in both. `si
 `SII_CAF_KEYS` to add a key. `verifyCafSignature(cafXml)` checks the `FRMA` of a single CAF the same way.
 
 - **A document that fails a check is a result, not an error.** Malformed XML, another root, an envelope without
-  `SetDTE` and a `DTE` without its `Documento` throw `XML_PARSE_FAILED`; an envelope without documents throws
+  exactly one `SetDTE` and a `DTE` without its `Documento` throw `XML_PARSE_FAILED`; an envelope without documents throws
   `ENVELOPE_EMPTY`.
 - **The bytes each signature covers.** A document is often signed before it goes into an envelope, with other
   namespaces in scope. Its signature is checked where it sits and, failing that, on its own, with the SII namespace and
   as written; the forms differ only in namespace declarations, never in content. The `FRMT` of the stamp and the `FRMA`
   of its CAF are checked over the `DD` and the `DA` as written, flattened (the form the SII signs), and with their texts
-  escaped the SII's way, for a file whose writer turned `Á` into `&#xC1;`. `xml` is the document exactly as it came.
+  escaped the SII's way, for a file whose writer turned `Á` into `&#xC1;`. A stamp is read only when its structure
+  leaves no doubt about which bytes are signed: a `DD` and then an `FRMT` in the `TED` and nothing else, one `CAF`
+  with one `DA` and one `FRMA` in the `DD`; anything else is a failed check. `xml` is the document exactly as it came.
 - **Not checked:** whose certificate signed, and whether the CAF had expired when the document was stamped.
 - **Not run on a supplier's document yet.** The tests sign test CAFs with a test SII key pair. The two SII keys were
   checked once by hand, outside the tests: key 100 verifies the CAF of the example the SII publishes, and key 300
