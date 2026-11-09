@@ -70,10 +70,10 @@ describe('unstable_fetchActivityVerification', () => {
   })
 
   test('the company of the call goes before the client one', async () => {
-    const entry = verificationEntry({ rut: 10000013, dv: 'K' })
+    const entry = verificationEntry({ rut: 14625621, dv: 'K' })
     const harness = await signedIn(routes(json(verificationAnswer([entry]))), options)
-    await unstable_fetchActivityVerification(harness.portal, { companyRut: '10.000.013-k' })
-    expect(sent(posts(harness)[0]).data).toEqual({ contribuyenteBO: { rut: 10000013, dv: 'K' } })
+    await unstable_fetchActivityVerification(harness.portal, { companyRut: '14.625.621-k' })
+    expect(sent(posts(harness)[0]).data).toEqual({ contribuyenteBO: { rut: 14625621, dv: 'K' } })
   })
 
   test('a company is needed, and it must be a RUT', async () => {

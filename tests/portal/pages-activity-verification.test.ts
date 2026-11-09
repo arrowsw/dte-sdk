@@ -159,8 +159,8 @@ describe('activityVerificationOf', () => {
   test('the RUT may come as a string, and the verifier in lower case', () => {
     const entry = verificationEntry({ rut: '76543210', dv: '3' })
     expect(activityVerificationOf(verificationAnswer([entry]), COMPANY)).toMatchObject({ outcome: 'read' })
-    const withK = verificationEntry({ rut: 10000013, dv: 'k' })
-    expect(activityVerificationOf(verificationAnswer([withK]), toSiiRut('10000013-K'))).toMatchObject({
+    const withK = verificationEntry({ rut: 14625621, dv: 'k' })
+    expect(activityVerificationOf(verificationAnswer([withK]), toSiiRut('14625621-K'))).toMatchObject({
       outcome: 'read',
     })
   })
