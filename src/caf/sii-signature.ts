@@ -1,3 +1,4 @@
+import { CERTIFICATION_KEY_ID, type Environment } from '../catalogs/codes'
 import { rsaSha1VerifyBase64, type RsaPublicKeyParts } from '../crypto/rsa'
 import { DteError } from '../errors'
 import { descendants, integer, isPlain, named, signedForms, textAt } from '../xml/elements'
@@ -49,11 +50,24 @@ export const SII_CAF_KEYS: SiiCafKeys = {
   },
 }
 
+const PRODUCTION_KEY_ID = 300
+
+/**
+ * EN: The environment the SII key `keyId` signs CAFs for: `certification` for 100, `production` for 300, null for
+ * another.
+ * ES: El ambiente para el que la llave del SII `keyId` firma CAF: `certification` para 100, `production` para 300, null
+ * para otra.
+ */
+export const cafEnvironment = (keyId: number): Environment | null =>
+  keyId === CERTIFICATION_KEY_ID ? 'certification' : keyId === PRODUCTION_KEY_ID ? 'production' : null
+
 /**
  * EN: Options of `verifyCafSignature`.
  * ES: Opciones de `verifyCafSignature`.
  */
 export type CafSignatureOptions = {
+  /** EN: The environment whose CAFs are accepted, `production` by default: a CAF of the other environment's SII key (100 in certification, 300 in production) is `invalid`. ES: El ambiente cuyos CAF se aceptan, `production` por defecto: un CAF de la llave del SII del otro ambiente (100 en certificación, 300 en producción) es `invalid`. */
+  readonly environment?: Environment
   /** EN: The SII keys by `IDK`, in place of `SII_CAF_KEYS` (spread it to add one). ES: Las llaves del SII por `IDK`, en lugar de `SII_CAF_KEYS` (para agregar una, expándela). */
   readonly siiKeys?: SiiCafKeys
 }
@@ -108,11 +122,13 @@ export const checkCafBlock = (block: CafBlock, keys: SiiCafKeys): VerificationSt
  * EN: Verifies the SII signature of a CAF (`FRMA`, SHA1withRSA over the `DA`) with the SII key its `IDK` names. Takes
  * a CAF file as the SII issues it or the `<CAF>` block a TED carries, read as `readCaf` reads it: one `CAF`, one `DA`
  * and one `FRMA`, the last two direct children of the first. `unchecked` when no key is known for that `IDK`:
- * `SII_CAF_KEYS` has 100 and 300.
+ * `SII_CAF_KEYS` has 100 and 300. `invalid` for a CAF of the other environment than `environment` (production by
+ * default), whatever its signature.
  * ES: Verifica la firma del SII sobre un CAF (`FRMA`, SHA1withRSA sobre el `DA`) con la llave del SII que nombra su
  * `IDK`. Recibe un archivo CAF tal como lo emite el SII o el bloque `<CAF>` que trae un TED, leído como lo lee
  * `readCaf`: un `CAF`, un `DA` y una `FRMA`, los dos últimos hijos directos del primero. `unchecked` si no se conoce
- * llave para ese `IDK`: `SII_CAF_KEYS` tiene la 100 y la 300.
+ * llave para ese `IDK`: `SII_CAF_KEYS` tiene la 100 y la 300. `invalid` para un CAF del otro ambiente que
+ * `environment` (producción por defecto), sea cual sea su firma.
  * @throws {DteError} EN: `CAF_INVALID` when the text is not XML or `readCaf` finds no CAF in it. ES: `CAF_INVALID` si el texto no es XML o `readCaf` no encuentra un CAF en él.
  */
 export const verifyCafSignature = (cafXml: string, options: CafSignatureOptions = {}): VerificationStatus => {
@@ -125,5 +141,7 @@ export const verifyCafSignature = (cafXml: string, options: CafSignatureOptions 
   })()
   const block = root === null ? null : readCaf(root)
   if (block === null) throw new DteError('CAF_INVALID', { reason: 'expected one CAF, with one DA and one FRMA' })
+  const environment = cafEnvironment(block.keyId)
+  if (environment !== null && environment !== (options.environment ?? 'production')) return 'invalid'
   return checkCafBlock(block, options.siiKeys ?? SII_CAF_KEYS)
 }

@@ -6,7 +6,7 @@ import { DteError } from '../src/errors'
 import { fixtureBytes, fixtureText } from './support/fixtures'
 import { signedCafXml, TEST_SII_KEYS } from './support/received-fixtures'
 
-const options = { siiKeys: TEST_SII_KEYS }
+const options = { siiKeys: TEST_SII_KEYS, environment: 'certification' } as const
 
 describe('SII_CAF_KEYS', () => {
   // The two certificates as CryptoSys and LibreDTE publish them, byte for byte the same in both.
@@ -43,7 +43,18 @@ describe('verifyCafSignature', () => {
   })
 
   test('the default keys are the SII’s, which never signed a test CAF', () => {
-    expect(verifyCafSignature(fixtureText('caf-33-signed.xml'))).toBe('invalid')
+    expect(verifyCafSignature(fixtureText('caf-33-signed.xml'), { environment: 'certification' })).toBe('invalid')
+  })
+
+  test('the environment: a CAF of the other one is invalid, whatever its signature', () => {
+    const certification = fixtureText('caf-33-signed.xml')
+    expect(verifyCafSignature(certification, { siiKeys: TEST_SII_KEYS })).toBe('invalid')
+    expect(verifyCafSignature(certification, { siiKeys: TEST_SII_KEYS, environment: 'certification' })).toBe('valid')
+    const production = signedCafXml({ keyId: 300 })
+    expect(verifyCafSignature(production, { siiKeys: { 300: TEST_SII_KEYS[100] } })).toBe('valid')
+    expect(verifyCafSignature(production, { siiKeys: { 300: TEST_SII_KEYS[100] }, environment: 'certification' })).toBe(
+      'invalid',
+    )
   })
 
   test('a DA changed after the SII signed it', () => {

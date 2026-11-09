@@ -191,7 +191,7 @@ export const signedElsewhere = (
     editSignedInfo(buildSignedInfo(id, digest, { includeXsi: false })),
     editSignedInfo(canonical),
   )
-  return unsigned.replace('</DTE>', `${signature}</DTE>`)
+  return unsigned.replace(/<\/DTE>$/, () => `${signature}</DTE>`)
 }
 
 /** An `EnvioDTE` that carries the given `<DTE>` texts as they are, signed by the fixture certificate. */

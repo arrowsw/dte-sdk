@@ -1,6 +1,8 @@
+import { canonicalAttribute, canonicalText } from './c14n'
 import { escapeXmlAttribute, escapeXmlMarkup, escapeXmlText } from './escape'
 
 const ELEMENT_NODE = 1
+const TEXT_NODE = 3
 const CDATA_NODE = 4
 const PROCESSING_INSTRUCTION_NODE = 7
 const COMMENT_NODE = 8
@@ -105,3 +107,36 @@ const flatten = (element: Element, escape: (text: string) => string): string => 
 export const signedForms = (element: Element): readonly string[] => [
   ...new Set([flatten(element, escapeXmlText), flatten(element, escapeXmlMarkup)]),
 ]
+
+const writeNode = (node: Node): string => {
+  if (node.nodeType === ELEMENT_NODE) return writeXml(node as Element)
+  if (node.nodeType === TEXT_NODE || node.nodeType === CDATA_NODE) return canonicalText((node as CharacterData).data)
+  if (node.nodeType === COMMENT_NODE) return `<!--${(node as CharacterData).data}-->`
+  const instruction = node as ProcessingInstruction
+  return `<?${instruction.target} ${instruction.data}?>`
+}
+
+/**
+ * EN: An element written as XML from the DOM, with the same content: its name, its attributes (its own namespace
+ * declarations included) in document order, its text, comments and instructions, and its elements. It reads back into
+ * the same elements, attributes and text, but it is not the input byte for byte: a CDATA section becomes escaped text,
+ * a character reference the character, an empty element `<X/>`, and every attribute takes double quotes.
+ * `declarations` adds namespace declarations to the element, such as the ones it inherits.
+ * ES: Un elemento escrito como XML desde el DOM, con el mismo contenido: su nombre, sus atributos (incluidas sus propias
+ * declaraciones de namespace) en el orden del documento, su texto, comentarios e instrucciones, y sus elementos. Se lee
+ * de vuelta en los mismos elementos, atributos y texto, pero no es la entrada byte a byte: una sección CDATA pasa a
+ * texto escapado, una referencia de carácter al carácter, un elemento vacío a `<X/>`, y todo atributo lleva comillas
+ * dobles. `declarations` agrega declaraciones de namespace al elemento, como las que hereda.
+ */
+export const writeXml = (element: Element, declarations: readonly (readonly [string, string])[] = []): string => {
+  const attributes = [
+    ...declarations,
+    ...Array.from(element.attributes, (attribute) => [attribute.name, attribute.value]),
+  ]
+    .map(([name, value]) => ` ${name}="${canonicalAttribute(value)}"`)
+    .join('')
+  const content = Array.from(element.childNodes, writeNode).join('')
+  return element.childNodes.length === 0
+    ? `<${element.tagName}${attributes}/>`
+    : `<${element.tagName}${attributes}>${content}</${element.tagName}>`
+}

@@ -24,7 +24,8 @@ import {
   XSI_NS,
 } from './support/received-fixtures'
 
-const options = { siiKeys: TEST_SII_KEYS }
+// The test CAFs carry IDK 100, the certification environment's key.
+const options = { siiKeys: TEST_SII_KEYS, environment: 'certification' } as const
 const verify = (xml: string): ReceivedDocumentsVerification => verifyReceivedDocuments(xml, options)
 const only = (xml: string): ReceivedDocument => {
   const { documents } = verify(xml)
@@ -37,6 +38,7 @@ const VALID_TED = { found: true, signatureValid: true, mismatches: [], valid: tr
 const VALID_CAF = {
   found: true,
   keyId: 100,
+  environment: 'certification',
   issuerRut: ISSUER_RUT,
   documentType: 33,
   range: { from: 1, to: 100 },
@@ -97,7 +99,7 @@ describe('verifyReceivedDocuments: a valid envelope', () => {
       'issuerRut' | 'documentType' | 'folio' | 'issueDate' | 'receiverRut' | 'totalAmount'
     >()
     expectTypeOf<ReceivedDocument['caf']['mismatches'][number]>().toEqualTypeOf<
-      'issuerRut' | 'documentType' | 'folio'
+      'issuerRut' | 'documentType' | 'folio' | 'environment'
     >()
   })
 
@@ -206,6 +208,7 @@ describe('verifyReceivedDocuments: each check on its own', () => {
     expect(result.documents[0].caf).toEqual({
       ...VALID_CAF,
       keyId: 999,
+      environment: null,
       siiSignature: 'unchecked',
       status: 'unchecked',
     })
@@ -232,6 +235,7 @@ describe('verifyReceivedDocuments: each check on its own', () => {
     expect(document.caf).toEqual({
       found: false,
       keyId: null,
+      environment: null,
       issuerRut: null,
       documentType: null,
       range: null,
@@ -554,6 +558,95 @@ describe('verifyReceivedDocuments: each text is its element', () => {
     const { xml } = issued(1)
     const crlf = `\u{FEFF}<?xml version="1.0" encoding="ISO-8859-1"?>\r\n<!-- \u{1F600} -->\r\n${xml}\r\n`
     expect(verify(crlf).documents[0]).toMatchObject({ xml, status: 'valid' })
+  })
+})
+
+describe('verifyReceivedDocuments: the node checked is the node read', () => {
+  // A review's attack on reading each DTE's text by position: a valid DTE in a comment just before the real one, and a
+  // comment with U+2029 after the real one's start tag, where xmldom's column count restarts. Comments are outside
+  // C14N, so every signature still holds.
+  const decoyed = (envelope: string, decoy: string): string => {
+    const start = envelope.indexOf('<DTE')
+    const tagEnd = envelope.indexOf('>', start) + 1
+    const head = `${envelope.slice(0, start)}<!--${decoy}-->`
+    const lineStart = head.lastIndexOf('\n') + 1
+    const pad = lineStart + head.length - (start + 4) - 1 - (head.length + tagEnd - start) - 4
+    return `${head}${envelope.slice(start, tagEnd)}<!--${'x'.repeat(pad)}\u{2029}-->${envelope.slice(tagEnd)}`
+  }
+  const decoy = issued(2).xml
+
+  test('a genuine envelope with a decoy in a comment reports its own document', () => {
+    const result = verify(decoyed(envelopeOf([issued(1)]), decoy))
+    expect(result.documents).toHaveLength(1)
+    expect(result.documents[0]).toMatchObject({ folio: 1, status: 'valid' })
+    expect(result.status).toBe('valid')
+  })
+
+  test('a forged document cannot hide behind a decoy in a comment', () => {
+    const forged = stampedWith(1, signedCaf(), { dd: (dd) => dd.replace(/<MNT>\d+<\/MNT>/, '<MNT>999</MNT>') }).xml
+    const result = verify(decoyed(envelopeAround([forged]), decoy))
+    expect(result.documents).toHaveLength(1)
+    expect(result.documents[0]).toMatchObject({ folio: 1, ted: { signatureValid: false }, status: 'invalid' })
+    expect(result.documents[0].xml).not.toBe(decoy)
+    expect(result.status).toBe('invalid')
+  })
+
+  test.each([
+    ['a lone CR', '\r'],
+    ['NEL', '\x85'],
+    ['CR NEL', '\r\x85'],
+    ['LS', '\u{2028}'],
+    ['PS', '\u{2029}'],
+  ])('%s in text and around tags changes nothing', (_label, mark) => {
+    const signed = signedElsewhere(issued(1), ` xmlns="${SII_NS}" xmlns:xsi="${XSI_NS}"`, (text) =>
+      text
+        .replace('<GiroRecep>Comercio</GiroRecep>', `<GiroRecep>Comer${mark}cio</GiroRecep>`)
+        .replace('</Encabezado>', `</Encabezado>${mark}`),
+    )
+    expect(only(signed)).toMatchObject({ folio: 1, status: 'valid' })
+    const envelope = envelopeAround([`${mark}${signed}${mark}`])
+    const result = verify(envelope)
+    expect(result.documents).toHaveLength(1)
+    expect(result.documents[0]).toMatchObject({ folio: 1, status: 'valid' })
+    expect(result.status).toBe('valid')
+  })
+
+  test('a closing DTE tag in a comment, an instruction or a CDATA section inside the document is only text', () => {
+    const signed = signedElsewhere(issued(1), ` xmlns="${SII_NS}" xmlns:xsi="${XSI_NS}"`, (text) =>
+      text
+        .replace('<Encabezado>', '<!-- </DTE> --><?nota </DTE>?><Encabezado>')
+        .replace('<GiroRecep>Comercio</GiroRecep>', '<GiroRecep><![CDATA[Comercio </DTE>]]></GiroRecep>'),
+    )
+    const document = verify(envelopeAround([signed])).documents[0]
+    expect(document.status).toBe('valid')
+    // `xml` is written from the element: the comment and the instruction stay, the CDATA section becomes escaped text.
+    expect(document.xml).toContain('<!-- </DTE> --><?nota </DTE>?><Encabezado>')
+    expect(document.xml).toContain('<GiroRecep>Comercio &lt;/DTE&gt;</GiroRecep>')
+  })
+
+  test('xml is the element written from the DOM, which reads back the same', () => {
+    const { xml } = issued(1)
+    const quoted = xml.replace('<GiroRecep>Comercio</GiroRecep>', '<GiroRecep>Comercio &#x41;</GiroRecep>')
+    expect(only(quoted).xml).toBe(xml.replace('<GiroRecep>Comercio</GiroRecep>', '<GiroRecep>Comercio A</GiroRecep>'))
+  })
+})
+
+describe('verifyReceivedDocuments: the environment', () => {
+  const production = { siiKeys: { 300: TEST_SII_KEYS[100] } }
+
+  test('in production by default, a certification CAF is invalid, with the mismatch environment', () => {
+    const document = verifyReceivedDocuments(issued(1).xml, { siiKeys: TEST_SII_KEYS }).documents[0]
+    expect(document.caf).toEqual({ ...VALID_CAF, mismatches: ['environment'], status: 'invalid' })
+    expect(document.status).toBe('invalid')
+  })
+
+  test('a production CAF passes in production and is invalid in certification', () => {
+    const { xml } = issued(1, signedCaf({ keyId: 300 }))
+    const valid = verifyReceivedDocuments(xml, production).documents[0]
+    expect(valid.caf).toEqual({ ...VALID_CAF, keyId: 300, environment: 'production' })
+    expect(valid.status).toBe('valid')
+    const other = verifyReceivedDocuments(xml, { ...production, environment: 'certification' }).documents[0]
+    expect(other.caf).toMatchObject({ environment: 'production', mismatches: ['environment'], status: 'invalid' })
   })
 })
 

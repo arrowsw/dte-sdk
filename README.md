@@ -226,6 +226,7 @@ import { readFileSync } from 'node:fs'
 import { decodeLatin1, isClaimDocumentType, verifyReceivedDocuments } from 'dte-sdk'
 
 // Decode the bytes with the encoding the XML declaration names: ISO-8859-1 for the SII's documents
+// In production by default: a document stamped with a certification CAF comes back invalid
 const { envelope, documents, status } = verifyReceivedDocuments(decodeLatin1(readFileSync('EnvioDTE.xml')))
 
 status // 'valid' | 'invalid' | 'unchecked': the worst of the envelope and its documents
@@ -249,18 +250,24 @@ has no known key, and `valid` otherwise:
   `IDK` names.
 
 `SII_CAF_KEYS` holds the keys 100 (certification) and 300 (production) that sign every CAF, taken from the SII's
-certificates as CryptoSys and LibreDTE publish them, the same bytes in both. `siiKeys` replaces them; spread
-`SII_CAF_KEYS` to add a key. `verifyCafSignature(cafXml)` checks the `FRMA` of a single CAF the same way.
+certificates as CryptoSys and LibreDTE publish them, the same bytes in both. Only the key of `environment` is accepted,
+`production` by default: a CAF signed with the other one is `invalid`, with the mismatch `environment` and
+`caf.environment` saying which it is, so a certification document never passes for a production one. Pass
+`environment: 'certification'` to check documents of the certification environment. `siiKeys` replaces the key
+material; spread `SII_CAF_KEYS` to add a key. `verifyCafSignature(cafXml, { environment })` checks the `FRMA` of a
+single CAF the same way.
 
 - **A document that fails a check is a result, not an error.** Malformed XML, another root, an envelope without
   exactly one `SetDTE` and a `DTE` without its `Documento` throw `XML_PARSE_FAILED`; an envelope without documents throws
   `ENVELOPE_EMPTY`.
-- **The bytes each signature covers are the bytes read.** Each `DTE` is taken from the input where the parser found its
-  element, so the text checked is the element the envelope's signature covers, and `xml` is that text exactly as it
-  came. A document is often signed before it goes into an envelope, with other namespaces in scope: its signature is
-  checked where it sits and, failing that, on its own, with the SII namespace and as written; the forms differ only in
-  namespace declarations, never in content. A signature passes only with one `Reference`, SHA-1, RSA-SHA1, C14N 1.0
-  and no transform but enveloped-signature or C14N 1.0.
+- **What is checked is what is reported.** Each document is read from its element in the parsed input, never from a cut
+  of the text: its signature is checked over forms written from that element and its fields and stamp are read from
+  it. `xml` is that element written out: the same elements, attributes, text and comments, which read back and verify
+  the same, but not the input byte for byte (a CDATA section becomes escaped text, a character reference the character,
+  an empty element `<X/>`). A document is often signed before it goes into an envelope, with other namespaces in scope:
+  its signature is checked where it sits and, failing that, on its own, with the SII namespace and as written; the
+  forms differ only in namespace declarations, never in content. A signature passes only with one `Reference`, SHA-1,
+  RSA-SHA1, C14N 1.0 and no transform but enveloped-signature or C14N 1.0.
 - **The stamp is read from its elements alone.** The `FRMT` and the `FRMA` are checked over the `DD` and the `DA` written
   from the very elements whose fields are compared: flattened, the form the SII signs, with their texts escaped the
   SII's way or with only `&`, `<` and `>` escaped (so `&#xC1;` reads as `Á`). A stamp is read only when its structure
