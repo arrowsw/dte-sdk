@@ -1,7 +1,7 @@
 import { isCafExpired } from '../caf/validity'
 import type { DocumentType } from '../catalogs/document-types'
 import type { PortalRejection } from '../catalogs/portal'
-import { errorMessage, isDteError } from '../errors'
+import { errorMessage, isDteError, type DteErrorCode } from '../errors'
 import type { CallOverrides } from '../sii/client'
 import { annulFoliosInSession } from './annulment'
 import type { PortalClient } from './client'
@@ -14,10 +14,27 @@ const DEFAULT_MAX_CHECKS_PER_RANGE = 30
 const MAX_RANGES_TO_ANNUL = 20
 
 /**
+ * EN: The `DteError` that stopped a composite flow already holding CAFs, when it was not a refusal: a transport
+ * failure, a timeout, an expired session, a block, an invalid CAF or the caller's abort. Only its code is kept, since
+ * its details may carry what a page said.
+ * ES: El `DteError` que detuvo un flujo compuesto que ya tenía CAF en la mano, cuando no fue un rechazo: una falla de
+ * transporte, un tiempo agotado, una sesión vencida, un bloqueo, un CAF inválido o la cancelación de quien llama. Solo
+ * se guarda su código, porque sus detalles pueden traer lo que dijo una página.
+ */
+export type FolioFlowFailure = {
+  /** EN: The error code. ES: El código del error. */
+  readonly code: DteErrorCode
+  /** EN: The step that failed. Reading the quota stamps nothing; a request may have been granted all the same, and `listReobtainableRanges` says whether it was. ES: El paso que falló. Leer el cupo no timbra nada; una solicitud pudo otorgarse igual, y `listReobtainableRanges` dice si se otorgó. */
+  readonly operation: 'queryFolioQuota' | 'requestCaf'
+}
+
+/**
  * EN: The outcome of a composite flow. Refusals come back as data, because the flow may already hold CAFs: those must
- * reach the caller, and a CAF cannot travel in an error's details, which get logged.
+ * reach the caller, and a CAF cannot travel in an error's details, which get logged. For the same reason, once a CAF is
+ * in hand any other `DteError` comes back as data too, in `failure`.
  * ES: El resultado de un flujo compuesto. Los rechazos vuelven como datos, porque el flujo puede tener ya CAF en la mano:
- * esos deben llegar a quien llama, y un CAF no puede viajar en los detalles de un error, que se registran.
+ * esos deben llegar a quien llama, y un CAF no puede viajar en los detalles de un error, que se registran. Por lo mismo,
+ * con un CAF ya en la mano cualquier otro `DteError` también vuelve como dato, en `failure`.
  */
 export type FolioFlowResult = {
   /** EN: The quantity asked for was covered. ES: Se cubrió la cantidad pedida. */
@@ -34,6 +51,8 @@ export type FolioFlowResult = {
   readonly rejection: PortalRejection | null
   /** EN: What the portal said, or null. ES: Lo que dijo el portal, o null. */
   readonly portalMessage: string | null
+  /** EN: What stopped the flow with CAFs in hand when it was not a refusal, or null; `rejection` is then null. Only `requestCafInBatches` sets it. ES: Lo que detuvo el flujo con CAF en la mano cuando no fue un rechazo, o null; `rejection` es entonces null. Solo lo llena `requestCafInBatches`. */
+  readonly failure: FolioFlowFailure | null
 }
 
 // A refusal of the SII turns into data; a transport failure, a block or an expired session stays an error.
@@ -57,7 +76,17 @@ const refusalResult = (
   rejection,
   // Every refusal these flows can meet carries what the portal said.
   portalMessage: details.portalMessage as string,
+  failure: null,
 })
+
+// With CAFs in hand a `DteError` that is not a refusal may not throw them away: it becomes data, by its code alone.
+// With none in hand it stays an error, as `asRefusal` leaves it, and so does anything that is not a `DteError`: a bug.
+const settleTrip =
+  (cafs: readonly ObtainedCaf[], operation: FolioFlowFailure['operation']) =>
+  (error: unknown): ReturnType<typeof asRefusal> | { readonly failure: FolioFlowFailure } =>
+    cafs.length > 0 && isDteError(error) && error.code !== 'SII_PORTAL_REJECTED'
+      ? { failure: { code: error.code, operation } }
+      : asRefusal(error)
 
 /**
  * EN: Input of `requestCafExact`.
@@ -95,6 +124,7 @@ const fromCaf = (caf: ObtainedCaf, quantity: number): FolioFlowResult => ({
   availableFolios: caf.availableFolios,
   rejection: caf.granted >= quantity ? null : 'foliosShort',
   portalMessage: null,
+  failure: null,
 })
 
 /**
@@ -182,15 +212,25 @@ export type RequestCafInBatchesInput = {
 /**
  * EN: Covers a quantity across several CAFs, for when `FOLIOS_DISP` is 0 and `MAX_AUTOR` is small: the SII rations by
  * history, there is nothing to annul or download again, and waiting does not move it. It stops as soon as a batch adds
- * nothing, because every grant raises `FOLIOS_DISP` and can lower the next `MAX_AUTOR`.
+ * nothing, because every grant raises `FOLIOS_DISP` and can lower the next `MAX_AUTOR`. Once a CAF is in hand, a later
+ * trip that fails with a `DteError` other than a refusal (a transport failure, a timeout, an expired session, a block,
+ * `CAF_INVALID`) ends the flow with the CAFs obtained, the last quota seen and the failure in `failure`, instead of
+ * throwing what the SII already granted away; when the trip was a request, it may have been granted too, so check
+ * `listReobtainableRanges` before asking again. The caller's abort as well: it stops the flow at once and, with CAFs in
+ * hand, returns them with `REQUEST_ABORTED`; with none it throws, as in `reobtainFolios`.
  * ES: Cubre una cantidad con varios CAF, para cuando `FOLIOS_DISP` es 0 y `MAX_AUTOR` es chico: el SII raciona por historial,
  * no hay nada que anular ni reobtener, y esperar no lo mueve. Se detiene apenas una tanda no aporta, porque cada entrega sube
- * `FOLIOS_DISP` y puede bajar el próximo `MAX_AUTOR`.
+ * `FOLIOS_DISP` y puede bajar el próximo `MAX_AUTOR`. Con un CAF ya en la mano, un viaje posterior que falla con un
+ * `DteError` que no es un rechazo (una falla de transporte, un tiempo agotado, una sesión vencida, un bloqueo,
+ * `CAF_INVALID`) termina el flujo con los CAF obtenidos, el último cupo visto y la falla en `failure`, en vez de
+ * botar lo que el SII ya otorgó; si el viaje era una solicitud, pudo otorgarse también, así que revisa
+ * `listReobtainableRanges` antes de pedir de nuevo. También la cancelación de quien llama: detiene el flujo de
+ * inmediato y, con CAF en la mano, los devuelve con `REQUEST_ABORTED`; sin ninguno lanza, como en `reobtainFolios`.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: type, quantity and limits. ES: tipo, cantidad y límites.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: the outcome, with whatever was obtained. ES: el resultado, con lo que se haya obtenido.
- * @throws {DteError} EN: session, block and transport codes. ES: códigos de sesión, bloqueo y transporte.
+ * @throws {DteError} EN: session, block and transport codes and `REQUEST_ABORTED`, only while no CAF is in hand. ES: códigos de sesión, bloqueo y transporte y `REQUEST_ABORTED`, solo mientras no hay un CAF en la mano.
  */
 export const requestCafInBatches = (
   portal: PortalClient,
@@ -210,47 +250,46 @@ export const requestCafInBatches = (
         maxAuthorized: lastQuota?.maxAuthorized ?? null,
         availableFolios: lastQuota?.availableFolios ?? null,
       }
-      const capReached = (): FolioFlowResult => ({
-        complete: false,
+      // Past the first check the quantity is not covered, so only that check ends complete.
+      const end = (
+        quota: typeof seen,
+        rejection: PortalRejection | null,
+        failure: FolioFlowFailure | null = null,
+      ): FolioFlowResult => ({
+        complete: covered >= input.quantity,
         cafs,
         granted: covered,
-        ...seen,
-        rejection: 'quotaCapReached',
+        ...quota,
+        rejection,
         portalMessage: null,
+        failure,
       })
-      if (covered >= input.quantity)
-        return { complete: true, cafs, granted: covered, ...seen, rejection: null, portalMessage: null }
-      if (number > maxBatches) return capReached()
+      if (covered >= input.quantity) return end(seen, null)
+      if (number > maxBatches) return end(seen, 'quotaCapReached')
       const quota =
         number === 1 && input.initialQuota !== undefined
           ? input.initialQuota
-          : await queryFolioQuotaInSession(context, { type: input.type, ...company }).catch((error: unknown) =>
-              asRefusal(error),
+          : await queryFolioQuotaInSession(context, { type: input.type, ...company }).catch(
+              settleTrip(cafs, 'queryFolioQuota'),
             )
+      if ('failure' in quota) return end(seen, null, quota.failure)
       if ('rejection' in quota) return refusalResult(cafs, quota.rejection, quota.details)
       const missing = input.quantity - covered
       const wanted = quota.unrestricted ? missing : Math.min(quota.maxAuthorized ?? 0, missing)
       const current = { maxAuthorized: quota.maxAuthorized, availableFolios: quota.availableFolios }
-      if (wanted <= 0)
-        return {
-          complete: false,
-          cafs,
-          granted: covered,
-          ...current,
-          rejection: 'quotaCapReached',
-          portalMessage: null,
-        }
+      if (wanted <= 0) return end(current, 'quotaCapReached')
       const outcome = await requestCafInSession(context, {
         type: input.type,
         quantity: wanted,
         minQuantity: 1,
         ...company,
-      }).catch((error: unknown) => asRefusal(error))
+      }).catch(settleTrip(cafs, 'requestCaf'))
+      if ('failure' in outcome) return end(current, null, outcome.failure)
       // An uncertain request is said as such: read as the cap, it would invite asking again for what may be granted.
       if ('rejection' in outcome) {
         return covered === 0 || outcome.rejection === 'stampingUncertain'
           ? refusalResult(cafs, outcome.rejection, { ...outcome.details, ...current })
-          : { complete: false, cafs, granted: covered, ...current, rejection: 'quotaCapReached', portalMessage: null }
+          : end(current, 'quotaCapReached')
       }
       return batch(number + 1, [...cafs, outcome], covered + outcome.granted, quota)
     }

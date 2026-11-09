@@ -32,6 +32,7 @@ export { listReobtainableRanges, reobtainCaf } from './reobtain'
 export type { ReobtainableRange } from './reobtain'
 export { requestCafExact, requestCafInBatches, reobtainFolios } from './flows'
 export type {
+  FolioFlowFailure,
   FolioFlowResult,
   ReobtainFoliosInput,
   ReobtainResult,

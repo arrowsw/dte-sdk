@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`requestCafInBatches` returns the CAFs it already holds when a later trip fails.** `FolioFlowResult` returns
+  refusals as data so that CAFs already obtained reach the caller, but anything else on the second trip or a later one
+  (a transport failure, a timeout, an expired session, a block, `CAF_INVALID`, the caller's abort) threw out of the
+  flow, and the CAFs earlier trips had brought, each a range the SII had granted and its private key, were lost: only
+  `listReobtainableRanges` and `reobtainCaf` could find them again. Once a CAF is in hand such a `DteError` now ends the
+  flow with `complete: false`, the CAFs, `granted` so far, the last quota seen, `rejection: null` and the new field
+  `failure: { code, operation }`, where `operation` is `queryFolioQuota` or `requestCaf`; a failed `requestCaf` may
+  have been granted all the same, and `listReobtainableRanges` says whether it was. Only the code is kept, since the
+  error's details may carry what a page said. With no CAF in hand it still throws, the caller's abort included, as
+  `reobtainFolios` does, and anything that is not a `DteError` still throws as a bug. `failure` is null everywhere
+  else, `requestCafExact` included: it holds no CAF when it asks a second time. `FolioFlowFailure` is exported from
+  `dte-sdk/portal`. The certification's `prepareFolios` keeps those CAFs in the state and then throws the failure's
+  code, with `type`, `operation` and `step`, as it threw before, instead of `FOLIO_OUT_OF_RANGE`. `dte-sdk/portal` went
+  from 73.88 kB to 73.97 kB, under its 74 kB limit.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added

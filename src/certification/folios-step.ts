@@ -233,16 +233,19 @@ const rangesOf = (xmls: readonly string[], type: number): readonly Span[] =>
     .filter((caf) => caf.documentType === type)
     .map((caf) => caf.range)
 
+// A request stopped by a failure, not by the SII, ends the step with that failure's code, as when the flow threw it.
 const shortage = (type: number, required: number, available: number, result: FolioFlowResult): DteError =>
-  new DteError('FOLIO_OUT_OF_RANGE', {
-    type,
-    required,
-    available,
-    maxAuthorized: result.maxAuthorized,
-    availableFolios: result.availableFolios,
-    rejection: result.rejection,
-    reason: result.availableFolios === 0 ? 'noUnusedFolios' : 'unusedFoliosBlock',
-  })
+  result.failure !== null
+    ? new DteError(result.failure.code, { type, operation: 'requestCafInBatches', step: result.failure.operation })
+    : new DteError('FOLIO_OUT_OF_RANGE', {
+        type,
+        required,
+        available,
+        maxAuthorized: result.maxAuthorized,
+        availableFolios: result.availableFolios,
+        rejection: result.rejection,
+        reason: result.availableFolios === 0 ? 'noUnusedFolios' : 'unusedFoliosBlock',
+      })
 
 /**
  * EN: Makes sure the run holds the folios each type needs, as the field does it. The CAFs in hand first: an expired one
@@ -259,7 +262,8 @@ const shortage = (type: number, required: number, available: number, result: Fol
  * included, the ones just obtained, and the ones a re-obtention brought and the run did not keep) and never the ranges
  * kept in `annulledRanges`. If any was annulled the maximum is read again and the request repeated following it; an
  * annulment that fails counts as none. Every CAF obtained is saved in the state at once, so a step that ends short
- * leaves them in hand for the next attempt. Still short throws `FOLIO_OUT_OF_RANGE` with the numbers.
+ * leaves them in hand for the next attempt. Still short throws `FOLIO_OUT_OF_RANGE` with the numbers, or, when the
+ * batches stopped on a failure and not on the SII's answer, that failure's code.
  * ES: Asegura que la corrida tenga los folios que necesita cada tipo, como lo hace el campo. Primero los CAF en mano:
  * uno vencido se omite, los folios de esta corrida que el SII nunca recibió se devuelven, y los que el SII ya recibió
  * se marcan como usados para saltarlos. Luego el cupo: un rechazo o un fallo al leerlo no detiene, la corrida sigue sin
@@ -274,7 +278,8 @@ const shortage = (type: number, required: number, available: number, result: Fol
  * recién obtenidos y los que trajo una reobtención y la corrida no conservó) ni los rangos de `annulledRanges`. Si se
  * anuló alguno se lee de nuevo el máximo y se repite la solicitud siguiéndolo; una anulación que falla cuenta como
  * ninguna. Cada CAF obtenido se guarda en el estado de inmediato, así un paso que termina corto los deja en mano para
- * el siguiente intento. Si aún falta, lanza `FOLIO_OUT_OF_RANGE` con los números.
+ * el siguiente intento. Si aún falta, lanza `FOLIO_OUT_OF_RANGE` con los números o, cuando las tandas se detuvieron por
+ * una falla y no por la respuesta del SII, el código de esa falla.
  * @throws {DteError} EN: `MISSING_FIELD { field: 'plan' }` without a plan and without `needs`; `FOLIO_OUT_OF_RANGE { type, required, available, maxAuthorized, availableFolios, rejection, reason }`; the portal codes. ES: los mismos códigos.
  */
 export const prepareFolios = async (
@@ -375,6 +380,7 @@ export const prepareFolios = async (
           availableFolios: null,
           rejection: 'stampingBlocked',
           portalMessage: null,
+          failure: null,
         }
       const exactFirst =
         quota === null || quota.unrestricted || quota.maxAuthorized === null || quota.maxAuthorized >= quantity
