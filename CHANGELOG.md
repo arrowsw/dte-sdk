@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The claim registry's document types at runtime.** `CLAIM_DOCUMENT_TYPES` (33, 34 and 43) and the guard
+  `isClaimDocumentType` come from `dte-sdk`, so documents can be filtered by them; `ClaimDocumentType` is derived from
+  the list and stays exported.
+
 ## [0.3.0] - 2026-11-08
 
 ### Added

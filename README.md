@@ -240,7 +240,8 @@ The client is plain data: every operation is a free function that takes it first
 obtained and renewed for you (one cache per environment, channel and certificate). Also
 available: `getSeed`/`getToken`, `uploadBook`, `uploadFolioConsumption`, `queryUploadStatus`,
 `queryDocumentStatus`, `folioReceived`, `listClaimEvents`, `queryTransferable`,
-`queryReceptionDate`, `receiverStatus`.
+`queryReceptionDate`, `receiverStatus`. `CLAIM_DOCUMENT_TYPES` (33, 34 and 43) and `isClaimDocumentType` say which
+documents the registry takes.
 
 `receiverAnswer(events, receivedAt, today)` reads what the receiver answered, with no request:
 the events of `listClaimEvents`, the `receivedAt` of `queryReceptionDate` and today in Chile

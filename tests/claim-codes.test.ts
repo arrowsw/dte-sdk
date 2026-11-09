@@ -1,10 +1,15 @@
+import { expectTypeOf } from 'expect-type'
+import * as root from '../src'
+import type { ClaimDocumentType } from '../src'
 import {
   CLAIM_ACTIONS,
+  CLAIM_DOCUMENT_TYPES,
   CLAIM_EVENT_CODES,
   CLAIM_RESPONSE_CODES,
   TRANSFERABILITY_CODES,
   claimResponseMessage,
   isClaimAction,
+  isClaimDocumentType,
   transferabilityMessage,
   transferabilityOf,
 } from '../src/catalogs/claim-codes'
@@ -21,6 +26,24 @@ describe('claim catalogs', () => {
     expect(isClaimAction('acceptContent')).toBe(true)
     expect(isClaimAction('toString')).toBe(false)
     expect(isClaimAction(42)).toBe(false)
+  })
+
+  test('the document types the registry accepts are a list at runtime, with a guard', () => {
+    expect(CLAIM_DOCUMENT_TYPES).toEqual([33, 34, 43])
+    expect(root.CLAIM_DOCUMENT_TYPES).toBe(CLAIM_DOCUMENT_TYPES)
+    expect(root.isClaimDocumentType).toBe(isClaimDocumentType)
+    expect(CLAIM_DOCUMENT_TYPES.every(isClaimDocumentType)).toBe(true)
+    expect([39, 46, 52, 56, 61, 0, 33.5].some(isClaimDocumentType)).toBe(false)
+    expect(isClaimDocumentType('33')).toBe(false)
+    expect(isClaimDocumentType(null)).toBe(false)
+  })
+
+  test('the type is the list, so a filter narrows to it', () => {
+    expectTypeOf<ClaimDocumentType>().toEqualTypeOf<33 | 34 | 43>()
+    expectTypeOf<(typeof CLAIM_DOCUMENT_TYPES)[number]>().toEqualTypeOf<ClaimDocumentType>()
+    const claimable = [33, 61, 34, 52, 43].filter(isClaimDocumentType)
+    expectTypeOf(claimable).toEqualTypeOf<ClaimDocumentType[]>()
+    expect(claimable).toEqual([33, 34, 43])
   })
 
   test('event codes include the credit-note events and the cash payment the SII registers', () => {

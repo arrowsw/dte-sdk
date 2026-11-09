@@ -69,13 +69,15 @@ export { RECEPTION_STATUS, classifyReceptionStatus, receptionStatusMessage } fro
 export type { ReceptionStatusClass } from './catalogs/reception-status'
 export {
   CLAIM_ACTIONS,
+  CLAIM_DOCUMENT_TYPES,
   CLAIM_EVENT_CODES,
   CLAIM_RESPONSE_CODES,
   claimResponseMessage,
+  isClaimDocumentType,
   TRANSFERABILITY_CODES,
   transferabilityMessage,
 } from './catalogs/claim-codes'
-export type { ClaimAction, ClaimActionCode } from './catalogs/claim-codes'
+export type { ClaimAction, ClaimActionCode, ClaimDocumentType } from './catalogs/claim-codes'
 
 export { toSiiRut, isSiiRut, splitSiiRut } from './model/rut'
 export type { SiiRut } from './model/rut'
@@ -351,7 +353,6 @@ export {
   receiverAnswer,
 } from './sii/claims'
 export type {
-  ClaimDocumentType,
   ClaimDocumentInput,
   RegisterClaimInput,
   ClaimResult,

@@ -1,4 +1,11 @@
-import { CLAIM_ACTIONS, isClaimAction, transferabilityOf, type ClaimAction } from '../catalogs/claim-codes'
+import {
+  CLAIM_ACTIONS,
+  isClaimAction,
+  isClaimDocumentType,
+  transferabilityOf,
+  type ClaimAction,
+  type ClaimDocumentType,
+} from '../catalogs/claim-codes'
 import { DteError } from '../errors'
 import { splitSiiRut, toSiiRut, type SiiRut } from '../model/rut'
 import { toIsoDate } from '../time/chile'
@@ -13,13 +20,6 @@ import { buildSoapEnvelope, parseSoapResponse, SOAP_HEADERS, type SoapParam } fr
 import { decodeBody, encodeUtf8 } from './transport'
 
 const CLAIMS_NAMESPACE = 'http://ws.registroreclamodte.diii.sdi.sii.cl'
-const CLAIM_DOCUMENT_TYPES: readonly number[] = [33, 34, 43]
-
-/**
- * EN: Document types the registry accepts.
- * ES: `tipoDoc` — Tipos de documento que acepta el registro: 33, 34 y 43.
- */
-export type ClaimDocumentType = 33 | 34 | 43
 
 /**
  * EN: A received document identified for the registry.
@@ -125,7 +125,7 @@ export type ReceiverStatusResult = {
 
 const documentParams = (input: ClaimDocumentInput): readonly SoapParam[] => {
   const issuer = splitSiiRut(toSiiRut(input.issuerRut, 'issuerRut'))
-  if (!CLAIM_DOCUMENT_TYPES.includes(input.type)) throw new DteError('INVALID_DOCUMENT_TYPE', { type: input.type })
+  if (!isClaimDocumentType(input.type)) throw new DteError('INVALID_DOCUMENT_TYPE', { type: input.type })
   if (!Number.isInteger(input.folio) || input.folio <= 0) throw new DteError('INVALID_FOLIO', { field: 'folio' })
   return [
     { name: 'rutEmisor', value: issuer.body },
