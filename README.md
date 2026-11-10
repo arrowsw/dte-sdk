@@ -81,8 +81,10 @@ every field.
 0.1.0 was the first release with a public API. 0.2.0 added the catalog of the register's document codes, 0.3.0 the
 activity verification, still unstable, and 0.4.0 the verification of received documents. 0.5.0 keeps the CAFs a batch
 request already holds when a later trip fails, and writes the folio registry for its owner only. 0.6.0 does the same for
-annulling, getting ranges back and the exact request, and logs what stopped a flow with every text redacted. Every area
-this README describes ships in 0.6.0. Releases before 1.0.0 come out as the work lands, without waiting for the runs against the
+annulling, getting ranges back and the exact request, and logs what stopped a flow with every text redacted. 0.7.0
+settles the gaps an application found while it was built on dte-sdk, in the folio flows, CAF files and CAF parsing, and
+the receiver's answer, which reads a failed query as `unknown`. Every area this README describes ships in 0.7.0.
+Releases before 1.0.0 come out as the work lands, without waiting for the runs against the
 real SII; those runs come before 1.0.0, the first version recommended for production.
 
 Every area is tested against synthetic SII answers, with a 100 % coverage gate in CI. Those tests cannot show how the
@@ -130,7 +132,7 @@ npm install pdf-lib bwip-js
 | Import from      | What it holds                                                                                                                                                                                                             | Runs on                                                        |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | `dte-sdk`        | Documents, stamps, signatures, envelopes, books, the verification of received documents and the SII web services client over `fetch`                                                                                      | Node, Bun, Deno; bundles for the browser with no configuration |
-| `dte-sdk/node`   | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`                  | Node                                                           |
+| `dte-sdk/node`   | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope`  | Node                                                           |
 | `dte-sdk/portal` | SII portal, folios and CAF requests, the folio registry, purchase and sales register, MIPYME backup, activity verification, and certification: sets, runner, exchange, upload of the samples and the receipts application | Node                                                           |
 | `dte-sdk/pdf`    | Printed samples and the SII office of each commune (`SII_OFFICES`, `siiOfficeForCommune`)                                                                                                                                 | Node, with `pdf-lib` and `bwip-js` installed                   |
 
@@ -311,11 +313,14 @@ available: `getSeed`/`getToken`, `uploadBook`, `uploadFolioConsumption`, `queryU
 `queryReceptionDate`, `receiverStatus`. `CLAIM_DOCUMENT_TYPES` (33, 34 and 43) and `isClaimDocumentType` say which
 documents the registry takes.
 
-`receiverAnswer(events, receivedAt, today)` reads what the receiver answered, with no request:
-the events of `listClaimEvents`, the `receivedAt` of `queryReceptionDate` and today in Chile
+`receiverAnswer(listed, receivedAt, today)` reads what the receiver answered, with no request:
+the result of `listClaimEvents`, the `receivedAt` of `queryReceptionDate` and today in Chile
 (`chileDate()`). A credit note that annuls comes first, then a claim, then an acceptance; with
 none of them, eight calendar days after the SII received the document it is accepted by law
-(Ley 19.983, `tacitlyAccepted`). It also gives `claimDeadline`, the last day to claim.
+(Ley 19.983, `tacitlyAccepted`). Pass the result of `listClaimEvents` whole: when the query
+failed and listed no events, the answer is `unknown`, never pending or accepted by law. Its
+events alone still work, but cannot tell a failed query. It also gives `claimDeadline`, the last
+day to claim.
 
 `queryAuthorizedIssuer(sii, { rut })` asks the public registry of authorized issuers of the SII
 (`ee_empresa_rut`) for a RUT: its business name, the resolution of the environment, which is the
@@ -435,12 +440,15 @@ present a client certificate.
   not the call: each pass tries at most `maxRanges` ranges (50, or 20 in `requestCafExact`) and there are up to four
   passes, so one call can annul up to four times that many (200, or 80). Every step is tried up to three times,
   whatever the error, on top of the retries of the client. `exclude` protects a CAF still in use. Pass `knownAnnulled`
-  back between runs: the portal keeps listing annulled ranges forever.
+  back between runs: the portal keeps listing annulled ranges forever, and a range its keys cover, in one key or
+  several, is not posted again. Folios the SII answered one by one come back in runs, and a walk cut short keeps them.
 - **Getting a range back asks the SII which folios are free.** `reobtainFolios` sends plain requests (referers
   without a host, the forms picked by their exact opening tag, no session handling on the way in) and
   reads the listing for ranges and nothing else: with a session that expired, or on a page that states a refusal, the
   list is empty, and a listing that fails for any reason reads as no ranges to get back (the failure is in `reason`).
-  It does not sign in on demand: call it with a session that is alive.
+  It does not sign in on demand: call it with a session that is alive. `reobtainCaf` on its own enters the procedure
+  first and signs in on demand. Inside `reobtainFolios`, a login page in answer to a download is
+  `SII_PORTAL_SESSION_EXPIRED`, which ends the walk with the CAFs in hand and `failure`, or throws with none.
 
 `createFolioRegistry`, `createMemoryFolioRegistry` and, from `dte-sdk/node`, `createDirectoryFolioRegistry` keep local
 track of the folios of each CAF: reserve, mark as sent or annulled, release. `reserve` hands out the next free folio:
@@ -453,12 +461,17 @@ ledger holds the companies' RUTs, their track ids and what you keep in `extra`.
 
 To pick the CAF file to issue with, `dte-sdk/node` searches a directory, and its folders down to five levels below it,
 for CAF files. `findCafFiles({ dir, type, issuerRut })` lists the usable ones newest first (by modification time):
-`.xml` files that parse as a CAF of that type whose `RE` is that company, read from the file and never from the folder it
-lies in, and that have not expired (`isCafExpired`, with its one-day margin). A folder or file that cannot be read is
-skipped. `findLatestCafFile` gives the first of them, or null. `resolveCafFile({ dir, type, issuerRut, required,
-registry, environment })` gives the newest one that still has `required` free folios, `remaining` in the registry for the
-scope of the file (or its whole range without a registry), with that `scope` to reserve from, and null when none has:
-then it is time to ask the SII for a new CAF.
+`.xml` files that parse as a CAF of that type whose `RE` is that company, read from the file and never from the folder
+it lies in, and that have not expired (`isCafExpired`, with its one-day margin). Each file is read in the encoding its
+XML declaration names, ISO-8859-1 as the SII serves it or UTF-8, and with no declaration as UTF-8; a file whose bytes
+are not that encoding is skipped, as is a folder or file that cannot be read. With `includeExpired: true` the expired
+files are listed too, with `expired` set. `findLatestCafFile` gives the first of them, or null. `resolveCafFile({ dir,
+type, issuerRut, required, registry, environment })` gives the newest one that still has `required` free folios,
+`remaining` in the registry for the scope of the file (or its whole range without a registry), with that `scope` to
+reserve from, and null when none has: then it is time to ask the SII for a new CAF. Neither `findLatestCafFile` nor
+`resolveCafFile` takes an expired file. `cafFileScope(file, environment)` builds the same scope from a CAF's text and
+the CAF parsed from it, such as the portal's `ObtainedCaf`: give it the text the file holds, since the scope's
+`cafFingerprint` is of that text.
 
 ```typescript
 import { createDirectoryFolioRegistry, resolveCafFile } from 'dte-sdk/node'
