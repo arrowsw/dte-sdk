@@ -67,6 +67,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the CAF's `IDK`, as it does for an `FRMA` that is not base64. In `verifyReceivedDocuments` such a CAF used to be no
   CAF, and the stamp, left without its key, failed too: the CAF is now found and fails its SII signature, and the stamp
   is checked with the CAF's key like any other.
+- **`parseCaf` checks that the CAF's private key is the pair of its public key.** It checked that `RSASK` was a PEM
+  private key, but not that it was the pair of the `RSAPK` the SII signed in the `DA`, as dte-sdk already checks a
+  certificate's key: a CAF with another key parsed, and every stamp signed with it failed the SII's check. A CAF whose
+  keys are not a pair now throws `CAF_INVALID` with the reason `RSASK is not the pair of RSAPK`. The keys are compared
+  as numbers, so a modulus wrapped over lines or with a leading zero byte still pairs.
+  - **What to change:** nothing for a CAF the SII issued. The portal's flows parse the CAF they download, so a CAF
+    whose keys are not a pair reaches them as `CAF_INVALID`, as a malformed one does.
 - **A cached session is checked on the client's own environment.** `openPortalSession`, and the check of a saved
   session before the GWT portals and the receipts' certification, read the company page `ad_empresa1` of the
   certification host whatever the client's environment, so a production client depended on maullin being up. They now

@@ -38,6 +38,25 @@ describe('parseCaf', () => {
     expect(caf.xml).not.toMatch(/>\s+</)
   })
 
+  test('the private key must be the pair of the public key the SII signed', () => {
+    const otherKey = /<RSASK>[\s\S]*<\/RSASK>/.exec(fixtureText('caf-33-signed.xml'))![0]
+    const swapped = caf33.replace(/<RSASK>[\s\S]*<\/RSASK>/, otherKey)
+    expect(() => parseCaf(swapped)).toThrow(DteError)
+    try {
+      parseCaf(swapped)
+    } catch (error) {
+      expect((error as DteError).details).toEqual({ reason: 'RSASK is not the pair of RSAPK' })
+    }
+    expectCode(() => parseCaf(caf33.replace(/<E>[^<]*<\/E>/, '<E>Aw==</E>')), 'CAF_INVALID')
+    expectCode(() => parseCaf(caf33.replace(/<M>[^<]*<\/M>/, '<M>FICTICIA</M>')), 'CAF_INVALID')
+    // The modulus read as a number: line breaks in it, as a writer may wrap it, and a leading zero byte change nothing.
+    const modulus = /<M>([^<]*)<\/M>/.exec(caf33)![1]
+    const wrapped = caf33.replace(modulus, `${modulus.slice(0, 40)}\n${modulus.slice(40)}`)
+    expect(parseCaf(wrapped).range).toEqual({ from: 1, to: 100 })
+    const padded = Buffer.concat([Buffer.from([0]), Buffer.from(modulus, 'base64')]).toString('base64')
+    expect(parseCaf(caf33.replace(modulus, padded)).range).toEqual({ from: 1, to: 100 })
+  })
+
   test('receipt CAF', () => {
     const caf = parseCaf(fixtureText('caf-39.xml'))
     expect(caf.documentType).toBe(39)
