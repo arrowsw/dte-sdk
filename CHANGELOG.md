@@ -48,7 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `verifyReceivedDocuments` already read it; it was not exported.
 - **`cafFileScope(file, environment)`**, in `dte-sdk/node`: the registry scope of a CAF file (its company, type and
   range, the environment, and the `cafFingerprint` of its text), the one `resolveCafFile` builds and returns. Anything
-  with a CAF's text and the CAF parsed from it, such as the portal's `ObtainedCaf`, has one too.
+  with a CAF's text and the CAF parsed from it, such as the portal's `ObtainedCaf`, has one too, but it is the saved
+  file's scope only when given the text the file holds: an app that rewrites a downloaded CAF before saving it, its
+  declaration say, takes the scope from the text it saved.
 
 ### Fixed
 
@@ -74,6 +76,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mark is dropped. `findLatestCafFile` and `resolveCafFile` follow.
   - **What to change:** a file with no declaration and ISO-8859-1 bytes is no longer found; declare its encoding, as
     the SII's file does, or save it as UTF-8.
+  - **The registry scope of some files moves.** `cafFingerprint` hashes the text as read, so the scope
+    `resolveCafFile` returns changes for a file saved with a UTF-8 byte order mark (the mark is no longer in the text)
+    and for one declared ISO-8859-1 with bytes above 0x7F (read as Latin-1 now, where they were replacement
+    characters). A folio registry entry kept under the old fingerprint no longer matches the file, and
+    `resolveCafFile` would read its whole range as free, folios already used included. Before issuing from such a
+    file again, move its entry to the new scope (`cafFileScope` of the file as now read), or re-save the file without
+    the mark, or as UTF-8, and move the entry then. A file in plain UTF-8, or ASCII, keeps its fingerprint.
 - **An empty `FRMA` is a CAF whose signature fails, not a CAF that is not one.** `verifyCafSignature` threw
   `CAF_INVALID` for a CAF whose `FRMA` was empty, as for one with no `FRMA` at all; it now answers `invalid`, whatever
   the CAF's `IDK`, as it does for an `FRMA` that is not base64. In `verifyReceivedDocuments` such a CAF used to be no

@@ -211,11 +211,15 @@ export const findLatestCafFile = async (
  * EN: The registry scope of a CAF file, to reserve and count its folios with: the company (`RE`), type (`TD`) and range
  * (`RNG`) of its CAF, the environment given, and the `cafFingerprint` of its text, so two files of one range never share
  * an entry. It is the scope `resolveCafFile` returns; anything with the text of a CAF and the CAF parsed from it, such as
- * an `ObtainedCaf` of the portal, has one too.
+ * an `ObtainedCaf` of the portal, has one too. It matches the scope of a file on disk only when given the text that file
+ * holds: a CAF rewritten before it was saved (its declaration, say) has the fingerprint of the text saved, not of the
+ * text downloaded.
  * ES: El alcance en el registro de un archivo CAF, para reservar y contar sus folios: la empresa (`RE`), el tipo (`TD`) y
  * el rango (`RNG`) de su CAF, el ambiente indicado y la `cafFingerprint` de su texto, para que dos archivos de un mismo
  * rango nunca compartan entrada. Es el alcance que devuelve `resolveCafFile`; cualquier cosa con el texto de un CAF y el
- * CAF parseado de él, como un `ObtainedCaf` del portal, también tiene uno.
+ * CAF parseado de él, como un `ObtainedCaf` del portal, también tiene uno. Coincide con el alcance de un archivo en disco
+ * solo si recibe el texto que guarda ese archivo: un CAF reescrito antes de guardarse (su declaración, por ejemplo) tiene
+ * la huella del texto guardado, no la del descargado.
  * @param file EN: the file's text and its CAF. ES: el texto del archivo y su CAF.
  * @param environment EN: environment of the registry. ES: ambiente del registro.
  */
