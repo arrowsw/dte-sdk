@@ -874,6 +874,29 @@ describe('reobtainFolios', () => {
     expect(harness.posted('rf_genera_archivo')).toHaveLength(2)
   })
 
+  test('a login page in answer to a later range is an expired session that ends the walk, not a refused range', async () => {
+    const harness = await signedIn([
+      ...listRoutes([
+        [1, 9],
+        [50, 59],
+      ]),
+      { url: `${MAULLIN}/rf_genera_folio`, reply: [{ body: REOBTAIN_RESOLUTION }, { body: AUTH_PAGE }] },
+      { url: `${MAULLIN}/rf_genera_archivo`, reply: { body: CAF_XML } },
+    ])
+    await expect(reobtainFolios(harness.portal, { type: 33, quantity: 12 })).resolves.toMatchObject({
+      complete: false,
+      cafs: [expect.objectContaining({ xml: CAF_XML })],
+      failure: { code: 'SII_PORTAL_SESSION_EXPIRED', operation: 'reobtainCaf' },
+    })
+    const first = await signedIn([
+      ...listRoutes([[1, 9]]),
+      { url: `${MAULLIN}/rf_genera_folio`, reply: { body: AUTH_PAGE } },
+    ])
+    expect((await failure(reobtainFolios(first.portal, { type: 33, quantity: 2 }))).code).toBe(
+      'SII_PORTAL_SESSION_EXPIRED',
+    )
+  })
+
   test('a walk with nothing cut short has no failure', async () => {
     const harness = await signedIn([...listRoutes([[1, 9]]), ...download(CAF_XML)])
     expect(await reobtainFolios(harness.portal, { type: 33, quantity: 2 })).toHaveProperty('failure', null)

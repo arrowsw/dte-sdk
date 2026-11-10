@@ -20,19 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **The certification's `prepareFolios`** follows from it: a later refusal that is not rationing (the company, the
     option) no longer leads it to annul folios, and a block on the person is first lifted by re-obtaining, as on the
     first trip.
-
 - **`findCafFiles` can include expired CAFs, and says which are.** With `includeExpired: true` it also lists the files
   whose CAF has expired, so a caller can say why a file is not used; `CafFile` gains `expired`, true for those and
   false otherwise. `findLatestCafFile` and `resolveCafFile` never take an expired one, whatever the option says.
   - **What to change:** `CafFile` gains `expired` as a required field; a literal built by hand, as in a test double,
     needs `expired: false`.
-
 - **`FolioStats.ranges` say which file and environment each count is for.** A registry keeps one entry per CAF file,
   by its range, environment and `cafFingerprint`, but the stats gave only the range, so two files of one range, or one
   range in both environments, could not be told apart. Each range now carries `environment` and `cafFingerprint`, null
   when its scope has none.
   - **What to change:** a `FolioRegistry` of one's own returns `stats` with both fields in each range.
-
 - **`receiverAnswer` reads the `codResp` of the events query.** It took the events alone, so a query that failed (the
   SII's internal error, a company that may not consult the document, a wrong folio) gave no events and read as
   `pending`, and past the eight days as `tacitlyAccepted`: a document read as accepted by law because the SII did not
@@ -41,9 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reads it. Events, when the SII sent some, speak whatever the code.
   - **What to change:** pass the result of `listClaimEvents` whole rather than its `events`, which still works but
     cannot tell a failed query. `ReceiverAnswer` gains `unknown`: an exhaustive `switch` on it needs the case.
-
 - **Size:** these changes took `dte-sdk` from 33.87 kB to 34.36 kB, over its 34 kB limit, which went to 36 kB.
   `dte-sdk/node` went to 7.09 kB, `dte-sdk/portal` to 74.98 kB and `dte-sdk/pdf` to 10.93 kB, under their limits.
+
 ### Added
 
 - **`cafEnvironment(keyId)`**, from the root: the environment of the SII key a CAF names in its `IDK`,
