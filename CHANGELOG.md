@@ -13,12 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the end of the walk, so a later pass's listing or a later range that failed with anything the step retries could not
   absorb (an expired session, a block, the caller's abort, a page it could not read, a refused listing) threw it away:
   folios already annulled, which cannot be undone, never reached `annulled` or `knownAnnulled`, and the next run posted
-  their annulment again only to hear "ya fue anulado". Once the SII has answered for some folios, such a `DteError` now
-  ends the walk with what was done until then and the new field `failure: { code, operation }`, where `operation` is
-  `listFolioRanges` or `annulFolios`. Only the code is kept, with the kind of refusal in `rejection` when the SII
-  refused a later listing; the original error goes whole to the client's logger.
-  Before any answer it still throws, and anything that is not a `DteError` still throws as a bug. `failure` is null on
-  a walk that finishes.
+  their annulment again only to hear "ya fue anulado". Once the SII has answered for some folios (a range that never got
+  through, recorded as `transport`, is no answer), such a `DteError` now ends the walk with what was done until then and
+  the new field `failure: { code, operation }`, where `operation` is `listFolioRanges` or `annulFolios`. Only the code
+  is kept, with the kind of refusal in `rejection` when the SII refused a later listing; the original error goes whole
+  to the client's logger. Before any answer it still throws, and anything that is not a `DteError` still throws as a
+  bug. `failure` is null on a walk that finishes.
   - **What to change:** `AnnulmentResult` gains `failure` as a required field. Persist `knownAnnulled` whether `failure`
     is set or not; a literal built by hand, as in a test double, needs `failure: null`. `FolioFlowFailure['operation']`
     now names every step a folio flow can stop at: `queryFolioQuota`, `requestCaf`, `reobtainCaf`, `listFolioRanges`

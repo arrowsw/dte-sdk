@@ -103,7 +103,7 @@ export type AnnulmentResult = {
   readonly totalRejected: number
   /** EN: `from-to` keys that are final (annulled, `alreadyAnnulled` or `received`): persist it and pass it back, because the portal keeps listing them forever. Nothing the SII answered in unknown words goes here. ES: Claves `desde-hasta` definitivas (anuladas, `alreadyAnnulled` o `received`): guárdalas y devuélvelas, porque el portal las sigue listando para siempre. Nada que el SII haya respondido con palabras desconocidas va aquí. */
   readonly knownAnnulled: readonly string[]
-  /** EN: What stopped the walk once the SII had answered for some folios, or null: a `DteError` of a later listing (`listFolioRanges`) or of a later range (`annulFolios`), a refusal included. Annulling cannot be undone, so what was done until then comes back; with no answer yet the error is thrown. ES: Lo que detuvo el recorrido cuando el SII ya había respondido por algunos folios, o null: un `DteError` de un listado posterior (`listFolioRanges`) o de un rango posterior (`annulFolios`), un rechazo incluido. Anular no se puede deshacer, así que vuelve lo hecho hasta entonces; sin respuesta aún, el error se lanza. */
+  /** EN: What stopped the walk once the SII had answered for some folios, or null: a `DteError` of a later listing (`listFolioRanges`) or of a later range (`annulFolios`), a refusal included. Annulling cannot be undone, so what was done until then comes back; with no answer yet the error is thrown, and a range that never got through (`transport`) is no answer. ES: Lo que detuvo el recorrido cuando el SII ya había respondido por algunos folios, o null: un `DteError` de un listado posterior (`listFolioRanges`) o de un rango posterior (`annulFolios`), un rechazo incluido. Anular no se puede deshacer, así que vuelve lo hecho hasta entonces; sin respuesta aún, el error se lanza, y un rango que nunca llegó (`transport`) no es respuesta. */
   readonly failure: FolioFlowFailure | null
 }
 
@@ -399,9 +399,11 @@ export const annulFoliosInSession = async (
       if (pass < MAX_PASSES - 1) await context.portal.sleep(PASS_PAUSE_MS, context.overrides?.signal)
     }
   } catch (error) {
-    // Annulling cannot be undone: once the SII has answered for some folios, what it did may not be thrown away. Before
-    // any answer the error stays an error, and so does anything that is not a `DteError`: a bug.
-    if (!isDteError(error) || tally.annulled.length + tally.rejected.length === 0) throw error
+    // Annulling cannot be undone: once the SII has answered for some folios, what it did may not be thrown away. A range
+    // that never got through is no answer. Before any answer the error stays an error, and so does anything that is not
+    // a `DteError`: a bug.
+    const answered = tally.annulled.length > 0 || tally.rejected.some((entry) => entry.reason !== 'transport')
+    if (!isDteError(error) || !answered) throw error
     failure = flowFailure(context, error, step)
   }
   return {
@@ -423,7 +425,8 @@ export const annulFoliosInSession = async (
  * Annulment cannot be undone and counts against the quota for six months; to lift a stamping block, issuing with the
  * unused folios works and annulling makes it worse. For that reason, once the SII has answered for some folios, a
  * `DteError` that ends the walk (an expired session, a block, the caller's abort, a later listing refused or not
- * understood) comes back in `failure`, with what was done until then, instead of throwing it away.
+ * understood) comes back in `failure`, with what was done until then, instead of throwing it away. A range that never
+ * got through, recorded as `transport`, is no answer.
  * ES: Anula folios sin usar: hasta cuatro pasadas por el listado, por rango y folio por folio cuando el rango choca,
  * deteniendo una pasada tras dos negativas reales seguidas. Cada pasada toma los últimos `maxRanges` rangos que aún no
  * intentó, así que `maxRanges` limita una pasada y no la llamada: una llamada puede anular hasta cuatro veces
@@ -433,7 +436,7 @@ export const annulFoliosInSession = async (
  * levantar un bloqueo de timbraje, emitir con los folios sin usar sirve y anular lo empeora. Por eso, cuando el SII ya
  * respondió por algunos folios, un `DteError` que termina el recorrido (una sesión vencida, un bloqueo, la cancelación de
  * quien llama, un listado posterior rechazado o ilegible) vuelve en `failure`, con lo hecho hasta entonces, en vez de
- * botarlo.
+ * botarlo. Un rango que nunca llegó, anotado como `transport`, no es respuesta.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: type and an explicit scope. ES: tipo y un alcance explícito.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.

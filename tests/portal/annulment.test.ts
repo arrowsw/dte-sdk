@@ -608,6 +608,50 @@ describe('annulFolios', () => {
       })
     })
 
+    test('a range that never got through is no answer, so a block after it still throws', async () => {
+      const cut = new DteError('TRANSPORT_FAILED', { reason: 'ECONNRESET' })
+      const harness = await signedIn([
+        entry,
+        list(
+          unusedRangesPage([
+            [1, 2],
+            [3, 4],
+          ]),
+        ),
+        {
+          url: `${MAULLIN}/af_anular3`,
+          method: 'POST',
+          reply: [cut, cut, cut, { status: 403 }, { status: 403 }, { status: 403 }],
+        },
+        respond('af_anular', ANNUL_OK),
+      ])
+      expect((await failure(annulFolios(harness.portal, { type: 33, all: true }))).code).toBe('SII_PORTAL_BLOCKED')
+    })
+
+    test('an answer that annuls nothing is still an answer, so a block after it returns the walk', async () => {
+      const harness = await signedIn([
+        entry,
+        list(
+          unusedRangesPage([
+            [1, 2],
+            [3, 4],
+          ]),
+        ),
+        {
+          url: `${MAULLIN}/af_anular3`,
+          method: 'POST',
+          reply: [{ body: page('ya fue anulado') }, { status: 403 }, { status: 403 }, { status: 403 }],
+        },
+      ])
+      await expect(annulFolios(harness.portal, { type: 33, all: true })).resolves.toEqual(
+        expect.objectContaining({
+          annulled: [],
+          rejected: [expect.objectContaining({ reason: 'alreadyAnnulled' })],
+          failure: { code: 'SII_PORTAL_BLOCKED', operation: 'annulFolios' },
+        }),
+      )
+    })
+
     test('a walk that finishes has no failure', async () => {
       const harness = await signedIn([
         entry,
