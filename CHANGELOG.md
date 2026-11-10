@@ -61,8 +61,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   range `knownAnnulled` covers in pieces.** When the SII refused a whole range and the walk went folio by folio, each
   folio came back as its own entry and its own key, even when every folio got the same answer, as a step retried after
   its answer was lost does ("ya fue anulado" for each folio the first try annulled). Folios next to each other with the
-  same answer are now one entry and one key in `annulled`, `rejected` and `knownAnnulled`. A listed range is skipped
-  when the keys of `knownAnnulled` cover all its folios, in one key or several, where only its exact key was.
+  same answer are now one entry and one key in `annulled`, `rejected` and `knownAnnulled`, and a walk cut short at one
+  folio (a block, an expired session) still returns the folios answered before it, with `failure`. A listed range is
+  skipped when the keys of `knownAnnulled` cover all its folios, in one key or several, where only its exact key was.
   - **What to change:** nothing for a caller that reads keys as spans of folios; one that compared them with the
     listing's ranges one to one reads them as spans now.
 - **`findCafFiles` reads each file in the encoding its XML declaration names.** It read every file as UTF-8, while the

@@ -296,7 +296,8 @@ const recordAnnulledBefore = (tally: Tally, span: FolioSpan, html: string): numb
 }
 
 // A step retried after its answer was lost hears "already annulled" for what its first try did: every folio says so,
-// and the span is one piece again.
+// and the span is one piece again. What the SII answered is written down whatever ends the walk: a block or an expired
+// session at one folio must not throw away the folios it annulled before, which cannot be undone.
 const annulOneByOne = async (
   context: PortalContext,
   span: FolioSpan,
@@ -305,18 +306,21 @@ const annulOneByOne = async (
   tally: Tally,
 ): Promise<void> => {
   const answers: (AnnulmentAnswer | 'transport')[] = []
-  for (let folio = span.from; folio <= span.to; folio += 1) {
-    const answer = await attempt(
-      context,
-      'af_anular.folio',
-      'af_anular',
-      base,
-      { ...fields, FOLIO_INI_A: String(folio), FOLIO_FIN_A: String(folio) },
-      at(context, 'af_anular3'),
-    )
-    answers.push(answer === null ? 'transport' : annulmentAnswer(answer.html))
+  try {
+    for (let folio = span.from; folio <= span.to; folio += 1) {
+      const answer = await attempt(
+        context,
+        'af_anular.folio',
+        'af_anular',
+        base,
+        { ...fields, FOLIO_INI_A: String(folio), FOLIO_FIN_A: String(folio) },
+        at(context, 'af_anular3'),
+      )
+      answers.push(answer === null ? 'transport' : annulmentAnswer(answer.html))
+    }
+  } finally {
+    recordFolios(tally, span.from, answers)
   }
-  recordFolios(tally, span.from, answers)
 }
 
 // Returns the refusals this range adds to the count; `null` resets it. Only real refusals count: `alreadyAnnulled` and
