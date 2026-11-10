@@ -592,6 +592,22 @@ describe('annulFolios', () => {
       })
     })
 
+    test('a later listing the SII refuses keeps the kind of refusal in the failure', async () => {
+      const harness = await signedIn([
+        entry,
+        list(unusedRangesPage([[1, 2]]), refusedPage('ANULACION DE FOLIOS')),
+        respond('af_anular3', ANNUL_FORM),
+        respond('af_anular', ANNUL_OK),
+      ])
+      const result = await annulFolios(harness.portal, { type: 33, all: true })
+      expect(result.annulled).toEqual([{ from: 1, to: 2, count: 2 }])
+      expect(result.failure).toEqual({
+        code: 'SII_PORTAL_REJECTED',
+        operation: 'listFolioRanges',
+        rejection: 'optionNotAuthorized',
+      })
+    })
+
     test('a walk that finishes has no failure', async () => {
       const harness = await signedIn([
         entry,

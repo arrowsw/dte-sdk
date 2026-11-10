@@ -15,13 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   folios already annulled, which cannot be undone, never reached `annulled` or `knownAnnulled`, and the next run posted
   their annulment again only to hear "ya fue anulado". Once the SII has answered for some folios, such a `DteError` now
   ends the walk with what was done until then and the new field `failure: { code, operation }`, where `operation` is
-  `listFolioRanges` or `annulFolios`. Only the code is kept; the original error goes whole to the client's logger.
+  `listFolioRanges` or `annulFolios`. Only the code is kept, with the kind of refusal in `rejection` when the SII
+  refused a later listing; the original error goes whole to the client's logger.
   Before any answer it still throws, and anything that is not a `DteError` still throws as a bug. `failure` is null on
   a walk that finishes.
   - **What to change:** `AnnulmentResult` gains `failure` as a required field. Persist `knownAnnulled` whether `failure`
     is set or not; a literal built by hand, as in a test double, needs `failure: null`. `FolioFlowFailure['operation']`
     now names every step a folio flow can stop at: `queryFolioQuota`, `requestCaf`, `reobtainCaf`, `listFolioRanges`
-    and `annulFolios`.
+    and `annulFolios`. `FolioFlowFailure` gains an optional `rejection`, set only when `code` is
+    `SII_PORTAL_REJECTED`.
   - **The certification's `prepareFolios`** keeps what such an annulment annulled in `annulledRanges` and counts it as
     none, as it counted one that threw: it does not ask the portal again.
 - **`reobtainFolios` returns the CAFs it already downloaded when a later download fails.** A download that failed
@@ -40,7 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `knownAnnulled` was lost with the folios just annulled. Once the SII has answered the annulment, such a failure now
   ends the flow with `complete: false`, `rejection: null`, the first request's quota, `knownAnnulled` with what was
   annulled, and `failure`: the annulment's (`listFolioRanges` or `annulFolios`) or the request's (`requestCaf`). A
-  cut-short annulment is not followed by another request. Before the annulment's first answer it still throws, and
+  listing the SII refuses during the annulment keeps its kind in `failure.rejection`, since `rejection` speaks of the
+  request. A cut-short annulment is not followed by another request. Before the annulment's first answer it still throws, and
   anything that is not a `DteError` still throws as a bug.
   - **What to change:** `failure` was always null on `requestCafExact`; read it as on `requestCafInBatches`, and
     persist `knownAnnulled` whether it is set or not. The type does not change.

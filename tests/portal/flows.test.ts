@@ -256,6 +256,26 @@ describe('requestCafExact', () => {
       expect(harness.posted('of_solicita_folios_dcto')).toHaveLength(1)
     })
 
+    test('a listing the SII refuses after annulling keeps the kind of refusal in the failure', async () => {
+      const harness = await signedIn([
+        entry,
+        replies('of_solicita_folios_dcto', quotaForm(2, 6)),
+        { url: `${MAULLIN}/af_anular1`, reply: { body: ANNUL_ENTRY } },
+        replies('af_anular2', unusedRangesPage([[1, 2]]), refusedPage('ANULACION DE FOLIOS')),
+        { url: `${MAULLIN}/af_anular3`, reply: { body: ANNUL_FORM } },
+        { url: `${MAULLIN}/af_anular`, reply: { body: ANNUL_OK } },
+      ])
+      const result = await requestCafExact(harness.portal, { type: 33, quantity: 5, allowAnnul: true })
+      expect(result).toEqual(
+        expect.objectContaining({
+          rejection: null,
+          failure: { code: 'SII_PORTAL_REJECTED', operation: 'listFolioRanges', rejection: 'optionNotAuthorized' },
+          knownAnnulled: ['1-2'],
+        }),
+      )
+      expect(harness.posted('af_anular')).toHaveLength(1)
+    })
+
     test('the request after annulling that fails returns the memory, with its failure', async () => {
       const harness = await signedIn([
         entry,
