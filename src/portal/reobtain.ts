@@ -22,7 +22,9 @@ import {
   withPortalSession,
   wrongPage,
   type PortalContext,
+  type PortalPage,
 } from './session'
+import { asksForAuthentication, looksLikeLoginRedirect } from './pages/auth'
 import type { ObtainedCaf } from './stamping'
 
 /**
@@ -55,6 +57,21 @@ const assertDocumentType = (type: unknown): void => {
   if (!isDocumentType(type)) throw new DteError('INVALID_DOCUMENT_TYPE', { field: 'type' })
 }
 
+// The procedure is entered like any other, logging in on demand and through the representation screen: with a plain
+// request, a session that had expired in the certification environment gave an empty list and no error, and a range
+// posted with it got the login page, which read as the SII refusing the download. A page that is not the procedure is
+// a refusal, an expired session or unexpected.
+const enterProcedure = async (context: PortalContext): Promise<PortalPage> => {
+  const entry = await ensurePage(context, 'rf_reobtencion1', at(context, 'rf_reobtencion1_folios'))
+  assertNotRejected(context, entry.html)
+  if (!isReobtainPage(entry.html)) throw wrongPage(context, 'rf_reobtencion1', entry.html)
+  return entry
+}
+
+// A step that did not give what it should: a login page means the session expired, anything else is the refusal.
+const missing = (context: PortalContext, step: string, html: string, refusal: DteError): DteError =>
+  asksForAuthentication(html) || looksLikeLoginRedirect(html) ? wrongPage(context, step, html) : refusal
+
 /**
  * EN: `listReobtainableRanges` inside a session already held.
  * ES: `listReobtainableRanges` dentro de una sesión ya tomada.
@@ -65,12 +82,8 @@ export const listReobtainableInSession = async (
 ): Promise<readonly ReobtainableRange[]> => {
   assertDocumentType(input.type)
   const company = companyFields(resolvePortalCompany(context.portal, input.companyRut))
-  // The procedure is entered like any other, logging in on demand and through the representation screen: with a plain
-  // request, a session that had expired in the certification environment gave an empty list and no error. A page that
-  // is not the procedure, or not its listing, is never "no ranges": it is a refusal, an expired session or unexpected.
-  const entry = await ensurePage(context, 'rf_reobtencion1', at(context, 'rf_reobtencion1_folios'))
-  assertNotRejected(context, entry.html)
-  if (!isReobtainPage(entry.html)) throw wrongPage(context, 'rf_reobtencion1', entry.html)
+  // A page that is not the listing is never "no ranges" either.
+  const entry = await enterProcedure(context)
   const list = await submitForm(
     context,
     'rf_reobtencion2',
@@ -106,8 +119,8 @@ export const listReobtainableInSession = async (
 }
 
 /**
- * EN: `reobtainCaf` inside a session already held.
- * ES: `reobtainCaf` dentro de una sesión ya tomada.
+ * EN: `reobtainCaf` inside a session already held, right after the listing: the procedure is not entered again.
+ * ES: `reobtainCaf` dentro de una sesión ya tomada, justo después del listado: no se vuelve a entrar al trámite.
  */
 export const reobtainCafInSession = async (
   context: PortalContext,
@@ -127,7 +140,8 @@ export const reobtainCafInSession = async (
     refererOf(context, 'rf_reobtencion3_folios'),
   )
   const downloadFields = reobtainDownloadFields(resolution.html)
-  if (downloadFields === null) throw rejected(context, 'reobtainDownloadMissing', details)
+  if (downloadFields === null)
+    throw missing(context, 'rf_genera_folio', resolution.html, rejected(context, 'reobtainDownloadMissing', details))
   const answer = await submitForm(
     context,
     'rf_genera_archivo',
@@ -136,7 +150,8 @@ export const reobtainCafInSession = async (
     { ...downloadFields, ACEPTAR: 'AQUI' },
     refererOf(context, 'rf_genera_folio'),
   )
-  if (!hasCaf(answer.html)) throw rejected(context, 'reobtainCafMissing', details)
+  if (!hasCaf(answer.html))
+    throw missing(context, 'rf_genera_archivo', answer.html, rejected(context, 'reobtainCafMissing', details))
   const caf = parseCaf(answer.html)
   return {
     xml: answer.html,
@@ -171,17 +186,27 @@ export const listReobtainableRanges = (
   withPortalSession(portal, 'listReobtainableRanges', overrides, (context) => listReobtainableInSession(context, input))
 
 /**
- * EN: Downloads the CAF of an already authorized range. It costs no quota.
- * ES: Descarga el CAF de un rango ya autorizado. No gasta cupo.
+ * EN: Downloads the CAF of an already authorized range. It costs no quota. The procedure is entered first, as
+ * `listReobtainableRanges` enters it, with a login on demand: a cached session that expired since the listing logs in
+ * again instead of posting the range with it. A page that states a refusal at the entry throws `SII_PORTAL_REJECTED`,
+ * and a login page at any step `SII_PORTAL_SESSION_EXPIRED`, never the refusal of a step.
+ * ES: Descarga el CAF de un rango ya autorizado. No gasta cupo. Primero se entra al trámite, como entra
+ * `listReobtainableRanges`, con login a pedido: una sesión en caché que venció después del listado inicia sesión de
+ * nuevo en vez de enviar el rango con ella. Una página que declara un rechazo en la entrada lanza `SII_PORTAL_REJECTED`,
+ * y una de ingreso en cualquier paso `SII_PORTAL_SESSION_EXPIRED`, nunca el rechazo de un paso.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: type and a range from `listReobtainableRanges`. ES: tipo y un rango de `listReobtainableRanges`.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: the CAF, with `recovered: true`; its XML holds a private key. ES: el CAF, con `recovered: true`; su XML contiene una llave privada.
- * @throws {DteError} EN: `SII_PORTAL_REJECTED`, session and transport codes, `CAF_INVALID`. ES: los mismos códigos.
+ * @throws {DteError} EN: `SII_PORTAL_REJECTED`, `SII_PORTAL_UNEXPECTED_PAGE`, session and transport codes, `CAF_INVALID`. ES: los mismos códigos.
  */
 export const reobtainCaf = (
   portal: PortalClient,
   input: { readonly type: DocumentType; readonly range: ReobtainableRange },
   overrides?: CallOverrides,
 ): Promise<ObtainedCaf> =>
-  withPortalSession(portal, 'reobtainCaf', overrides, (context) => reobtainCafInSession(context, input))
+  withPortalSession(portal, 'reobtainCaf', overrides, async (context) => {
+    assertDocumentType(input.type)
+    await enterProcedure(context)
+    return reobtainCafInSession(context, input)
+  })

@@ -204,6 +204,14 @@ describe('verifyReceivedDocuments: each check on its own', () => {
     expect(document.status).toBe('invalid')
   })
 
+  test('a CAF whose FRMA is empty is a CAF that fails its check, and the stamp still verifies with its key', () => {
+    const caf = signedCaf()
+    const empty = { ...caf, xml: caf.xml.replace(/(<FRMA[^>]*>)[^<]*/, '$1') }
+    const document = only(stampedWith(1, empty).xml)
+    expect(document.ted).toEqual(VALID_TED)
+    expect(document.caf).toEqual({ ...VALID_CAF, siiSignature: 'invalid', status: 'invalid' })
+  })
+
   test('a CAF whose IDK has no known key is unchecked, not failed', () => {
     const result = verify(envelopeOf([issued(1, signedCaf({ keyId: 999 })), issued(2)]))
     expect(result.documents[0].caf).toEqual({
@@ -544,6 +552,12 @@ describe('verifyReceivedDocuments: each text is its element', () => {
   })
 
   // Searching the text for each `<DTE` took quadratic time: 0.2 MB of these took 3 s, so 2 MB would take minutes.
+  test('elements nested deeper than any document are XML_PARSE_FAILED, never a stack overflow', () => {
+    const nested = (depth: number): string => `<DTE>${'<a>'.repeat(depth)}${'</a>'.repeat(depth)}</DTE>`
+    for (const depth of [100, 5000, 20000])
+      expectFailure(() => verify(nested(depth)), 'XML_PARSE_FAILED', { reason: 'nested deeper than 100 elements' })
+  })
+
   test('megabytes of start and closing tags in attribute values are read in linear time', () => {
     const xml = envelopeOf([issued(1)]).replace(
       '</SetDTE>',

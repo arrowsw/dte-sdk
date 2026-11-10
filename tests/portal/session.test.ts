@@ -20,6 +20,7 @@ import {
   failure,
   HERCULES,
   MAULLIN,
+  PALENA,
   portalWith,
   seedSession,
   SESSION_COOKIES,
@@ -107,6 +108,14 @@ describe('openPortalSession', () => {
     })
     await expect(openPortalSession(restarted.portal)).resolves.toEqual({ userRut: '12345678-5', reused: true })
     expect(restarted.fake.requests).toHaveLength(1)
+  })
+
+  test("checks a cached session on the client's environment, not on certification's", async () => {
+    const harness = await signedIn([{ url: `${PALENA}/ad_empresa1`, reply: { body: COMPANY_FORM } }], {
+      environment: 'production',
+    })
+    await expect(openPortalSession(harness.portal)).resolves.toEqual({ userRut: '12345678-5', reused: true })
+    expect(harness.urls()).toEqual([`${PALENA}/ad_empresa1`])
   })
 
   test('reuses a cached session that still answers', async () => {

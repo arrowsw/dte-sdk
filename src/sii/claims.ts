@@ -368,12 +368,21 @@ export const receiverStatus = async (
 /**
  * EN: The receiver's answer to a document, Ley 19.983 included: `annulled` (a credit note annulled it, `NCA`),
  * `claimed` (`RCD`, `RFP`, `RFT`), `accepted` (`ACD`), `tacitlyAccepted` (eight calendar days after the SII received it
- * with none of those), `goodsReceived` (`ERM`, with the eight days still running) or `pending`.
+ * with none of those), `goodsReceived` (`ERM`, with the eight days still running), `pending`, or `unknown` (the events
+ * query answered a `codResp` that lists nothing, so nothing can be said).
  * ES: La respuesta del receptor a un documento, con la Ley 19.983: `annulled` (una nota de crédito lo anuló, `NCA`),
  * `claimed` (`RCD`, `RFP`, `RFT`), `accepted` (`ACD`), `tacitlyAccepted` (ocho días corridos después de que el SII lo
- * recibió sin ninguno de esos), `goodsReceived` (`ERM`, con los ocho días aún corriendo) o `pending`.
+ * recibió sin ninguno de esos), `goodsReceived` (`ERM`, con los ocho días aún corriendo), `pending`, o `unknown` (la
+ * consulta de eventos respondió un `codResp` que no lista nada, así que nada puede decirse).
  */
-export type ReceiverAnswer = 'annulled' | 'claimed' | 'accepted' | 'tacitlyAccepted' | 'goodsReceived' | 'pending'
+export type ReceiverAnswer =
+  | 'annulled'
+  | 'claimed'
+  | 'accepted'
+  | 'tacitlyAccepted'
+  | 'goodsReceived'
+  | 'pending'
+  | 'unknown'
 
 /**
  * EN: `receiverAnswer` result.
@@ -393,22 +402,31 @@ const CLAIM_DAYS = 8
  * EN: The receiver's answer from the events of `listClaimEvents` and the reception date of `queryReceptionDate`, with
  * no request: `NCA` comes first, then a claim, then `ACD`; past the deadline with none of them the document is
  * accepted by law (Ley 19.983), and before it `ERM` is goods received and anything else pending. `PAG` and `ENC`
- * change nothing. `receiverStatus` keeps reading the latest event only.
+ * change nothing. Given the whole result of `listClaimEvents`, with no events and a `codResp` other than 15, 16 or 18
+ * (the codes that list events or say there are none), the query failed and the answer is `unknown`, never pending or
+ * tacitly accepted, as `receiverStatus` reads it. `receiverStatus` keeps reading the latest event only.
  * ES: La respuesta del receptor desde los eventos de `listClaimEvents` y la fecha de recepción de `queryReceptionDate`,
  * sin ninguna petición: primero `NCA`, luego un reclamo, luego `ACD`; pasado el plazo sin ninguno de ellos el documento
  * queda aceptado por ley (Ley 19.983), y antes de eso `ERM` es recibo de mercaderías y cualquier otra cosa pendiente.
- * `PAG` y `ENC` no cambian nada. `receiverStatus` sigue leyendo solo el último evento.
- * @param events EN: the events, in any order. ES: los eventos, en cualquier orden.
+ * `PAG` y `ENC` no cambian nada. Con el resultado completo de `listClaimEvents`, sin eventos y con un `codResp` distinto
+ * de 15, 16 o 18 (los códigos que listan eventos o dicen que no hay), la consulta falló y la respuesta es `unknown`,
+ * nunca pendiente ni aceptada tácitamente, como lo lee `receiverStatus`. `receiverStatus` sigue leyendo solo el último
+ * evento.
+ * @param events EN: the result of `listClaimEvents`, or its events alone, in any order; only the result can say the query failed. ES: el resultado de `listClaimEvents`, o solo sus eventos, en cualquier orden; solo el resultado puede decir que la consulta falló.
  * @param receivedAt EN: `receivedAt` of `queryReceptionDate` (its date is what counts), or null. ES: `receivedAt` de `queryReceptionDate` (cuenta su fecha), o null.
  * @param today EN: today in Chile, YYYY-MM-DD, as `chileDate()` gives it. ES: hoy en Chile, AAAA-MM-DD, como lo da `chileDate()`.
  * @returns EN: the answer and the deadline to claim. ES: la respuesta y el plazo para reclamar.
  * @throws {DteError} EN: `INVALID_DATE` when `today` is not a date. ES: `INVALID_DATE` si `today` no es una fecha.
  */
 export const receiverAnswer = (
-  events: readonly Pick<ClaimEvent, 'code'>[],
+  listed:
+    | readonly Pick<ClaimEvent, 'code'>[]
+    | { readonly code: number; readonly events: readonly Pick<ClaimEvent, 'code'>[] },
   receivedAt: string | null,
   today: string,
 ): ReceiverAnswerResult => {
+  const events = 'events' in listed ? listed.events : listed
+  const failed = 'events' in listed && events.length === 0 && !NO_EVENT_CODES.includes(listed.code)
   const day = toIsoDate(today, 'today')
   const received = /^(\d{4})-(\d{2})-(\d{2})/.exec(receivedAt ?? '')
   const claimDeadline =
@@ -418,16 +436,18 @@ export const receiverAnswer = (
           .toISOString()
           .slice(0, 10)
   const has = (codes: readonly string[]): boolean => events.some((event) => codes.includes(event.code))
-  const answer: ReceiverAnswer = has(['NCA'])
-    ? 'annulled'
-    : has(CLAIMED)
-      ? 'claimed'
-      : has(['ACD'])
-        ? 'accepted'
-        : claimDeadline !== null && day > claimDeadline
-          ? 'tacitlyAccepted'
-          : has(['ERM'])
-            ? 'goodsReceived'
-            : 'pending'
+  const answer: ReceiverAnswer = failed
+    ? 'unknown'
+    : has(['NCA'])
+      ? 'annulled'
+      : has(CLAIMED)
+        ? 'claimed'
+        : has(['ACD'])
+          ? 'accepted'
+          : claimDeadline !== null && day > claimDeadline
+            ? 'tacitlyAccepted'
+            : has(['ERM'])
+              ? 'goodsReceived'
+              : 'pending'
   return { answer, claimDeadline }
 }

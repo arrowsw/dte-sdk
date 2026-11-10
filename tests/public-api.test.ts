@@ -179,6 +179,7 @@ const ROOT_EXPORTS = [
   'uploadFolioConsumption',
   'uploadStatusMessage',
   'verifyCafSignature',
+  'cafEnvironment',
   'verifyDocumentSignature',
   'verifyEnvelopeSignature',
   'verifyEnveloped',
@@ -193,6 +194,7 @@ const ROOT_EXPORTS = [
 ] as const
 
 const NODE_EXPORTS = [
+  'cafFileScope',
   'createDirectoryFolioRegistry',
   'findCafFiles',
   'findLatestCafFile',

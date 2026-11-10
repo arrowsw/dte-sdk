@@ -38,6 +38,37 @@ describe('parseCaf', () => {
     expect(caf.xml).not.toMatch(/>\s+</)
   })
 
+  test('the private key must be the pair of the public key the SII signed', () => {
+    const otherKey = /<RSASK>[\s\S]*<\/RSASK>/.exec(fixtureText('caf-33-signed.xml'))![0]
+    const swapped = caf33.replace(/<RSASK>[\s\S]*<\/RSASK>/, otherKey)
+    expect(() => parseCaf(swapped)).toThrow(DteError)
+    try {
+      parseCaf(swapped)
+    } catch (error) {
+      expect((error as DteError).details).toEqual({ reason: 'RSASK is not the pair of RSAPK' })
+    }
+    expectCode(() => parseCaf(caf33.replace(/<E>[^<]*<\/E>/, '<E>Aw==</E>')), 'CAF_INVALID')
+    expectCode(() => parseCaf(caf33.replace(/<M>[^<]*<\/M>/, '<M>FICTICIA</M>')), 'CAF_INVALID')
+    // The modulus read as a number: line breaks in it, as a writer may wrap it, and a leading zero byte change nothing.
+    const modulus = /<M>([^<]*)<\/M>/.exec(caf33)![1]
+    const wrapped = caf33.replace(modulus, `${modulus.slice(0, 40)}\n${modulus.slice(40)}`)
+    expect(parseCaf(wrapped).range).toEqual({ from: 1, to: 100 })
+    const padded = Buffer.concat([Buffer.from([0]), Buffer.from(modulus, 'base64')]).toString('base64')
+    expect(parseCaf(caf33.replace(modulus, padded)).range).toEqual({ from: 1, to: 100 })
+  })
+
+  test('character references are read as the DOM reads them, and the block keeps them as written', () => {
+    const referenced = caf33
+      .replace('<RS>COMERCIAL ANDINA SPA</RS>', '<RS>COMERCIAL &#xD1;AND&#218; &amp;#67; SPA</RS>')
+      .replace('<RE>76543210-3</RE>', '<RE>76543210&#45;3</RE>')
+      .replace('<TD>33</TD>', '<TD>&#51;3</TD>')
+    const caf = parseCaf(referenced)
+    expect(caf.issuerName).toBe('COMERCIAL ÑANDÚ &#67; SPA')
+    expect(caf.issuerRut).toBe('76543210-3')
+    expect(caf.documentType).toBe(33)
+    expect(caf.xml).toContain('<RS>COMERCIAL &#xD1;AND&#218; &amp;#67; SPA</RS>')
+  })
+
   test('receipt CAF', () => {
     const caf = parseCaf(fixtureText('caf-39.xml'))
     expect(caf.documentType).toBe(39)

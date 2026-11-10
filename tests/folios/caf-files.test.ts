@@ -1,7 +1,7 @@
 import { mkdir, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { FolioScope } from '../../src/folios/ledger'
-import { findCafFiles, findLatestCafFile, resolveCafFile } from '../../src/folios/node-caf-files'
+import { cafFileScope, findCafFiles, findLatestCafFile, resolveCafFile } from '../../src/folios/node-caf-files'
 import { cafFingerprint, createMemoryFolioRegistry } from '../../src/folios/registry'
 import { loadNodeFs, type NodeFsModules } from '../../src/sii/node-fs'
 import { cafXml } from '../support/certification-harness'
@@ -25,6 +25,21 @@ const put = async (dir: string, name: string, content: string, minutes = 0): Pro
 }
 
 const otherIssuer = (xml: string): string => xml.replace(`<RE>${ISSUER_RUT}</RE>`, `<RE>${RECEIVER_RUT}</RE>`)
+
+/** Writes bytes under `dir`, with a modification time `minutes` after a fixed instant. */
+const putBytes = async (dir: string, name: string, bytes: Uint8Array, minutes = 0): Promise<string> => {
+  const file = join(dir, name)
+  await writeFile(file, bytes)
+  const at = new Date(Date.UTC(2026, 10, 1, 12, minutes))
+  await utimes(file, at, at)
+  return file
+}
+
+const ACCENTED = 'COMERCIAL ÑANDÚ SPA'
+const accented = (declaration: string): string =>
+  `${declaration}${cafXml(33).replace('<RS>COMERCIAL ANDINA SPA</RS>', `<RS>${ACCENTED}</RS>`)}`
+const latin1 = (text: string): Uint8Array => Uint8Array.from(text, (char) => char.charCodeAt(0))
+const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text)
 
 describe('findCafFiles', () => {
   test('lists the CAFs of the type and issuer, newest first, from every folder below the directory', async () => {
@@ -142,6 +157,51 @@ describe('findCafFiles', () => {
     expect(load).not.toHaveBeenCalled()
   })
 
+  test('a file is read in the encoding its XML declaration names: ISO-8859-1 as such, UTF-8 or none as UTF-8', async () => {
+    const dir = await temp.make('dte-sdk-caf-')
+    const declaredLatin1 = await putBytes(
+      dir,
+      'latin1.xml',
+      latin1(accented('<?xml version="1.0" encoding="ISO-8859-1"?>\n')),
+      4,
+    )
+    const declaredUtf8 = await putBytes(dir, 'utf8.xml', utf8(accented("<?xml version='1.0' encoding='utf-8'?>\n")), 3)
+    const undeclared = await putBytes(dir, 'plain.xml', utf8(accented('<?xml version="1.0"?>\n')), 2)
+    const marked = await putBytes(dir, 'bom.xml', Uint8Array.from([0xef, 0xbb, 0xbf, ...utf8(accented(''))]), 1)
+    const files = await findCafFiles({ dir, type: 33, issuerRut: ISSUER_RUT, now })
+    expect(files.map((file) => file.path)).toEqual([declaredLatin1, declaredUtf8, undeclared, marked])
+    expect(files.map((file) => file.caf.issuerName)).toEqual([ACCENTED, ACCENTED, ACCENTED, ACCENTED])
+    expect(files[0].xml).toBe(accented('<?xml version="1.0" encoding="ISO-8859-1"?>\n'))
+    expect(files[3].xml).toBe(accented(''))
+  })
+
+  test('a file whose bytes are not the encoding it declares, or that declares another one, is left out', async () => {
+    const dir = await temp.make('dte-sdk-caf-')
+    await putBytes(dir, 'undeclared-latin1.xml', latin1(accented('<?xml version="1.0"?>\n')), 4)
+    await putBytes(dir, 'lying.xml', latin1(accented('<?xml version="1.0" encoding="UTF-8"?>\n')), 3)
+    await putBytes(dir, 'other.xml', latin1(accented('<?xml version="1.0" encoding="windows-1252"?>\n')), 2)
+    // Only the attribute named encoding counts, not one whose name ends in it.
+    await putBytes(dir, 'x-encoding.xml', latin1(accented('<?xml version="1.0" x-encoding="ISO-8859-1"?>\n')), 1)
+    await expect(findCafFiles({ dir, type: 33, issuerRut: ISSUER_RUT, now })).resolves.toEqual([])
+  })
+
+  test('with includeExpired an expired CAF comes too, marked so; the others are marked unexpired', async () => {
+    const dir = await temp.make('dte-sdk-caf-')
+    const old = await put(dir, 'old.xml', fixtureText('caf-33-old.xml'), 9)
+    const good = await put(dir, 'good.xml', cafXml(33), 1)
+    const all = await findCafFiles({ dir, type: 33, issuerRut: ISSUER_RUT, now, includeExpired: true })
+    expect(all.map((file) => [file.path, file.expired])).toEqual([
+      [old, true],
+      [good, false],
+    ])
+    const usable = await findCafFiles({ dir, type: 33, issuerRut: ISSUER_RUT, now })
+    expect(usable.map((file) => [file.path, file.expired])).toEqual([[good, false]])
+    // The two that choose a file to use never take an expired one.
+    const search = { dir, type: 33, issuerRut: ISSUER_RUT, now, includeExpired: true } as const
+    await expect(findLatestCafFile(search)).resolves.toMatchObject({ path: good })
+    await expect(resolveCafFile(search)).resolves.toMatchObject({ path: good })
+  })
+
   test('without node:fs it says so', async () => {
     const error = await failure(
       findCafFiles({ dir: 'x', type: 33, issuerRut: ISSUER_RUT }, async () => {
@@ -208,6 +268,17 @@ describe('resolveCafFile', () => {
       path: newer,
       remaining: 3,
     })
+  })
+
+  test('cafFileScope builds the scope resolveCafFile reserves with, from a file or any CAF with its text', async () => {
+    const dir = await temp.make('dte-sdk-caf-')
+    const xml = cafXml(33, { from: 11, to: 13 })
+    await put(dir, 'caf.xml', xml, 1)
+    const [file] = await findCafFiles({ dir, type: 33, issuerRut: ISSUER_RUT, now })
+    expect(cafFileScope(file, 'certification')).toEqual(scopeOf(xml, { from: 11, to: 13 }))
+    const resolved = await resolveCafFile({ dir, type: 33, issuerRut: ISSUER_RUT, now, environment: 'production' })
+    expect(resolved?.scope).toEqual(cafFileScope(file, 'production'))
+    expect(cafFileScope({ xml: file.xml, caf: file.caf }, 'production').environment).toBe('production')
   })
 
   test('the options are checked', async () => {

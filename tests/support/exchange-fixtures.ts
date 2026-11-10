@@ -30,6 +30,10 @@ export const sessionCheckRoute: FakeRoute = {
   reply: { body: '<form name="ad_empresa">RUT_EMP</form>' },
 }
 
+/** The same page for a production client, which checks its session on its own environment. */
+export const PRODUCTION_SESSION_CHECK_URL = 'https://palena.sii.cl/cvc_cgi/dte/ad_empresa1'
+export const productionSessionCheckRoute: FakeRoute = { ...sessionCheckRoute, url: PRODUCTION_SESSION_CHECK_URL }
+
 /** The session check, the warm-up page and the module script that confirms the known permutation. */
 export const gwtWarmUpRoutes = (portal: GwtPortal): FakeRoute[] => [
   sessionCheckRoute,

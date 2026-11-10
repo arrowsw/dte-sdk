@@ -889,6 +889,18 @@ describe('prepareFolios', () => {
     expect(harness.posted('af_anular3').map((form) => form.FOLIO_INI)).toEqual(['1'])
   })
 
+  test('a later refusal that is not rationing annuls nothing', async () => {
+    const harness = await certificationHarness([
+      stampEntry,
+      quota(...repeat(quotaForm(1, 5), 4)),
+      confirm(cafXml(33, { from: 1, to: 1 }), REJECTION_PAGES.optionNotAuthorized),
+      get('af_anular1', ANNUL_ENTRY),
+    ])
+    const error = await failure(prepareFolios(harness.deps, stateWith(), { needs: { 33: 2 } }))
+    expect(error.details).toMatchObject({ available: 1, rejection: 'optionNotAuthorized' })
+    expect(harness.fake.requests.filter((request) => request.url.includes('af_anular'))).toEqual([])
+  })
+
   test('still short: the error carries the numbers and the reason', async () => {
     const harness = await certificationHarness([
       stampEntry,
@@ -897,12 +909,13 @@ describe('prepareFolios', () => {
     ])
     const error = await failure(prepareFolios(harness.deps, stateWith(), { needs: { 33: 2 } }))
     expect(error.code).toBe('FOLIO_OUT_OF_RANGE')
+    // The refusal of the second batch keeps its kind: it is the person's block, not the cap.
     expect(error.details).toMatchObject({
       type: 33,
       required: 2,
       available: 1,
       availableFolios: 0,
-      rejection: 'quotaCapReached',
+      rejection: 'personWithPendingIssues',
       reason: 'noUnusedFolios',
     })
     // What was obtained before the step ended short is kept: the next attempt finds it in hand.

@@ -2,6 +2,7 @@ import { escapeXmlText, escapeXmlAttribute, escapeXmlMarkup } from '../src/xml/e
 import { buildXml } from '../src/xml/build'
 import {
   parseXml,
+  parseXmlWithReferences,
   parseXmlWithoutNamespaces,
   parseXmlDom,
   extractTagContent,
@@ -110,5 +111,42 @@ describe('format', () => {
     expect(out).toContain(`<Modulus>${'B'.repeat(64)}\n${'B'.repeat(6)}</Modulus>`)
     expect(out).toContain(`<X509Certificate>${'B'.repeat(64)}\n${'B'.repeat(6)}</X509Certificate>`)
     expect(out).toContain(`<Other>${b64}</Other>`)
+  })
+})
+
+describe('parseXmlWithReferences', () => {
+  test('decodes numeric character references as a DOM does, where parseXml keeps them', () => {
+    const xml = '<?xml version="1.0"?><a b="&#67;"><c>&#209;&#xD1;&#x1F600; &amp;#67; &lt;&gt;&quot;&apos;</c></a>'
+    expect(parseXmlWithReferences(xml)).toEqual({
+      '?xml': { '@_version': '1.0' },
+      a: { '@_b': 'C', c: 'ÑÑ😀 &#67; <>"\'' },
+    })
+    expect((parseXml(xml) as { a: { c: string } }).a.c).toBe('&#209;&#xD1;&#x1F600; &#67; <>"\'')
+  })
+
+  test('a reference to a character XML does not allow, and a named entity, stay as written', () => {
+    expect(parseXmlWithReferences('<a>&#0;&#xD800;&#xFFFE;&#1114112;&nbsp;&#9;&#10;&#13;x</a>')).toEqual({
+      a: '&#0;&#xD800;&#xFFFE;&#1114112;&nbsp;\t\n\rx',
+    })
+  })
+
+  test('an entity a DOCTYPE declares is not expanded', () => {
+    expect(parseXmlWithReferences('<!DOCTYPE a [<!ENTITY x "y">]><a>&x;</a>')).toEqual({ a: '&x;' })
+  })
+})
+
+describe('parseXmlDom depth', () => {
+  const nested = (depth: number): string => `${'<a>'.repeat(depth)}${'</a>'.repeat(depth)}`
+
+  test('a document 100 elements deep is read; one deeper is XML_PARSE_FAILED', () => {
+    expect(parseXmlDom(nested(100)).documentElement.tagName).toBe('a')
+    expect(() => parseXmlDom(nested(101))).toThrow(
+      expect.objectContaining({ code: 'XML_PARSE_FAILED', details: { reason: 'nested deeper than 100 elements' } }),
+    )
+  })
+
+  test('text, comments and siblings do not count as depth', () => {
+    const wide = `<r>${'<!-- c --><a>x</a>'.repeat(500)}${nested(98)}</r>`
+    expect(parseXmlDom(wide).documentElement.childNodes.length).toBe(1001)
   })
 })

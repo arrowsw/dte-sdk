@@ -1,4 +1,5 @@
 import { createHash, X509Certificate } from 'node:crypto'
+import { cafEnvironment as rootCafEnvironment } from '../src/index'
 import { parseCaf } from '../src/caf/parse'
 import { SII_CAF_KEYS, verifyCafSignature } from '../src/caf/sii-signature'
 import { rsaPublicKeyPartsFromCertificatePem } from '../src/crypto/rsa'
@@ -71,6 +72,13 @@ describe('verifyCafSignature', () => {
     expect(verifyCafSignature(xml, options)).toBe('invalid')
   })
 
+  test('an empty FRMA is a signature that does not verify, whether its key is known or not', () => {
+    const empty = fixtureText('caf-33-signed.xml').replace(/(<FRMA[^>]*>)[^<]*/, '$1 ')
+    expect(verifyCafSignature(empty, options)).toBe('invalid')
+    expect(verifyCafSignature(empty.replace(/(<FRMA[^>]*>) /, '$1'), options)).toBe('invalid')
+    expect(verifyCafSignature(empty.replace('<IDK>100</IDK>', '<IDK>999</IDK>'), options)).toBe('invalid')
+  })
+
   test.each([
     ['empty text', ''],
     ['no CAF block', '<AUTORIZACION/>'],
@@ -93,7 +101,6 @@ describe('verifyCafSignature', () => {
       'a CAF nested deeper',
       '<A><X><CAF version="1.0"><DA><IDK>100</IDK></DA><FRMA algoritmo="SHA1withRSA">AA==</FRMA></CAF></X></A>',
     ],
-    ['an empty FRMA', '<CAF version="1.0"><DA><IDK>100</IDK></DA><FRMA algoritmo="SHA1withRSA"> </FRMA></CAF>'],
     [
       'a comment in the CAF',
       '<CAF version="1.0"><!-- x --><DA><IDK>100</IDK></DA><FRMA algoritmo="SHA1withRSA">AA==</FRMA></CAF>',
@@ -136,4 +143,8 @@ describe('verifyCafSignature', () => {
   test('a value that is not a string is CAF_INVALID', () => {
     expect(() => verifyCafSignature(undefined as unknown as string)).toThrow(DteError)
   })
+})
+
+test('cafEnvironment, from the root, names the environment of the SII key a CAF names', () => {
+  expect([100, 300, 200].map(rootCafEnvironment)).toEqual(['certification', 'production', null])
 })
