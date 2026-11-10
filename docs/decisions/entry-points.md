@@ -30,7 +30,7 @@ which went to 34 kB, and the stricter checks it brought (the signature, and the 
 Returning the CAFs a batch request already holds, with its check of the quantity, took `dte-sdk/portal` to 73.95 kB,
 still under its limit. Returning what the other folio flows already hold when a later step fails (the annulment's tally,
 the CAFs a re-obtaining downloaded, the memory of an exact request that annulled), with the original error logged,
-took it to 74.18 kB, over its 74 kB limit, which went to 76 kB.
+took it to 74.33 kB, over its 74 kB limit, which went to 76 kB.
 
 ## Why
 
