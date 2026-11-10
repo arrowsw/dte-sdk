@@ -74,6 +74,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as numbers, so a modulus wrapped over lines or with a leading zero byte still pairs.
   - **What to change:** nothing for a CAF the SII issued. The portal's flows parse the CAF they download, so a CAF
     whose keys are not a pair reaches them as `CAF_INVALID`, as a malformed one does.
+- **`parseCaf` reads character references as the DOM does.** Its fields came from a parser that kept numeric
+  character references as written, while `verifyCafSignature` and the SII read the same CAF through a DOM that decodes
+  them: a CAF whose writer turned an Ñ into `&#209;` read `RS` with the reference in it, and one with a reference in
+  `RE` or `TD` failed to parse. `parseCaf` now decodes `&#…;` and `&#x…;` as the DOM does, leaves a reference to a
+  character XML does not allow as written, and expands no other entity. The `<CAF>` block it keeps for the TED is still
+  the text as the SII issued it.
 - **A cached session is checked on the client's own environment.** `openPortalSession`, and the check of a saved
   session before the GWT portals and the receipts' certification, read the company page `ad_empresa1` of the
   certification host whatever the client's environment, so a production client depended on maullin being up. They now

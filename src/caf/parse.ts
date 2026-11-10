@@ -3,7 +3,7 @@ import { isDocumentType, type DocumentType } from '../catalogs/document-types'
 import { isRsaKeyPair, type RsaPublicKeyParts } from '../crypto/rsa'
 import { DteError } from '../errors'
 import { toSiiRut, type SiiRut } from '../model/rut'
-import { parseXml } from '../xml/parse'
+import { parseXmlWithReferences } from '../xml/parse'
 
 /**
  * EN: A parsed CAF (Código de Autorización de Folios): the SII authorization of a folio range plus the private key that
@@ -72,7 +72,8 @@ export const parseCaf = (xml: string): Caf => {
   if (/<!DOCTYPE/i.test(xml)) throw invalid('a DOCTYPE is not read')
   const tree = (() => {
     try {
-      return parseXml(xml)
+      // Character references decode as `verifyCafSignature`'s DOM decodes them, so both read the same fields.
+      return parseXmlWithReferences(xml)
     } catch {
       throw invalid('malformed XML')
     }

@@ -2,6 +2,7 @@ import { escapeXmlText, escapeXmlAttribute, escapeXmlMarkup } from '../src/xml/e
 import { buildXml } from '../src/xml/build'
 import {
   parseXml,
+  parseXmlWithReferences,
   parseXmlWithoutNamespaces,
   parseXmlDom,
   extractTagContent,
@@ -110,5 +111,26 @@ describe('format', () => {
     expect(out).toContain(`<Modulus>${'B'.repeat(64)}\n${'B'.repeat(6)}</Modulus>`)
     expect(out).toContain(`<X509Certificate>${'B'.repeat(64)}\n${'B'.repeat(6)}</X509Certificate>`)
     expect(out).toContain(`<Other>${b64}</Other>`)
+  })
+})
+
+describe('parseXmlWithReferences', () => {
+  test('decodes numeric character references as a DOM does, where parseXml keeps them', () => {
+    const xml = '<?xml version="1.0"?><a b="&#67;"><c>&#209;&#xD1;&#x1F600; &amp;#67; &lt;&gt;&quot;&apos;</c></a>'
+    expect(parseXmlWithReferences(xml)).toEqual({
+      '?xml': { '@_version': '1.0' },
+      a: { '@_b': 'C', c: 'ÑÑ😀 &#67; <>"\'' },
+    })
+    expect((parseXml(xml) as { a: { c: string } }).a.c).toBe('&#209;&#xD1;&#x1F600; &#67; <>"\'')
+  })
+
+  test('a reference to a character XML does not allow, and a named entity, stay as written', () => {
+    expect(parseXmlWithReferences('<a>&#0;&#xD800;&#xFFFE;&#1114112;&nbsp;&#9;&#10;&#13;x</a>')).toEqual({
+      a: '&#0;&#xD800;&#xFFFE;&#1114112;&nbsp;\t\n\rx',
+    })
+  })
+
+  test('an entity a DOCTYPE declares is not expanded', () => {
+    expect(parseXmlWithReferences('<!DOCTYPE a [<!ENTITY x "y">]><a>&x;</a>')).toEqual({ a: '&x;' })
   })
 })

@@ -20,6 +20,38 @@ const base = { ignoreAttributes: false, attributeNamePrefix: '@_', trimValues: t
 const objectParser = new XMLParser(base)
 const noNamespaceParser = new XMLParser({ ...base, removeNSPrefix: true })
 const looseParser = new XMLParser({ ...base, parseTagValue: true })
+const XML_ENTITIES: Readonly<Record<string, string>> = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" }
+// A character XML allows: a reference to any other one is left as written, as the parsers leave it.
+const isXmlChar = (code: number): boolean =>
+  code === 0x9 ||
+  code === 0xa ||
+  code === 0xd ||
+  (code >= 0x20 && code <= 0xd7ff) ||
+  (code >= 0xe000 && code <= 0xfffd) ||
+  (code >= 0x10000 && code <= 0x10ffff)
+// The five XML entities and numeric character references, in one pass, so `&amp;#67;` stays `&#67;`, as the DOM reads
+// it. No other named entity is read: without a DOCTYPE the DOM knows none.
+const decodeReferences = (text: string): string =>
+  text.replace(
+    /&(?:#(\d+)|#x([0-9a-fA-F]+)|(lt|gt|amp|quot|apos));/g,
+    (reference, decimal?: string, hex?: string, name?: string) => {
+      if (name !== undefined) return XML_ENTITIES[name]
+      const code = decimal === undefined ? Number.parseInt(hex!, 16) : Number(decimal)
+      return isXmlChar(code) ? String.fromCodePoint(code) : reference
+    },
+  )
+// The decoder keeps no state: entities a DOCTYPE declares are not expanded, and nothing else is set on it.
+const ignore = (): void => undefined
+const referenceParser = new XMLParser({
+  ...base,
+  entityDecoder: {
+    setExternalEntities: ignore,
+    addInputEntities: ignore,
+    reset: ignore,
+    setXmlVersion: ignore,
+    decode: decodeReferences,
+  },
+})
 
 const assertWellFormed = (xml: string): void => {
   const result = XMLValidator.validate(xml)
@@ -34,6 +66,18 @@ const assertWellFormed = (xml: string): void => {
 export const parseXml = (xml: string): ParsedXml => {
   assertWellFormed(xml)
   return objectParser.parse(xml) as ParsedXml
+}
+
+/**
+ * EN: Like `parseXml`, with numeric character references (`&#209;`, `&#xD1;`) decoded as a DOM decodes them, where
+ * `parseXml` keeps them as written. For text read field by field beside a DOM reading of it, as a CAF is.
+ * ES: Como `parseXml`, con las referencias numéricas de carácter (`&#209;`, `&#xD1;`) decodificadas como las decodifica
+ * un DOM, donde `parseXml` las deja tal cual. Para un texto que se lee campo por campo junto a una lectura DOM de él,
+ * como un CAF.
+ */
+export const parseXmlWithReferences = (xml: string): ParsedXml => {
+  assertWellFormed(xml)
+  return referenceParser.parse(xml) as ParsedXml
 }
 
 /**

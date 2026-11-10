@@ -57,6 +57,18 @@ describe('parseCaf', () => {
     expect(parseCaf(caf33.replace(modulus, padded)).range).toEqual({ from: 1, to: 100 })
   })
 
+  test('character references are read as the DOM reads them, and the block keeps them as written', () => {
+    const referenced = caf33
+      .replace('<RS>COMERCIAL ANDINA SPA</RS>', '<RS>COMERCIAL &#xD1;AND&#218; &amp;#67; SPA</RS>')
+      .replace('<RE>76543210-3</RE>', '<RE>76543210&#45;3</RE>')
+      .replace('<TD>33</TD>', '<TD>&#51;3</TD>')
+    const caf = parseCaf(referenced)
+    expect(caf.issuerName).toBe('COMERCIAL ÑANDÚ &#67; SPA')
+    expect(caf.issuerRut).toBe('76543210-3')
+    expect(caf.documentType).toBe(33)
+    expect(caf.xml).toContain('<RS>COMERCIAL &#xD1;AND&#218; &amp;#67; SPA</RS>')
+  })
+
   test('receipt CAF', () => {
     const caf = parseCaf(fixtureText('caf-39.xml'))
     expect(caf.documentType).toBe(39)
