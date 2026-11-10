@@ -604,9 +604,13 @@ export type PortalSessionInfo = {
   readonly reused: boolean
 }
 
+// The company page of the client's own environment: one session serves both, and a production client never depends on
+// the certification host.
 const cachedSessionAlive = async (context: PortalContext): Promise<boolean> => {
   if (!hasSessionCookie(context.state.cookies)) return false
-  const page = await portalRequest(context, 'validate', 'GET', cgiUrl('certification', 'ad_empresa1')).catch(() => null)
+  const page = await portalRequest(context, 'validate', 'GET', cgiUrl(context.portal.environment, 'ad_empresa1')).catch(
+    () => null,
+  )
   return page !== null && page.status === 200 && (page.html.includes('RUT_EMP') || page.html.includes('ad_empresa'))
 }
 
@@ -625,10 +629,10 @@ export const ensureSession = async (context: PortalContext): Promise<void> => {
 
 /**
  * EN: Makes sure the jar holds a session that is alive: a session it already holds is checked with a read of the
- * company page and dropped when the SII no longer answers for it, then `ensureSession` logs in when there is none. With
+ * company page of the client's environment and dropped when the SII no longer answers for it, then `ensureSession` logs in when there is none. With
  * `checked` the session was already checked in this run and the company page is not read again.
  * ES: Se asegura de que la bolsa tenga una sesión viva: una sesión que ya tiene se comprueba con una lectura de la
- * página de empresa y se descarta cuando el SII ya no responde por ella; luego `ensureSession` inicia sesión si no hay.
+ * página de empresa del ambiente del cliente y se descarta cuando el SII ya no responde por ella; luego `ensureSession` inicia sesión si no hay.
  * Con `checked` la sesión ya se comprobó en esta corrida y no se vuelve a leer la página de empresa.
  * @throws {DteError} EN: the codes of `ensureSession`. ES: los códigos de `ensureSession`.
  */
@@ -639,10 +643,10 @@ export const ensureLiveSession = async (context: PortalContext, checked: boolean
 }
 
 /**
- * EN: Opens a session explicitly, reusing a cached one that is still alive. The other operations do not need this: they
- * log in on demand.
- * ES: Abre una sesión de forma explícita, reutilizando una en caché que siga viva. Las demás operaciones no lo necesitan:
- * inician sesión a pedido.
+ * EN: Opens a session explicitly, reusing a cached one that is still alive, as the company page of the client's
+ * environment (`ad_empresa1`) says. The other operations do not need this: they log in on demand.
+ * ES: Abre una sesión de forma explícita, reutilizando una en caché que siga viva, según lo dice la página de empresa del
+ * ambiente del cliente (`ad_empresa1`). Las demás operaciones no lo necesitan: inician sesión a pedido.
  * @param portal EN: the client. ES: el cliente.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: who the session belongs to and whether it was reused. ES: de quién es la sesión y si se reutilizó.

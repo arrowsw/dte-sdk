@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A cached session is checked on the client's own environment.** `openPortalSession`, and the check of a saved
+  session before the GWT portals and the receipts' certification, read the company page `ad_empresa1` of the
+  certification host whatever the client's environment, so a production client depended on maullin being up. They now
+  read the page of the client's environment; one session still serves both.
 - **`reobtainCaf` logs in on demand.** It posted the range with whatever session it found in the cache, so a session
   that had expired since `listReobtainableRanges` got the login page back, which read as the SII refusing the download
   (`SII_PORTAL_REJECTED` with `reobtainDownloadMissing`). It now enters the procedure first, as
