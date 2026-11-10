@@ -1,4 +1,5 @@
 import { createHash, X509Certificate } from 'node:crypto'
+import { cafEnvironment as rootCafEnvironment } from '../src/index'
 import { parseCaf } from '../src/caf/parse'
 import { SII_CAF_KEYS, verifyCafSignature } from '../src/caf/sii-signature'
 import { rsaPublicKeyPartsFromCertificatePem } from '../src/crypto/rsa'
@@ -142,4 +143,8 @@ describe('verifyCafSignature', () => {
   test('a value that is not a string is CAF_INVALID', () => {
     expect(() => verifyCafSignature(undefined as unknown as string)).toThrow(DteError)
   })
+})
+
+test('cafEnvironment, from the root, names the environment of the SII key a CAF names', () => {
+  expect([100, 300, 200].map(rootCafEnvironment)).toEqual(['certification', 'production', null])
 })

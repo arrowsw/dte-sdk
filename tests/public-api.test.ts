@@ -179,6 +179,7 @@ const ROOT_EXPORTS = [
   'uploadFolioConsumption',
   'uploadStatusMessage',
   'verifyCafSignature',
+  'cafEnvironment',
   'verifyDocumentSignature',
   'verifyEnvelopeSignature',
   'verifyEnveloped',

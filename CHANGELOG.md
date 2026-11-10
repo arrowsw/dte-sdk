@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`cafEnvironment(keyId)`**, from the root: the environment of the SII key a CAF names in its `IDK`,
+  `certification` for 100 and `production` for 300, null for another. `verifyCafSignature` and
+  `verifyReceivedDocuments` already read it; it was not exported.
 - **`cafFileScope(file, environment)`**, in `dte-sdk/node`: the registry scope of a CAF file (its company, type and
   range, the environment, and the `cafFingerprint` of its text), the one `resolveCafFile` builds and returns. Anything
   with a CAF's text and the CAF parsed from it, such as the portal's `ObtainedCaf`, has one too.
