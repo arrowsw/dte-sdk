@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The "flow stopped" warning no longer logs what a page said.** Since 0.6.0 a folio flow that keeps what it holds
+  logs the error that stopped it, as `sii portal flow stopped, keeping what it holds`, with every detail spread and
+  redacted. Redaction hides keys and tokens, but a page's text (`portalMessage`, `body`) and the `url` it came from can
+  name the company and its RUT, and they reached the log. The warning now leaves those three out; the rest of the
+  details, the step's `operation`, `flow`, `code` and `stoppedAt` are logged as before. The thrown errors keep them.
 - **A cached session is checked on the client's own environment.** `openPortalSession`, and the check of a saved
   session before the GWT portals and the receipts' certification, read the company page `ad_empresa1` of the
   certification host whatever the client's environment, so a production client depended on maullin being up. They now

@@ -24,7 +24,7 @@ import {
 const CAF_XML = readFileSync(fixturePath('caf-33.xml'), 'latin1')
 const OLD_CAF_XML = readFileSync(fixturePath('caf-33-old.xml'), 'latin1')
 const entry = { url: `${MAULLIN}/of_solicita_folios`, method: 'GET' as const, reply: { body: STAMP_ENTRY } }
-const replies = (name: string, ...bodies: readonly (string | Error | { status: number })[]) => ({
+const replies = (name: string, ...bodies: readonly (string | Error | { status: number; body?: string })[]) => ({
   url: `${MAULLIN}/${name}`,
   method: 'POST' as const,
   reply: bodies.map((body) => (typeof body === 'string' ? { body } : body)),
@@ -566,9 +566,11 @@ describe('requestCafInBatches', () => {
     ])
   })
 
-  test('the logger gets what a page showed with its secrets redacted, in the page text as in the excerpt', async () => {
+  test('the logger gets nothing a page showed: no portalMessage, body or url', async () => {
     const { warned, logger } = captureWarnings()
-    const leaky = page('<p>Intente m&aacute;s tarde</p><RSASK>SECRET-PRIVATE-KEY</RSASK> TOKEN=abc123xyz')
+    const leaky = page(
+      '<p>Intente m&aacute;s tarde, EMPRESA FICTICIA SPA 76.543.210-3</p><RSASK>SECRET-PRIVATE-KEY</RSASK> TOKEN=abc123xyz',
+    )
     const harness = await signedIn(
       [
         entry,
@@ -580,13 +582,36 @@ describe('requestCafInBatches', () => {
     const result = await requestCafInBatches(harness.portal, { type: 33, quantity: 200 })
     expect(result.failure).toEqual({ code: 'SII_PORTAL_UNEXPECTED_PAGE', operation: 'queryFolioQuota' })
     const logged = warned.find((entry) => entry.message === 'sii portal flow stopped, keeping what it holds')?.context
-    expect(logged).toEqual(
-      expect.objectContaining({
-        portalMessage: 'SII Intente más tarde [redacted] TOKEN=[redacted]',
-        body: expect.stringContaining('<RSASK>[redacted]</RSASK> TOKEN=[redacted]'),
-      }),
+    expect(logged).toEqual({
+      operation: 'requestCafInBatches',
+      step: 'of_solicita_folios',
+      flow: 'requestCafInBatches',
+      code: 'SII_PORTAL_UNEXPECTED_PAGE',
+      stoppedAt: 'queryFolioQuota',
+    })
+    expect(JSON.stringify(logged)).not.toMatch(/EMPRESA FICTICIA|76\.543\.210|SECRET-PRIVATE-KEY|abc123xyz/)
+  })
+
+  test('an HTTP error of a later trip is logged with its status, without its body or url', async () => {
+    const { warned, logger } = captureWarnings()
+    const harness = await signedIn(
+      [
+        entry,
+        replies('of_solicita_folios_dcto', quotaForm(3, 0), quotaForm(3, 0), {
+          status: 503,
+          body: 'EMPRESA FICTICIA SPA 76.543.210-3',
+        }),
+        replies('of_confirma_folio', CAF_XML),
+      ],
+      { logger },
     )
-    expect(JSON.stringify(logged)).not.toMatch(/SECRET-PRIVATE-KEY|abc123xyz/)
+    const result = await requestCafInBatches(harness.portal, { type: 33, quantity: 200 })
+    expect(result.failure).toEqual({ code: 'SII_HTTP_ERROR', operation: 'queryFolioQuota' })
+    const logged = warned.find((entry) => entry.message === 'sii portal flow stopped, keeping what it holds')?.context
+    expect(logged).toMatchObject({ httpStatus: 503, channel: 'portal', code: 'SII_HTTP_ERROR' })
+    expect(logged).not.toHaveProperty('body')
+    expect(logged).not.toHaveProperty('url')
+    expect(JSON.stringify(logged)).not.toMatch(/EMPRESA FICTICIA|76\.543\.210/)
   })
 
   test('a detail that did not come from a page reaches the logger redacted too', async () => {
