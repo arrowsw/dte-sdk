@@ -10,6 +10,7 @@ import {
   reobtainFolios,
   requestCafExact,
   requestCafInBatches,
+  type FolioFlowFailure,
   type FolioFlowResult,
   type ReobtainResult,
 } from '../portal/flows'
@@ -233,10 +234,19 @@ const rangesOf = (xmls: readonly string[], type: number): readonly Span[] =>
     .filter((caf) => caf.documentType === type)
     .map((caf) => caf.range)
 
-// A request stopped by a failure, not by the SII, ends the step with that failure's code, as when the flow threw it.
+// A flow stopped by a failure, not by the SII's answer, ends the step with that failure's code, as when the flow threw
+// it, and with the kind of refusal when there is one.
+const stopped = (type: number, operation: string, failure: FolioFlowFailure): DteError =>
+  new DteError(failure.code, {
+    type,
+    operation,
+    step: failure.operation,
+    ...(failure.rejection === undefined ? {} : { rejection: failure.rejection }),
+  })
+
 const shortage = (type: number, required: number, available: number, result: FolioFlowResult): DteError =>
   result.failure !== null
-    ? new DteError(result.failure.code, { type, operation: 'requestCafInBatches', step: result.failure.operation })
+    ? stopped(type, 'requestCafInBatches', result.failure)
     : new DteError('FOLIO_OUT_OF_RANGE', {
         type,
         required,
@@ -261,11 +271,11 @@ const shortage = (type: number, required: number, available: number, result: Fol
  * at most 10 in each of up to four passes, never a range the run downloaded (the CAFs of the state, expired ones
  * included, the ones just obtained, and the ones a re-obtention brought and the run did not keep) and never the ranges
  * kept in `annulledRanges`. If any was annulled the maximum is read again and the request repeated following it; an
- * annulment that fails counts as none, even cut short after annulling, though what it annulled is kept in
- * `annulledRanges`. Every CAF obtained is saved in the state at once, so a step that ends short leaves them in hand for
- * the next attempt. Still short throws `FOLIO_OUT_OF_RANGE` with the numbers, or, when the batches stopped on a failure
- * and not on the SII's answer, that failure's code. Downloads of a re-obtaining stopped by a failure end the step with
- * that failure's code too, once what they brought and was kept is in the state.
+ * annulment that fails before the SII answers counts as none. Every CAF obtained is saved in the state at once, so a
+ * step that ends short leaves them in hand for the next attempt. Still short throws `FOLIO_OUT_OF_RANGE` with the
+ * numbers, or, when the batches stopped on a failure and not on the SII's answer, that failure's code. Downloads of a
+ * re-obtaining, or an annulment, stopped by a failure end the step with that failure's code too, with the kind of
+ * refusal when the SII refused, once what they brought and was kept, or what was annulled, is in the state.
  * ES: Asegura que la corrida tenga los folios que necesita cada tipo, como lo hace el campo. Primero los CAF en mano:
  * uno vencido se omite, los folios de esta corrida que el SII nunca recibió se devuelven, y los que el SII ya recibió
  * se marcan como usados para saltarlos. Luego el cupo: un rechazo o un fallo al leerlo no detiene, la corrida sigue sin
@@ -278,12 +288,12 @@ const shortage = (type: number, required: number, available: number, result: Fol
  * muestra más folios sin usar que los en mano, se anulan rangos sin usar de los últimos 180 días: máximo 10 en cada una
  * de hasta cuatro pasadas, nunca un rango que la corrida descargó (los CAF del estado, incluidos los vencidos, los
  * recién obtenidos y los que trajo una reobtención y la corrida no conservó) ni los rangos de `annulledRanges`. Si se
- * anuló alguno se lee de nuevo el máximo y se repite la solicitud siguiéndolo; una anulación que falla cuenta como
- * ninguna, aunque se corte después de anular, si bien lo que anuló queda en `annulledRanges`. Cada CAF obtenido se
- * guarda en el estado de inmediato, así un paso que termina corto los deja en mano para el siguiente intento. Si aún
- * falta, lanza `FOLIO_OUT_OF_RANGE` con los números o, cuando las tandas se detuvieron por una falla y no por la
- * respuesta del SII, el código de esa falla. Las descargas de una reobtención detenidas por una falla terminan el paso
- * también con el código de esa falla, una vez que lo que trajeron y se conservó está en el estado.
+ * anuló alguno se lee de nuevo el máximo y se repite la solicitud siguiéndolo; una anulación que falla antes de que el
+ * SII responda cuenta como ninguna. Cada CAF obtenido se guarda en el estado de inmediato, así un paso que termina corto
+ * los deja en mano para el siguiente intento. Si aún falta, lanza `FOLIO_OUT_OF_RANGE` con los números o, cuando las
+ * tandas se detuvieron por una falla y no por la respuesta del SII, el código de esa falla. Las descargas de una
+ * reobtención, o una anulación, detenidas por una falla terminan el paso también con el código de esa falla, con el
+ * tipo de rechazo cuando el SII rechazó, una vez que lo que trajeron y se conservó, o lo anulado, está en el estado.
  * @throws {DteError} EN: `MISSING_FIELD { field: 'plan' }` without a plan and without `needs`; `FOLIO_OUT_OF_RANGE { type, required, available, maxAuthorized, availableFolios, rejection, reason }`; the portal codes. ES: los mismos códigos.
  */
 export const prepareFolios = async (
@@ -362,12 +372,7 @@ export const prepareFolios = async (
         missing = reobtained.complete ? 0 : required - reobtained.available
       }
       // Downloads stopped by a failure end the step with its code, as when the flow threw it, once what was kept is saved.
-      if (reobtained.failure !== null)
-        throw new DteError(reobtained.failure.code, {
-          type,
-          operation: 'reobtainFolios',
-          step: reobtained.failure.operation,
-        })
+      if (reobtained.failure !== null) throw stopped(type, 'reobtainFolios', reobtained.failure)
     }
     // The floor of the SII is a maximum of one folio and every batch asks for at least one, so as many batches as
     // folios are missing always reach; four, the default, fall short as soon as the SII gives them one by one.
@@ -432,7 +437,7 @@ export const prepareFolios = async (
       if (missing > 0 && last !== null && last.rejection !== null && RATIONING.has(last.rejection)) {
         const unusedInHand = await available()
         if (last.availableFolios === null || last.availableFolios > unusedInHand) {
-          // A failed annulment counts as none annulled and the run goes on.
+          // An annulment that fails before the SII answers counts as none annulled and the run goes on.
           const annulment = await annulFolios(rt.portal, {
             type: type as DocumentType,
             withinDays: ANNUL_WINDOW_DAYS,
@@ -445,8 +450,10 @@ export const prepareFolios = async (
               annulledRanges = { ...annulledRanges, [type]: annulment.knownAnnulled }
               current = await saveState(rt, current, { annulledRanges })
             }
-            // One cut short counts as none, like one that fails before annulling: what it annulled is kept above.
-            if (annulment.failure === null && annulment.totalAnnulled > 0) {
+            // One cut short ends the step with its code, as a request or a re-obtaining cut short does, once what it
+            // annulled is kept above.
+            if (annulment.failure !== null) throw stopped(type, 'annulFolios', annulment.failure)
+            if (annulment.totalAnnulled > 0) {
               // Annulling moves the maximum, so it is read again and the request follows the same rule as the first.
               last = await ask(await readQuota(), missing)
               missing = required - (await available())

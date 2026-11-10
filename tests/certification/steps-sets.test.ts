@@ -433,7 +433,7 @@ describe('prepareFolios', () => {
     expect((await harness.store.load())?.annulledRanges).toEqual({ '33': ['1-9'] })
   })
 
-  test('an annulment cut short counts as none, but what it annulled is kept in the state', async () => {
+  test('an annulment cut short ends the step with its code, once what it annulled is kept in the state', async () => {
     const harness = await certificationHarness([
       stampEntry,
       quota(REJECTION_PAGES.stampingBlocked, quotaForm(), quotaForm()),
@@ -454,8 +454,32 @@ describe('prepareFolios', () => {
       confirm(CAF_XML),
     ])
     const error = await failure(prepareFolios(harness.deps, stateWith(), { needs: { 33: 2 } }))
-    expect(error.code).toBe('FOLIO_OUT_OF_RANGE')
+    expect(error.code).toBe('SII_PORTAL_BLOCKED')
+    expect(error.details).toEqual({ type: 33, operation: 'annulFolios', step: 'annulFolios' })
     expect(harness.posted('af_anular')).toHaveLength(1)
+    expect((await harness.store.load())?.annulledRanges).toEqual({ '33': ['1-9'] })
+    expect(harness.posted('of_solicita_folios_dcto')).toHaveLength(1)
+  })
+
+  test('an annulment whose later listing the SII refuses ends the step with the kind of refusal', async () => {
+    const harness = await certificationHarness([
+      stampEntry,
+      quota(REJECTION_PAGES.stampingBlocked, quotaForm(), quotaForm()),
+      ...noRanges,
+      get('af_anular1', ...repeat(ANNUL_ENTRY, 4)),
+      post('af_anular2', unusedRangesPage([[1, 9, '01-11-2026']]), refusedPage('ANULACION DE FOLIOS')),
+      post('af_anular3', ANNUL_FORM),
+      post('af_anular', ANNUL_OK),
+      confirm(CAF_XML),
+    ])
+    const error = await failure(prepareFolios(harness.deps, stateWith(), { needs: { 33: 2 } }))
+    expect(error.code).toBe('SII_PORTAL_REJECTED')
+    expect(error.details).toEqual({
+      type: 33,
+      operation: 'annulFolios',
+      step: 'listFolioRanges',
+      rejection: 'optionNotAuthorized',
+    })
     expect((await harness.store.load())?.annulledRanges).toEqual({ '33': ['1-9'] })
     expect(harness.posted('of_solicita_folios_dcto')).toHaveLength(1)
   })

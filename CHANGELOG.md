@@ -24,8 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     now names every step a folio flow can stop at: `queryFolioQuota`, `requestCaf`, `reobtainCaf`, `listFolioRanges`
     and `annulFolios`. `FolioFlowFailure` gains an optional `rejection`, set only when `code` is
     `SII_PORTAL_REJECTED`.
-  - **The certification's `prepareFolios`** keeps what such an annulment annulled in `annulledRanges` and counts it as
-    none, as it counted one that threw: it does not ask the portal again.
+  - **The certification's `prepareFolios`** keeps what such an annulment annulled in `annulledRanges` and then ends the
+    step with the failure's code, with `type`, `operation: 'annulFolios'`, `step` and, for a refusal, `rejection`, as
+    a cut-short request or re-obtaining does. It used to count it as none and end with `FOLIO_OUT_OF_RANGE`, which
+    read a network failure as rationing. An annulment that throws before the SII answers still counts as none.
 - **`reobtainFolios` returns the CAFs it already downloaded when a later download fails.** A download that failed
   with anything but a refusal threw out of the walk and the CAFs earlier downloads had brought were lost; nothing was
   spent, but they had to be downloaded again. Once a CAF is in hand such a `DteError` now ends the walk with
