@@ -33,6 +33,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when its scope has none.
   - **What to change:** a `FolioRegistry` of one's own returns `stats` with both fields in each range.
 
+- **`receiverAnswer` reads the `codResp` of the events query.** It took the events alone, so a query that failed (the
+  SII's internal error, a company that may not consult the document, a wrong folio) gave no events and read as
+  `pending`, and past the eight days as `tacitlyAccepted`: a document read as accepted by law because the SII did not
+  answer. It now also takes the whole result of `listClaimEvents`; with no events and a `codResp` other than 15, 16 or
+  18, the codes that list events or say there are none, the answer is the new `unknown`, as `receiverStatus` already
+  reads it. Events, when the SII sent some, speak whatever the code.
+  - **What to change:** pass the result of `listClaimEvents` whole rather than its `events`, which still works but
+    cannot tell a failed query. `ReceiverAnswer` gains `unknown`: an exhaustive `switch` on it needs the case.
+
 ### Added
 
 - **`cafEnvironment(keyId)`**, from the root: the environment of the SII key a CAF names in its `IDK`,
