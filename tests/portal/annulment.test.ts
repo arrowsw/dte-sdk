@@ -167,6 +167,7 @@ describe('annulFolios', () => {
       totalAnnulled: 3,
       totalRejected: 0,
       knownAnnulled: ['1-3'],
+      failure: null,
     })
     expect(harness.posted('af_anular3')[0]).toEqual({
       RUT_EMP: '76543210',
@@ -542,6 +543,80 @@ describe('annulFolios', () => {
       { url: `${MAULLIN}/af_anular3`, reply: { status: 403 } },
     ])
     expect((await failure(annulFolios(harness.portal, { type: 33, all: true }))).code).toBe('SII_PORTAL_BLOCKED')
+  })
+
+  // Annulling cannot be undone: once the SII has answered for some folios, what it did reaches the caller.
+  describe('a walk cut short returns what it already did, with the failure', () => {
+    test('a later listing that fails for good, after an earlier pass annulled', async () => {
+      const expired = new DteError('SII_PORTAL_SESSION_EXPIRED', { operation: 'annulFolios' })
+      const harness = await signedIn([
+        entry,
+        respond('af_anular2', unusedRangesPage([[1, 3]]), expired, expired, expired),
+        respond('af_anular3', ANNUL_FORM),
+        respond('af_anular', ANNUL_OK),
+      ])
+      await expect(annulFolios(harness.portal, { type: 33, all: true, knownAnnulled: ['7-9'] })).resolves.toEqual({
+        annulled: [{ from: 1, to: 3, count: 3 }],
+        rejected: [],
+        totalAnnulled: 3,
+        totalRejected: 0,
+        knownAnnulled: ['7-9', '1-3'],
+        failure: { code: 'SII_PORTAL_SESSION_EXPIRED', operation: 'listFolioRanges' },
+      })
+      expect(harness.posted('af_anular')).toHaveLength(1)
+    })
+
+    test('a block at a later range, after an earlier one was annulled', async () => {
+      const harness = await signedIn([
+        entry,
+        list(
+          unusedRangesPage([
+            [1, 2],
+            [3, 4],
+          ]),
+        ),
+        {
+          url: `${MAULLIN}/af_anular3`,
+          method: 'POST',
+          reply: [{ body: ANNUL_FORM }, { status: 403 }, { status: 403 }, { status: 403 }],
+        },
+        respond('af_anular', ANNUL_OK),
+      ])
+      await expect(annulFolios(harness.portal, { type: 33, all: true })).resolves.toEqual({
+        annulled: [{ from: 1, to: 2, count: 2 }],
+        rejected: [],
+        totalAnnulled: 2,
+        totalRejected: 0,
+        knownAnnulled: ['1-2'],
+        failure: { code: 'SII_PORTAL_BLOCKED', operation: 'annulFolios' },
+      })
+    })
+
+    test('a walk that finishes has no failure', async () => {
+      const harness = await signedIn([
+        entry,
+        list(unusedRangesPage([[1, 2]]), unusedRangesPage([])),
+        respond('af_anular3', ANNUL_FORM),
+        respond('af_anular', ANNUL_OK),
+      ])
+      expect((await annulFolios(harness.portal, { type: 33, all: true })).failure).toBeNull()
+    })
+
+    test('anything that is not a DteError is a bug and still throws, whatever was annulled', async () => {
+      const bug = new Error('bug')
+      const harness = await signedIn([
+        entry,
+        list(
+          unusedRangesPage([
+            [1, 2],
+            [3, 4],
+          ]),
+        ),
+        respond('af_anular3', ANNUL_FORM, bug, bug, bug),
+        respond('af_anular', ANNUL_OK),
+      ])
+      await expect(annulFolios(harness.portal, { type: 33, all: true })).rejects.toThrow('bug')
+    })
   })
 
   test('the passes end after four, however many ranges keep appearing', async () => {

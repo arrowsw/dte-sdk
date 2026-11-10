@@ -261,7 +261,8 @@ const shortage = (type: number, required: number, available: number, result: Fol
  * at most 10 in each of up to four passes, never a range the run downloaded (the CAFs of the state, expired ones
  * included, the ones just obtained, and the ones a re-obtention brought and the run did not keep) and never the ranges
  * kept in `annulledRanges`. If any was annulled the maximum is read again and the request repeated following it; an
- * annulment that fails counts as none. Every CAF obtained is saved in the state at once, so a step that ends short
+ * annulment that fails counts as none, even cut short after annulling, though what it annulled is kept in
+ * `annulledRanges`. Every CAF obtained is saved in the state at once, so a step that ends short
  * leaves them in hand for the next attempt. Still short throws `FOLIO_OUT_OF_RANGE` with the numbers, or, when the
  * batches stopped on a failure and not on the SII's answer, that failure's code.
  * ES: Asegura que la corrida tenga los folios que necesita cada tipo, como lo hace el campo. Primero los CAF en mano:
@@ -277,7 +278,7 @@ const shortage = (type: number, required: number, available: number, result: Fol
  * de hasta cuatro pasadas, nunca un rango que la corrida descargó (los CAF del estado, incluidos los vencidos, los
  * recién obtenidos y los que trajo una reobtención y la corrida no conservó) ni los rangos de `annulledRanges`. Si se
  * anuló alguno se lee de nuevo el máximo y se repite la solicitud siguiéndolo; una anulación que falla cuenta como
- * ninguna. Cada CAF obtenido se guarda en el estado de inmediato, así un paso que termina corto los deja en mano para
+ * ninguna, aunque se corte después de anular, si bien lo que anuló queda en `annulledRanges`. Cada CAF obtenido se guarda en el estado de inmediato, así un paso que termina corto los deja en mano para
  * el siguiente intento. Si aún falta, lanza `FOLIO_OUT_OF_RANGE` con los números o, cuando las tandas se detuvieron por
  * una falla y no por la respuesta del SII, el código de esa falla.
  * @throws {DteError} EN: `MISSING_FIELD { field: 'plan' }` without a plan and without `needs`; `FOLIO_OUT_OF_RANGE { type, required, available, maxAuthorized, availableFolios, rejection, reason }`; the portal codes. ES: los mismos códigos.
@@ -434,7 +435,8 @@ export const prepareFolios = async (
               annulledRanges = { ...annulledRanges, [type]: annulment.knownAnnulled }
               current = await saveState(rt, current, { annulledRanges })
             }
-            if (annulment.totalAnnulled > 0) {
+            // One cut short counts as none, like one that fails before annulling: what it annulled is kept above.
+            if (annulment.failure === null && annulment.totalAnnulled > 0) {
               // Annulling moves the maximum, so it is read again and the request follows the same rule as the first.
               last = await ask(await readQuota(), missing)
               missing = required - (await available())

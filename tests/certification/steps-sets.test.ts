@@ -433,6 +433,33 @@ describe('prepareFolios', () => {
     expect((await harness.store.load())?.annulledRanges).toEqual({ '33': ['1-9'] })
   })
 
+  test('an annulment cut short counts as none, but what it annulled is kept in the state', async () => {
+    const harness = await certificationHarness([
+      stampEntry,
+      quota(REJECTION_PAGES.stampingBlocked, quotaForm(), quotaForm()),
+      ...noRanges,
+      get('af_anular1', ...repeat(ANNUL_ENTRY, 4)),
+      post(
+        'af_anular2',
+        ...repeat(
+          unusedRangesPage([
+            [1, 9, '01-11-2026'],
+            [20, 29, '01-11-2026'],
+          ]),
+          4,
+        ),
+      ),
+      post('af_anular3', ANNUL_FORM, { status: 403 }, { status: 403 }, { status: 403 }),
+      post('af_anular', ANNUL_OK),
+      confirm(CAF_XML),
+    ])
+    const error = await failure(prepareFolios(harness.deps, stateWith(), { needs: { 33: 2 } }))
+    expect(error.code).toBe('FOLIO_OUT_OF_RANGE')
+    expect(harness.posted('af_anular')).toHaveLength(1)
+    expect((await harness.store.load())?.annulledRanges).toEqual({ '33': ['1-9'] })
+    expect(harness.posted('of_solicita_folios_dcto')).toHaveLength(1)
+  })
+
   describe('a block on the person is met with the re-obtaining before any annulment', () => {
     const blocked = [stampEntry, quota(quotaForm(), REJECTION_PAGES.personWithPendingIssues)]
     const annulment = [

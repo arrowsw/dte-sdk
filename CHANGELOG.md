@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`annulFolios` returns what the SII already annulled when a later step fails.** The tally of a call lived only until
+  the end of the walk, so a later pass's listing or a later range that failed with anything the step retries could not
+  absorb (an expired session, a block, the caller's abort, a page it could not read, a refused listing) threw it away:
+  folios already annulled, which cannot be undone, never reached `annulled` or `knownAnnulled`, and the next run posted
+  their annulment again only to hear "ya fue anulado". Once the SII has answered for some folios, such a `DteError` now
+  ends the walk with what was done until then and the new field `failure: { code, operation }`, where `operation` is
+  `listFolioRanges` or `annulFolios`. Only the code is kept; the original error goes whole to the client's logger.
+  Before any answer it still throws, and anything that is not a `DteError` still throws as a bug. `failure` is null on
+  a walk that finishes.
+  - **What to change:** `AnnulmentResult` gains `failure` as a required field. Persist `knownAnnulled` whether `failure`
+    is set or not; a literal built by hand, as in a test double, needs `failure: null`. `FolioFlowFailure['operation']`
+    now names every step a folio flow can stop at: `queryFolioQuota`, `requestCaf`, `reobtainCaf`, `listFolioRanges`
+    and `annulFolios`.
+  - **The certification's `prepareFolios`** keeps what such an annulment annulled in `annulledRanges` and counts it as
+    none, as it counted one that threw: it does not ask the portal again.
+
 ## [0.5.0] - 2026-11-09
 
 ### Changed

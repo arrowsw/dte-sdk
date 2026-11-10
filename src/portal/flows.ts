@@ -1,10 +1,11 @@
 import { isCafExpired } from '../caf/validity'
 import type { DocumentType } from '../catalogs/document-types'
 import type { PortalRejection } from '../catalogs/portal'
-import { errorMessage, isDteError, type DteErrorCode } from '../errors'
+import { errorMessage, isDteError } from '../errors'
 import type { CallOverrides } from '../sii/client'
 import { annulFoliosInSession } from './annulment'
 import type { PortalClient } from './client'
+import type { FolioFlowFailure } from './flow-failure'
 import { listReobtainableInSession, reobtainCafInSession, type ReobtainableRange } from './reobtain'
 import { withPortalSession, type PortalContext } from './session'
 import {
@@ -15,24 +16,11 @@ import {
   type ObtainedCaf,
 } from './stamping'
 
+export type { FolioFlowFailure } from './flow-failure'
+
 const DEFAULT_MAX_BATCHES = 4
 const DEFAULT_MAX_CHECKS_PER_RANGE = 30
 const MAX_RANGES_TO_ANNUL = 20
-
-/**
- * EN: The `DteError` that stopped a composite flow already holding CAFs, when it was not a refusal: a transport
- * failure, a timeout, an expired session, a block, an invalid CAF or the caller's abort. Only its code is kept, since
- * its details may carry what a page said.
- * ES: El `DteError` que detuvo un flujo compuesto que ya tenía CAF en la mano, cuando no fue un rechazo: una falla de
- * transporte, un tiempo agotado, una sesión vencida, un bloqueo, un CAF inválido o la cancelación de quien llama. Solo
- * se guarda su código, porque sus detalles pueden traer lo que dijo una página.
- */
-export type FolioFlowFailure = {
-  /** EN: The error code. ES: El código del error. */
-  readonly code: DteErrorCode
-  /** EN: The step that failed. Reading the quota stamps nothing; a request may have been granted all the same, and `listReobtainableRanges` says whether it was. ES: El paso que falló. Leer el cupo no timbra nada; una solicitud pudo otorgarse igual, y `listReobtainableRanges` dice si se otorgó. */
-  readonly operation: 'queryFolioQuota' | 'requestCaf'
-}
 
 /**
  * EN: The outcome of a composite flow. Refusals come back as data, because the flow may already hold CAFs: those must
