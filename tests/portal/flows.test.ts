@@ -383,7 +383,7 @@ describe('requestCafInBatches', () => {
     })
   })
 
-  test('a refusal with nothing obtained keeps its value; after a grant it is the cap', async () => {
+  test('a refusal keeps its value, with nothing obtained or after a grant', async () => {
     const nothing = await signedIn([
       entry,
       replies('of_solicita_folios_dcto', quotaForm(3, 0), REJECTION_PAGES.optionNotAuthorized),
@@ -407,8 +407,44 @@ describe('requestCafInBatches', () => {
     await expect(requestCafInBatches(some.portal, { type: 33, quantity: 200 })).resolves.toMatchObject({
       complete: false,
       granted: 100,
-      rejection: 'quotaCapReached',
+      cafs: [expect.anything()],
+      rejection: 'optionNotAuthorized',
+      portalMessage: expect.any(String),
+      maxAuthorized: 3,
+      availableFolios: 0,
+      failure: null,
     })
+  })
+
+  test('a range the SII authorized without its file, after a grant, is said as such, not as the cap', async () => {
+    const harness = await signedIn([
+      entry,
+      replies('of_solicita_folios_dcto', quotaForm(3, 0), quotaForm(3, 0), quotaForm(3, 0), quotaForm(3, 0)),
+      replies('of_confirma_folio', CAF_XML, page('ya fue autorizado')),
+    ])
+    await expect(requestCafInBatches(harness.portal, { type: 33, quantity: 200 })).resolves.toMatchObject({
+      complete: false,
+      granted: 100,
+      cafs: [expect.anything()],
+      rejection: 'rangeAlreadyAuthorized',
+      portalMessage: expect.stringContaining('ya fue autorizado'),
+    })
+  })
+
+  test('one folio over the maximum, after a grant, is the cap', async () => {
+    const exceeded = page('debe ser menor o igual al m&aacute;ximo autorizado')
+    const harness = await signedIn([
+      entry,
+      replies('of_solicita_folios_dcto', ...Array.from({ length: 5 }, () => quotaForm(3, 0))),
+      replies('of_confirma_folio', CAF_XML, exceeded, exceeded),
+    ])
+    await expect(requestCafInBatches(harness.portal, { type: 33, quantity: 200 })).resolves.toMatchObject({
+      complete: false,
+      granted: 100,
+      rejection: 'quotaCapReached',
+      portalMessage: null,
+    })
+    expect(harness.posted('of_confirma_folio').map((form) => form.CANT_DOCTOS)).toEqual(['3', '3', '1'])
   })
 
   test('an uncertain request after a grant is said as such, not as the cap', async () => {

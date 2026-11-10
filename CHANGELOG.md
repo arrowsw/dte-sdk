@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`requestCafInBatches` says why a later trip was refused.** Any refusal of the second trip or a later one, but
+  `stampingUncertain`, came back as `quotaCapReached`, so a range the SII authorized without handing its CAF over
+  (`rangeAlreadyAuthorized`) read as the quota running out, and so did a refusal of the company, the option or the
+  person. A refusal now comes back with its own kind and `portalMessage`, as on the first trip. Only one folio over the
+  maximum (`quotaExceeded`), after a grant, still reads as `quotaCapReached`: the SII has no more to give in that pass.
+  - **What to change:** a caller that read `quotaCapReached` as "stop asking" for every short batch now meets the
+    other kinds after a grant too; `rangeAlreadyAuthorized` means the range can be downloaded again with
+    `listReobtainableRanges` and `reobtainCaf`.
+  - **The certification's `prepareFolios`** follows from it: a later refusal that is not rationing (the company, the
+    option) no longer leads it to annul folios, and a block on the person is first lifted by re-obtaining, as on the
+    first trip.
+
 ### Fixed
 
 - **`reobtainCaf` logs in on demand.** It posted the range with whatever session it found in the cache, so a session
