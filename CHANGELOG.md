@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **What to change:** pass the result of `listClaimEvents` whole rather than its `events`, which still works but
     cannot tell a failed query. `ReceiverAnswer` gains `unknown`: an exhaustive `switch` on it needs the case.
 - **Size:** these changes took `dte-sdk` from 33.87 kB to 34.36 kB, over its 34 kB limit, which went to 36 kB.
-  `dte-sdk/node` went to 7.09 kB, `dte-sdk/portal` to 74.98 kB and `dte-sdk/pdf` to 10.93 kB, under their limits.
+  `dte-sdk/node` went to 7.09 kB, `dte-sdk/portal` to 74.90 kB and `dte-sdk/pdf` to 10.93 kB, under their limits.
 
 ### Added
 

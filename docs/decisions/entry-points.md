@@ -34,7 +34,7 @@ took it to 74.33 kB, over its 74 kB limit, which went to 76 kB.
 The fixes Paperwork's upstream notes asked for, on 2026-11-10, took `dte-sdk` from 33.87 kB to 34.36 kB, over its 34 kB
 limit, which went to 36 kB: the check that a CAF's two keys are a pair, its character references read as the DOM reads
 them, the depth every DOM is allowed and the `codResp` of the receiver's answer. With them `dte-sdk/node`, which now
-reads a CAF file by its declaration, went to 7.09 kB, `dte-sdk/portal` to 74.98 kB and `dte-sdk/pdf` to 10.93 kB, all
+reads a CAF file by its declaration, went to 7.09 kB, `dte-sdk/portal` to 74.90 kB and `dte-sdk/pdf` to 10.93 kB, all
 under their limits.
 
 ## Why
