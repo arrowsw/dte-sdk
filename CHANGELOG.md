@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     option) no longer leads it to annul folios, and a block on the person is first lifted by re-obtaining, as on the
     first trip.
 
+- **`findCafFiles` can include expired CAFs, and says which are.** With `includeExpired: true` it also lists the files
+  whose CAF has expired, so a caller can say why a file is not used; `CafFile` gains `expired`, true for those and
+  false otherwise. `findLatestCafFile` and `resolveCafFile` never take an expired one, whatever the option says.
+  - **What to change:** `CafFile` gains `expired` as a required field; a literal built by hand, as in a test double,
+    needs `expired: false`.
+
 ### Fixed
 
 - **The "flow stopped" warning no longer logs what a page said.** Since 0.6.0 a folio flow that keeps what it holds
@@ -36,6 +42,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when the keys of `knownAnnulled` cover all its folios, in one key or several, where only its exact key was.
   - **What to change:** nothing for a caller that reads keys as spans of folios; one that compared them with the
     listing's ranges one to one reads them as spans now.
+- **`findCafFiles` reads each file in the encoding its XML declaration names.** It read every file as UTF-8, while the
+  SII writes ISO-8859-1: a CAF saved as the SII served it, with an Ñ or an accent in the company's name, was read with
+  replacement characters in `RS`, and every stamp made with its `<CAF>` block failed the SII's check. A file that
+  declares ISO-8859-1 is now read as such, and one that declares UTF-8, or no encoding, as strict UTF-8; a file whose
+  bytes are not the encoding it names, or that names another one, is skipped rather than misread. A UTF-8 byte order
+  mark is dropped. `findLatestCafFile` and `resolveCafFile` follow.
+  - **What to change:** a file with no declaration and ISO-8859-1 bytes is no longer found; declare its encoding, as
+    the SII's file does, or save it as UTF-8.
 - **A cached session is checked on the client's own environment.** `openPortalSession`, and the check of a saved
   session before the GWT portals and the receipts' certification, read the company page `ad_empresa1` of the
   certification host whatever the client's environment, so a production client depended on maullin being up. They now
