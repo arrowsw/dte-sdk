@@ -204,6 +204,14 @@ describe('verifyReceivedDocuments: each check on its own', () => {
     expect(document.status).toBe('invalid')
   })
 
+  test('a CAF whose FRMA is empty is a CAF that fails its check, and the stamp still verifies with its key', () => {
+    const caf = signedCaf()
+    const empty = { ...caf, xml: caf.xml.replace(/(<FRMA[^>]*>)[^<]*/, '$1') }
+    const document = only(stampedWith(1, empty).xml)
+    expect(document.ted).toEqual(VALID_TED)
+    expect(document.caf).toEqual({ ...VALID_CAF, siiSignature: 'invalid', status: 'invalid' })
+  })
+
   test('a CAF whose IDK has no known key is unchecked, not failed', () => {
     const result = verify(envelopeOf([issued(1, signedCaf({ keyId: 999 })), issued(2)]))
     expect(result.documents[0].caf).toEqual({

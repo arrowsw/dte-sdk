@@ -62,6 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mark is dropped. `findLatestCafFile` and `resolveCafFile` follow.
   - **What to change:** a file with no declaration and ISO-8859-1 bytes is no longer found; declare its encoding, as
     the SII's file does, or save it as UTF-8.
+- **An empty `FRMA` is a CAF whose signature fails, not a CAF that is not one.** `verifyCafSignature` threw
+  `CAF_INVALID` for a CAF whose `FRMA` was empty, as for one with no `FRMA` at all; it now answers `invalid`, whatever
+  the CAF's `IDK`, as it does for an `FRMA` that is not base64. In `verifyReceivedDocuments` such a CAF used to be no
+  CAF, and the stamp, left without its key, failed too: the CAF is now found and fails its SII signature, and the stamp
+  is checked with the CAF's key like any other.
 - **A cached session is checked on the client's own environment.** `openPortalSession`, and the check of a saved
   session before the GWT portals and the receipts' certification, read the company page `ad_empresa1` of the
   certification host whatever the client's environment, so a production client depended on maullin being up. They now
