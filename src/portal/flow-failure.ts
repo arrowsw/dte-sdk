@@ -1,4 +1,5 @@
 import type { DteError, DteErrorCode } from '../errors'
+import { redactText } from '../sii/capture'
 import type { PortalContext } from './session'
 
 /**
@@ -15,19 +16,23 @@ export type FolioFlowFailure = {
 }
 
 /**
- * EN: The failure of a flow that keeps what it holds: the original error goes to the logger whole, the result keeps its
- * code.
- * ES: La falla de un flujo que conserva lo que tiene: el error original va completo al logger, el resultado guarda su
- * código.
+ * EN: The failure of a flow that keeps what it holds: the original error goes to the logger whole, each text detail
+ * with its secrets redacted, and the result keeps its code.
+ * ES: La falla de un flujo que conserva lo que tiene: el error original va completo al logger, cada detalle de texto con
+ * sus secretos ocultos, y el resultado guarda su código.
  */
 export const flowFailure = (
   context: PortalContext,
   error: DteError,
   operation: FolioFlowFailure['operation'],
 ): FolioFlowFailure => {
+  const details = Object.entries(error.details).map(([key, value]) => [
+    key,
+    typeof value === 'string' ? redactText(value) : value,
+  ])
   context.portal.logger.warn('sii portal flow stopped, keeping what it holds', {
     operation: context.operation,
-    ...error.details,
+    ...Object.fromEntries(details),
     code: error.code,
     stoppedAt: operation,
   })

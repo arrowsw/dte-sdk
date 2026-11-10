@@ -9,7 +9,6 @@ import {
 import { DteError, errorMessage, isDteError } from '../errors'
 import { splitSiiRut, type SiiRut } from '../model/rut'
 import type { CallOverrides } from '../sii/client'
-import { redactText } from '../sii/capture'
 import { bodyExcerpt, httpError } from '../sii/operation'
 import { mergeRetryPolicy, withRetry } from '../sii/retry'
 import { send } from '../sii/send'
@@ -356,7 +355,7 @@ export const portalRequest = async (
       operation: context.operation,
       step,
       httpStatus: response.status,
-      portalMessage: portalMessageOf(redactText(html)),
+      portalMessage: portalMessageOf(html),
     })
   return { status: response.status, headers: response.headers, html, url, lastLocation: null }
 }

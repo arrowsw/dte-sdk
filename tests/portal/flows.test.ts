@@ -29,6 +29,14 @@ const replies = (name: string, ...bodies: readonly (string | Error | { status: n
   method: 'POST' as const,
   reply: bodies.map((body) => (typeof body === 'string' ? { body } : body)),
 })
+const captureWarnings = () => {
+  const warned: { readonly message: string; readonly context?: Readonly<Record<string, unknown>> }[] = []
+  const log = (message: string, context?: Readonly<Record<string, unknown>>): void => {
+    warned.push({ message, context })
+  }
+  const logger: Logger = { debug: () => undefined, info: () => undefined, warn: log, error: log }
+  return { warned, logger }
+}
 const annulRoutes = (ranges: string, form: string = ANNUL_FORM) => [
   { url: `${MAULLIN}/af_anular1`, reply: { body: ANNUL_ENTRY } },
   { url: `${MAULLIN}/af_anular2`, reply: { body: ranges } },
@@ -471,11 +479,7 @@ describe('requestCafInBatches', () => {
   })
 
   test('a failure keeps only the code, and the original error goes whole to the logger', async () => {
-    const warned: { readonly message: string; readonly context?: Readonly<Record<string, unknown>> }[] = []
-    const log = (message: string, context?: Readonly<Record<string, unknown>>): void => {
-      warned.push({ message, context })
-    }
-    const logger: Logger = { debug: () => undefined, info: () => undefined, warn: log, error: log }
+    const { warned, logger } = captureWarnings()
     const harness = await signedIn(
       [
         entry,
@@ -502,6 +506,48 @@ describe('requestCafInBatches', () => {
           stoppedAt: 'queryFolioQuota',
         },
       },
+    ])
+  })
+
+  test('the logger gets what a page showed with its secrets redacted, in the page text as in the excerpt', async () => {
+    const { warned, logger } = captureWarnings()
+    const leaky = page('<p>Intente m&aacute;s tarde</p><RSASK>SECRET-PRIVATE-KEY</RSASK> TOKEN=abc123xyz')
+    const harness = await signedIn(
+      [
+        entry,
+        replies('of_solicita_folios_dcto', quotaForm(3, 0), quotaForm(3, 0), leaky),
+        replies('of_confirma_folio', CAF_XML),
+      ],
+      { logger },
+    )
+    const result = await requestCafInBatches(harness.portal, { type: 33, quantity: 200 })
+    expect(result.failure).toEqual({ code: 'SII_PORTAL_UNEXPECTED_PAGE', operation: 'queryFolioQuota' })
+    const logged = warned.find((entry) => entry.message === 'sii portal flow stopped, keeping what it holds')?.context
+    expect(logged).toEqual(
+      expect.objectContaining({
+        portalMessage: 'SII Intente más tarde [redacted] TOKEN=[redacted]',
+        body: expect.stringContaining('<RSASK>[redacted]</RSASK> TOKEN=[redacted]'),
+      }),
+    )
+    expect(JSON.stringify(logged)).not.toMatch(/SECRET-PRIVATE-KEY|abc123xyz/)
+  })
+
+  test('a detail that did not come from a page reaches the logger redacted too', async () => {
+    const { warned, logger } = captureWarnings()
+    const cut = new DteError('TRANSPORT_FAILED', { reason: 'socket hang up at /cvc_cgi/dte?TOKEN=abc123xyz' })
+    const harness = await signedIn(
+      [
+        entry,
+        replies('of_solicita_folios_dcto', quotaForm(3, 0), quotaForm(3, 0), cut),
+        replies('of_confirma_folio', CAF_XML),
+      ],
+      { logger },
+    )
+    await requestCafInBatches(harness.portal, { type: 33, quantity: 200 })
+    expect(warned).toEqual([
+      expect.objectContaining({
+        context: expect.objectContaining({ reason: 'socket hang up at /cvc_cgi/dte?TOKEN=[redacted]', attempts: 1 }),
+      }),
     ])
   })
 

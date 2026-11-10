@@ -44,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   anything that is not a `DteError` still throws as a bug.
   - **What to change:** `failure` was always null on `requestCafExact`; read it as on `requestCafInBatches`, and
     persist `knownAnnulled` whether it is set or not. The type does not change.
-- **Size:** these changes and the logging below took `dte-sdk/portal` from 73.95 kB to 74.19 kB, over its 74 kB limit,
+- **Size:** these changes and the logging below took `dte-sdk/portal` from 73.95 kB to 74.18 kB, over its 74 kB limit,
   which went to 76 kB.
 
 ### Fixed
@@ -54,7 +54,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the original's `reason` (`ECONNRESET`, a timeout), `httpStatus`, `attempts` and the rest reached neither the thrown
   error nor the `CERT_ERROR` event. Every flow that turns a failure into data (`requestCafInBatches`,
   `requestCafExact`, `reobtainFolios`, `annulFolios`) now logs the original first through the client's logger, as a
-  warning `sii portal flow stopped, keeping what it holds` with the error's details, its `code` and `stoppedAt`.
+  warning `sii portal flow stopped, keeping what it holds` with the error's details, its `code` and `stoppedAt`. Every
+  text detail goes through `redactText` first, so a token, an `RSASK` or a session cookie reaches the log as
+  `[redacted]`.
+- **`portalMessage` no longer carries a secret a page showed.** The portal's message was the visible text of the page,
+  read without redaction everywhere but on a block page, while `body` beside it was redacted: an `RSASK` or a token in
+  a page's text reached the error's `portalMessage`, and from this release the log, as written. The page is now
+  redacted before its text is read, on every error and result that carries `portalMessage`; redacting the text
+  afterwards would miss an `RSASK`, whose tags the text no longer has.
 
 ## [0.5.0] - 2026-11-09
 
