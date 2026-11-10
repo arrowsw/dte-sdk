@@ -552,6 +552,12 @@ describe('verifyReceivedDocuments: each text is its element', () => {
   })
 
   // Searching the text for each `<DTE` took quadratic time: 0.2 MB of these took 3 s, so 2 MB would take minutes.
+  test('elements nested deeper than any document are XML_PARSE_FAILED, never a stack overflow', () => {
+    const nested = (depth: number): string => `<DTE>${'<a>'.repeat(depth)}${'</a>'.repeat(depth)}</DTE>`
+    for (const depth of [100, 5000, 20000])
+      expectFailure(() => verify(nested(depth)), 'XML_PARSE_FAILED', { reason: 'nested deeper than 100 elements' })
+  })
+
   test('megabytes of start and closing tags in attribute values are read in linear time', () => {
     const xml = envelopeOf([issued(1)]).replace(
       '</SetDTE>',

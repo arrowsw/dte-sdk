@@ -134,3 +134,19 @@ describe('parseXmlWithReferences', () => {
     expect(parseXmlWithReferences('<!DOCTYPE a [<!ENTITY x "y">]><a>&x;</a>')).toEqual({ a: '&x;' })
   })
 })
+
+describe('parseXmlDom depth', () => {
+  const nested = (depth: number): string => `${'<a>'.repeat(depth)}${'</a>'.repeat(depth)}`
+
+  test('a document 100 elements deep is read; one deeper is XML_PARSE_FAILED', () => {
+    expect(parseXmlDom(nested(100)).documentElement.tagName).toBe('a')
+    expect(() => parseXmlDom(nested(101))).toThrow(
+      expect.objectContaining({ code: 'XML_PARSE_FAILED', details: { reason: 'nested deeper than 100 elements' } }),
+    )
+  })
+
+  test('text, comments and siblings do not count as depth', () => {
+    const wide = `<r>${'<!-- c --><a>x</a>'.repeat(500)}${nested(98)}</r>`
+    expect(parseXmlDom(wide).documentElement.childNodes.length).toBe(1001)
+  })
+})

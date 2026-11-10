@@ -113,13 +113,32 @@ const failDom = (message: string): never => {
 // undefined entity, say) it reports as an error, never as a warning.
 const domParser = new DOMParser({ locator: {}, errorHandler: { error: failDom, fatalError: failDom } })
 
+// No document the SII or an issuer writes nests more than a dozen elements; what reads a DOM walks it recursively, and a
+// few thousand levels overflow the stack.
+const MAX_DEPTH = 100
+
+// Walked with a list of its own, not recursively, so the walk itself cannot overflow.
+const assertShallow = (document: XmlDocument): void => {
+  const pending: { readonly node: Node; readonly depth: number }[] = [{ node: document.documentElement, depth: 1 }]
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    if (next.depth > MAX_DEPTH)
+      throw new DteError('XML_PARSE_FAILED', { reason: `nested deeper than ${MAX_DEPTH} elements` })
+    for (let child = next.node.firstChild; child !== null; child = child.nextSibling)
+      if (child.nodeType === 1) pending.push({ node: child, depth: next.depth + 1 })
+  }
+}
+
 /**
- * EN: Parses XML into a DOM (needed by canonicalization and signature verification).
- * ES: Parsea XML a un DOM (lo necesitan la canonicalización y la verificación de firmas).
+ * EN: Parses XML into a DOM (needed by canonicalization and signature verification). Elements nested deeper than 100
+ * levels are `XML_PARSE_FAILED`, before anything walks them.
+ * ES: Parsea XML a un DOM (lo necesitan la canonicalización y la verificación de firmas). Elementos anidados a más de 100
+ * niveles son `XML_PARSE_FAILED`, antes de que algo los recorra.
  */
 export const parseXmlDom = (xml: string): XmlDocument => {
   assertWellFormed(xml)
-  return domParser.parseFromString(xml, 'application/xml')
+  const document = domParser.parseFromString(xml, 'application/xml')
+  assertShallow(document)
+  return document
 }
 
 /**

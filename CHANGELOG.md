@@ -92,6 +92,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RE` or `TD` failed to parse. `parseCaf` now decodes `&#…;` and `&#x…;` as the DOM does, leaves a reference to a
   character XML does not allow as written, and expands no other entity. The `<CAF>` block it keeps for the TED is still
   the text as the SII issued it.
+- **XML nested thousands of levels deep is `XML_PARSE_FAILED`, not a stack overflow.** `verifyReceivedDocuments` threw a
+  `RangeError` for a file of a few thousand nested elements, since what reads a DOM walks it recursively. Every DOM
+  dte-sdk parses (received documents, signatures, CAFs, the SII's answers) now refuses elements nested deeper than 100
+  levels with `XML_PARSE_FAILED`, before anything walks them; no document the SII or an issuer writes comes close.
 - **A cached session is checked on the client's own environment.** `openPortalSession`, and the check of a saved
   session before the GWT portals and the receipts' certification, read the company page `ad_empresa1` of the
   certification host whatever the client's environment, so a production client depended on maullin being up. They now
