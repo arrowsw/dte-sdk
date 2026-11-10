@@ -35,6 +35,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **The certification's `prepareFolios`** keeps what such a walk brought by the rule it already applies to a short
     one, and then throws the failure's code with `type`, `operation: 'reobtainFolios'` and `step`, as it threw that
     code before.
+- **`requestCafExact` keeps the memory of what it annulled when a later step fails.** With `allowAnnul`, a
+  `DteError` that cut the annulment short, or one of the request asked once more after it, threw out of the flow and
+  `knownAnnulled` was lost with the folios just annulled. Once the SII has answered the annulment, such a failure now
+  ends the flow with `complete: false`, `rejection: null`, the first request's quota, `knownAnnulled` with what was
+  annulled, and `failure`: the annulment's (`listFolioRanges` or `annulFolios`) or the request's (`requestCaf`). A
+  cut-short annulment is not followed by another request. Before the annulment's first answer it still throws, and
+  anything that is not a `DteError` still throws as a bug.
+  - **What to change:** `failure` was always null on `requestCafExact`; read it as on `requestCafInBatches`, and
+    persist `knownAnnulled` whether it is set or not. The type does not change.
 
 ### Fixed
 

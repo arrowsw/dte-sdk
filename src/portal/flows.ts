@@ -25,10 +25,10 @@ const MAX_RANGES_TO_ANNUL = 20
 /**
  * EN: The outcome of a composite flow. Refusals come back as data, because the flow may already hold CAFs: those must
  * reach the caller, and a CAF cannot travel in an error's details, which get logged. For the same reason, once a CAF is
- * in hand any other `DteError` comes back as data too, in `failure`.
+ * in hand, or folios were annulled, any other `DteError` comes back as data too, in `failure`.
  * ES: El resultado de un flujo compuesto. Los rechazos vuelven como datos, porque el flujo puede tener ya CAF en la mano:
  * esos deben llegar a quien llama, y un CAF no puede viajar en los detalles de un error, que se registran. Por lo mismo,
- * con un CAF ya en la mano cualquier otro `DteError` también vuelve como dato, en `failure`.
+ * con un CAF ya en la mano, o folios ya anulados, cualquier otro `DteError` también vuelve como dato, en `failure`.
  */
 export type FolioFlowResult = {
   /** EN: The quantity asked for was covered. ES: Se cubrió la cantidad pedida. */
@@ -45,7 +45,7 @@ export type FolioFlowResult = {
   readonly rejection: PortalRejection | null
   /** EN: What the portal said, or null. ES: Lo que dijo el portal, o null. */
   readonly portalMessage: string | null
-  /** EN: What stopped the flow with CAFs in hand when it was not a refusal, or null; `rejection` is then null. Only `requestCafInBatches` sets it. ES: Lo que detuvo el flujo con CAF en la mano cuando no fue un rechazo, o null; `rejection` es entonces null. Solo lo llena `requestCafInBatches`. */
+  /** EN: What stopped the flow while it held something the caller must not lose, or null; `rejection` is then null. `requestCafInBatches` sets it with CAFs in hand, when it was not a refusal; `requestCafExact` once the SII has answered its annulment, with what cut the annulment short or the request after it, and `knownAnnulled` keeps what was annulled. ES: Lo que detuvo el flujo mientras tenía algo que quien llama no puede perder, o null; `rejection` es entonces null. `requestCafInBatches` lo llena con CAF en la mano, cuando no fue un rechazo; `requestCafExact` una vez que el SII respondió su anulación, con lo que cortó la anulación o la solicitud que sigue, y `knownAnnulled` guarda lo anulado. */
   readonly failure: FolioFlowFailure | null
 }
 
@@ -126,16 +126,21 @@ const fromCaf = (caf: ObtainedCaf, quantity: number): FolioFlowResult => ({
  * EN: Requests one CAF that covers the whole quantity; below it nothing is stamped. With `allowAnnul`, a limit caused by
  * unused folios is lifted by annulling up to 20 ranges in each of up to four passes (80 ranges in all), never those in
  * `exclude`, and asking once more. `FOLIOS_DISP` 0 means nothing is annullable, so that attempt is skipped; while
- * blocked the field is absent, and that case does try.
+ * blocked the field is absent, and that case does try. Annulling cannot be undone, so once the SII has answered the
+ * annulment, a `DteError` that cuts it short, or one of the request that follows, ends the flow with `rejection: null`,
+ * the first request's quota, the failure in `failure` and what was annulled in `knownAnnulled`, instead of throwing.
  * ES: Solicita un CAF que cubra toda la cantidad; bajo ella no se timbra nada. Con `allowAnnul`, un límite causado por folios
  * sin usar se levanta anulando hasta 20 rangos en cada una de hasta cuatro pasadas (80 rangos en total), nunca los de
  * `exclude`, y pidiendo una vez más. `FOLIOS_DISP` 0 significa que nada es anulable, así que ese intento se omite; con
- * el timbraje bloqueado el campo no viene, y ese caso sí lo intenta.
+ * el timbraje bloqueado el campo no viene, y ese caso sí lo intenta. Anular no se puede deshacer, así que una vez que el
+ * SII respondió la anulación, un `DteError` que la corta, o uno de la solicitud que sigue, termina el flujo con
+ * `rejection: null`, el cupo de la primera solicitud, la falla en `failure` y lo anulado en `knownAnnulled`, en vez de
+ * lanzar.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: type, quantity and whether annulling is allowed. ES: tipo, cantidad y si se permite anular.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: the outcome, where a refusal is data, and the memory to persist. ES: el resultado, donde un rechazo es un dato, y la memoria que guardar.
- * @throws {DteError} EN: session, block and transport codes. ES: códigos de sesión, bloqueo y transporte.
+ * @throws {DteError} EN: session, block and transport codes, until the SII has answered an annulment. ES: códigos de sesión, bloqueo y transporte, hasta que el SII responde una anulación.
  */
 export const requestCafExact = (
   portal: PortalClient,
@@ -177,14 +182,26 @@ export const requestCafExact = (
         portalMessage: annulment.details.portalMessage as string,
         knownAnnulled: known,
       }
+    const knownAnnulled = annulment.knownAnnulled
+    // After the SII has answered the annulment, a failure ends the flow with the memory of what it annulled, which
+    // cannot be undone, and the last quota seen; asking again would only meet the same failure.
+    const stopped = (failure: FolioFlowFailure): RequestCafExactResult => ({
+      ...first,
+      rejection: null,
+      portalMessage: null,
+      failure,
+      knownAnnulled,
+    })
+    if (annulment.failure !== null) return stopped(annulment.failure)
     if (annulment.totalAnnulled === 0)
-      return {
-        ...first,
-        rejection: 'noAnnullableFolios',
-        portalMessage: first.portalMessage,
-        knownAnnulled: annulment.knownAnnulled,
-      }
-    return { ...(await ask()), knownAnnulled: annulment.knownAnnulled }
+      return { ...first, rejection: 'noAnnullableFolios', portalMessage: first.portalMessage, knownAnnulled }
+    return ask().then(
+      (second) => ({ ...second, knownAnnulled }),
+      (error: unknown) => {
+        if (!isDteError(error)) throw error
+        return stopped(flowFailure(context, error, 'requestCaf'))
+      },
+    )
   })
 
 /**

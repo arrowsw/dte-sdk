@@ -210,6 +210,74 @@ describe('requestCafExact', () => {
     })
   })
 
+  describe('after annulling, a failure returns the memory instead of throwing it away', () => {
+    test('an annulment cut short returns what it annulled, with its failure, and asks no more', async () => {
+      const harness = await signedIn([
+        entry,
+        replies('of_solicita_folios_dcto', quotaForm(2, 6)),
+        { url: `${MAULLIN}/af_anular1`, reply: { body: ANNUL_ENTRY } },
+        {
+          url: `${MAULLIN}/af_anular2`,
+          reply: {
+            body: unusedRangesPage([
+              [1, 2],
+              [3, 4],
+            ]),
+          },
+        },
+        replies('af_anular3', ANNUL_FORM, { status: 403 }, { status: 403 }, { status: 403 }),
+        { url: `${MAULLIN}/af_anular`, reply: { body: ANNUL_OK } },
+      ])
+      const result = await requestCafExact(harness.portal, {
+        type: 33,
+        quantity: 5,
+        allowAnnul: true,
+        knownAnnulled: ['7-9'],
+      })
+      expect(result).toEqual({
+        complete: false,
+        cafs: [],
+        granted: 0,
+        maxAuthorized: 2,
+        availableFolios: 6,
+        rejection: null,
+        portalMessage: null,
+        failure: { code: 'SII_PORTAL_BLOCKED', operation: 'annulFolios' },
+        knownAnnulled: ['7-9', '1-2'],
+      })
+      expect(harness.posted('of_solicita_folios_dcto')).toHaveLength(1)
+    })
+
+    test('the request after annulling that fails returns the memory, with its failure', async () => {
+      const harness = await signedIn([
+        entry,
+        replies('of_solicita_folios_dcto', quotaForm(2, 6), quotaForm(100, 0)),
+        replies('of_confirma_folio', AUTH_PAGE),
+        ...annulRoutes(unusedRangesPage([[1, 6]])),
+      ])
+      await expect(requestCafExact(harness.portal, { type: 33, quantity: 5, allowAnnul: true })).resolves.toEqual({
+        complete: false,
+        cafs: [],
+        granted: 0,
+        maxAuthorized: 2,
+        availableFolios: 6,
+        rejection: null,
+        portalMessage: null,
+        failure: { code: 'SII_PORTAL_SESSION_EXPIRED', operation: 'requestCaf' },
+        knownAnnulled: ['1-6'],
+      })
+    })
+
+    test('anything that is not a DteError after annulling is a bug and stays an error', async () => {
+      const harness = await signedIn([
+        entry,
+        replies('of_solicita_folios_dcto', quotaForm(2, 6), new Error('bug')),
+        ...annulRoutes(unusedRangesPage([[1, 6]])),
+      ])
+      await expect(requestCafExact(harness.portal, { type: 33, quantity: 5, allowAnnul: true })).rejects.toThrow('bug')
+    })
+  })
+
   test('a refusal annulling cannot help is returned as it is', async () => {
     const harness = await signedIn([entry, replies('of_solicita_folios_dcto', REJECTION_PAGES.companyNotAuthorized)])
     const result = await requestCafExact(harness.portal, { type: 33, quantity: 5, allowAnnul: true })
