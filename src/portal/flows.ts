@@ -96,7 +96,7 @@ export type RequestCafExactInput = {
   readonly allowAnnul?: boolean
   /** EN: Folios annulling never touches, such as a CAF still in use. ES: Folios que la anulación no toca, como un CAF todavía en uso. */
   readonly exclude?: readonly { readonly from: number; readonly to: number }[]
-  /** EN: `knownAnnulled` of the previous run: these are not tried again. ES: `knownAnnulled` de la corrida anterior: estos no se vuelven a intentar. */
+  /** EN: `knownAnnulled` of the previous run: a listed range whose folios these keys cover, in one key or several, is not tried again. ES: `knownAnnulled` de la corrida anterior: un rango listado cuyos folios cubren estas claves, en una o en varias, no se vuelve a intentar. */
   readonly knownAnnulled?: readonly string[]
   /** EN: Company RUT; the client's by default. ES: `RUT_EMP` + `DV_EMP` — RUT de la empresa; por defecto el del cliente. */
   readonly companyRut?: string

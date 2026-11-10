@@ -28,6 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redacted. Redaction hides keys and tokens, but a page's text (`portalMessage`, `body`) and the `url` it came from can
   name the company and its RUT, and they reached the log. The warning now leaves those three out; the rest of the
   details, the step's `operation`, `flow`, `code` and `stoppedAt` are logged as before. The thrown errors keep them.
+- **`annulFolios` reports a range answered folio by folio in as few pieces as its answers allow, and leaves alone a
+  range `knownAnnulled` covers in pieces.** When the SII refused a whole range and the walk went folio by folio, each
+  folio came back as its own entry and its own key, even when every folio got the same answer, as a step retried after
+  its answer was lost does ("ya fue anulado" for each folio the first try annulled). Folios next to each other with the
+  same answer are now one entry and one key in `annulled`, `rejected` and `knownAnnulled`. A listed range is skipped
+  when the keys of `knownAnnulled` cover all its folios, in one key or several, where only its exact key was.
+  - **What to change:** nothing for a caller that reads keys as spans of folios; one that compared them with the
+    listing's ranges one to one reads them as spans now.
 - **A cached session is checked on the client's own environment.** `openPortalSession`, and the check of a saved
   session before the GWT portals and the receipts' certification, read the company page `ad_empresa1` of the
   certification host whatever the client's environment, so a production client depended on maullin being up. They now

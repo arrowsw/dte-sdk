@@ -82,7 +82,7 @@ export type AnnulFoliosInput = {
   readonly maxRanges?: number
   /** EN: Folios never to touch, such as a CAF still in use. ES: Folios que no se tocan, como un CAF todavía en uso. */
   readonly exclude?: readonly { readonly from: number; readonly to: number }[]
-  /** EN: `knownAnnulled` of the previous run: these are not tried again. ES: `knownAnnulled` de la corrida anterior: estos no se vuelven a intentar. */
+  /** EN: `knownAnnulled` of the previous run: a listed range whose folios these keys cover, in one key or several, is not tried again. ES: `knownAnnulled` de la corrida anterior: un rango listado cuyos folios cubren estas claves, en una o en varias, no se vuelve a intentar. */
   readonly knownAnnulled?: readonly string[]
   /** EN: Company RUT; the client's by default. ES: `RUT_EMP` + `DV_EMP` — RUT de la empresa; por defecto el del cliente. */
   readonly companyRut?: string
@@ -101,7 +101,7 @@ export type AnnulmentResult = {
   readonly totalAnnulled: number
   /** EN: Sum of `rejected`. ES: Suma de `rejected`. */
   readonly totalRejected: number
-  /** EN: `from-to` keys that are final (annulled, `alreadyAnnulled` or `received`): persist it and pass it back, because the portal keeps listing them forever. Nothing the SII answered in unknown words goes here. ES: Claves `desde-hasta` definitivas (anuladas, `alreadyAnnulled` o `received`): guárdalas y devuélvelas, porque el portal las sigue listando para siempre. Nada que el SII haya respondido con palabras desconocidas va aquí. */
+  /** EN: `from-to` keys that are final (annulled, `alreadyAnnulled` or `received`): persist it and pass it back, because the portal keeps listing them forever. A range answered folio by folio comes in as few keys as its answers allow, one for each run of folios with the same answer. Nothing the SII answered in unknown words goes here. ES: Claves `desde-hasta` definitivas (anuladas, `alreadyAnnulled` o `received`): guárdalas y devuélvelas, porque el portal las sigue listando para siempre. Un rango respondido folio por folio queda en tan pocas claves como lo permitan sus respuestas, una por cada tramo de folios con la misma respuesta. Nada que el SII haya respondido con palabras desconocidas va aquí. */
   readonly knownAnnulled: readonly string[]
   /** EN: What stopped the walk once the SII had answered for some folios, or null: a `DteError` of a later listing (`listFolioRanges`) or of a later range (`annulFolios`), a refusal included. Annulling cannot be undone, so what was done until then comes back; with no answer yet the error is thrown, and a range that never got through (`transport`) is no answer. ES: Lo que detuvo el recorrido cuando el SII ya había respondido por algunos folios, o null: un `DteError` de un listado posterior (`listFolioRanges`) o de un rango posterior (`annulFolios`), un rechazo incluido. Anular no se puede deshacer, así que vuelve lo hecho hasta entonces; sin respuesta aún, el error se lanza, y un rango que nunca llegó (`transport`) no es respuesta. */
   readonly failure: FolioFlowFailure | null
@@ -268,22 +268,35 @@ const record = (tally: Tally, span: FolioSpan, answer: AnnulmentAnswer | 'transp
   return 0
 }
 
+// Writes down the answers of a span's folios, from its first, each run of folios with the same answer as one span: a
+// range the SII answers folio by folio is reported, and remembered, in as few pieces as its answers allow. Returns the
+// most refusals one run adds, or 0.
+const recordFolios = (tally: Tally, from: number, answers: readonly (AnnulmentAnswer | 'transport')[]): number => {
+  const runs: (FolioSpan & { readonly answer: AnnulmentAnswer | 'transport' })[] = []
+  answers.forEach((answer, index) => {
+    const last = runs[runs.length - 1]
+    if (last?.answer === answer) runs[runs.length - 1] = { ...last, to: from + index, count: last.count + 1 }
+    else runs.push({ from: from + index, to: from + index, count: 1, answer })
+  })
+  return runs.reduce((refusals, { answer, ...run }) => Math.max(refusals, record(tally, run, answer) ?? 0), 0)
+}
+
 // `af_anular3` said the range was annulled before. The page lists the folios it means ("Folio Inicial Anulado 114
 // Folio Final Anulado 114"): those are `alreadyAnnulled`, and about the rest of the span it says nothing. A page with
 // no such list speaks for the whole span.
 const recordAnnulledBefore = (tally: Tally, span: FolioSpan, html: string): number => {
   const before = annulledBefore(html)
   if (before.length === 0) return record(tally, span, 'alreadyAnnulled')!
-  const parts: (FolioSpan & { readonly answer: AnnulmentAnswer })[] = []
-  for (let folio = span.from; folio <= span.to; folio += 1) {
-    const answer = before.some((range) => range.from <= folio && folio <= range.to) ? 'alreadyAnnulled' : 'unknown'
-    const last = parts[parts.length - 1]
-    if (last?.answer === answer) parts[parts.length - 1] = { ...last, to: folio, count: last.count + 1 }
-    else parts.push({ from: folio, to: folio, count: 1, answer })
-  }
-  return parts.reduce((refusals, { answer, ...part }) => Math.max(refusals, record(tally, part, answer)!), 0)
+  const answers = Array.from({ length: span.count }, (_, index) =>
+    before.some((range) => range.from <= span.from + index && span.from + index <= range.to)
+      ? 'alreadyAnnulled'
+      : 'unknown',
+  )
+  return recordFolios(tally, span.from, answers)
 }
 
+// A step retried after its answer was lost hears "already annulled" for what its first try did: every folio says so,
+// and the span is one piece again.
 const annulOneByOne = async (
   context: PortalContext,
   span: FolioSpan,
@@ -291,8 +304,8 @@ const annulOneByOne = async (
   base: string,
   tally: Tally,
 ): Promise<void> => {
+  const answers: (AnnulmentAnswer | 'transport')[] = []
   for (let folio = span.from; folio <= span.to; folio += 1) {
-    const one = { from: folio, to: folio, count: 1 }
     const answer = await attempt(
       context,
       'af_anular.folio',
@@ -301,8 +314,9 @@ const annulOneByOne = async (
       { ...fields, FOLIO_INI_A: String(folio), FOLIO_FIN_A: String(folio) },
       at(context, 'af_anular3'),
     )
-    record(tally, one, answer === null ? 'transport' : annulmentAnswer(answer.html))
+    answers.push(answer === null ? 'transport' : annulmentAnswer(answer.html))
   }
+  recordFolios(tally, span.from, answers)
 }
 
 // Returns the refusals this range adds to the count; `null` resets it. Only real refusals count: `alreadyAnnulled` and
@@ -354,6 +368,26 @@ const annulRange = async (
 
 const sum = (spans: readonly FolioSpan[]): number => spans.reduce((total, span) => total + span.count, 0)
 
+// The spans of the `from-to` keys, by their first folio; a key that is not one is left out.
+const spansOf = (keys: Iterable<string>): readonly { readonly from: number; readonly to: number }[] =>
+  [...keys]
+    .flatMap((key) => {
+      const match = /^(\d+)-(\d+)$/.exec(key)
+      return match === null ? [] : [{ from: Number(match[1]), to: Number(match[2]) }]
+    })
+    .sort((a, b) => a.from - b.from)
+
+// Whether the spans hold every folio of the range: a range answered folio by folio is remembered in pieces, and only its
+// exact key would be left out.
+const isCovered = (
+  range: UnusedFolioRange,
+  spans: readonly { readonly from: number; readonly to: number }[],
+): boolean => {
+  let next = range.from
+  for (const span of spans) if (span.from <= next && span.to >= next) next = span.to + 1
+  return next > range.to
+}
+
 /**
  * EN: `annulFolios` inside a session already held.
  * ES: `annulFolios` dentro de una sesión ya tomada.
@@ -376,9 +410,10 @@ export const annulFoliosInSession = async (
   try {
     for (let pass = 0; pass < MAX_PASSES; pass += 1) {
       const { ranges } = await listInSession(context, input.type, input.companyRut)
+      const known = spansOf(tally.known)
       const candidates = ranges
         .filter((range) => inScope(range, input, earliestMs))
-        .filter((range) => !tally.known.has(`${range.from}-${range.to}`) && !seen.has(`${range.from}-${range.to}`))
+        .filter((range) => !isCovered(range, known) && !seen.has(`${range.from}-${range.to}`))
         .slice(-limit)
       if (candidates.length === 0) break
       step = 'annulFolios'
