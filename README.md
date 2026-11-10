@@ -80,8 +80,9 @@ every field.
 
 0.1.0 was the first release with a public API. 0.2.0 added the catalog of the register's document codes, 0.3.0 the
 activity verification, still unstable, and 0.4.0 the verification of received documents. 0.5.0 keeps the CAFs a batch
-request already holds when a later trip fails, and writes the folio registry for its owner only. Every area this README
-describes ships in 0.5.0. Releases before 1.0.0 come out as the work lands, without waiting for the runs against the
+request already holds when a later trip fails, and writes the folio registry for its owner only. 0.6.0 does the same for
+annulling, getting ranges back and the exact request, and logs what stopped a flow with every text redacted. Every area
+this README describes ships in 0.6.0. Releases before 1.0.0 come out as the work lands, without waiting for the runs against the
 real SII; those runs come before 1.0.0, the first version recommended for production.
 
 Every area is tested against synthetic SII answers, with a 100 % coverage gate in CI. Those tests cannot show how the
@@ -419,11 +420,14 @@ present a client certificate.
 - **To lift a block, issue with the folios you have.** `reobtainFolios` gets lost CAFs back without spending quota.
   `requestCafInBatches` is for a small `MAX_AUTOR` with nothing unused, and `requestCafExact` wants one CAF for the
   whole quantity.
-- **A batch cut short keeps what it got.** Once `requestCafInBatches` holds a CAF, a later trip that fails with
-  anything but a refusal (a transport failure, a timeout, an expired session, a block, `CAF_INVALID`, your abort) ends
-  the flow with the CAFs, `complete: false`, `rejection: null` and `failure: { code, operation }`. Read `failure` as
-  well as `rejection`. A failed `requestCaf` may have been granted all the same, so check `listReobtainableRanges`
-  before asking again.
+- **A flow cut short keeps what it got.** Once a folio flow holds something, a later step that fails with anything but
+  a refusal it can report (a transport failure, a timeout, an expired session, a block, `CAF_INVALID`, your abort) ends
+  it with what it holds and `failure: { code, operation, rejection? }`, and the original error goes to the client's
+  logger with every text redacted. `requestCafInBatches` returns the CAFs it got, with `complete: false` and
+  `rejection: null`; a failed `requestCaf` may have been granted all the same, so check `listReobtainableRanges` before
+  asking again. `annulFolios` returns what the SII already annulled, `reobtainFolios` the CAFs it already downloaded,
+  and `requestCafExact` the `knownAnnulled` of its annulment. Read `failure` as well as `rejection`, and persist
+  `knownAnnulled` whether `failure` is set or not.
 - **A grant can be smaller than asked.** `requestCaf` caps at `MAX_AUTOR` and, past the effective maximum with no
   `minQuantity`, asks for one folio, so read `granted`. `minQuantity` and `requestCafExact` are the strict forms.
 - **Annulling cannot be undone** and counts against the quota for six months. `annulFolios` needs `range`,
