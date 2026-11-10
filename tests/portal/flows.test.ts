@@ -498,7 +498,7 @@ describe('requestCafInBatches', () => {
     })
   })
 
-  test('a failure keeps only the code, and the original error goes whole to the logger', async () => {
+  test('a failure keeps only the code, and the original error goes whole to the logger, with the flow named', async () => {
     const { warned, logger } = captureWarnings()
     const harness = await signedIn(
       [
@@ -522,6 +522,7 @@ describe('requestCafInBatches', () => {
           operation: 'requestCafInBatches.of_solicita_folios.post',
           attempts: 1,
           reason: 'ECONNRESET',
+          flow: 'requestCafInBatches',
           code: 'TRANSPORT_FAILED',
           stoppedAt: 'queryFolioQuota',
         },

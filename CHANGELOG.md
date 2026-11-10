@@ -55,13 +55,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **A folio flow cut short logs the error it keeps only the code of.** Since 0.5.0 a batch cut short returns
-  `failure: { code, operation }`, and the certification's `prepareFolios` rebuilt the error from that code alone, so
-  the original's `reason` (`ECONNRESET`, a timeout), `httpStatus`, `attempts` and the rest reached neither the thrown
-  error nor the `CERT_ERROR` event. Every flow that turns a failure into data (`requestCafInBatches`,
-  `requestCafExact`, `reobtainFolios`, `annulFolios`) now logs the original first through the client's logger, as a
-  warning `sii portal flow stopped, keeping what it holds` with the error's details, its `code` and `stoppedAt`. Every
-  text detail goes through `redactText` first, so a token, an `RSASK` or a session cookie reaches the log as
-  `[redacted]`.
+  `failure: { code, operation }`, and the certification's `prepareFolios` rebuilt the error from that code alone, so the
+  original's `reason` (`ECONNRESET`, a timeout), `httpStatus`, `attempts` and the rest reached neither the thrown error
+  nor the `CERT_ERROR` event. Every flow that turns a failure into data (`requestCafInBatches`, `requestCafExact`,
+  `reobtainFolios`, `annulFolios`) now logs the original first through the client's logger, as a warning
+  `sii portal flow stopped, keeping what it holds` with the error's details (their `operation` names the step that
+  failed), `flow` with the flow's name, its `code` and `stoppedAt`. Every text detail goes through `redactText` first,
+  so a token, an `RSASK` or a session cookie reaches the log as `[redacted]`.
 - **`portalMessage` no longer carries a secret a page showed.** The portal's message was the visible text of the page,
   read without redaction everywhere but on a block page, while `body` beside it was redacted: an `RSASK` or a token in
   a page's text reached the error's `portalMessage`, and from this release the log, as written. The page is now

@@ -22,9 +22,11 @@ export type FolioFlowFailure = {
 
 /**
  * EN: The failure of a flow that keeps what it holds: the original error goes to the logger whole, each text detail
- * with its secrets redacted, and the result keeps its code.
+ * with its secrets redacted, its `operation` naming the step that failed and `flow` the flow; the result keeps its
+ * code.
  * ES: La falla de un flujo que conserva lo que tiene: el error original va completo al logger, cada detalle de texto con
- * sus secretos ocultos, y el resultado guarda su código.
+ * sus secretos ocultos, su `operation` con el nombre del paso que falló y `flow` con el del flujo; el resultado guarda
+ * su código.
  */
 export const flowFailure = (
   context: PortalContext,
@@ -35,9 +37,11 @@ export const flowFailure = (
     key,
     typeof value === 'string' ? redactText(value) : value,
   ])
+  // The details' `operation`, when there is one, names the step and replaces the flow's; `flow` keeps the flow's.
   context.portal.logger.warn('sii portal flow stopped, keeping what it holds', {
     operation: context.operation,
     ...Object.fromEntries(details),
+    flow: context.operation,
     code: error.code,
     stoppedAt: operation,
   })
