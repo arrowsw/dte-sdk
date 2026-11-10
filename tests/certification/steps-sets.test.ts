@@ -652,6 +652,31 @@ describe('prepareFolios', () => {
       expect(result.cafs).toEqual([narrow, cafXml(33, { from: 300, to: 300 })])
     })
 
+    test('a download that fails after another keeps what it downloaded and ends the step with its code', async () => {
+      const range = cafXml(33, { from: 10, to: 11 })
+      const harness = await certificationHarness([
+        stampEntry,
+        quota(quotaForm(1, 9)),
+        get('rf_reobtencion1_folios', REOBTAIN_ENTRY),
+        post(
+          'rf_reobtencion2_folios',
+          reobtainListPage([
+            [10, 11],
+            [20, 21],
+          ]),
+        ),
+        post('rf_reobtencion3_folios', reobtainDetailPage(10), reobtainDetailPage(20)),
+        post('rf_genera_folio', ...repeat(REOBTAIN_RESOLUTION, 2)),
+        post('rf_genera_archivo', range, new DteError('TRANSPORT_FAILED', { reason: 'ECONNRESET' })),
+        estDte(free, free, free, free),
+      ])
+      const error = await failure(prepareFolios(harness.deps, stateWith(), { needs: { 33: 4 } }))
+      expect(error.code).toBe('TRANSPORT_FAILED')
+      expect(error.details).toEqual({ type: 33, operation: 'reobtainFolios', step: 'reobtainCaf' })
+      expect((await harness.store.load())?.cafs).toEqual([range])
+      expect(harness.posted('of_solicita_folios_dcto')).toHaveLength(1)
+    })
+
     test('after a block on the person a short answer joins what the run holds and has just obtained', async () => {
       const held = cafXml(33, { from: 200, to: 200 })
       const range = cafXml(33, { from: 10, to: 12 })
@@ -881,6 +906,10 @@ describe('prepareFolios', () => {
     expect(error.code).toBe('TRANSPORT_FAILED')
     expect(error.details).toEqual({ type: 33, operation: 'requestCafInBatches', step: 'queryFolioQuota' })
     expect((await harness.store.load())?.cafs).toEqual([cafXml(33, { from: 1, to: 1 })])
+    // The error keeps the code alone; what the original said, `reason` included, went to the logger first.
+    expect(harness.warnedWith('sii portal flow stopped, keeping what it holds')).toEqual([
+      expect.objectContaining({ code: 'TRANSPORT_FAILED', reason: 'ECONNRESET', stoppedAt: 'queryFolioQuota' }),
+    ])
   })
 
   test('folios of this run the SII never received come back; received ones stay used; an expired CAF is skipped', async () => {

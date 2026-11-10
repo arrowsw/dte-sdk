@@ -24,6 +24,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     and `annulFolios`.
   - **The certification's `prepareFolios`** keeps what such an annulment annulled in `annulledRanges` and counts it as
     none, as it counted one that threw: it does not ask the portal again.
+- **`reobtainFolios` returns the CAFs it already downloaded when a later download fails.** A download that failed
+  with anything but a refusal threw out of the walk and the CAFs earlier downloads had brought were lost; nothing was
+  spent, but they had to be downloaded again. Once a CAF is in hand such a `DteError` now ends the walk with
+  `complete: false`, the CAFs, their ranges, the failure's message in `reason` and the new field
+  `failure: { code, operation: 'reobtainCaf' }`. With no CAF in hand it still throws, and anything that is not a
+  `DteError` still throws as a bug. A refused download is logged and skipped, as before.
+  - **What to change:** `ReobtainResult` gains `failure` as a required field, null everywhere else; a literal built by
+    hand needs `failure: null`.
+  - **The certification's `prepareFolios`** keeps what such a walk brought by the rule it already applies to a short
+    one, and then throws the failure's code with `type`, `operation: 'reobtainFolios'` and `step`, as it threw that
+    code before.
+
+### Fixed
+
+- **A folio flow cut short logs the error it keeps only the code of.** Since 0.5.0 a batch cut short returns
+  `failure: { code, operation }`, and the certification's `prepareFolios` rebuilt the error from that code alone, so
+  the original's `reason` (`ECONNRESET`, a timeout), `httpStatus`, `attempts` and the rest reached neither the thrown
+  error nor the `CERT_ERROR` event. Every flow that turns a failure into data (`requestCafInBatches`,
+  `requestCafExact`, `reobtainFolios`, `annulFolios`) now logs the original first through the client's logger, as a
+  warning `sii portal flow stopped, keeping what it holds` with the error's details, its `code` and `stoppedAt`.
 
 ## [0.5.0] - 2026-11-09
 

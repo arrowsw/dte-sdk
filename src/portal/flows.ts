@@ -5,7 +5,7 @@ import { errorMessage, isDteError } from '../errors'
 import type { CallOverrides } from '../sii/client'
 import { annulFoliosInSession } from './annulment'
 import type { PortalClient } from './client'
-import type { FolioFlowFailure } from './flow-failure'
+import { flowFailure, type FolioFlowFailure } from './flow-failure'
 import { listReobtainableInSession, reobtainCafInSession, type ReobtainableRange } from './reobtain'
 import { withPortalSession, type PortalContext } from './session'
 import {
@@ -73,13 +73,14 @@ const refusalResult = (
   failure: null,
 })
 
-// With CAFs in hand a `DteError` that is not a refusal may not throw them away: it becomes data, by its code alone.
-// With none in hand it stays an error, as `asRefusal` leaves it, and so does anything that is not a `DteError`: a bug.
+// With CAFs in hand a `DteError` that is not a refusal may not throw them away: it becomes data, by its code alone, and
+// the original goes to the logger. With none in hand it stays an error, as `asRefusal` leaves it, and so does anything
+// that is not a `DteError`: a bug.
 const settleTrip =
-  (cafs: readonly ObtainedCaf[], operation: FolioFlowFailure['operation']) =>
+  (context: PortalContext, cafs: readonly ObtainedCaf[], operation: FolioFlowFailure['operation']) =>
   (error: unknown): ReturnType<typeof asRefusal> | { readonly failure: FolioFlowFailure } =>
     cafs.length > 0 && isDteError(error) && error.code !== 'SII_PORTAL_REJECTED'
-      ? { failure: { code: error.code, operation } }
+      ? { failure: flowFailure(context, error, operation) }
       : asRefusal(error)
 
 /**
@@ -266,7 +267,7 @@ export const requestCafInBatches = (
         number === 1 && input.initialQuota !== undefined
           ? input.initialQuota
           : await queryFolioQuotaInSession(context, { type: input.type, ...company }).catch(
-              settleTrip(cafs, 'queryFolioQuota'),
+              settleTrip(context, cafs, 'queryFolioQuota'),
             )
       if ('failure' in quota) return end(seen, null, quota.failure)
       if ('rejection' in quota) return refusalResult(cafs, quota.rejection, quota.details)
@@ -279,7 +280,7 @@ export const requestCafInBatches = (
         quantity: wanted,
         minQuantity: 1,
         ...company,
-      }).catch(settleTrip(cafs, 'requestCaf'))
+      }).catch(settleTrip(context, cafs, 'requestCaf'))
       if ('failure' in outcome) return end(current, null, outcome.failure)
       // An uncertain request is said as such: read as the cap, it would invite asking again for what may be granted.
       if ('rejection' in outcome) {
@@ -327,8 +328,10 @@ export type ReobtainResult = {
   readonly expired: readonly { readonly from: number; readonly to: number; readonly authorizationDate: string | null }[]
   /** EN: Free folios covered. ES: Folios libres cubiertos. */
   readonly available: number
-  /** EN: Why it fell short, in words, or null; when the listing failed, the message of that failure. ES: Por qué no alcanzó, en palabras, o null; si el listado falló, el mensaje de ese fallo. */
+  /** EN: Why it fell short, in words, or null; when the listing or a download failed, the message of that failure. ES: Por qué no alcanzó, en palabras, o null; si el listado o una descarga falló, el mensaje de ese fallo. */
   readonly reason: string | null
+  /** EN: What stopped the downloads with CAFs in hand when it was not a refusal, or null; `operation` is then `reobtainCaf`. ES: Lo que detuvo las descargas con CAF en la mano cuando no fue un rechazo, o null; `operation` es entonces `reobtainCaf`. */
+  readonly failure: FolioFlowFailure | null
 }
 
 const freeFoliosOf = async (
@@ -370,7 +373,7 @@ const reobtainInSession = async (context: PortalContext, input: ReobtainFoliosIn
     return { failed: errorMessage(error) }
   })
   if ('failed' in listed)
-    return { complete: false, cafs: [], ranges: [], expired: [], available: 0, reason: listed.failed }
+    return { complete: false, cafs: [], ranges: [], expired: [], available: 0, reason: listed.failed, failure: null }
   const usable = await usableRanges(listed, input)
   const total = usable.reduce((sum, range) => sum + range.quantity, 0)
   if (total < input.quantity)
@@ -381,20 +384,28 @@ const reobtainInSession = async (context: PortalContext, input: ReobtainFoliosIn
       expired: [],
       available: total,
       reason: `usable ranges do not reach the quantity: ${total} of ${input.quantity}`,
+      failure: null,
     }
   const cafs: ObtainedCaf[] = []
   const used: { from: number; to: number; freeFolios: readonly number[] }[] = []
   const expired: { from: number; to: number; authorizationDate: string | null }[] = []
   const covered = { folios: 0 }
+  let stopped: { readonly failure: FolioFlowFailure; readonly reason: string } | null = null
   for (const range of usable) {
     if (covered.folios >= input.quantity) break
     const freeFolios = await freeFoliosOf(range, input.quantity - covered.folios, input)
     if (freeFolios.length > 0) {
       const caf = await reobtainCafInSession(context, { type: input.type, range }).catch((error: unknown) => {
-        const refusal = asRefusal(error)
-        context.portal.logger.warn('sii portal could not reobtain a range', { rejection: refusal.rejection })
+        const settled = settleTrip(context, cafs, 'reobtainCaf')(error)
+        if ('failure' in settled) return { ...settled, reason: errorMessage(error) }
+        context.portal.logger.warn('sii portal could not reobtain a range', { rejection: settled.rejection })
         return null
       })
+      // `ObtainedCaf` has no `failure`: what has it is the download that stopped the walk.
+      if (caf !== null && 'failure' in caf) {
+        stopped = caf
+        break
+      }
       if (caf !== null) {
         if (isCafExpired(caf.caf, { now: context.portal.now() })) {
           expired.push({ from: range.from, to: range.to, authorizationDate: caf.caf.authorizationDate })
@@ -413,7 +424,10 @@ const reobtainInSession = async (context: PortalContext, input: ReobtainFoliosIn
     ranges: used,
     expired,
     available: covered.folios,
-    reason: complete ? null : `usable ranges do not reach the quantity: ${covered.folios} of ${input.quantity}`,
+    reason:
+      stopped?.reason ??
+      (complete ? null : `usable ranges do not reach the quantity: ${covered.folios} of ${input.quantity}`),
+    failure: stopped?.failure ?? null,
   }
 }
 
@@ -422,17 +436,23 @@ const reobtainInSession = async (context: PortalContext, input: ReobtainFoliosIn
  * block, since the SII asks for folios to be issued. A range with some received folios is not discarded: its free
  * folios are used. An expired CAF does not count and the walk moves on. The listing logs in on demand, and whatever
  * fails while listing (a refusal, an expired session, a page that is not the listing) reads as no ranges, with the
- * failure in `reason`: it does not throw.
+ * failure in `reason`: it does not throw. A refused download is logged and the walk moves on. Once a CAF is in hand, a
+ * download that fails with any other `DteError` (a transport failure, a timeout, an expired session, a block, the
+ * caller's abort) ends the walk with the CAFs downloaded, the failure's message in `reason` and the failure in
+ * `failure`, instead of throwing them away.
  * ES: Cubre una cantidad con rangos autorizados sin gastar cupo, partiendo por el folio más antiguo. Es lo que levanta
  * un bloqueo de timbraje, porque el SII pide emitir folios. Un rango con algunos folios recibidos no se descarta: se
  * usan sus folios libres. Un CAF vencido no cuenta y se sigue con el siguiente. El listado inicia sesión a pedido, y
  * cualquier fallo al listar (un rechazo, una sesión vencida, una página que no es el listado) se lee como sin rangos,
- * con el fallo en `reason`: no lanza.
+ * con el fallo en `reason`: no lanza. Una descarga rechazada se registra y se sigue. Con un CAF ya en la mano, una
+ * descarga que falla con cualquier otro `DteError` (una falla de transporte, un tiempo agotado, una sesión vencida, un
+ * bloqueo, la cancelación de quien llama) termina el recorrido con los CAF descargados, el mensaje de la falla en
+ * `reason` y la falla en `failure`, en vez de botarlos.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: type, quantity and the checks the caller can make. ES: tipo, cantidad y las verificaciones que puede hacer quien llama.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: what was obtained, even when it falls short. ES: lo obtenido, aunque no alcance.
- * @throws {DteError} EN: session, block and transport codes while downloading a range; `REQUEST_ABORTED`. ES: códigos de sesión, bloqueo y transporte al descargar un rango; `REQUEST_ABORTED`.
+ * @throws {DteError} EN: session, block and transport codes and `REQUEST_ABORTED` while downloading, only while no CAF is in hand. ES: códigos de sesión, bloqueo y transporte y `REQUEST_ABORTED` al descargar, solo mientras no hay un CAF en la mano.
  */
 export const reobtainFolios = (
   portal: PortalClient,
