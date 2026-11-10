@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`reobtainCaf` logs in on demand.** It posted the range with whatever session it found in the cache, so a session
+  that had expired since `listReobtainableRanges` got the login page back, which read as the SII refusing the download
+  (`SII_PORTAL_REJECTED` with `reobtainDownloadMissing`). It now enters the procedure first, as
+  `listReobtainableRanges` does, logging in on demand and passing the representation screen, and a login page in
+  answer to the range or to the file is `SII_PORTAL_SESSION_EXPIRED`, in `reobtainFolios` too. A page that states a
+  refusal at the entry throws `SII_PORTAL_REJECTED`, and any other page `SII_PORTAL_UNEXPECTED_PAGE`, before anything
+  is posted.
+  - **What to change:** `reobtainCaf` makes one `GET` more, of `rf_reobtencion1_folios`. A caller that took
+    `reobtainDownloadMissing` or `reobtainCafMissing` for an expired session now gets `SII_PORTAL_SESSION_EXPIRED`;
+    `reobtainFolios` ends its walk on it, with the CAFs already in hand and `failure`, or throws it with none, where it
+    used to skip the range as refused.
+
 ## [0.6.0] - 2026-11-10
 
 ### Changed

@@ -7,8 +7,9 @@ import {
 } from '../../src/portal/pages/reobtain'
 import { listReobtainableRanges, reobtainCaf, type ReobtainableRange } from '../../src/portal/reobtain'
 import { fixturePath } from '../support/fixtures'
-import { failure, MAULLIN, signedIn } from '../support/portal'
+import { failure, HERCULES, MAULLIN, portalWith, seedSession, signedIn } from '../support/portal'
 import {
+  AUTH_PAGE,
   page,
   refusedPage,
   REOBTAIN_ENTRY,
@@ -204,18 +205,25 @@ describe('reobtainCaf', () => {
     formFields: { FOLIO_INI: '1', FOLIO_FIN: '9' },
     downloadFields: { FOLIO_INI: '1' },
   }
+  const entry = { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: REOBTAIN_ENTRY } }
   const routes = (resolution: string, file: string) => [
+    entry,
     { url: `${MAULLIN}/rf_genera_folio`, reply: { body: resolution } },
     { url: `${MAULLIN}/rf_genera_archivo`, reply: { body: file } },
   ]
 
-  test('two steps: the resolution, then the file', async () => {
+  test('enters the procedure, then two steps: the resolution, then the file', async () => {
     const harness = await signedIn(routes(REOBTAIN_RESOLUTION, CAF_XML))
     await expect(reobtainCaf(harness.portal, { type: 33, range })).resolves.toMatchObject({
       recovered: true,
       granted: 100,
       maxAuthorized: null,
     })
+    expect(harness.fake.requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+      `GET ${MAULLIN}/rf_reobtencion1_folios`,
+      `POST ${MAULLIN}/rf_genera_folio`,
+      `POST ${MAULLIN}/rf_genera_archivo`,
+    ])
     expect(harness.posted('rf_genera_folio')).toEqual([{ FOLIO_INI: '1', ACEPTAR: 'Solicitar Folios' }])
     expect(harness.posted('rf_genera_archivo')).toEqual([{ FOLIO_INI: '1', FOLIO_FIN: '9', ACEPTAR: 'AQUI' }])
   })
@@ -223,11 +231,74 @@ describe('reobtainCaf', () => {
   test('the referers are paths without a host', async () => {
     const harness = await signedIn(routes(REOBTAIN_RESOLUTION, CAF_XML))
     await reobtainCaf(harness.portal, { type: 33, range })
-    expect(harness.fake.requests.map((request) => request.headers.referer)).toEqual([
+    expect(harness.fake.requests.slice(1).map((request) => request.headers.referer)).toEqual([
       '/cvc_cgi/dte/rf_reobtencion3_folios',
       '/cvc_cgi/dte/rf_genera_folio',
     ])
   })
+
+  test('a session that expired logs in on demand before the range is posted', async () => {
+    const harness = portalWith([
+      {
+        url: `${MAULLIN}/rf_reobtencion1_folios`,
+        reply: [
+          {
+            status: 302,
+            headers: {
+              Location: `https://zeus.sii.cl/AUT2000/InicioAutenticacion/IngresoRutClave.html?${MAULLIN}/rf_reobtencion1_folios`,
+            },
+          },
+          { body: REOBTAIN_ENTRY },
+        ],
+      },
+      { url: 'https://zeus.sii.cl/AUT2000/InicioAutenticacion/*', reply: { body: AUTH_PAGE } },
+      {
+        url: `${HERCULES}*`,
+        reply: {
+          status: 302,
+          headers: { Location: `${MAULLIN}/rf_reobtencion1_folios`, 'Set-Cookie': 'NETSCAPE_LIVEWIRE.x=1' },
+        },
+      },
+      { url: `${MAULLIN}/rf_genera_folio`, reply: { body: REOBTAIN_RESOLUTION } },
+      { url: `${MAULLIN}/rf_genera_archivo`, reply: { body: CAF_XML } },
+    ])
+    await seedSession(harness.portal)
+    await expect(reobtainCaf(harness.portal, { type: 33, range })).resolves.toMatchObject({ recovered: true })
+    expect(harness.posted('CAutInicio')).toEqual([{ referencia: `${MAULLIN}/rf_reobtencion1_folios` }])
+    const posts = harness.fake.requests.filter((request) => request.method === 'POST').map((request) => request.url)
+    expect(posts.indexOf(`${MAULLIN}/rf_genera_folio`)).toBeGreaterThan(
+      posts.indexOf(`${HERCULES}?${MAULLIN}/rf_reobtencion1_folios`),
+    )
+  })
+
+  test('the entry is checked as the listing checks it: a refusal or another page posts nothing', async () => {
+    const refused = await signedIn([
+      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: refusedPage('REOBTENCION DE FOLIOS') } },
+    ])
+    expect(await failure(reobtainCaf(refused.portal, { type: 33, range }))).toMatchObject({
+      code: 'SII_PORTAL_REJECTED',
+      details: { rejection: 'optionNotAuthorized' },
+    })
+    const other = await signedIn([{ url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: page('otra') } }])
+    expect(await failure(reobtainCaf(other.portal, { type: 33, range }))).toMatchObject({
+      code: 'SII_PORTAL_UNEXPECTED_PAGE',
+      details: { step: 'rf_reobtencion1' },
+    })
+    for (const harness of [refused, other])
+      expect(harness.fake.requests.map((request) => request.method)).toEqual(['GET'])
+  })
+
+  test.each(['rf_genera_folio', 'rf_genera_archivo'])(
+    'a login page in answer to %s is an expired session, not a refusal of the SII',
+    async (step) => {
+      const answers = { rf_genera_folio: REOBTAIN_RESOLUTION, rf_genera_archivo: CAF_XML, [step]: AUTH_PAGE }
+      const harness = await signedIn(routes(answers.rf_genera_folio, answers.rf_genera_archivo))
+      expect(await failure(reobtainCaf(harness.portal, { type: 33, range }))).toMatchObject({
+        code: 'SII_PORTAL_SESSION_EXPIRED',
+        details: { operation: 'reobtainCaf', step },
+      })
+    },
+  )
 
   test.each([
     ['rangeAnnulled', { ...range, annulled: true }, REOBTAIN_RESOLUTION, CAF_XML],
