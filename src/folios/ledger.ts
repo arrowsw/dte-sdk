@@ -76,6 +76,10 @@ export type FolioStats = {
   readonly ranges: readonly {
     readonly from: number
     readonly to: number
+    /** EN: Environment of the entry, as its scope says. ES: Ambiente de la entrada, como lo dice su alcance. */
+    readonly environment: Environment
+    /** EN: `cafFingerprint` of the file the entry counts, or null when its scope has none: two files of one range are two entries. ES: `cafFingerprint` del archivo que cuenta la entrada, o null si su alcance no lo tiene: dos archivos de un mismo rango son dos entradas. */
+    readonly cafFingerprint: string | null
     readonly used: number
     readonly sent: number
     readonly remaining: number
@@ -254,6 +258,8 @@ export const statsOfLedger = (
   const ranges = entries.map((entry) => ({
     from: entry.scope.range.from,
     to: entry.scope.range.to,
+    environment: entry.scope.environment,
+    cafFingerprint: entry.scope.cafFingerprint ?? null,
     used: entry.used.length,
     sent: Object.keys(entry.sent).length,
     remaining: entry.scope.range.to - entry.scope.range.from + 1 - entry.used.length,

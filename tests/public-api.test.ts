@@ -193,6 +193,7 @@ const ROOT_EXPORTS = [
 ] as const
 
 const NODE_EXPORTS = [
+  'cafFileScope',
   'createDirectoryFolioRegistry',
   'findCafFiles',
   'findLatestCafFile',

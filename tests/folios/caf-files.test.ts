@@ -1,7 +1,7 @@
 import { mkdir, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { FolioScope } from '../../src/folios/ledger'
-import { findCafFiles, findLatestCafFile, resolveCafFile } from '../../src/folios/node-caf-files'
+import { cafFileScope, findCafFiles, findLatestCafFile, resolveCafFile } from '../../src/folios/node-caf-files'
 import { cafFingerprint, createMemoryFolioRegistry } from '../../src/folios/registry'
 import { loadNodeFs, type NodeFsModules } from '../../src/sii/node-fs'
 import { cafXml } from '../support/certification-harness'
@@ -268,6 +268,17 @@ describe('resolveCafFile', () => {
       path: newer,
       remaining: 3,
     })
+  })
+
+  test('cafFileScope builds the scope resolveCafFile reserves with, from a file or any CAF with its text', async () => {
+    const dir = await temp.make('dte-sdk-caf-')
+    const xml = cafXml(33, { from: 11, to: 13 })
+    await put(dir, 'caf.xml', xml, 1)
+    const [file] = await findCafFiles({ dir, type: 33, issuerRut: ISSUER_RUT, now })
+    expect(cafFileScope(file, 'certification')).toEqual(scopeOf(xml, { from: 11, to: 13 }))
+    const resolved = await resolveCafFile({ dir, type: 33, issuerRut: ISSUER_RUT, now, environment: 'production' })
+    expect(resolved?.scope).toEqual(cafFileScope(file, 'production'))
+    expect(cafFileScope({ xml: file.xml, caf: file.caf }, 'production').environment).toBe('production')
   })
 
   test('the options are checked', async () => {

@@ -8,7 +8,7 @@ D40 and D41 of the design specs). Tracks [issue #5](https://github.com/arrowsw/d
 | Entry | Holds | Size | Reaches `node:` |
 |---|---|---|---|
 | `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 33.87 kB | No |
-| `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile` | 6.41 kB | Yes, on first use |
+| `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 6.41 kB | Yes, on first use |
 | `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 74.33 kB | Yes, on first use |
 | `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 10.70 kB | Yes, on first use |
 

@@ -193,8 +193,15 @@ test('remaining and statistics', () => {
     totalEntries: 1,
     totalUsed: 2,
     totalSent: 1,
-    ranges: [{ from: 1, to: 3, used: 2, sent: 1, remaining: 1 }],
+    ranges: [{ from: 1, to: 3, environment: 'certification', cafFingerprint: null, used: 2, sent: 1, remaining: 1 }],
   })
+  // Each range says which file and environment it counts, so two files of one range are told apart.
+  const file = reserveMany(production, 1, { ...scope, cafFingerprint: 'abcdef012345' }).ledger
+  expect(statsOfLedger(file, { companyRut: scope.companyRut, type: 33 }).ranges).toEqual([
+    { from: 1, to: 3, environment: 'certification', cafFingerprint: null, used: 2, sent: 1, remaining: 1 },
+    { from: 1, to: 3, environment: 'production', cafFingerprint: null, used: 1, sent: 0, remaining: 2 },
+    { from: 1, to: 3, environment: 'certification', cafFingerprint: 'abcdef012345', used: 1, sent: 0, remaining: 2 },
+  ])
   expect(statsOfLedger(production, { companyRut: scope.companyRut, type: 33 }).totalEntries).toBe(2)
   expect(statsOfLedger(production, { companyRut: scope.companyRut, type: 34 }).totalEntries).toBe(0)
   expect(statsOfLedger(production, { companyRut: '10000004-0', type: 33 }).totalEntries).toBe(0)

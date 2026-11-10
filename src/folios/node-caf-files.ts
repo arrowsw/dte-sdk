@@ -208,6 +208,26 @@ export const findLatestCafFile = async (
 ): Promise<CafFile | null> => (await usableCafFiles(options, load))[0] ?? null
 
 /**
+ * EN: The registry scope of a CAF file, to reserve and count its folios with: the company (`RE`), type (`TD`) and range
+ * (`RNG`) of its CAF, the environment given, and the `cafFingerprint` of its text, so two files of one range never share
+ * an entry. It is the scope `resolveCafFile` returns; anything with the text of a CAF and the CAF parsed from it, such as
+ * an `ObtainedCaf` of the portal, has one too.
+ * ES: El alcance en el registro de un archivo CAF, para reservar y contar sus folios: la empresa (`RE`), el tipo (`TD`) y
+ * el rango (`RNG`) de su CAF, el ambiente indicado y la `cafFingerprint` de su texto, para que dos archivos de un mismo
+ * rango nunca compartan entrada. Es el alcance que devuelve `resolveCafFile`; cualquier cosa con el texto de un CAF y el
+ * CAF parseado de él, como un `ObtainedCaf` del portal, también tiene uno.
+ * @param file EN: the file's text and its CAF. ES: el texto del archivo y su CAF.
+ * @param environment EN: environment of the registry. ES: ambiente del registro.
+ */
+export const cafFileScope = (file: Pick<CafFile, 'xml' | 'caf'>, environment: Environment): FolioScope => ({
+  companyRut: file.caf.issuerRut,
+  type: file.caf.documentType,
+  range: file.caf.range,
+  environment,
+  cafFingerprint: cafFingerprint(file.xml),
+})
+
+/**
  * EN: The newest usable CAF file (see `findCafFiles`, never an expired one) that still has `required` free folios, or null when none has. With
  * a registry the free folios are `registry.remaining` for the scope of the file (company, type, range, `environment` and
  * `cafFingerprint` of its content), which comes back as `scope`; without one, the whole range. It only reads: reserving the folio is the registry's
@@ -229,16 +249,7 @@ export const resolveCafFile = async (
   if (registry !== undefined && environment === undefined)
     throw new DteError('INVALID_OPTION', { field: 'environment' })
   for (const file of await usableCafFiles(options, load)) {
-    const scope: FolioScope | null =
-      environment === undefined
-        ? null
-        : {
-            companyRut: file.caf.issuerRut,
-            type: file.caf.documentType,
-            range: file.caf.range,
-            environment,
-            cafFingerprint: cafFingerprint(file.xml),
-          }
+    const scope = environment === undefined ? null : cafFileScope(file, environment)
     const remaining = registry === undefined ? availableFolios(file.caf) : await registry.remaining(scope as FolioScope)
     if (remaining >= required) return { ...file, remaining, scope }
   }

@@ -27,6 +27,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **What to change:** `CafFile` gains `expired` as a required field; a literal built by hand, as in a test double,
     needs `expired: false`.
 
+- **`FolioStats.ranges` say which file and environment each count is for.** A registry keeps one entry per CAF file,
+  by its range, environment and `cafFingerprint`, but the stats gave only the range, so two files of one range, or one
+  range in both environments, could not be told apart. Each range now carries `environment` and `cafFingerprint`, null
+  when its scope has none.
+  - **What to change:** a `FolioRegistry` of one's own returns `stats` with both fields in each range.
+
+### Added
+
+- **`cafFileScope(file, environment)`**, in `dte-sdk/node`: the registry scope of a CAF file (its company, type and
+  range, the environment, and the `cafFingerprint` of its text), the one `resolveCafFile` builds and returns. Anything
+  with a CAF's text and the CAF parsed from it, such as the portal's `ObtainedCaf`, has one too.
+
 ### Fixed
 
 - **The "flow stopped" warning no longer logs what a page said.** Since 0.6.0 a folio flow that keeps what it holds
