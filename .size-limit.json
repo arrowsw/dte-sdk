@@ -3,7 +3,7 @@
     "name": "dte-sdk (min + brotli)",
     "path": "dist/index.min.js",
     "ignore": ["node-forge", "@xmldom/xmldom", "fast-xml-parser", "rut.ts", "pdf-lib", "bwip-js", "node:*"],
-    "limit": "34 kB"
+    "limit": "36 kB"
   },
   {
     "name": "dte-sdk/node (min + brotli)",

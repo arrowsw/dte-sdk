@@ -10,7 +10,13 @@ import {
 } from '../../src/portal/receipts-certification'
 import type { Logger } from '../../src/sii/logger'
 import { FIXED_NOW } from '../support/fixtures'
-import { gwtMethodOf, SESSION_CHECK_URL, sessionCheckRoute as alive } from '../support/exchange-fixtures'
+import {
+  gwtMethodOf,
+  PRODUCTION_SESSION_CHECK_URL,
+  productionSessionCheckRoute as productionAlive,
+  SESSION_CHECK_URL,
+  sessionCheckRoute as alive,
+} from '../support/exchange-fixtures'
 import type { FakeReply, FakeRoute, RecordedRequest } from '../support/fake-sii'
 import { EMPTY_OK, EXCEPTION, okAnswer } from '../support/gwt-answers'
 import { failure, MAULLIN, PALENA, portalWith, seedSession, signedIn, type PortalHarness } from '../support/portal'
@@ -507,7 +513,9 @@ describe('verifyReceiptsAuthorization', () => {
     { url: secondUrl, method: 'POST', reply: { body: selector } },
   ]
   const production = async (selector: string, entry?: string, secondUrl?: string) => {
-    const harness = portalWith([alive, ...stamping(selector, entry, secondUrl)], { environment: 'production' })
+    const harness = portalWith([productionAlive, ...stamping(selector, entry, secondUrl)], {
+      environment: 'production',
+    })
     await seedSession(harness.portal)
     return harness
   }
@@ -532,7 +540,7 @@ describe('verifyReceiptsAuthorization', () => {
       },
     )
     expect(live.urls()).toEqual([
-      SESSION_CHECK_URL,
+      PRODUCTION_SESSION_CHECK_URL,
       `${PALENA}/of_solicita_folios`,
       `${PALENA}/of_solicita_folios_dcto`,
     ])
@@ -657,7 +665,7 @@ describe('the transport of the receipts portal, as the field talks to it', () =>
   test('the stamping requests carry the cookies and the short browser line; only the first one an accept list', async () => {
     const live = portalWith(
       [
-        alive,
+        productionAlive,
         { url: `${PALENA}/of_solicita_folios`, method: 'GET', reply: { body: STAMP_ENTRY } },
         {
           url: `${PALENA}/of_solicita_folios_dcto`,
@@ -697,7 +705,7 @@ describe('the transport of the receipts portal, as the field talks to it', () =>
     expect(new Set(short.fake.requests.slice(1).map((request) => request.timeoutMs))).toEqual(new Set([5000]))
     const live = portalWith(
       [
-        alive,
+        productionAlive,
         { url: `${PALENA}/of_solicita_folios`, method: 'GET', reply: { body: STAMP_ENTRY } },
         {
           url: `${PALENA}/of_solicita_folios_dcto`,

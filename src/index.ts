@@ -187,7 +187,7 @@ export { parseCaf } from './caf/parse'
 export type { Caf } from './caf/parse'
 export { cafExpiresAt, isCafExpired, isFolioInRange, assertFolioInRange, availableFolios } from './caf/validity'
 export { signWithCaf, verifyWithCaf } from './caf/sign'
-export { SII_CAF_KEYS, verifyCafSignature } from './caf/sii-signature'
+export { SII_CAF_KEYS, cafEnvironment, verifyCafSignature } from './caf/sii-signature'
 export type { SiiCafKeys, CafSignatureOptions, VerificationStatus } from './caf/sii-signature'
 
 export { stampDocument, verifyTed, buildDdString, buildTedXml, tedText } from './ted/build'

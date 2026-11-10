@@ -332,10 +332,10 @@ describe('annulFolios', () => {
       ])
       const result = await annulFolios(harness.portal, { type: 33, all: true, maxRanges: 1 })
       expect(result.annulled).toEqual([
-        { from: 3, to: 3, count: 1 },
-        { from: 4, to: 4, count: 1 },
+        { from: 3, to: 4, count: 2 },
         { from: 1, to: 2, count: 2 },
       ])
+      expect(result.knownAnnulled).toEqual(['3-4', '1-2'])
       expect(harness.posted('af_anular3')).toHaveLength(2)
     })
   })
@@ -378,6 +378,55 @@ describe('annulFolios', () => {
     expect(result.knownAnnulled).toEqual(['1-1', '2-2'])
     expect(result).toMatchObject({ totalAnnulled: 1, totalRejected: 3 })
     expect(harness.posted('af_anular')[2]).toMatchObject({ FOLIO_INI_A: '2', FOLIO_FIN_A: '2' })
+  })
+
+  test('a retried step the SII answers "already annulled" is one range, not one per folio', async () => {
+    const harness = await signedIn([
+      entry,
+      twice(unusedRangesPage([[1, 3]])),
+      respond('af_anular3', ANNUL_FORM),
+      respond(
+        'af_anular',
+        new DteError('TRANSPORT_FAILED'),
+        page('el folio ya fue anulado'),
+        page('el folio ya fue anulado'),
+        page('el folio ya fue anulado'),
+        page('el folio ya fue anulado'),
+      ),
+    ])
+    const result = await annulFolios(harness.portal, { type: 33, all: true })
+    expect(result.rejected).toEqual([{ from: 1, to: 3, count: 3, reason: 'alreadyAnnulled' }])
+    expect(result.knownAnnulled).toEqual(['1-3'])
+    expect(harness.posted('af_anular').map((form) => `${form.FOLIO_INI_A}-${form.FOLIO_FIN_A}`)).toEqual([
+      '1-3',
+      '1-3',
+      '1-1',
+      '2-2',
+      '3-3',
+    ])
+  })
+
+  test('a range whose folios knownAnnulled covers in pieces is not tried again', async () => {
+    const covered = await signedIn([entry, twice(unusedRangesPage([[1, 4]]))])
+    const result = await annulFolios(covered.portal, {
+      type: 33,
+      all: true,
+      knownAnnulled: ['3-4', 'not a key', '1-1', '2-2'],
+    })
+    expect(result).toMatchObject({
+      totalAnnulled: 0,
+      totalRejected: 0,
+      knownAnnulled: ['3-4', 'not a key', '1-1', '2-2'],
+    })
+    expect(covered.posted('af_anular3')).toEqual([])
+    const gap = await signedIn([
+      entry,
+      list(unusedRangesPage([[1, 4]]), unusedRangesPage([])),
+      respond('af_anular3', ANNUL_FORM),
+      respond('af_anular', ANNUL_OK),
+    ])
+    await annulFolios(gap.portal, { type: 33, all: true, knownAnnulled: ['1-1', '3-4'] })
+    expect(gap.posted('af_anular3')).toHaveLength(1)
   })
 
   test('final answers are remembered and transient ones are not', async () => {
@@ -528,10 +577,8 @@ describe('annulFolios', () => {
         respond('af_anular', page('ya fue anulado'), failed, ANNUL_OK, ANNUL_OK),
       ])
       const result = await annulFolios(harness.portal, { type: 33, all: true })
-      expect(result.annulled).toEqual([
-        { from: 1, to: 1, count: 1 },
-        { from: 2, to: 2, count: 1 },
-      ])
+      expect(result.annulled).toEqual([{ from: 1, to: 2, count: 2 }])
+      expect(harness.posted('af_anular').map((form) => form.FOLIO_INI_A)).toEqual(['1', '1', '1', '2'])
       expect(harness.sleeps).toEqual([1500, 1500])
     })
   })
@@ -547,6 +594,67 @@ describe('annulFolios', () => {
 
   // Annulling cannot be undone: once the SII has answered for some folios, what it did reaches the caller.
   describe('a walk cut short returns what it already did, with the failure', () => {
+    test('a block in a folio-by-folio walk keeps the folios the SII annulled before it, on the first range', async () => {
+      const harness = await signedIn([
+        entry,
+        list(unusedRangesPage([[1, 3]]), unusedRangesPage([[1, 3]])),
+        respond('af_anular3', ANNUL_FORM),
+        {
+          url: `${MAULLIN}/af_anular`,
+          method: 'POST',
+          reply: [
+            // The whole range: "already annulled" for part of it, so the walk goes folio by folio.
+            { body: page('el folio ya fue anulado') },
+            { body: ANNUL_OK },
+            // Folio 2 meets the firewall on each of its three tries.
+            { status: 403 },
+            { status: 403 },
+            { status: 403 },
+          ],
+        },
+      ])
+      await expect(annulFolios(harness.portal, { type: 33, all: true })).resolves.toEqual({
+        annulled: [{ from: 1, to: 1, count: 1 }],
+        rejected: [],
+        totalAnnulled: 1,
+        totalRejected: 0,
+        knownAnnulled: ['1-1'],
+        failure: { code: 'SII_PORTAL_BLOCKED', operation: 'annulFolios' },
+      })
+      expect(harness.posted('af_anular').map((form) => `${form.FOLIO_INI_A}-${form.FOLIO_FIN_A}`)).toEqual([
+        '1-3',
+        '1-1',
+        '2-2',
+        '2-2',
+        '2-2',
+      ])
+    })
+
+    test('an expired session in a folio-by-folio walk keeps its folios beside an earlier range', async () => {
+      const expired = new DteError('SII_PORTAL_SESSION_EXPIRED', { operation: 'annulFolios' })
+      const harness = await signedIn([
+        entry,
+        list(
+          unusedRangesPage([
+            [5, 5],
+            [10, 12],
+          ]),
+        ),
+        respond('af_anular3', ANNUL_FORM, ANNUL_FORM),
+        respond('af_anular', ANNUL_OK, page('el folio ya fue anulado'), ANNUL_OK, ANNUL_OK, expired, expired, expired),
+      ])
+      const result = await annulFolios(harness.portal, { type: 33, all: true })
+      expect(result).toMatchObject({
+        annulled: [
+          { from: 5, to: 5, count: 1 },
+          { from: 10, to: 11, count: 2 },
+        ],
+        totalAnnulled: 3,
+        knownAnnulled: ['5-5', '10-11'],
+        failure: { code: 'SII_PORTAL_SESSION_EXPIRED', operation: 'annulFolios' },
+      })
+    })
+
     test('a later listing that fails for good, after an earlier pass annulled', async () => {
       const expired = new DteError('SII_PORTAL_SESSION_EXPIRED', { operation: 'annulFolios' })
       const harness = await signedIn([

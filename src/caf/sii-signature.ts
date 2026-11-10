@@ -88,10 +88,12 @@ export type CafBlock = {
 /**
  * EN: The CAF `scope` holds, read only when there is no doubt about it: exactly one `CAF`, one `DA` and one `FRMA` in
  * `scope` by local name, whatever their prefix; the `CAF` is `scope` or a direct child of it, is plain (`isPlain`), and
- * has the `DA` and the `FRMA` as direct children; the `DA` has a numeric `IDK` and the `FRMA` a value. Null otherwise.
+ * has the `DA` and the `FRMA` as direct children; the `DA` has a numeric `IDK`. Null otherwise. An empty `FRMA` is read
+ * as it is, a signature that never verifies.
  * ES: El CAF que contiene `scope`, leído solo cuando no hay dudas: exactamente un `CAF`, un `DA` y una `FRMA` en
  * `scope` por nombre local, con cualquier prefijo; el `CAF` es `scope` o un hijo directo suyo, es simple (`isPlain`) y
- * tiene el `DA` y la `FRMA` como hijos directos; el `DA` tiene un `IDK` numérico y la `FRMA` un valor. Null si no.
+ * tiene el `DA` y la `FRMA` como hijos directos; el `DA` tiene un `IDK` numérico. Null si no. Una `FRMA` vacía se lee
+ * tal cual, una firma que nunca verifica.
  */
 export const readCaf = (scope: Element): CafBlock | null => {
   const elements = [scope, ...descendants(scope)]
@@ -103,7 +105,7 @@ export const readCaf = (scope: Element): CafBlock | null => {
   const keyId = integer(textAt(da, 'IDK'))
   const signature = String(frma.textContent).replace(/\s+/g, '')
   const placed = (caf === scope || caf.parentNode === scope) && da.parentNode === caf && frma.parentNode === caf
-  return placed && isPlain(caf) && keyId !== null && signature !== '' ? { da, signature, keyId } : null
+  return placed && isPlain(caf) && keyId !== null ? { da, signature, keyId } : null
 }
 
 /**
@@ -111,6 +113,7 @@ export const readCaf = (scope: Element): CafBlock | null => {
  * ES: Chequea la `FRMA` de un CAF con la llave del SII de su `IDK`, sobre las formas de `signedForms` de su `DA`.
  */
 export const checkCafBlock = (block: CafBlock, keys: SiiCafKeys): VerificationStatus => {
+  if (block.signature === '') return 'invalid'
   const key = keys[block.keyId]
   if (key === undefined) return 'unchecked'
   return signedForms(block.da).some((data) => rsaSha1VerifyBase64(key, data, 'latin1', block.signature))
@@ -123,12 +126,12 @@ export const checkCafBlock = (block: CafBlock, keys: SiiCafKeys): VerificationSt
  * a CAF file as the SII issues it or the `<CAF>` block a TED carries, read as `readCaf` reads it: one `CAF`, one `DA`
  * and one `FRMA`, the last two direct children of the first. `unchecked` when no key is known for that `IDK`:
  * `SII_CAF_KEYS` has 100 and 300. `invalid` for a CAF of the other environment than `environment` (production by
- * default), whatever its signature.
+ * default), whatever its signature, and for an empty `FRMA`, whatever its key.
  * ES: Verifica la firma del SII sobre un CAF (`FRMA`, SHA1withRSA sobre el `DA`) con la llave del SII que nombra su
  * `IDK`. Recibe un archivo CAF tal como lo emite el SII o el bloque `<CAF>` que trae un TED, leído como lo lee
  * `readCaf`: un `CAF`, un `DA` y una `FRMA`, los dos últimos hijos directos del primero. `unchecked` si no se conoce
  * llave para ese `IDK`: `SII_CAF_KEYS` tiene la 100 y la 300. `invalid` para un CAF del otro ambiente que
- * `environment` (producción por defecto), sea cual sea su firma.
+ * `environment` (producción por defecto), sea cual sea su firma, y para una `FRMA` vacía, sea cual sea su llave.
  * @throws {DteError} EN: `CAF_INVALID` when the text is not XML, holds a DOCTYPE, or `readCaf` finds no CAF in it. ES: `CAF_INVALID` si el texto no es XML, trae un DOCTYPE o `readCaf` no encuentra un CAF en él.
  */
 export const verifyCafSignature = (cafXml: string, options: CafSignatureOptions = {}): VerificationStatus => {

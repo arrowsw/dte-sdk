@@ -651,6 +651,20 @@ describe('receiverAnswer', () => {
     })
   })
 
+  test('given the whole result of listClaimEvents, a code that lists nothing says nothing: never pending or tacit', () => {
+    for (const failed of [14, -1, 0, 1])
+      expect(receiverAnswer({ code: failed, events: [] }, RECEIVED, '2026-10-30')).toEqual({
+        answer: 'unknown',
+        claimDeadline: '2026-09-26',
+      })
+    // 15 lists the events, 16 says there are none and 18 that the SII never received the document.
+    expect(receiverAnswer({ code: 16, events: [] }, RECEIVED, '2026-10-30').answer).toBe('tacitlyAccepted')
+    expect(receiverAnswer({ code: 15, events: at('ACD') }, RECEIVED, '2026-10-30').answer).toBe('accepted')
+    expect(receiverAnswer({ code: 18, events: [] }, null, '2026-10-30').answer).toBe('pending')
+    // Events, when the SII sent some, speak whatever the code.
+    expect(receiverAnswer({ code: -1, events: at('RCD') }, RECEIVED, '2026-10-30').answer).toBe('claimed')
+  })
+
   test('today must be a date, written either way', () => {
     expect(receiverAnswer([], RECEIVED, '27-09-2026').answer).toBe('tacitlyAccepted')
     for (const today of ['2026-13-01', 'hoy'])
@@ -684,6 +698,11 @@ describe('receiverAnswer', () => {
     expect(receiverAnswer((await listClaimEvents(none.sii, doc)).events, null, '2026-11-24')).toEqual({
       answer: 'pending',
       claimDeadline: null,
+    })
+    const refused = answering(code(14))
+    expect(receiverAnswer(await listClaimEvents(refused.sii, doc), receivedAt, '2026-11-24')).toEqual({
+      answer: 'unknown',
+      claimDeadline: '2026-11-23',
     })
   })
 })

@@ -7,6 +7,120 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`requestCafInBatches` says why a later trip was refused.** Any refusal of the second trip or a later one, but
+  `stampingUncertain`, came back as `quotaCapReached`, so a range the SII authorized without handing its CAF over
+  (`rangeAlreadyAuthorized`) read as the quota running out, and so did a refusal of the company, the option or the
+  person. A refusal now comes back with its own kind and `portalMessage`, as on the first trip. Only one folio over the
+  maximum (`quotaExceeded`), after a grant, still reads as `quotaCapReached`: the SII has no more to give in that pass.
+  - **What to change:** a caller that read `quotaCapReached` as "stop asking" for every short batch now meets the
+    other kinds after a grant too; `rangeAlreadyAuthorized` means the range can be downloaded again with
+    `listReobtainableRanges` and `reobtainCaf`.
+  - **The certification's `prepareFolios`** follows from it: a later refusal that is not rationing (the company, the
+    option) no longer leads it to annul folios, and a block on the person is first lifted by re-obtaining, as on the
+    first trip.
+- **`findCafFiles` can include expired CAFs, and says which are.** With `includeExpired: true` it also lists the files
+  whose CAF has expired, so a caller can say why a file is not used; `CafFile` gains `expired`, true for those and
+  false otherwise. `findLatestCafFile` and `resolveCafFile` never take an expired one, whatever the option says.
+  - **What to change:** `CafFile` gains `expired` as a required field; a literal built by hand, as in a test double,
+    needs `expired: false`.
+- **`FolioStats.ranges` say which file and environment each count is for.** A registry keeps one entry per CAF file,
+  by its range, environment and `cafFingerprint`, but the stats gave only the range, so two files of one range, or one
+  range in both environments, could not be told apart. Each range now carries `environment` and `cafFingerprint`, null
+  when its scope has none.
+  - **What to change:** a `FolioRegistry` of one's own returns `stats` with both fields in each range.
+- **`receiverAnswer` reads the `codResp` of the events query.** It took the events alone, so a query that failed (the
+  SII's internal error, a company that may not consult the document, a wrong folio) gave no events and read as
+  `pending`, and past the eight days as `tacitlyAccepted`: a document read as accepted by law because the SII did not
+  answer. It now also takes the whole result of `listClaimEvents`; with no events and a `codResp` other than 15, 16 or
+  18, the codes that list events or say there are none, the answer is the new `unknown`, as `receiverStatus` already
+  reads it. Events, when the SII sent some, speak whatever the code.
+  - **What to change:** pass the result of `listClaimEvents` whole rather than its `events`, which still works but
+    cannot tell a failed query. `ReceiverAnswer` gains `unknown`: an exhaustive `switch` on it needs the case.
+- **Size:** these changes took `dte-sdk` from 33.87 kB to 34.36 kB, over its 34 kB limit, which went to 36 kB.
+  `dte-sdk/node` went to 7.09 kB, `dte-sdk/portal` to 74.90 kB and `dte-sdk/pdf` to 10.93 kB, under their limits.
+
+### Added
+
+- **`cafEnvironment(keyId)`**, from the root: the environment of the SII key a CAF names in its `IDK`,
+  `certification` for 100 and `production` for 300, null for another. `verifyCafSignature` and
+  `verifyReceivedDocuments` already read it; it was not exported.
+- **`cafFileScope(file, environment)`**, in `dte-sdk/node`: the registry scope of a CAF file (its company, type and
+  range, the environment, and the `cafFingerprint` of its text), the one `resolveCafFile` builds and returns. Anything
+  with a CAF's text and the CAF parsed from it, such as the portal's `ObtainedCaf`, has one too, but it is the saved
+  file's scope only when given the text the file holds: an app that rewrites a downloaded CAF before saving it, its
+  declaration say, takes the scope from the text it saved.
+
+### Fixed
+
+- **The "flow stopped" warning no longer logs what a page said.** Since 0.6.0 a folio flow that keeps what it holds
+  logs the error that stopped it, as `sii portal flow stopped, keeping what it holds`, with every detail spread and
+  redacted. Redaction hides keys and tokens, but a page's text (`portalMessage`, `body`) and the `url` it came from can
+  name the company and its RUT, and they reached the log. The warning now leaves those three out; the rest of the
+  details, the step's `operation`, `flow`, `code` and `stoppedAt` are logged as before. The thrown errors keep them.
+- **`annulFolios` reports a range answered folio by folio in as few pieces as its answers allow, and leaves alone a
+  range `knownAnnulled` covers in pieces.** When the SII refused a whole range and the walk went folio by folio, each
+  folio came back as its own entry and its own key, even when every folio got the same answer, as a step retried after
+  its answer was lost does ("ya fue anulado" for each folio the first try annulled). Folios next to each other with the
+  same answer are now one entry and one key in `annulled`, `rejected` and `knownAnnulled`, and a walk cut short at one
+  folio (a block, an expired session) still returns the folios answered before it, with `failure`. A listed range is
+  skipped when the keys of `knownAnnulled` cover all its folios, in one key or several, where only its exact key was.
+  - **What to change:** nothing for a caller that reads keys as spans of folios; one that compared them with the
+    listing's ranges one to one reads them as spans now.
+- **`findCafFiles` reads each file in the encoding its XML declaration names.** It read every file as UTF-8, while the
+  SII writes ISO-8859-1: a CAF saved as the SII served it, with an Ñ or an accent in the company's name, was read with
+  replacement characters in `RS`, and every stamp made with its `<CAF>` block failed the SII's check. A file that
+  declares ISO-8859-1 is now read as such, and one that declares UTF-8, or no encoding, as strict UTF-8; a file whose
+  bytes are not the encoding it names, or that names another one, is skipped rather than misread. A UTF-8 byte order
+  mark is dropped. `findLatestCafFile` and `resolveCafFile` follow.
+  - **What to change:** a file with no declaration and ISO-8859-1 bytes is no longer found; declare its encoding, as
+    the SII's file does, or save it as UTF-8.
+  - **The registry scope of some files moves.** `cafFingerprint` hashes the text as read, so the scope
+    `resolveCafFile` returns changes for a file saved with a UTF-8 byte order mark (the mark is no longer in the text)
+    and for one declared ISO-8859-1 with bytes above 0x7F (read as Latin-1 now, where they were replacement
+    characters). A folio registry entry kept under the old fingerprint no longer matches the file, and
+    `resolveCafFile` would read its whole range as free, folios already used included. Before issuing from such a
+    file again, move its entry to the new scope (`cafFileScope` of the file as now read), or re-save the file without
+    the mark, or as UTF-8, and move the entry then. A file in plain UTF-8, or ASCII, keeps its fingerprint.
+- **An empty `FRMA` is a CAF whose signature fails, not a CAF that is not one.** `verifyCafSignature` threw
+  `CAF_INVALID` for a CAF whose `FRMA` was empty, as for one with no `FRMA` at all; it now answers `invalid`, whatever
+  the CAF's `IDK`, as it does for an `FRMA` that is not base64. In `verifyReceivedDocuments` such a CAF used to be no
+  CAF, and the stamp, left without its key, failed too: the CAF is now found and fails its SII signature, and the stamp
+  is checked with the CAF's key like any other.
+- **`parseCaf` checks that the CAF's private key is the pair of its public key.** It checked that `RSASK` was a PEM
+  private key, but not that it was the pair of the `RSAPK` the SII signed in the `DA`, as dte-sdk already checks a
+  certificate's key: a CAF with another key parsed, and every stamp signed with it failed the SII's check. A CAF whose
+  keys are not a pair now throws `CAF_INVALID` with the reason `RSASK is not the pair of RSAPK`. The keys are compared
+  as numbers, so a modulus wrapped over lines or with a leading zero byte still pairs.
+  - **What to change:** nothing for a CAF the SII issued. The portal's flows parse the CAF they download, so a CAF
+    whose keys are not a pair reaches them as `CAF_INVALID`, as a malformed one does.
+- **`parseCaf` reads character references as the DOM does.** Its fields came from a parser that kept numeric
+  character references as written, while `verifyCafSignature` and the SII read the same CAF through a DOM that decodes
+  them: a CAF whose writer turned an Ñ into `&#209;` read `RS` with the reference in it, and one with a reference in
+  `RE` or `TD` failed to parse. `parseCaf` now decodes `&#…;` and `&#x…;` as the DOM does, leaves a reference to a
+  character XML does not allow as written, and expands no other entity. The `<CAF>` block it keeps for the TED is still
+  the text as the SII issued it.
+- **XML nested thousands of levels deep is `XML_PARSE_FAILED`, not a stack overflow.** `verifyReceivedDocuments` threw a
+  `RangeError` for a file of a few thousand nested elements, since what reads a DOM walks it recursively. Every DOM
+  dte-sdk parses (received documents, signatures, CAFs, the SII's answers) now refuses elements nested deeper than 100
+  levels with `XML_PARSE_FAILED`, before anything walks them; no document the SII or an issuer writes comes close.
+- **A cached session is checked on the client's own environment.** `openPortalSession`, and the check of a saved
+  session before the GWT portals and the receipts' certification, read the company page `ad_empresa1` of the
+  certification host whatever the client's environment, so a production client depended on maullin being up. They now
+  read the page of the client's environment; one session still serves both.
+- **`reobtainCaf` logs in on demand.** It posted the range with whatever session it found in the cache, so a session
+  that had expired since `listReobtainableRanges` got the login page back, which read as the SII refusing the download
+  (`SII_PORTAL_REJECTED` with `reobtainDownloadMissing`). It now enters the procedure first, as
+  `listReobtainableRanges` does, logging in on demand and passing the representation screen, and a login page in
+  answer to the range or to the file is `SII_PORTAL_SESSION_EXPIRED`, in `reobtainFolios` too. A page that states a
+  refusal at the entry throws `SII_PORTAL_REJECTED`, and any other page `SII_PORTAL_UNEXPECTED_PAGE`, before anything
+  is posted.
+  - **What to change:** `reobtainCaf` makes one `GET` more, of `rf_reobtencion1_folios`. A caller that took
+    `reobtainDownloadMissing` or `reobtainCafMissing` for an expired session now gets `SII_PORTAL_SESSION_EXPIRED`;
+    `reobtainFolios` ends its walk on it, with the CAFs already in hand and `failure`, or throws it with none, where it
+    used to skip the range as refused.
+
 ## [0.6.0] - 2026-11-10
 
 ### Changed

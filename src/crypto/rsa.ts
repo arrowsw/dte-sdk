@@ -36,6 +36,15 @@ export const rsaPublicKeyParts = (privateKeyPem: string): RsaPublicKeyParts => {
 }
 
 /**
+ * EN: Whether a private key is the pair of a public key given as modulus/exponent, compared as numbers: whitespace in
+ * the base64 and leading zero bytes change nothing.
+ * ES: Si una llave privada es el par de una clave pública dada como módulo/exponente, comparadas como números: los
+ * espacios en el base64 y los bytes cero al inicio no cambian nada.
+ */
+export const isRsaKeyPair = (privateKey: forge.pki.rsa.PrivateKey, publicKey: RsaPublicKeyParts): boolean =>
+  privateKey.n.equals(base64ToBigInt(publicKey.modulus)) && privateKey.e.equals(base64ToBigInt(publicKey.exponent))
+
+/**
  * EN: Public modulus and exponent of a PEM certificate.
  * ES: Módulo y exponente públicos de un certificado PEM.
  */

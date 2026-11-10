@@ -96,7 +96,7 @@ export type RequestCafExactInput = {
   readonly allowAnnul?: boolean
   /** EN: Folios annulling never touches, such as a CAF still in use. ES: Folios que la anulación no toca, como un CAF todavía en uso. */
   readonly exclude?: readonly { readonly from: number; readonly to: number }[]
-  /** EN: `knownAnnulled` of the previous run: these are not tried again. ES: `knownAnnulled` de la corrida anterior: estos no se vuelven a intentar. */
+  /** EN: `knownAnnulled` of the previous run: a listed range whose folios these keys cover, in one key or several, is not tried again. ES: `knownAnnulled` de la corrida anterior: un rango listado cuyos folios cubren estas claves, en una o en varias, no se vuelve a intentar. */
   readonly knownAnnulled?: readonly string[]
   /** EN: Company RUT; the client's by default. ES: `RUT_EMP` + `DV_EMP` — RUT de la empresa; por defecto el del cliente. */
   readonly companyRut?: string
@@ -224,7 +224,9 @@ export type RequestCafInBatchesInput = {
 /**
  * EN: Covers a quantity across several CAFs, for when `FOLIOS_DISP` is 0 and `MAX_AUTOR` is small: the SII rations by
  * history, there is nothing to annul or download again, and waiting does not move it. It stops as soon as a batch adds
- * nothing, because every grant raises `FOLIOS_DISP` and can lower the next `MAX_AUTOR`. Once a CAF is in hand, a later
+ * nothing, because every grant raises `FOLIOS_DISP` and can lower the next `MAX_AUTOR`. A refusal comes back with its
+ * own kind and `portalMessage`, on the first trip or a later one; after a grant, only one folio over the maximum
+ * (`quotaExceeded`) reads as `quotaCapReached`. Once a CAF is in hand, a later
  * trip that fails with a `DteError` other than a refusal (a transport failure, a timeout, an expired session, a block,
  * `CAF_INVALID`) ends the flow with the CAFs obtained, the last quota seen and the failure in `failure`, instead of
  * throwing what the SII already granted away; when the trip was a request, it may have been granted too, so check
@@ -232,7 +234,9 @@ export type RequestCafInBatchesInput = {
  * hand, returns them with `REQUEST_ABORTED`; with none it throws, as in `reobtainFolios`.
  * ES: Cubre una cantidad con varios CAF, para cuando `FOLIOS_DISP` es 0 y `MAX_AUTOR` es chico: el SII raciona por historial,
  * no hay nada que anular ni reobtener, y esperar no lo mueve. Se detiene apenas una tanda no aporta, porque cada entrega sube
- * `FOLIOS_DISP` y puede bajar el próximo `MAX_AUTOR`. Con un CAF ya en la mano, un viaje posterior que falla con un
+ * `FOLIOS_DISP` y puede bajar el próximo `MAX_AUTOR`. Un rechazo vuelve con su propio tipo y `portalMessage`, en el
+ * primer viaje o en uno posterior; después de una entrega, solo un folio por sobre el máximo (`quotaExceeded`) se lee
+ * como `quotaCapReached`. Con un CAF ya en la mano, un viaje posterior que falla con un
  * `DteError` que no es un rechazo (una falla de transporte, un tiempo agotado, una sesión vencida, un bloqueo,
  * `CAF_INVALID`) termina el flujo con los CAF obtenidos, el último cupo visto y la falla en `failure`, en vez de
  * botar lo que el SII ya otorgó; si el viaje era una solicitud, pudo otorgarse también, así que revisa
@@ -299,11 +303,13 @@ export const requestCafInBatches = (
         ...company,
       }).catch(settleTrip(context, cafs, 'requestCaf'))
       if ('failure' in outcome) return end(current, null, outcome.failure)
-      // An uncertain request is said as such: read as the cap, it would invite asking again for what may be granted.
+      // A refusal is said as it was: read as the cap, an uncertain request or a range the SII authorized without its
+      // file would invite asking again for what may be granted. Only one folio over the maximum, after a grant, is the
+      // cap: the SII has no more to give in this pass.
       if ('rejection' in outcome) {
-        return covered === 0 || outcome.rejection === 'stampingUncertain'
-          ? refusalResult(cafs, outcome.rejection, { ...outcome.details, ...current })
-          : end(current, 'quotaCapReached')
+        return covered > 0 && outcome.rejection === 'quotaExceeded'
+          ? end(current, 'quotaCapReached')
+          : refusalResult(cafs, outcome.rejection, { ...outcome.details, ...current })
       }
       return batch(number + 1, [...cafs, outcome], covered + outcome.granted, quota)
     }

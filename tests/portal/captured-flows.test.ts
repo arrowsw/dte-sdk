@@ -84,16 +84,16 @@ describe('annulment', () => {
         served('af_anular-ok'),
       ),
     ])
+    // Folios next to each other with the same answer are one span.
     expect(result.annulled).toEqual([
       { from: 109, to: 109, count: 1 },
-      { from: 112, to: 112, count: 1 },
-      { from: 113, to: 113, count: 1 },
+      { from: 112, to: 113, count: 2 },
     ])
     expect(result.rejected).toEqual([
       { from: 110, to: 110, count: 1, reason: 'received' },
       { from: 111, to: 111, count: 1, reason: 'unknown' },
     ])
-    expect(result.knownAnnulled).toEqual(['109-109', '110-110', '112-112', '113-113'])
+    expect(result.knownAnnulled).toEqual(['109-109', '110-110', '112-113'])
     expect(harness.posted('af_anular').map((fields) => fields.FOLIO_INI_A)).toEqual([
       '109',
       '109',
