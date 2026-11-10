@@ -85,6 +85,8 @@ export type CertificationHarness = {
   readonly posted: (page: string) => readonly Readonly<Record<string, string>>[]
   readonly urls: () => readonly string[]
   readonly warnings: () => readonly string[]
+  /** The contexts of the warnings logged with this message. */
+  readonly warnedWith: (message: string) => readonly (Readonly<Record<string, unknown>> | undefined)[]
 }
 
 const parseForm = (text: string): Readonly<Record<string, string>> =>
@@ -103,10 +105,14 @@ export const certificationHarness = async (routes: readonly FakeRoute[]): Promis
   const sleeps: number[] = []
   const events: CertificationProgressEvent[] = []
   const warnings: string[] = []
+  const contexts: (Readonly<Record<string, unknown>> | undefined)[] = []
   const logger = {
     debug: () => undefined,
     info: () => undefined,
-    warn: (message: string) => void warnings.push(message),
+    warn: (message: string, context?: Readonly<Record<string, unknown>>) => {
+      warnings.push(message)
+      contexts.push(context)
+    },
     error: () => undefined,
   }
   const portal = createPortalClient({
@@ -171,6 +177,7 @@ export const certificationHarness = async (routes: readonly FakeRoute[]): Promis
         .map((request) => parseForm(request.text)),
     urls: () => fake.requests.map((request) => request.url),
     warnings: () => warnings,
+    warnedWith: (message) => contexts.filter((_, index) => warnings[index] === message),
   }
 }
 

@@ -433,6 +433,57 @@ describe('prepareFolios', () => {
     expect((await harness.store.load())?.annulledRanges).toEqual({ '33': ['1-9'] })
   })
 
+  test('an annulment cut short ends the step with its code, once what it annulled is kept in the state', async () => {
+    const harness = await certificationHarness([
+      stampEntry,
+      quota(REJECTION_PAGES.stampingBlocked, quotaForm(), quotaForm()),
+      ...noRanges,
+      get('af_anular1', ...repeat(ANNUL_ENTRY, 4)),
+      post(
+        'af_anular2',
+        ...repeat(
+          unusedRangesPage([
+            [1, 9, '01-11-2026'],
+            [20, 29, '01-11-2026'],
+          ]),
+          4,
+        ),
+      ),
+      post('af_anular3', ANNUL_FORM, { status: 403 }, { status: 403 }, { status: 403 }),
+      post('af_anular', ANNUL_OK),
+      confirm(CAF_XML),
+    ])
+    const error = await failure(prepareFolios(harness.deps, stateWith(), { needs: { 33: 2 } }))
+    expect(error.code).toBe('SII_PORTAL_BLOCKED')
+    expect(error.details).toEqual({ type: 33, operation: 'annulFolios', step: 'annulFolios' })
+    expect(harness.posted('af_anular')).toHaveLength(1)
+    expect((await harness.store.load())?.annulledRanges).toEqual({ '33': ['1-9'] })
+    expect(harness.posted('of_solicita_folios_dcto')).toHaveLength(1)
+  })
+
+  test('an annulment whose later listing the SII refuses ends the step with the kind of refusal', async () => {
+    const harness = await certificationHarness([
+      stampEntry,
+      quota(REJECTION_PAGES.stampingBlocked, quotaForm(), quotaForm()),
+      ...noRanges,
+      get('af_anular1', ...repeat(ANNUL_ENTRY, 4)),
+      post('af_anular2', unusedRangesPage([[1, 9, '01-11-2026']]), refusedPage('ANULACION DE FOLIOS')),
+      post('af_anular3', ANNUL_FORM),
+      post('af_anular', ANNUL_OK),
+      confirm(CAF_XML),
+    ])
+    const error = await failure(prepareFolios(harness.deps, stateWith(), { needs: { 33: 2 } }))
+    expect(error.code).toBe('SII_PORTAL_REJECTED')
+    expect(error.details).toEqual({
+      type: 33,
+      operation: 'annulFolios',
+      step: 'listFolioRanges',
+      rejection: 'optionNotAuthorized',
+    })
+    expect((await harness.store.load())?.annulledRanges).toEqual({ '33': ['1-9'] })
+    expect(harness.posted('of_solicita_folios_dcto')).toHaveLength(1)
+  })
+
   describe('a block on the person is met with the re-obtaining before any annulment', () => {
     const blocked = [stampEntry, quota(quotaForm(), REJECTION_PAGES.personWithPendingIssues)]
     const annulment = [
@@ -623,6 +674,31 @@ describe('prepareFolios', () => {
       ])
       const result = await prepareFolios(harness.deps, stateWith(), { needs: { 33: 2 } })
       expect(result.cafs).toEqual([narrow, cafXml(33, { from: 300, to: 300 })])
+    })
+
+    test('a download that fails after another keeps what it downloaded and ends the step with its code', async () => {
+      const range = cafXml(33, { from: 10, to: 11 })
+      const harness = await certificationHarness([
+        stampEntry,
+        quota(quotaForm(1, 9)),
+        get('rf_reobtencion1_folios', REOBTAIN_ENTRY),
+        post(
+          'rf_reobtencion2_folios',
+          reobtainListPage([
+            [10, 11],
+            [20, 21],
+          ]),
+        ),
+        post('rf_reobtencion3_folios', reobtainDetailPage(10), reobtainDetailPage(20)),
+        post('rf_genera_folio', ...repeat(REOBTAIN_RESOLUTION, 2)),
+        post('rf_genera_archivo', range, new DteError('TRANSPORT_FAILED', { reason: 'ECONNRESET' })),
+        estDte(free, free, free, free),
+      ])
+      const error = await failure(prepareFolios(harness.deps, stateWith(), { needs: { 33: 4 } }))
+      expect(error.code).toBe('TRANSPORT_FAILED')
+      expect(error.details).toEqual({ type: 33, operation: 'reobtainFolios', step: 'reobtainCaf' })
+      expect((await harness.store.load())?.cafs).toEqual([range])
+      expect(harness.posted('of_solicita_folios_dcto')).toHaveLength(1)
     })
 
     test('after a block on the person a short answer joins what the run holds and has just obtained', async () => {
@@ -854,6 +930,10 @@ describe('prepareFolios', () => {
     expect(error.code).toBe('TRANSPORT_FAILED')
     expect(error.details).toEqual({ type: 33, operation: 'requestCafInBatches', step: 'queryFolioQuota' })
     expect((await harness.store.load())?.cafs).toEqual([cafXml(33, { from: 1, to: 1 })])
+    // The error keeps the code alone; what the original said, `reason` included, went to the logger first.
+    expect(harness.warnedWith('sii portal flow stopped, keeping what it holds')).toEqual([
+      expect.objectContaining({ code: 'TRANSPORT_FAILED', reason: 'ECONNRESET', stoppedAt: 'queryFolioQuota' }),
+    ])
   })
 
   test('folios of this run the SII never received come back; received ones stay used; an expired CAF is skipped', async () => {

@@ -28,7 +28,9 @@ The verification of received documents, on 2026-11-09, took `dte-sdk` from 31.54
 which went to 34 kB, and the stricter checks it brought (the signature, and the `<CAF>` block `parseCaf` keeps) took
 `dte-sdk/portal` to 73.88 kB.
 Returning the CAFs a batch request already holds, with its check of the quantity, took `dte-sdk/portal` to 73.95 kB,
-still under its limit.
+still under its limit. Returning what the other folio flows already hold when a later step fails (the annulment's tally,
+the CAFs a re-obtaining downloaded, the memory of an exact request that annulled), with the original error logged,
+took it to 74.33 kB, over its 74 kB limit, which went to 76 kB.
 
 ## Why
 

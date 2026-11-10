@@ -29,6 +29,14 @@ const replies = (name: string, ...bodies: readonly (string | Error | { status: n
   method: 'POST' as const,
   reply: bodies.map((body) => (typeof body === 'string' ? { body } : body)),
 })
+const captureWarnings = () => {
+  const warned: { readonly message: string; readonly context?: Readonly<Record<string, unknown>> }[] = []
+  const log = (message: string, context?: Readonly<Record<string, unknown>>): void => {
+    warned.push({ message, context })
+  }
+  const logger: Logger = { debug: () => undefined, info: () => undefined, warn: log, error: log }
+  return { warned, logger }
+}
 const annulRoutes = (ranges: string, form: string = ANNUL_FORM) => [
   { url: `${MAULLIN}/af_anular1`, reply: { body: ANNUL_ENTRY } },
   { url: `${MAULLIN}/af_anular2`, reply: { body: ranges } },
@@ -207,6 +215,94 @@ describe('requestCafExact', () => {
       availableFolios: 6,
       portalMessage: expect.stringContaining('autorizado'),
       knownAnnulled: ['3-4'],
+    })
+  })
+
+  describe('after annulling, a failure returns the memory instead of throwing it away', () => {
+    test('an annulment cut short returns what it annulled, with its failure, and asks no more', async () => {
+      const harness = await signedIn([
+        entry,
+        replies('of_solicita_folios_dcto', quotaForm(2, 6)),
+        { url: `${MAULLIN}/af_anular1`, reply: { body: ANNUL_ENTRY } },
+        {
+          url: `${MAULLIN}/af_anular2`,
+          reply: {
+            body: unusedRangesPage([
+              [1, 2],
+              [3, 4],
+            ]),
+          },
+        },
+        replies('af_anular3', ANNUL_FORM, { status: 403 }, { status: 403 }, { status: 403 }),
+        { url: `${MAULLIN}/af_anular`, reply: { body: ANNUL_OK } },
+      ])
+      const result = await requestCafExact(harness.portal, {
+        type: 33,
+        quantity: 5,
+        allowAnnul: true,
+        knownAnnulled: ['7-9'],
+      })
+      expect(result).toEqual({
+        complete: false,
+        cafs: [],
+        granted: 0,
+        maxAuthorized: 2,
+        availableFolios: 6,
+        rejection: null,
+        portalMessage: null,
+        failure: { code: 'SII_PORTAL_BLOCKED', operation: 'annulFolios' },
+        knownAnnulled: ['7-9', '1-2'],
+      })
+      expect(harness.posted('of_solicita_folios_dcto')).toHaveLength(1)
+    })
+
+    test('a listing the SII refuses after annulling keeps the kind of refusal in the failure', async () => {
+      const harness = await signedIn([
+        entry,
+        replies('of_solicita_folios_dcto', quotaForm(2, 6)),
+        { url: `${MAULLIN}/af_anular1`, reply: { body: ANNUL_ENTRY } },
+        replies('af_anular2', unusedRangesPage([[1, 2]]), refusedPage('ANULACION DE FOLIOS')),
+        { url: `${MAULLIN}/af_anular3`, reply: { body: ANNUL_FORM } },
+        { url: `${MAULLIN}/af_anular`, reply: { body: ANNUL_OK } },
+      ])
+      const result = await requestCafExact(harness.portal, { type: 33, quantity: 5, allowAnnul: true })
+      expect(result).toEqual(
+        expect.objectContaining({
+          rejection: null,
+          failure: { code: 'SII_PORTAL_REJECTED', operation: 'listFolioRanges', rejection: 'optionNotAuthorized' },
+          knownAnnulled: ['1-2'],
+        }),
+      )
+      expect(harness.posted('af_anular')).toHaveLength(1)
+    })
+
+    test('the request after annulling that fails returns the memory, with its failure', async () => {
+      const harness = await signedIn([
+        entry,
+        replies('of_solicita_folios_dcto', quotaForm(2, 6), quotaForm(100, 0)),
+        replies('of_confirma_folio', AUTH_PAGE),
+        ...annulRoutes(unusedRangesPage([[1, 6]])),
+      ])
+      await expect(requestCafExact(harness.portal, { type: 33, quantity: 5, allowAnnul: true })).resolves.toEqual({
+        complete: false,
+        cafs: [],
+        granted: 0,
+        maxAuthorized: 2,
+        availableFolios: 6,
+        rejection: null,
+        portalMessage: null,
+        failure: { code: 'SII_PORTAL_SESSION_EXPIRED', operation: 'requestCaf' },
+        knownAnnulled: ['1-6'],
+      })
+    })
+
+    test('anything that is not a DteError after annulling is a bug and stays an error', async () => {
+      const harness = await signedIn([
+        entry,
+        replies('of_solicita_folios_dcto', quotaForm(2, 6), new Error('bug')),
+        ...annulRoutes(unusedRangesPage([[1, 6]])),
+      ])
+      await expect(requestCafExact(harness.portal, { type: 33, quantity: 5, allowAnnul: true })).rejects.toThrow('bug')
     })
   })
 
@@ -402,6 +498,80 @@ describe('requestCafInBatches', () => {
     })
   })
 
+  test('a failure keeps only the code, and the original error goes whole to the logger, with the flow named', async () => {
+    const { warned, logger } = captureWarnings()
+    const harness = await signedIn(
+      [
+        entry,
+        replies(
+          'of_solicita_folios_dcto',
+          quotaForm(3, 0),
+          quotaForm(3, 0),
+          new DteError('TRANSPORT_FAILED', { reason: 'ECONNRESET' }),
+        ),
+        replies('of_confirma_folio', CAF_XML),
+      ],
+      { logger },
+    )
+    const result = await requestCafInBatches(harness.portal, { type: 33, quantity: 200 })
+    expect(result.failure).toEqual({ code: 'TRANSPORT_FAILED', operation: 'queryFolioQuota' })
+    expect(warned).toEqual([
+      {
+        message: 'sii portal flow stopped, keeping what it holds',
+        context: {
+          operation: 'requestCafInBatches.of_solicita_folios.post',
+          attempts: 1,
+          reason: 'ECONNRESET',
+          flow: 'requestCafInBatches',
+          code: 'TRANSPORT_FAILED',
+          stoppedAt: 'queryFolioQuota',
+        },
+      },
+    ])
+  })
+
+  test('the logger gets what a page showed with its secrets redacted, in the page text as in the excerpt', async () => {
+    const { warned, logger } = captureWarnings()
+    const leaky = page('<p>Intente m&aacute;s tarde</p><RSASK>SECRET-PRIVATE-KEY</RSASK> TOKEN=abc123xyz')
+    const harness = await signedIn(
+      [
+        entry,
+        replies('of_solicita_folios_dcto', quotaForm(3, 0), quotaForm(3, 0), leaky),
+        replies('of_confirma_folio', CAF_XML),
+      ],
+      { logger },
+    )
+    const result = await requestCafInBatches(harness.portal, { type: 33, quantity: 200 })
+    expect(result.failure).toEqual({ code: 'SII_PORTAL_UNEXPECTED_PAGE', operation: 'queryFolioQuota' })
+    const logged = warned.find((entry) => entry.message === 'sii portal flow stopped, keeping what it holds')?.context
+    expect(logged).toEqual(
+      expect.objectContaining({
+        portalMessage: 'SII Intente más tarde [redacted] TOKEN=[redacted]',
+        body: expect.stringContaining('<RSASK>[redacted]</RSASK> TOKEN=[redacted]'),
+      }),
+    )
+    expect(JSON.stringify(logged)).not.toMatch(/SECRET-PRIVATE-KEY|abc123xyz/)
+  })
+
+  test('a detail that did not come from a page reaches the logger redacted too', async () => {
+    const { warned, logger } = captureWarnings()
+    const cut = new DteError('TRANSPORT_FAILED', { reason: 'socket hang up at /cvc_cgi/dte?TOKEN=abc123xyz' })
+    const harness = await signedIn(
+      [
+        entry,
+        replies('of_solicita_folios_dcto', quotaForm(3, 0), quotaForm(3, 0), cut),
+        replies('of_confirma_folio', CAF_XML),
+      ],
+      { logger },
+    )
+    await requestCafInBatches(harness.portal, { type: 33, quantity: 200 })
+    expect(warned).toEqual([
+      expect.objectContaining({
+        context: expect.objectContaining({ reason: 'socket hang up at /cvc_cgi/dte?TOKEN=[redacted]', attempts: 1 }),
+      }),
+    ])
+  })
+
   test('a session that expires at a later request returns what was obtained, with the quota of that trip', async () => {
     const harness = await signedIn([
       entry,
@@ -468,6 +638,7 @@ describe('reobtainFolios', () => {
       expired: [],
       available: 0,
       reason: expect.stringContaining('rejection=optionNotAuthorized'),
+      failure: null,
     })
   })
 
@@ -491,6 +662,7 @@ describe('reobtainFolios', () => {
       expired: [],
       available: 0,
       reason: expect.any(String),
+      failure: null,
     })
   })
 
@@ -502,7 +674,7 @@ describe('reobtainFolios', () => {
       reply: ranges.map(([from]) => ({ body: reobtainDetailPage(from, annulled.includes(from)) })),
     },
   ]
-  const download = (...files: readonly string[]) => [
+  const download = (...files: readonly (string | Error)[]) => [
     { url: `${MAULLIN}/rf_genera_folio`, reply: { body: REOBTAIN_RESOLUTION } },
     replies('rf_genera_archivo', ...files),
   ]
@@ -618,5 +790,49 @@ describe('reobtainFolios', () => {
       { url: `${MAULLIN}/rf_genera_folio`, reply: new DteError('TRANSPORT_FAILED') },
     ])
     expect((await failure(reobtainFolios(harness.portal, { type: 33, quantity: 1 }))).code).toBe('TRANSPORT_FAILED')
+  })
+
+  test('a download that fails after another returns what was downloaded, with the failure', async () => {
+    const cut = new DteError('TRANSPORT_FAILED', { reason: 'ECONNRESET' })
+    const harness = await signedIn([
+      ...listRoutes([
+        [1, 9],
+        [50, 59],
+      ]),
+      ...download(CAF_XML, cut),
+    ])
+    await expect(reobtainFolios(harness.portal, { type: 33, quantity: 12 })).resolves.toEqual({
+      complete: false,
+      cafs: [expect.objectContaining({ xml: CAF_XML })],
+      ranges: [{ from: 1, to: 9, freeFolios: [1, 2, 3, 4, 5, 6, 7, 8, 9] }],
+      expired: [],
+      available: 9,
+      reason: expect.stringContaining(cut.message),
+      failure: { code: 'TRANSPORT_FAILED', operation: 'reobtainCaf' },
+    })
+    expect(harness.posted('rf_genera_archivo')).toHaveLength(2)
+  })
+
+  test('a walk with nothing cut short has no failure', async () => {
+    const harness = await signedIn([...listRoutes([[1, 9]]), ...download(CAF_XML)])
+    expect(await reobtainFolios(harness.portal, { type: 33, quantity: 2 })).toHaveProperty('failure', null)
+    const short = await signedIn([...listRoutes([[1, 2]])])
+    expect(await reobtainFolios(short.portal, { type: 33, quantity: 5 })).toHaveProperty('failure', null)
+    const unlisted = await signedIn([
+      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: REOBTAIN_ENTRY } },
+      { url: `${MAULLIN}/rf_reobtencion2_folios`, reply: new DteError('TRANSPORT_FAILED') },
+    ])
+    expect(await reobtainFolios(unlisted.portal, { type: 33, quantity: 2 })).toHaveProperty('failure', null)
+  })
+
+  test('a later download that fails with something that is not a DteError is a bug and stays an error', async () => {
+    const harness = await signedIn([
+      ...listRoutes([
+        [1, 9],
+        [50, 59],
+      ]),
+      ...download(CAF_XML, new Error('bug')),
+    ])
+    await expect(reobtainFolios(harness.portal, { type: 33, quantity: 12 })).rejects.toThrow('bug')
   })
 })

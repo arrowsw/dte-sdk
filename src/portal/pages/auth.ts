@@ -1,3 +1,4 @@
+import { redactText } from '../../sii/capture'
 import { alertMessages, attribute, formBlocks, inputValues, visibleText } from '../html'
 
 /**
@@ -101,10 +102,14 @@ export const isBlockedPage = (status: number, html: string): boolean =>
   status === 403 || html.includes('acceso restringido') || html.includes('Transaccion Rechazada')
 
 /**
- * EN: What the portal said on a page, for `details.portalMessage`: its `alert()` messages, else its visible text.
+ * EN: What the portal said on a page, for `details.portalMessage`: its `alert()` messages, else its visible text. Secrets
+ * are redacted in the page before its text is read, since the text no longer has the tags that mark an `RSASK`.
  * ES: Lo que dijo el portal en una página, para `details.portalMessage`: sus mensajes `alert()`, si no su texto visible.
+ * Los secretos se ocultan en la página antes de leer su texto, porque el texto ya no tiene las etiquetas que marcan un
+ * `RSASK`.
  */
 export const portalMessageOf = (html: string): string => {
-  const alerts = alertMessages(html)
-  return alerts.length > 0 ? alerts.join(' | ').slice(0, 400) : visibleText(html)
+  const redacted = redactText(html)
+  const alerts = alertMessages(redacted)
+  return alerts.length > 0 ? alerts.join(' | ').slice(0, 400) : visibleText(redacted)
 }

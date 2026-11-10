@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`annulFolios` returns what the SII already annulled when a later step fails.** The tally of a call lived only until
+  the end of the walk, so a later pass's listing or a later range that failed with anything the step retries could not
+  absorb (an expired session, a block, the caller's abort, a page it could not read, a refused listing) threw it away:
+  folios already annulled, which cannot be undone, never reached `annulled` or `knownAnnulled`, and the next run posted
+  their annulment again only to hear "ya fue anulado". Once the SII has answered for some folios (a range that never got
+  through, recorded as `transport`, is no answer), such a `DteError` now ends the walk with what was done until then and
+  the new field `failure: { code, operation }`, where `operation` is `listFolioRanges` or `annulFolios`. Only the code
+  is kept, with the kind of refusal in `rejection` when the SII refused a later listing; the original error goes whole
+  to the client's logger. Before any answer it still throws, and anything that is not a `DteError` still throws as a
+  bug. `failure` is null on a walk that finishes.
+  - **What to change:** `AnnulmentResult` gains `failure` as a required field. Persist `knownAnnulled` whether `failure`
+    is set or not; a literal built by hand, as in a test double, needs `failure: null`. `FolioFlowFailure['operation']`
+    now names every step a folio flow can stop at: `queryFolioQuota`, `requestCaf`, `reobtainCaf`, `listFolioRanges`
+    and `annulFolios`. `FolioFlowFailure` gains an optional `rejection`, set only when `code` is
+    `SII_PORTAL_REJECTED`.
+  - **The certification's `prepareFolios`** keeps what such an annulment annulled in `annulledRanges` and then ends the
+    step with the failure's code, with `type`, `operation: 'annulFolios'`, `step` and, for a refusal, `rejection`, as
+    a cut-short request or re-obtaining does. It used to count it as none and end with `FOLIO_OUT_OF_RANGE`, which
+    read a network failure as rationing. An annulment that throws before the SII answers still counts as none.
+- **`reobtainFolios` returns the CAFs it already downloaded when a later download fails.** A download that failed
+  with anything but a refusal threw out of the walk and the CAFs earlier downloads had brought were lost; nothing was
+  spent, but they had to be downloaded again. Once a CAF is in hand such a `DteError` now ends the walk with
+  `complete: false`, the CAFs, their ranges, the failure's message in `reason` and the new field
+  `failure: { code, operation: 'reobtainCaf' }`. With no CAF in hand it still throws, and anything that is not a
+  `DteError` still throws as a bug. A refused download is logged and skipped, as before.
+  - **What to change:** `ReobtainResult` gains `failure` as a required field, null everywhere else; a literal built by
+    hand needs `failure: null`.
+  - **The certification's `prepareFolios`** keeps what such a walk brought by the rule it already applies to a short
+    one, and then throws the failure's code with `type`, `operation: 'reobtainFolios'` and `step`, as it threw that
+    code before.
+- **`requestCafExact` keeps the memory of what it annulled when a later step fails.** With `allowAnnul`, a
+  `DteError` that cut the annulment short, or one of the request asked once more after it, threw out of the flow and
+  `knownAnnulled` was lost with the folios just annulled. Once the SII has answered the annulment, such a failure now
+  ends the flow with `complete: false`, `rejection: null`, the first request's quota, `knownAnnulled` with what was
+  annulled, and `failure`: the annulment's (`listFolioRanges` or `annulFolios`) or the request's (`requestCaf`). A
+  listing the SII refuses during the annulment keeps its kind in `failure.rejection`, since `rejection` speaks of the
+  request. A cut-short annulment is not followed by another request. Before the annulment's first answer it still throws, and
+  anything that is not a `DteError` still throws as a bug.
+  - **What to change:** `failure` was always null on `requestCafExact`; read it as on `requestCafInBatches`, and
+    persist `knownAnnulled` whether it is set or not. The type does not change.
+- **Size:** these changes and the logging below took `dte-sdk/portal` from 73.95 kB to 74.33 kB, over its 74 kB limit,
+  which went to 76 kB.
+
+### Fixed
+
+- **A folio flow cut short logs the error it keeps only the code of.** Since 0.5.0 a batch cut short returns
+  `failure: { code, operation }`, and the certification's `prepareFolios` rebuilt the error from that code alone, so the
+  original's `reason` (`ECONNRESET`, a timeout), `httpStatus`, `attempts` and the rest reached neither the thrown error
+  nor the `CERT_ERROR` event. Every flow that turns a failure into data (`requestCafInBatches`, `requestCafExact`,
+  `reobtainFolios`, `annulFolios`) now logs the original first through the client's logger, as a warning
+  `sii portal flow stopped, keeping what it holds` with the error's details (their `operation` names the step that
+  failed), `flow` with the flow's name, its `code` and `stoppedAt`. Every text detail goes through `redactText` first,
+  so a token, an `RSASK` or a session cookie reaches the log as `[redacted]`.
+- **`portalMessage` no longer carries a secret a page showed.** The portal's message was the visible text of the page,
+  read without redaction everywhere but on a block page, while `body` beside it was redacted: an `RSASK` or a token in
+  a page's text reached the error's `portalMessage`, and from this release the log, as written. The page is now
+  redacted before its text is read, on every error and result that carries `portalMessage`; redacting the text
+  afterwards would miss an `RSASK`, whose tags the text no longer has.
+
 ## [0.5.0] - 2026-11-09
 
 ### Changed

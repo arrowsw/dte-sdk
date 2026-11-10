@@ -1,8 +1,9 @@
 import { isDocumentType, type DocumentType } from '../catalogs/document-types'
 import { cgiUrl } from '../catalogs/portal'
-import { DteError } from '../errors'
+import { DteError, isDteError } from '../errors'
 import { assertPositive, type CallOverrides } from '../sii/client'
 import { isRetryablePortalError, resolvePortalCompany, type PortalClient } from './client'
+import { flowFailure, type FolioFlowFailure } from './flow-failure'
 import { formAction, inputValues, namedForm } from './html'
 import {
   annulledBefore,
@@ -102,6 +103,8 @@ export type AnnulmentResult = {
   readonly totalRejected: number
   /** EN: `from-to` keys that are final (annulled, `alreadyAnnulled` or `received`): persist it and pass it back, because the portal keeps listing them forever. Nothing the SII answered in unknown words goes here. ES: Claves `desde-hasta` definitivas (anuladas, `alreadyAnnulled` o `received`): guárdalas y devuélvelas, porque el portal las sigue listando para siempre. Nada que el SII haya respondido con palabras desconocidas va aquí. */
   readonly knownAnnulled: readonly string[]
+  /** EN: What stopped the walk once the SII had answered for some folios, or null: a `DteError` of a later listing (`listFolioRanges`) or of a later range (`annulFolios`), a refusal included. Annulling cannot be undone, so what was done until then comes back; with no answer yet the error is thrown, and a range that never got through (`transport`) is no answer. ES: Lo que detuvo el recorrido cuando el SII ya había respondido por algunos folios, o null: un `DteError` de un listado posterior (`listFolioRanges`) o de un rango posterior (`annulFolios`), un rechazo incluido. Anular no se puede deshacer, así que vuelve lo hecho hasta entonces; sin respuesta aún, el error se lanza, y un rango que nunca llegó (`transport`) no es respuesta. */
+  readonly failure: FolioFlowFailure | null
 }
 
 const at = (context: PortalContext, page: string): string => cgiUrl(context.portal.environment, page)
@@ -367,27 +370,41 @@ export const annulFoliosInSession = async (
   const seen = new Set<string>()
   // The limit applies to each pass, as in field behaviour: four passes can reach four times `maxRanges`.
   const limit = input.maxRanges ?? DEFAULT_MAX_RANGES
-  for (let pass = 0; pass < MAX_PASSES; pass += 1) {
-    const { ranges } = await listInSession(context, input.type, input.companyRut)
-    const candidates = ranges
-      .filter((range) => inScope(range, input, earliestMs))
-      .filter((range) => !tally.known.has(`${range.from}-${range.to}`) && !seen.has(`${range.from}-${range.to}`))
-      .slice(-limit)
-    if (candidates.length === 0) break
-    const counter = { refusals: 0 }
-    for (const range of candidates) {
-      if (counter.refusals >= MAX_REFUSALS_IN_A_ROW) {
-        context.portal.logger.warn('sii portal stopped annulling: the SII keeps refusing', {
-          operation: context.operation,
-          type: input.type,
-        })
-        break
+  // The step under way, for a failure: the pause between passes belongs to the next listing.
+  let step: FolioFlowFailure['operation'] = 'listFolioRanges'
+  let failure: FolioFlowFailure | null = null
+  try {
+    for (let pass = 0; pass < MAX_PASSES; pass += 1) {
+      const { ranges } = await listInSession(context, input.type, input.companyRut)
+      const candidates = ranges
+        .filter((range) => inScope(range, input, earliestMs))
+        .filter((range) => !tally.known.has(`${range.from}-${range.to}`) && !seen.has(`${range.from}-${range.to}`))
+        .slice(-limit)
+      if (candidates.length === 0) break
+      step = 'annulFolios'
+      const counter = { refusals: 0 }
+      for (const range of candidates) {
+        if (counter.refusals >= MAX_REFUSALS_IN_A_ROW) {
+          context.portal.logger.warn('sii portal stopped annulling: the SII keeps refusing', {
+            operation: context.operation,
+            type: input.type,
+          })
+          break
+        }
+        seen.add(`${range.from}-${range.to}`)
+        const added = await annulRange(context, range, input, company, tally)
+        counter.refusals = added === null ? 0 : counter.refusals + added
       }
-      seen.add(`${range.from}-${range.to}`)
-      const added = await annulRange(context, range, input, company, tally)
-      counter.refusals = added === null ? 0 : counter.refusals + added
+      step = 'listFolioRanges'
+      if (pass < MAX_PASSES - 1) await context.portal.sleep(PASS_PAUSE_MS, context.overrides?.signal)
     }
-    if (pass < MAX_PASSES - 1) await context.portal.sleep(PASS_PAUSE_MS, context.overrides?.signal)
+  } catch (error) {
+    // Annulling cannot be undone: once the SII has answered for some folios, what it did may not be thrown away. A range
+    // that never got through is no answer. Before any answer the error stays an error, and so does anything that is not
+    // a `DteError`: a bug.
+    const answered = tally.annulled.length > 0 || tally.rejected.some((entry) => entry.reason !== 'transport')
+    if (!isDteError(error) || !answered) throw error
+    failure = flowFailure(context, error, step)
   }
   return {
     annulled: tally.annulled,
@@ -395,6 +412,7 @@ export const annulFoliosInSession = async (
     totalAnnulled: sum(tally.annulled),
     totalRejected: sum(tally.rejected),
     knownAnnulled: [...tally.known],
+    failure,
   }
 }
 
@@ -405,19 +423,25 @@ export const annulFoliosInSession = async (
  * the listing and every step is tried up to three times, 1.5 s apart, whatever the error, on top of the retries of the
  * client; a step that changed something on a try that failed is recovered by the "already annulled" answer of the next.
  * Annulment cannot be undone and counts against the quota for six months; to lift a stamping block, issuing with the
- * unused folios works and annulling makes it worse.
+ * unused folios works and annulling makes it worse. For that reason, once the SII has answered for some folios, a
+ * `DteError` that ends the walk (an expired session, a block, the caller's abort, a later listing refused or not
+ * understood) comes back in `failure`, with what was done until then, instead of throwing it away. A range that never
+ * got through, recorded as `transport`, is no answer.
  * ES: Anula folios sin usar: hasta cuatro pasadas por el listado, por rango y folio por folio cuando el rango choca,
  * deteniendo una pasada tras dos negativas reales seguidas. Cada pasada toma los últimos `maxRanges` rangos que aún no
  * intentó, así que `maxRanges` limita una pasada y no la llamada: una llamada puede anular hasta cuatro veces
  * `maxRanges` rangos. Cada consulta del listado y cada paso se intenta hasta tres veces, con 1,5 s entre intentos, sea
  * cual sea el error, encima de los reintentos del cliente; un paso que cambió algo en un intento fallido se recupera
  * con la respuesta "ya anulado" del siguiente. La anulación no se puede deshacer y pesa contra el cupo seis meses; para
- * levantar un bloqueo de timbraje, emitir con los folios sin usar sirve y anular lo empeora.
+ * levantar un bloqueo de timbraje, emitir con los folios sin usar sirve y anular lo empeora. Por eso, cuando el SII ya
+ * respondió por algunos folios, un `DteError` que termina el recorrido (una sesión vencida, un bloqueo, la cancelación de
+ * quien llama, un listado posterior rechazado o ilegible) vuelve en `failure`, con lo hecho hasta entonces, en vez de
+ * botarlo. Un rango que nunca llegó, anotado como `transport`, no es respuesta.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: type and an explicit scope. ES: tipo y un alcance explícito.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
- * @returns EN: what was annulled, what was not, and the memory to persist. ES: lo anulado, lo no anulado y la memoria que guardar.
- * @throws {DteError} EN: `INVALID_OPTION { field }` without a scope or with one that cannot be read, `SII_PORTAL_REJECTED`, `SII_PORTAL_UNEXPECTED_PAGE`, session and block codes. ES: `INVALID_OPTION { field }` sin alcance o con uno ilegible, `SII_PORTAL_REJECTED`, `SII_PORTAL_UNEXPECTED_PAGE`, códigos de sesión y bloqueo.
+ * @returns EN: what was annulled, what was not, the memory to persist, and what cut the walk short. ES: lo anulado, lo no anulado, la memoria que guardar y lo que cortó el recorrido.
+ * @throws {DteError} EN: `INVALID_OPTION { field }` without a scope or with one that cannot be read; `SII_PORTAL_REJECTED`, `SII_PORTAL_UNEXPECTED_PAGE`, session and block codes only before the SII has answered for any folio. ES: `INVALID_OPTION { field }` sin alcance o con uno ilegible; `SII_PORTAL_REJECTED`, `SII_PORTAL_UNEXPECTED_PAGE`, códigos de sesión y bloqueo solo antes de que el SII responda por algún folio.
  */
 export const annulFolios = (
   portal: PortalClient,
