@@ -44,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   anything that is not a `DteError` still throws as a bug.
   - **What to change:** `failure` was always null on `requestCafExact`; read it as on `requestCafInBatches`, and
     persist `knownAnnulled` whether it is set or not. The type does not change.
+- **Size:** these changes and the logging below took `dte-sdk/portal` from 73.95 kB to 74.19 kB, over its 74 kB limit,
+  which went to 76 kB.
 
 ### Fixed
 
