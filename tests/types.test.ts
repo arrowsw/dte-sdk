@@ -114,6 +114,7 @@ import type {
   ClaimEvent,
   ReceiverStatus,
   ReceiverStatusResult,
+  ReceiverAnswer,
   ReceptionDateResult,
 } from '../src'
 import type {
@@ -223,7 +224,12 @@ const _typecheck = () => {
   expectTypeOf<ClaimAction>().toEqualTypeOf<
     'acceptContent' | 'claimContent' | 'acknowledgeGoods' | 'claimPartialShortfall' | 'claimTotalShortfall'
   >()
-  expectTypeOf<ReceiverStatus>().toEqualTypeOf<'accepted' | 'goodsReceived' | 'claimed' | 'none' | 'unknown'>()
+  expectTypeOf<ReceiverStatus>().toEqualTypeOf<
+    'accepted' | 'goodsReceived' | 'claimed' | 'paidInCash' | 'none' | 'unknown'
+  >()
+  expectTypeOf<ReceiverAnswer>().toEqualTypeOf<
+    'annulled' | 'claimed' | 'accepted' | 'paidInCash' | 'tacitlyAccepted' | 'goodsReceived' | 'pending' | 'unknown'
+  >()
   expectTypeOf<UploadKind>().toEqualTypeOf<'dte' | 'receipt' | 'book' | 'folioConsumption'>()
   expectTypeOf<TokenChannel>().toEqualTypeOf<'soap' | 'rest'>()
   expectTypeOf(createPurchaseSalesBook).returns.toEqualTypeOf<PurchaseSalesBook>()

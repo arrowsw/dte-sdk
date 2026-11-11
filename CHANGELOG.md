@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`receiverAnswer` reads a document paid in cash.** The SII registers `PAG` ("DTE Pagado al Contado") on a document
+  issued as paid in cash as it receives it, and the registry then refuses any event on it, acceptance, claim or goods
+  received, with code 27. `receiverAnswer` read `PAG` as changing nothing, so such a document read as `pending` with
+  eight days to claim, and as `tacitlyAccepted` after them, inviting an answer the SII refuses. It now answers the new
+  `paidInCash`, with `claimDeadline` null since nothing can be claimed; an annulment, a claim or an acceptance the
+  registry holds still comes first. `receiverStatus` reads a last `PAG` as `paidInCash` too, where it said `unknown`.
+  - **What to change:** `ReceiverAnswer` and `ReceiverStatus` gain `paidInCash`: an exhaustive `switch` on either
+    needs the case. A caller that offers registry actions offers none on it, and one that shows `claimDeadline` meets
+    null for it.
+  - **Not covered yet:** the SII refuses a document issued as free (`Sin costo`) with the same code, but no events
+    listing of one has been seen, so whether it carries `PAG` is not known; until then it reads as before.
+
+### Added
+
+- **Code 27 in `CLAIM_RESPONSE_CODES`**: "No se puede registrar un evento de un DTE pagado al contado o gratuito",
+  the registry refusing an event on a document paid in cash or free, as production answered an acceptance on
+  2026-11-11. `claimResponseMessage(27)` said "Código de respuesta desconocido: 27".
+
 ## [0.7.0] - 2026-11-10
 
 ### Changed
