@@ -7,14 +7,14 @@ D40 and D41 of the design specs). Tracks [issue #5](https://github.com/arrowsw/d
 
 | Entry | Holds | Size | Reaches `node:` |
 |---|---|---|---|
-| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 34.36 kB | No |
+| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 34.33 kB | No |
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.09 kB | Yes, on first use |
 | `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 74.90 kB | Yes, on first use |
 | `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 10.93 kB | Yes, on first use |
 
 Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
 it. The decision was taken at phase 5b-2, which took `dte-sdk/portal` from 39.35 kB to 55.86 kB; each limit was then the
-measure rounded up to the next 2 kB. The sizes above were measured again on 2026-11-10, for 0.7.0. `createDirectoryTokenCache` took
+measure rounded up to the next 2 kB. The sizes above were measured again on 2026-11-11, for 0.8.0. `createDirectoryTokenCache` took
 `dte-sdk/node` from 4.19 kB to 4.71 kB, and the CAF file search, which parses CAFs, took it to 6.30 kB, over its 6 kB
 limit, which went to 8 kB. The SII office table took `dte-sdk/pdf` from 8.49 kB to 10.45 kB. That table is about 1.9 kB
 of data that the renderer needs for its default office, so it fits neither the root (30.49 kB plus the table is
@@ -36,6 +36,8 @@ limit, which went to 36 kB: the check that a CAF's two keys are a pair, its char
 them, the depth every DOM is allowed and the `codResp` of the receiver's answer. With them `dte-sdk/node`, which now
 reads a CAF file by its declaration, went to 7.09 kB, `dte-sdk/portal` to 74.90 kB and `dte-sdk/pdf` to 10.93 kB, all
 under their limits.
+The receiver's answer for a document paid in cash and the registry's code 27, on 2026-11-11, measured `dte-sdk` at
+34.33 kB; the other entries did not move.
 
 ## Why
 
