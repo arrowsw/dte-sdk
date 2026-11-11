@@ -66,8 +66,11 @@ export const CLAIM_EVENT_CODES: Readonly<Record<string, string>> = {
 }
 
 /**
- * EN: `codResp` of the registry operations (0 ok, 1–19 business answers, -1 internal error).
- * ES: `codResp` — Respuestas de las operaciones del registro (0 ok, 1–19 respuestas de negocio, -1 error interno).
+ * EN: `codResp` of the registry operations (0 ok, 1–19 and 27 business answers, -1 internal error). 27 is the SII
+ * refusing an event on a document paid in cash or free, seen in production on an acceptance of one listed with `PAG`.
+ * ES: `codResp` — Respuestas de las operaciones del registro (0 ok, 1–19 y 27 respuestas de negocio, -1 error interno).
+ * 27 es el SII rechazando un evento sobre un documento pagado al contado o gratuito, visto en producción al aceptar uno
+ * con `PAG` en sus eventos.
  */
 export const CLAIM_RESPONSE_CODES: Readonly<Record<string, string>> = {
   '0': 'Acción completada OK',
@@ -90,6 +93,7 @@ export const CLAIM_RESPONSE_CODES: Readonly<Record<string, string>> = {
   '17': 'Solo la empresa receptora puede registrar eventos',
   '18': 'Documento no recibido en el SII',
   '19': 'Reclamo por mercaderías ya realizado',
+  '27': 'No se puede registrar un evento de un DTE pagado al contado o gratuito',
   '-1': 'Error interno del SII, reintentar',
 }
 
