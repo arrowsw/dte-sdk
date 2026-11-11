@@ -1,3 +1,4 @@
+import { claimResponseMessage } from '../../src/catalogs/claim-codes'
 import { DteError } from '../../src/errors'
 import { createMemoryCapture } from '../../src/sii/capture'
 import type { SiiClientOptions } from '../../src/sii/client'
@@ -135,9 +136,28 @@ describe('registerClaim', () => {
     })
   })
 
-  test.each([5, 7, 8, 11, 17, 19, -1])('code %i comes back as an answer and is sent only once', async (value) => {
+  test.each([5, 7, 8, 11, 17, 19, 27, -1])('code %i comes back as an answer and is sent only once', async (value) => {
     const { sii, fake } = answering(code(value))
     expect(await registerClaim(sii, ACCEPT)).toMatchObject({ code: value, ok: false, description: 'glosa' })
+    expect(posts(fake)).toBe(1)
+  })
+
+  test('a document paid in cash is refused with code 27, which the catalog names, and sent once', async () => {
+    // As production answered an acceptance of an invoice whose events listed only PAG, on 2026-11-11.
+    const { sii, fake } = answering(
+      answer(
+        '<codResp>27</codResp><descResp>No se puede registrar un evento (acuse de recibo, reclamo o aceptacion de contenido) de un DTE pagado al contado o gratuito.</descResp>',
+      ),
+    )
+    const result = await registerClaim(sii, ACCEPT)
+    expect(result).toMatchObject({
+      code: 27,
+      ok: false,
+      description: expect.stringContaining('de un DTE pagado al contado o gratuito.'),
+    })
+    expect(claimResponseMessage(result.code)).toBe(
+      'No se puede registrar un evento de un DTE pagado al contado o gratuito',
+    )
     expect(posts(fake)).toBe(1)
   })
 
@@ -557,6 +577,7 @@ describe('receiverStatus', () => {
     ['RFT', 'claimed'],
     ['NCA', 'none'],
     ['ENC', 'none'],
+    ['PAG', 'paidInCash'],
     ['XYZ', 'unknown'],
     ['', 'unknown'],
     ['constructor', 'unknown'],
@@ -620,7 +641,7 @@ describe('receiverAnswer', () => {
     [at('RFT', 'ACD'), 'claimed'],
     [at('ERM', 'ACD'), 'accepted'],
     [at('ERM'), 'goodsReceived'],
-    [at('PAG', 'ENC'), 'pending'],
+    [at('ENC'), 'pending'],
     [[], 'pending'],
   ] as const)('within the eight days, %j is %s', (events, answer) => {
     expect(receiverAnswer(events, RECEIVED, '2026-09-26')).toEqual({ answer, claimDeadline: '2026-09-26' })
@@ -631,10 +652,25 @@ describe('receiverAnswer', () => {
       answer: 'tacitlyAccepted',
       claimDeadline: '2026-09-26',
     })
-    expect(receiverAnswer(at('ERM', 'PAG'), RECEIVED, '2026-10-30').answer).toBe('tacitlyAccepted')
+    expect(receiverAnswer(at('ERM', 'ENC'), RECEIVED, '2026-10-30').answer).toBe('tacitlyAccepted')
     expect(receiverAnswer(at('RCD'), RECEIVED, '2026-10-30').answer).toBe('claimed')
     expect(receiverAnswer(at('ACD'), RECEIVED, '2026-10-30').answer).toBe('accepted')
     expect(receiverAnswer(at('NCA'), RECEIVED, '2026-10-30').answer).toBe('annulled')
+  })
+
+  test('a document paid in cash takes no answer: paidInCash, with no deadline, whatever the day', () => {
+    for (const today of ['2026-09-19', '2026-09-26', '2026-10-30'])
+      for (const events of [at('PAG'), at('ENC', 'PAG'), at('ERM', 'PAG')])
+        expect(receiverAnswer(events, RECEIVED, today)).toEqual({ answer: 'paidInCash', claimDeadline: null })
+    expect(receiverAnswer(at('PAG'), null, '2030-01-01')).toEqual({ answer: 'paidInCash', claimDeadline: null })
+    expect(receiverAnswer({ code: 15, events: at('PAG') }, RECEIVED, '2026-09-20').answer).toBe('paidInCash')
+    // An annulment, a claim or an acceptance the registry holds still speaks first, with its deadline.
+    expect(receiverAnswer(at('PAG', 'NCA'), RECEIVED, '2026-09-20').answer).toBe('annulled')
+    expect(receiverAnswer(at('RCD', 'PAG'), RECEIVED, '2026-09-20')).toEqual({
+      answer: 'claimed',
+      claimDeadline: '2026-09-26',
+    })
+    expect(receiverAnswer(at('ACD', 'PAG'), RECEIVED, '2026-09-20').answer).toBe('accepted')
   })
 
   test('the eight calendar days cross months and years, and a bare date works too', () => {
@@ -687,6 +723,17 @@ describe('receiverAnswer', () => {
     expect(receiverAnswer(events, '2026-11-02T20:00:00', '2026-11-05')).toEqual({
       answer: 'claimed',
       claimDeadline: '2026-11-10',
+    })
+    // As production listed an invoice paid in cash on 2026-11-11: PAG alone, registered as the SII received it.
+    const paid = answering(
+      answer(
+        '<codResp>15</codResp><descResp>Lista de eventos del documento</descResp>' +
+          '<listaEventosDoc><codEvento>PAG</codEvento><descEvento>DTE Pagado al Contado</descEvento><rutResponsable>76543210</rutResponsable><dvResponsable>3</dvResponsable><fechaEvento>11-11-2026 00:49:38</fechaEvento></listaEventosDoc>',
+      ),
+    )
+    expect(receiverAnswer(await listClaimEvents(paid.sii, doc), '2026-11-11T00:49:00', '2026-11-11')).toEqual({
+      answer: 'paidInCash',
+      claimDeadline: null,
     })
     const received = answering(fx('claims-reception-date.xml'))
     const { receivedAt } = await queryReceptionDate(received.sii, doc)

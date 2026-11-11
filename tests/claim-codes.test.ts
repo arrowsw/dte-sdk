@@ -51,11 +51,12 @@ describe('claim catalogs', () => {
     expect(CLAIM_EVENT_CODES.PAG).toBe('DTE Pagado al Contado')
   })
 
-  test('response codes 0 to 19 and -1 have a message', () => {
-    expect(Object.keys(CLAIM_RESPONSE_CODES)).toHaveLength(21)
+  test('response codes 0 to 19, 27 and -1 have a message', () => {
+    expect(Object.keys(CLAIM_RESPONSE_CODES)).toHaveLength(22)
     expect(claimResponseMessage(0)).toBe('Acción completada OK')
     expect(claimResponseMessage(8)).toBe('Han pasado más de 8 días desde la recepción del documento')
     expect(claimResponseMessage(-1)).toBe('Error interno del SII, reintentar')
+    expect(claimResponseMessage(27)).toBe('No se puede registrar un evento de un DTE pagado al contado o gratuito')
     expect(claimResponseMessage(77)).toBe('Código de respuesta desconocido: 77')
   })
 

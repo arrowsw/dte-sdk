@@ -48,7 +48,7 @@ export type RegisterClaimInput = ClaimDocumentInput & {
  * ES: Resultado de una operación del registro. El SII responde situaciones de negocio con un código, no con un error.
  */
 export type ClaimResult = {
-  /** EN: SII response code (0 ok, 1–19 business, -1 internal). ES: `codResp` — Código de respuesta del SII. */
+  /** EN: SII response code (0 ok, 1–19 and 27 business, -1 internal). ES: `codResp` — Código de respuesta del SII. */
   readonly code: number
   /** EN: SII description (≤ 70 chars). ES: `descResp` — Descripción del SII. */
   readonly description: string
@@ -63,7 +63,7 @@ export type ClaimResult = {
  * ES: Un evento registrado (`listaEventosDoc`).
  */
 export type ClaimEvent = {
-  /** EN: ACD, RCD, ERM, RFP, RFT, NCA, ENC. ES: `codEvento` — Código del evento. */
+  /** EN: ACD, RCD, ERM, RFP, RFT, NCA, ENC, PAG. ES: `codEvento` — Código del evento. */
   readonly code: string
   /** EN: Description. ES: `descEvento` — Descripción del evento. */
   readonly description: string
@@ -105,10 +105,12 @@ export type ReceptionDateResult = {
 }
 
 /**
- * EN: Summary of what the receiver did with a document.
- * ES: Resumen de lo que hizo el receptor con un documento: aceptado, recibo de mercaderías, reclamado, nada, desconocido.
+ * EN: Summary of what the receiver did with a document, or `paidInCash` when the SII marked it paid in cash (`PAG`) and
+ * the registry takes no event on it.
+ * ES: Resumen de lo que hizo el receptor con un documento: aceptado, recibo de mercaderías, reclamado, pagado al contado
+ * (`PAG`, el registro no toma eventos sobre él), nada, desconocido.
  */
-export type ReceiverStatus = 'accepted' | 'goodsReceived' | 'claimed' | 'none' | 'unknown'
+export type ReceiverStatus = 'accepted' | 'goodsReceived' | 'claimed' | 'paidInCash' | 'none' | 'unknown'
 
 /**
  * EN: `receiverStatus` result.
@@ -337,6 +339,7 @@ const EVENT_STATUS: ReadonlyMap<string, ReceiverStatus> = new Map([
   ['RFT', 'claimed'],
   ['NCA', 'none'],
   ['ENC', 'none'],
+  ['PAG', 'paidInCash'],
 ])
 const NO_EVENT_CODES: readonly number[] = [15, 16, 18]
 
@@ -347,10 +350,11 @@ const latestEvent = (events: readonly ClaimEvent[]): ClaimEvent =>
 
 /**
  * EN: What the receiver did, derived from the latest event of `listClaimEvents` (by date, else by position):
- * `accepted` (ACD), `goodsReceived` (ERM), `claimed` (RCD/RFP/RFT), `none` (no events, NCA/ENC), `unknown` otherwise.
- * No events means `none` for `codResp` 15, 16 and 18, and `unknown` for any other code.
+ * `accepted` (ACD), `goodsReceived` (ERM), `claimed` (RCD/RFP/RFT), `paidInCash` (PAG), `none` (no events, NCA/ENC),
+ * `unknown` otherwise. No events means `none` for `codResp` 15, 16 and 18, and `unknown` for any other code.
  * ES: Qué hizo el receptor, derivado del último evento de `listClaimEvents` (por fecha, si no por posición):
- * `accepted` (ACD), `goodsReceived` (ERM), `claimed` (RCD/RFP/RFT), `none` (sin eventos, NCA/ENC), `unknown` en otro caso.
+ * `accepted` (ACD), `goodsReceived` (ERM), `claimed` (RCD/RFP/RFT), `paidInCash` (PAG), `none` (sin eventos, NCA/ENC),
+ * `unknown` en otro caso.
  * Sin eventos es `none` para `codResp` 15, 16 y 18, y `unknown` para cualquier otro código.
  * @throws {DteError} EN: the codes of `listClaimEvents`. ES: los códigos de `listClaimEvents`.
  */
@@ -367,18 +371,22 @@ export const receiverStatus = async (
 
 /**
  * EN: The receiver's answer to a document, Ley 19.983 included: `annulled` (a credit note annulled it, `NCA`),
- * `claimed` (`RCD`, `RFP`, `RFT`), `accepted` (`ACD`), `tacitlyAccepted` (eight calendar days after the SII received it
- * with none of those), `goodsReceived` (`ERM`, with the eight days still running), `pending`, or `unknown` (the events
- * query answered a `codResp` that lists nothing, so nothing can be said).
+ * `claimed` (`RCD`, `RFP`, `RFT`), `accepted` (`ACD`), `paidInCash` (the SII marked it paid in cash, `PAG`, and the
+ * registry refuses any event on it with code 27, so there is nothing to answer and no deadline), `tacitlyAccepted`
+ * (eight calendar days after the SII received it with none of those), `goodsReceived` (`ERM`, with the eight days still
+ * running), `pending`, or `unknown` (the events query answered a `codResp` that lists nothing, so nothing can be said).
  * ES: La respuesta del receptor a un documento, con la Ley 19.983: `annulled` (una nota de crédito lo anuló, `NCA`),
- * `claimed` (`RCD`, `RFP`, `RFT`), `accepted` (`ACD`), `tacitlyAccepted` (ocho días corridos después de que el SII lo
- * recibió sin ninguno de esos), `goodsReceived` (`ERM`, con los ocho días aún corriendo), `pending`, o `unknown` (la
- * consulta de eventos respondió un `codResp` que no lista nada, así que nada puede decirse).
+ * `claimed` (`RCD`, `RFP`, `RFT`), `accepted` (`ACD`), `paidInCash` (el SII lo marcó pagado al contado, `PAG`, y el
+ * registro rechaza cualquier evento sobre él con el código 27, así que no hay nada que responder ni plazo),
+ * `tacitlyAccepted` (ocho días corridos después de que el SII lo recibió sin ninguno de esos), `goodsReceived` (`ERM`,
+ * con los ocho días aún corriendo), `pending`, o `unknown` (la consulta de eventos respondió un `codResp` que no lista
+ * nada, así que nada puede decirse).
  */
 export type ReceiverAnswer =
   | 'annulled'
   | 'claimed'
   | 'accepted'
+  | 'paidInCash'
   | 'tacitlyAccepted'
   | 'goodsReceived'
   | 'pending'
@@ -391,7 +399,7 @@ export type ReceiverAnswer =
 export type ReceiverAnswerResult = {
   /** EN: The answer. ES: La respuesta. */
   readonly answer: ReceiverAnswer
-  /** EN: Last day to claim, YYYY-MM-DD: the day of the SII reception plus eight; null without a reception date. ES: Último día para reclamar, AAAA-MM-DD: el día de la recepción en el SII más ocho; null sin fecha de recepción. */
+  /** EN: Last day to claim, YYYY-MM-DD: the day of the SII reception plus eight; null without a reception date, and for `paidInCash`, which takes no claim. ES: Último día para reclamar, AAAA-MM-DD: el día de la recepción en el SII más ocho; null sin fecha de recepción, y para `paidInCash`, que no admite reclamo. */
   readonly claimDeadline: string | null
 }
 
@@ -400,15 +408,16 @@ const CLAIM_DAYS = 8
 
 /**
  * EN: The receiver's answer from the events of `listClaimEvents` and the reception date of `queryReceptionDate`, with
- * no request: `NCA` comes first, then a claim, then `ACD`; past the deadline with none of them the document is
- * accepted by law (Ley 19.983), and before it `ERM` is goods received and anything else pending. `PAG` and `ENC`
- * change nothing. Given the whole result of `listClaimEvents`, with no events and a `codResp` other than 15, 16 or 18
+ * no request: `NCA` comes first, then a claim, then `ACD`; then `PAG`, a document the SII marked paid in cash, which
+ * the registry takes no event on, so it has no deadline; past the deadline with none of them the document is accepted
+ * by law (Ley 19.983), and before it `ERM` is goods received and anything else pending. `ENC` changes nothing. Given the whole result of `listClaimEvents`, with no events and a `codResp` other than 15, 16 or 18
  * (the codes that list events or say there are none), the query failed and the answer is `unknown`, never pending or
  * tacitly accepted, as `receiverStatus` reads it. `receiverStatus` keeps reading the latest event only.
  * ES: La respuesta del receptor desde los eventos de `listClaimEvents` y la fecha de recepción de `queryReceptionDate`,
- * sin ninguna petición: primero `NCA`, luego un reclamo, luego `ACD`; pasado el plazo sin ninguno de ellos el documento
- * queda aceptado por ley (Ley 19.983), y antes de eso `ERM` es recibo de mercaderías y cualquier otra cosa pendiente.
- * `PAG` y `ENC` no cambian nada. Con el resultado completo de `listClaimEvents`, sin eventos y con un `codResp` distinto
+ * sin ninguna petición: primero `NCA`, luego un reclamo, luego `ACD`; luego `PAG`, un documento que el SII marcó pagado
+ * al contado, sobre el que el registro no toma eventos, así que no tiene plazo; pasado el plazo sin ninguno de ellos el
+ * documento queda aceptado por ley (Ley 19.983), y antes de eso `ERM` es recibo de mercaderías y cualquier otra cosa
+ * pendiente. `ENC` no cambia nada. Con el resultado completo de `listClaimEvents`, sin eventos y con un `codResp` distinto
  * de 15, 16 o 18 (los códigos que listan eventos o dicen que no hay), la consulta falló y la respuesta es `unknown`,
  * nunca pendiente ni aceptada tácitamente, como lo lee `receiverStatus`. `receiverStatus` sigue leyendo solo el último
  * evento.
@@ -444,10 +453,12 @@ export const receiverAnswer = (
         ? 'claimed'
         : has(['ACD'])
           ? 'accepted'
-          : claimDeadline !== null && day > claimDeadline
-            ? 'tacitlyAccepted'
-            : has(['ERM'])
-              ? 'goodsReceived'
-              : 'pending'
-  return { answer, claimDeadline }
+          : has(['PAG'])
+            ? 'paidInCash'
+            : claimDeadline !== null && day > claimDeadline
+              ? 'tacitlyAccepted'
+              : has(['ERM'])
+                ? 'goodsReceived'
+                : 'pending'
+  return { answer, claimDeadline: answer === 'paidInCash' ? null : claimDeadline }
 }
