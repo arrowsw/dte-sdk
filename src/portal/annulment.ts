@@ -182,7 +182,11 @@ const assertDocumentType = (type: unknown): void => {
 
 const isPositiveInteger = (value: number): boolean => Number.isInteger(value) && value > 0
 
-const isSpan = (span: { readonly from: number; readonly to: number }): boolean =>
+/**
+ * EN: True when the folios are positive integers in order.
+ * ES: True cuando los folios son enteros positivos y en orden.
+ */
+export const isSpan = (span: { readonly from: number; readonly to: number }): boolean =>
   isPositiveInteger(span.from) && isPositiveInteger(span.to) && span.from <= span.to
 
 // Annulling cannot be undone, and a value the filters cannot read would widen the scope instead of narrowing it:

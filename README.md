@@ -510,6 +510,60 @@ and what to do; the composite flows return it as data, so the CAFs already obtai
 refusal pages were measured against the real SII, but the pages of an enrolled company (quota, CAF, folio ranges) have not
 been seen yet: see the [portal and folios design](./docs/superpowers/specs/2026-11-02-phase-4-portal-folios-design.md).
 
+### Keeping folios stocked
+
+`unstable_replenishFolios` is one call that keeps a document type stocked. It asks the SII only when the usable folios
+fall below `minimum`, and then in the order that does not make a block worse: ranges already authorized that nobody
+holds are downloaded again, which spends no quota; what is still missing is requested in batches, within the quota;
+and unused folios are annulled as a last resort.
+
+```typescript
+import { unstable_replenishFolios } from 'dte-sdk/portal'
+
+const report = await unstable_replenishFolios(portal, {
+  type: 33,
+  minimum: 20, // replenish below 20 usable folios
+  quantity: 100, // folios to obtain each time
+  cafs: () => store.holdings(33), // every CAF of the type you hold, with its unused folios
+  lastIssuedFolio: await store.lastIssuedFolio(33), // 0 when none was issued
+  coolUntil: state.coolUntil,
+  knownAnnulled: state.knownAnnulled,
+  onObtained: ({ cafs, reobtained }) => store.keep(cafs, reobtained), // runs with the portal lock still held
+})
+// report.status: 'none' | 'coolDown' | 'replenished' | 'partial' | 'blocked' | 'failed'
+await store.saveState({ coolUntil: report.coolUntil, knownAnnulled: report.knownAnnulled })
+```
+
+- **`unstable_replenishFolios` is unstable.** Its shape may change in any release, a patch included. It has not run
+  against the SII yet, in certification or in production, and it requests folios and can annul them, which cannot be
+  undone. Once it has run in both environments it becomes `replenishFolios`.
+- **It stores nothing and schedules nothing.** Call it before issuing, or on a timer. Keep `report.cafs`, whose XML
+  holds a private key, so the report is not something to log, and pass `coolUntil` and `knownAnnulled` back next time.
+  `planFolioReplenishment` is the decision alone, with no I/O: `none`, `coolDown` or `replenish`.
+- **`reason` is the cause.** `expired` when the folios lost to expiry would have reached the minimum, whether some are
+  left or none; otherwise they were used, `low` with some left and `exhausted` with none. `usable` and `expiredFolios`
+  give the numbers. A CAF that expires within `expiryMarginMs`, a day by default, no longer counts.
+- **Say what you hold and what you issued.** `cafs` is every CAF of the type you hold, spent and expired ones too: a
+  range held is never downloaded again and never annulled. `lastIssuedFolio` is the highest folio the company has
+  issued, on any system: a folio up to it is never taken as free. Without `isFolioFree`, every folio after it in a
+  range nobody holds is free; with it, the SII is asked about each one, up to `maxChecksPerRange` per range.
+- **Annulling is off in production** unless you pass `allowAnnul: true`, and on in certification. It runs only for a
+  refusal that unused folios cause, and only when the SII counts more of them (`FOLIOS_DISP`) than the ones in hand. It
+  never touches a CAF held, a range the run downloaded or `exclude`, and it reaches only ranges stamped in the last 180
+  days, ten per pass. Put in `exclude` the folios of documents signed and not received by the SII yet.
+- **A run that ends short cools down.** With no failure, `coolUntil` is 15 minutes ahead (`coolDownMs`); after a
+  session limit or a firewall block, an hour. Until then the call answers `coolDown` and nothing goes out. Any other
+  failure sets none, and a report with enough folios hands back a cool-down still running.
+- **Refusals and failures are data.** `rejection` and `portalMessage` carry the refusal in the SII's own words, and
+  `failure` any other `DteError`. A listing that fails or is refused ends the run before any quota is spent. A request
+  the SII may have granted without handing it over (`stampingUncertain`, `rangeAlreadyAuthorized`) is settled in the
+  same run, by reading the listing again. `partial` with neither means the batches ran out of trips (`maxBatches`).
+- **Several replicas.** The call waits for the portal lock, which may take as long as another replica's run, and then
+  reads `cafs` again. Pass `cafs` as a function and keep what arrives in `onObtained`, which runs with the lock still
+  held: a replica that waited then finds the folios and does nothing. `cafs`, `isIssued`, `isFolioFree` and
+  `onObtained` run under the lock, so they must not call a portal operation of the same client.
+- **Requests go out a second apart,** whatever the step.
+
 ## Purchase and sales register and MIPYME backup
 
 These run on the same session as the rest of the portal.

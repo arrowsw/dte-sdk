@@ -43,8 +43,13 @@ const CONFIRM = 'of_confirma_folio'
 const GENERATE = 'of_genera_folio'
 const DOWNLOAD = 'of_genera_archivo'
 const PATH = '/cvc_cgi/dte/'
-// Requests on one certificate stay this far apart, without keeping any state: the lock is held for this long afterwards.
-const REQUEST_SPACING_MS = 1001
+/**
+ * EN: Requests on one certificate stay this far apart, without keeping any state: the lock is held for this long
+ * afterwards.
+ * ES: Las solicitudes de un certificado se separan este tiempo, sin guardar estado: el candado se mantiene tomado ese
+ * tiempo después.
+ */
+export const REQUEST_SPACING_MS = 1001
 const DOWNLOAD_RETRY_STEP_MS = 3000
 const DOWNLOAD_RETRIES = 3
 
@@ -76,6 +81,8 @@ export type FolioQuota = QuotaFields & {
   readonly unrestricted: boolean
   /** EN: The SII authorizes nothing: "NO SE AUTORIZA TIMBRAJE". ES: El SII no autoriza nada: "NO SE AUTORIZA TIMBRAJE". */
   readonly blocked: boolean
+  /** EN: What the SII wrote when it blocks, in its own words; absent otherwise. ES: Lo que escribió el SII cuando bloquea, con sus palabras; ausente si no. */
+  readonly portalMessage?: string
 }
 
 /**
@@ -373,7 +380,9 @@ export const requestCafInSession = async (context: PortalContext, input: CafRequ
   try {
     return await runRequest(context, input, company)
   } finally {
-    await context.portal.sleep(REQUEST_SPACING_MS, context.overrides?.signal)
+    // A pause cut short, by the caller's abort for one, takes nothing with it: neither the CAF the SII has just
+    // delivered nor what the request said. The next request meets the abort.
+    await context.portal.sleep(REQUEST_SPACING_MS, context.overrides?.signal).catch(() => undefined)
   }
 }
 
@@ -393,7 +402,13 @@ export const queryFolioQuotaInSession = async (
     const { page, atQuota } = await reachQuotaForm(context, started, input.type, company)
     const rejection = hardRejection(page.html)
     if (rejection === 'stampingBlocked')
-      return { unrestricted: false, blocked: true, maxAuthorized: null, availableFolios: null }
+      return {
+        unrestricted: false,
+        blocked: true,
+        maxAuthorized: null,
+        availableFolios: null,
+        portalMessage: stampingBlockReason(page.html) ?? portalMessageOf(page.html),
+      }
     if (rejection !== null)
       throw rejected(context, rejection, { type: input.type, portalMessage: portalMessageOf(page.html) })
     // A page that is not the quota form of the type is never read as an unrationed type.

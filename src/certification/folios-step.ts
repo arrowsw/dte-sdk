@@ -7,6 +7,7 @@ import type { FolioScope } from '../folios/ledger'
 import { cafFingerprint, type FolioRegistry } from '../folios/registry'
 import { annulFolios } from '../portal/annulment'
 import {
+  LIFTED_BY_ANNULLING,
   reobtainFolios,
   requestCafExact,
   requestCafInBatches,
@@ -34,11 +35,9 @@ export type HeldCaf = {
 const ANNUL_WINDOW_DAYS = 180
 const ANNUL_MAX_RANGES = 10
 const MAX_RECEIPT_CHECKS = 30
-// The refusals that come from unused folios: annulling may lift them.
-const RATIONING: ReadonlySet<PortalRejection> = new Set([
-  'quotaInsufficient',
-  'stampingBlocked',
-  'quotaCapReached',
+// The refusals that come from unused folios: annulling may lift them. A block on the person is one more here.
+const RATIONING: ReadonlySet<PortalRejection> = new Set<PortalRejection>([
+  ...LIFTED_BY_ANNULLING,
   'personWithPendingIssues',
 ])
 // After an exact request these mean "less than asked": a run of batches may still cover it. A single folio over the
