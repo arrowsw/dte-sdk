@@ -18,8 +18,16 @@ import {
 
 export type { FolioFlowFailure } from './flow-failure'
 
-const DEFAULT_MAX_BATCHES = 4
-const DEFAULT_MAX_CHECKS_PER_RANGE = 30
+/**
+ * EN: Most trips to the portal in a run of batches, unless the caller says otherwise.
+ * ES: Máximo de viajes al portal en una ronda de tandas, salvo que quien llama diga otra cosa.
+ */
+export const DEFAULT_MAX_BATCHES = 4
+/**
+ * EN: Most folios of a range the caller's check is asked about, unless the caller says otherwise.
+ * ES: Máximo de folios de un rango que se consultan a la verificación de quien llama, salvo que diga otra cosa.
+ */
+export const DEFAULT_MAX_CHECKS_PER_RANGE = 30
 const MAX_RANGES_TO_ANNUL = 20
 
 /**
@@ -49,6 +57,16 @@ export type FolioFlowResult = {
   readonly failure: FolioFlowFailure | null
 }
 
+/**
+ * EN: The refusals that unused folios cause, which annulling them may lift.
+ * ES: Los rechazos que causan los folios sin usar, que anularlos puede levantar.
+ */
+export const LIFTED_BY_ANNULLING: ReadonlySet<PortalRejection> = new Set<PortalRejection>([
+  'quotaInsufficient',
+  'quotaCapReached',
+  'stampingBlocked',
+])
+
 // A refusal of the SII turns into data; a transport failure, a block or an expired session stays an error.
 const asRefusal = (
   error: unknown,
@@ -73,13 +91,13 @@ const refusalResult = (
   failure: null,
 })
 
-// With CAFs in hand a `DteError` that is not a refusal may not throw them away: it becomes data, by its code alone, and
-// the original goes to the logger. With none in hand it stays an error, as `asRefusal` leaves it, and so does anything
-// that is not a `DteError`: a bug.
+// With something in hand a `DteError` that is not a refusal may not throw it away: it becomes data, by its code alone,
+// and the original goes to the logger. With nothing in hand it stays an error, as `asRefusal` leaves it, and so does
+// anything that is not a `DteError`: a bug.
 const settleTrip =
-  (context: PortalContext, cafs: readonly ObtainedCaf[], operation: FolioFlowFailure['operation']) =>
+  (context: PortalContext, holding: boolean, operation: FolioFlowFailure['operation']) =>
   (error: unknown): ReturnType<typeof asRefusal> | { readonly failure: FolioFlowFailure } =>
-    cafs.length > 0 && isDteError(error) && error.code !== 'SII_PORTAL_REJECTED'
+    holding && isDteError(error) && error.code !== 'SII_PORTAL_REJECTED'
       ? { failure: flowFailure(context, error, operation) }
       : asRefusal(error)
 
@@ -164,7 +182,8 @@ export const requestCafExact = (
     }
     const known = input.knownAnnulled ?? []
     const first = await ask()
-    const recoverable = first.rejection === 'quotaInsufficient' || first.rejection === 'stampingBlocked'
+    // A single request never answers `quotaCapReached`: only the batches read a refusal as the cap.
+    const recoverable = first.rejection !== null && LIFTED_BY_ANNULLING.has(first.rejection)
     if (!recoverable || input.allowAnnul !== true || first.availableFolios === 0)
       return { ...first, knownAnnulled: known }
     const annulment = await annulFoliosInSession(context, {
@@ -253,68 +272,81 @@ export const requestCafInBatches = (
   input: RequestCafInBatchesInput,
   overrides?: CallOverrides,
 ): Promise<FolioFlowResult> =>
-  withPortalSession(portal, 'requestCafInBatches', overrides, async (context) => {
-    // Checked once before anything goes out: a later trip would only meet it with CAFs in hand, as a failure.
-    assertQuantity(input.quantity, 'quantity')
-    const company = input.companyRut === undefined ? {} : { companyRut: input.companyRut }
-    const maxBatches = input.maxBatches ?? DEFAULT_MAX_BATCHES
-    const batch = async (
-      number: number,
-      cafs: readonly ObtainedCaf[],
-      covered: number,
-      lastQuota: FolioQuota | null,
-    ): Promise<FolioFlowResult> => {
-      const seen = {
-        maxAuthorized: lastQuota?.maxAuthorized ?? null,
-        availableFolios: lastQuota?.availableFolios ?? null,
-      }
-      // Past the first check the quantity is not covered, so only that check ends complete.
-      const end = (
-        quota: typeof seen,
-        rejection: PortalRejection | null,
-        failure: FolioFlowFailure | null = null,
-      ): FolioFlowResult => ({
-        complete: covered >= input.quantity,
-        cafs,
-        granted: covered,
-        ...quota,
-        rejection,
-        portalMessage: null,
-        failure,
-      })
-      if (covered >= input.quantity) return end(seen, null)
-      if (number > maxBatches) return end(seen, 'quotaCapReached')
-      const quota =
-        number === 1 && input.initialQuota !== undefined
-          ? input.initialQuota
-          : await queryFolioQuotaInSession(context, { type: input.type, ...company }).catch(
-              settleTrip(context, cafs, 'queryFolioQuota'),
-            )
-      if ('failure' in quota) return end(seen, null, quota.failure)
-      if ('rejection' in quota) return refusalResult(cafs, quota.rejection, quota.details)
-      const missing = input.quantity - covered
-      const wanted = quota.unrestricted ? missing : Math.min(quota.maxAuthorized ?? 0, missing)
-      const current = { maxAuthorized: quota.maxAuthorized, availableFolios: quota.availableFolios }
-      if (wanted <= 0) return end(current, 'quotaCapReached')
-      const outcome = await requestCafInSession(context, {
-        type: input.type,
-        quantity: wanted,
-        minQuantity: 1,
-        ...company,
-      }).catch(settleTrip(context, cafs, 'requestCaf'))
-      if ('failure' in outcome) return end(current, null, outcome.failure)
-      // A refusal is said as it was: read as the cap, an uncertain request or a range the SII authorized without its
-      // file would invite asking again for what may be granted. Only one folio over the maximum, after a grant, is the
-      // cap: the SII has no more to give in this pass.
-      if ('rejection' in outcome) {
-        return covered > 0 && outcome.rejection === 'quotaExceeded'
-          ? end(current, 'quotaCapReached')
-          : refusalResult(cafs, outcome.rejection, { ...outcome.details, ...current })
-      }
-      return batch(number + 1, [...cafs, outcome], covered + outcome.granted, quota)
+  withPortalSession(portal, 'requestCafInBatches', overrides, (context) => requestCafInBatchesInSession(context, input))
+
+/**
+ * EN: `requestCafInBatches` inside a session already held. With `holding`, the caller already holds something it must
+ * not lose, so a `DteError` that is not a refusal comes back in `failure` from the first trip on, as it does with CAFs
+ * in hand.
+ * ES: `requestCafInBatches` dentro de una sesión ya tomada. Con `holding`, quien llama ya tiene algo que no puede
+ * perder, así que un `DteError` que no es un rechazo vuelve en `failure` desde el primer viaje, como con CAF en la mano.
+ */
+export const requestCafInBatchesInSession = async (
+  context: PortalContext,
+  input: RequestCafInBatchesInput,
+  holding = false,
+): Promise<FolioFlowResult> => {
+  // Checked once before anything goes out: a later trip would only meet it with CAFs in hand, as a failure.
+  assertQuantity(input.quantity, 'quantity')
+  const company = input.companyRut === undefined ? {} : { companyRut: input.companyRut }
+  const maxBatches = input.maxBatches ?? DEFAULT_MAX_BATCHES
+  const batch = async (
+    number: number,
+    cafs: readonly ObtainedCaf[],
+    covered: number,
+    lastQuota: FolioQuota | null,
+  ): Promise<FolioFlowResult> => {
+    const seen = {
+      maxAuthorized: lastQuota?.maxAuthorized ?? null,
+      availableFolios: lastQuota?.availableFolios ?? null,
     }
-    return batch(1, [], 0, null)
-  })
+    // Past the first check the quantity is not covered, so only that check ends complete.
+    const end = (
+      quota: typeof seen,
+      rejection: PortalRejection | null,
+      failure: FolioFlowFailure | null = null,
+    ): FolioFlowResult => ({
+      complete: covered >= input.quantity,
+      cafs,
+      granted: covered,
+      ...quota,
+      rejection,
+      portalMessage: null,
+      failure,
+    })
+    if (covered >= input.quantity) return end(seen, null)
+    if (number > maxBatches) return end(seen, 'quotaCapReached')
+    const quota =
+      number === 1 && input.initialQuota !== undefined
+        ? input.initialQuota
+        : await queryFolioQuotaInSession(context, { type: input.type, ...company }).catch(
+            settleTrip(context, holding || cafs.length > 0, 'queryFolioQuota'),
+          )
+    if ('failure' in quota) return end(seen, null, quota.failure)
+    if ('rejection' in quota) return refusalResult(cafs, quota.rejection, quota.details)
+    const missing = input.quantity - covered
+    const wanted = quota.unrestricted ? missing : Math.min(quota.maxAuthorized ?? 0, missing)
+    const current = { maxAuthorized: quota.maxAuthorized, availableFolios: quota.availableFolios }
+    if (wanted <= 0) return end(current, 'quotaCapReached')
+    const outcome = await requestCafInSession(context, {
+      type: input.type,
+      quantity: wanted,
+      minQuantity: 1,
+      ...company,
+    }).catch(settleTrip(context, holding || cafs.length > 0, 'requestCaf'))
+    if ('failure' in outcome) return end(current, null, outcome.failure)
+    // A refusal is said as it was: read as the cap, an uncertain request or a range the SII authorized without its
+    // file would invite asking again for what may be granted. Only one folio over the maximum, after a grant, is the
+    // cap: the SII has no more to give in this pass.
+    if ('rejection' in outcome) {
+      return covered > 0 && outcome.rejection === 'quotaExceeded'
+        ? end(current, 'quotaCapReached')
+        : refusalResult(cafs, outcome.rejection, { ...outcome.details, ...current })
+    }
+    return batch(number + 1, [...cafs, outcome], covered + outcome.granted, quota)
+  }
+  return batch(1, [], 0, null)
+}
 
 /**
  * EN: Input of `reobtainFolios`.
@@ -419,7 +451,7 @@ const reobtainInSession = async (context: PortalContext, input: ReobtainFoliosIn
     const freeFolios = await freeFoliosOf(range, input.quantity - covered.folios, input)
     if (freeFolios.length > 0) {
       const caf = await reobtainCafInSession(context, { type: input.type, range }).catch((error: unknown) => {
-        const settled = settleTrip(context, cafs, 'reobtainCaf')(error)
+        const settled = settleTrip(context, cafs.length > 0, 'reobtainCaf')(error)
         if ('failure' in settled) return { ...settled, reason: errorMessage(error) }
         context.portal.logger.warn('sii portal could not reobtain a range', { rejection: settled.rejection })
         return null

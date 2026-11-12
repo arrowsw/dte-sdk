@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Keeping folios stocked, unsafe.** `unsafe_replenishFolios(portal, { type, minimum, quantity, cafs,
+  lastIssuedFolio, … })` in `dte-sdk/portal` is one call that asks the SII for folios only when the usable ones fall
+  below `minimum`, in the order that does not make a block worse: ranges already authorized that nobody holds are
+  downloaded again without spending quota, what is still missing is requested in batches within the quota, and unused
+  folios are annulled as a last resort, in certification only unless `allowAnnul` says otherwise. Annulling never
+  touches a CAF held or a range the run downloaded, runs only when the SII counts more unused folios than the ones in
+  hand, and reaches only ranges stamped in the last 180 days. A run that ends short sets `coolUntil`, 15 minutes ahead
+  after a refusal and an hour after a session limit or a firewall block. A request the SII may have granted without
+  handing it over is settled in the same run by reading the listing again, and every request goes out a second after
+  the one before. It stores nothing: the caller keeps the CAFs, in `onObtained` while the portal lock is still held,
+  and passes `coolUntil` and `knownAnnulled` back. It is unsafe because it has not run against the SII yet, in either
+  environment; once it has, it becomes `replenishFolios`.
+- **`planFolioReplenishment`**, the decision alone and with no I/O: `none`, `coolDown` or `replenish`, with `usable`,
+  `expiredFolios` and a `reason` that is the cause, `expired` when the folios lost to expiry would have reached the
+  minimum and otherwise `low` or `exhausted`.
+- **`FolioQuota.portalMessage`**: `queryFolioQuota` hands over what the SII wrote when it blocks stamping, which it
+  kept to itself.
+  - **What to change:** nothing, unless a test compares a blocked quota whole: it has one more field.
+- **`listReobtainableRanges` in `FolioFlowFailure['operation']`**, for a listing of ranges to download again that
+  stops a flow.
+  - **What to change:** an exhaustive `switch` on `operation` needs the case.
+
+### Fixed
+
+- **`requestCaf` keeps the CAF when the pause after it is cut short.** Each request is followed by a pause of a
+  second, and a pause that failed, with the caller's abort for one, replaced the outcome of the request: the CAF the
+  SII had just delivered was lost, or the refusal it had stated came back as `REQUEST_ABORTED`. The pause now takes
+  nothing with it, in `requestCaf`, `requestCafExact` and `requestCafInBatches`; the next request meets the abort.
+
 ## [0.8.0] - 2026-11-11
 
 ### Changed

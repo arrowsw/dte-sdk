@@ -15,7 +15,13 @@ export type FolioFlowFailure = {
   /** EN: The error code. ES: El código del error. */
   readonly code: DteErrorCode
   /** EN: The step that failed. Reading the quota or listing ranges changes nothing; a request may have been granted all the same, and `listReobtainableRanges` says whether it was; an annulment may have gone through, and the next one hears it from the SII as "already annulled". ES: El paso que falló. Leer el cupo o listar rangos no cambia nada; una solicitud pudo otorgarse igual, y `listReobtainableRanges` dice si se otorgó; una anulación pudo pasar, y la siguiente lo sabe por el SII como "ya anulado". */
-  readonly operation: 'queryFolioQuota' | 'requestCaf' | 'reobtainCaf' | 'listFolioRanges' | 'annulFolios'
+  readonly operation:
+    | 'queryFolioQuota'
+    | 'requestCaf'
+    | 'listReobtainableRanges'
+    | 'reobtainCaf'
+    | 'listFolioRanges'
+    | 'annulFolios'
   /** EN: The kind of refusal when `code` is `SII_PORTAL_REJECTED`, as a listing the SII refuses after an annulment; absent otherwise. ES: El tipo de rechazo cuando `code` es `SII_PORTAL_REJECTED`, como un listado que el SII rechaza después de una anulación; ausente si no. */
   readonly rejection?: PortalRejection
 }

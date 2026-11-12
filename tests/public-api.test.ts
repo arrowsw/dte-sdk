@@ -320,6 +320,7 @@ const PORTAL_EXPORTS = [
   'moveVatToCommonUse',
   'moveVatToRecoverable',
   'openPortalSession',
+  'planFolioReplenishment',
   'portalRejectionMessage',
   'queryCertificationSets',
   'queryFolioQuota',
@@ -329,6 +330,7 @@ const PORTAL_EXPORTS = [
   'requestCaf',
   'requestCafExact',
   'requestCafInBatches',
+  'unsafe_replenishFolios',
   'unstable_fetchActivityVerification',
 ] as const
 

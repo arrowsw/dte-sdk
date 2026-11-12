@@ -200,6 +200,21 @@ describe('requestCaf', () => {
     expect(harness.posted('of_genera_archivo')).toHaveLength(4)
   })
 
+  test('a pause that fails does not throw away the CAF the SII delivered, nor hide what a request said', async () => {
+    const aborted = {
+      sleep: async (): Promise<void> => {
+        throw new DteError('REQUEST_ABORTED')
+      },
+    }
+    const granted = await signedIn([entry, ...FULL_FLOW()], aborted)
+    await expect(requestCaf(granted.portal, { type: 33, quantity: 80 })).resolves.toMatchObject({ granted: 100 })
+    const refused = await signedIn(
+      [entry, route('of_solicita_folios_dcto', REJECTION_PAGES.companyNotAuthorized)],
+      aborted,
+    )
+    expect((await failure(requestCaf(refused.portal, { type: 33, quantity: 80 }))).code).toBe('SII_PORTAL_REJECTED')
+  })
+
   test('below minQuantity nothing is stamped', async () => {
     const harness = await signedIn([entry, route('of_solicita_folios_dcto', quotaForm(2, 6))])
     const error = await failure(requestCaf(harness.portal, { type: 33, quantity: 5, minQuantity: 5 }))
@@ -440,6 +455,14 @@ describe('queryFolioQuota', () => {
       blocked: true,
       maxAuthorized: null,
       availableFolios: null,
+      portalMessage: 'NO AUTORIZA TIMBRAJE ELECTRÓNICA - usted tiene folios suficientes.',
+    })
+    // A block page too long to cut its reason out of: the whole text of the page is what the SII wrote.
+    const wordy = page(`<p>NO AUTORIZA TIMBRAJE</p><p>${'los folios vigentes '.repeat(40)}</p>`)
+    const long = await signedIn([entry, route('of_solicita_folios_dcto', wordy)])
+    await expect(queryFolioQuota(long.portal, { type: 33 })).resolves.toMatchObject({
+      blocked: true,
+      portalMessage: expect.stringContaining('NO AUTORIZA TIMBRAJE los folios vigentes'),
     })
   })
 

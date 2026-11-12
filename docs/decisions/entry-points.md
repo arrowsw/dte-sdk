@@ -9,7 +9,7 @@ D40 and D41 of the design specs). Tracks [issue #5](https://github.com/arrowsw/d
 |---|---|---|---|
 | `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 34.33 kB | No |
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.09 kB | Yes, on first use |
-| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 74.90 kB | Yes, on first use |
+| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 76.54 kB | Yes, on first use |
 | `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 10.93 kB | Yes, on first use |
 
 Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
@@ -38,6 +38,8 @@ reads a CAF file by its declaration, went to 7.09 kB, `dte-sdk/portal` to 74.90 
 under their limits.
 The receiver's answer for a document paid in cash and the registry's code 27, on 2026-11-11, measured `dte-sdk` at
 34.33 kB; the other entries did not move.
+Keeping folios stocked in one call, on 2026-11-12, took `dte-sdk/portal` from 74.90 kB to 76.54 kB, over its 76 kB
+limit, which went to 78 kB.
 
 ## Why
 
