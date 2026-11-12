@@ -330,8 +330,8 @@ const PORTAL_EXPORTS = [
   'requestCaf',
   'requestCafExact',
   'requestCafInBatches',
-  'unsafe_replenishFolios',
   'unstable_fetchActivityVerification',
+  'unstable_replenishFolios',
 ] as const
 
 const PDF_EXPORTS = [

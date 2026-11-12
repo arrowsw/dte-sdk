@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { DteError } from '../../src/errors'
 import {
   planFolioReplenishment,
-  unsafe_replenishFolios,
+  unstable_replenishFolios,
   type CafHolding,
   type ReplenishFoliosInput,
 } from '../../src/portal/replenish'
@@ -181,11 +181,11 @@ describe('planFolioReplenishment', () => {
   })
 })
 
-describe('unsafe_replenishFolios', () => {
+describe('unstable_replenishFolios', () => {
   test('enough folios: nothing goes out, and the memory comes back as it was', async () => {
     const harness = portalWith([])
     await expect(
-      unsafe_replenishFolios(harness.portal, { ...base, cafs: [held(30)], knownAnnulled: ['1-6'] }),
+      unstable_replenishFolios(harness.portal, { ...base, cafs: [held(30)], knownAnnulled: ['1-6'] }),
     ).resolves.toEqual({
       status: 'none',
       reason: null,
@@ -211,14 +211,14 @@ describe('unsafe_replenishFolios', () => {
 
   test('with enough folios a cool-down still running is handed back, and one that ended is not', async () => {
     const harness = portalWith([])
-    const run = (coolUntil: Date) => unsafe_replenishFolios(harness.portal, { ...base, cafs: [held(30)], coolUntil })
+    const run = (coolUntil: Date) => unstable_replenishFolios(harness.portal, { ...base, cafs: [held(30)], coolUntil })
     await expect(run(after(HOUR))).resolves.toMatchObject({ status: 'none', coolUntil: after(HOUR) })
     await expect(run(FIXED_NOW)).resolves.toMatchObject({ status: 'none', coolUntil: null })
   })
 
   test('a cool-down running: nothing goes out, and the cool-down comes back', async () => {
     const harness = portalWith([])
-    const report = await unsafe_replenishFolios(harness.portal, { ...base, cafs: [held(5)], coolUntil: after(HOUR) })
+    const report = await unstable_replenishFolios(harness.portal, { ...base, cafs: [held(5)], coolUntil: after(HOUR) })
     expect(report).toMatchObject({ status: 'coolDown', reason: null, usable: 5, wanted: 0, coolUntil: after(HOUR) })
     expect(harness.fake.requests).toEqual([])
   })
@@ -226,7 +226,7 @@ describe('unsafe_replenishFolios', () => {
   test('the CAFs are read again under the lock, from a function that may answer at once', async () => {
     const harness = portalWith([])
     const reads = [[held(5)], [held(5), held(100, { range: { from: 101, to: 200 } })]]
-    const report = await unsafe_replenishFolios(harness.portal, { ...base, cafs: () => reads.shift() ?? [] })
+    const report = await unstable_replenishFolios(harness.portal, { ...base, cafs: () => reads.shift() ?? [] })
     expect(report).toMatchObject({ status: 'none', usable: 105 })
     expect(harness.fake.requests).toEqual([])
   })
@@ -235,7 +235,7 @@ describe('unsafe_replenishFolios', () => {
     const harness = portalWith([])
     const read = jest.fn(async () => [])
     const bad = async (overrides: Partial<ReplenishFoliosInput>): Promise<unknown> => {
-      const error = await failure(unsafe_replenishFolios(harness.portal, { ...base, cafs: read, ...overrides }))
+      const error = await failure(unstable_replenishFolios(harness.portal, { ...base, cafs: read, ...overrides }))
       return [error.code, error.details.field]
     }
     expect(await bad({ coolDownMs: 0 })).toEqual(['INVALID_OPTION', 'coolDownMs'])
@@ -261,7 +261,7 @@ describe('unsafe_replenishFolios', () => {
       ]),
       ...at.download(CAF_XML),
     ])
-    const report = await unsafe_replenishFolios(harness.portal, {
+    const report = await unstable_replenishFolios(harness.portal, {
       ...base,
       cafs: [held(5)],
       lastIssuedFolio: 95,
@@ -288,7 +288,7 @@ describe('unsafe_replenishFolios', () => {
   test('with no check of its own, every folio after the last one issued is free', async () => {
     const run = async (lastIssuedFolio: number) => {
       const harness = await signedIn([...at.listing([[201, 300]]), ...at.download(CAF_XML)])
-      return unsafe_replenishFolios(harness.portal, { ...base, lastIssuedFolio })
+      return unstable_replenishFolios(harness.portal, { ...base, lastIssuedFolio })
     }
     await expect(run(0)).resolves.toMatchObject({
       status: 'replenished',
@@ -310,7 +310,7 @@ describe('unsafe_replenishFolios', () => {
       at.always('of_solicita_folios_dcto', quotaForm(0, 0)),
     ])
     const checked: number[] = []
-    const report = await unsafe_replenishFolios(harness.portal, {
+    const report = await unstable_replenishFolios(harness.portal, {
       ...base,
       lastIssuedFolio: 250,
       maxChecksPerRange: 3,
@@ -335,7 +335,7 @@ describe('unsafe_replenishFolios', () => {
       at.replies('of_solicita_folios_dcto', quotaForm(100, 0), quotaForm(100, 0)),
       at.replies('of_confirma_folio', CAF_XML),
     ])
-    const report = await unsafe_replenishFolios(harness.portal, {
+    const report = await unstable_replenishFolios(harness.portal, {
       ...base,
       cafs: [held(0)],
       lastIssuedFolio: 200,
@@ -361,7 +361,7 @@ describe('unsafe_replenishFolios', () => {
       at.replies('of_solicita_folios_dcto', quotaForm(100, 0), quotaForm(100, 0)),
       at.replies('of_confirma_folio', CAF_XML),
     ])
-    const report = await unsafe_replenishFolios(harness.portal, {
+    const report = await unstable_replenishFolios(harness.portal, {
       ...base,
       cafs: [held(5)],
       lastIssuedFolio: 95,
@@ -386,7 +386,7 @@ describe('unsafe_replenishFolios', () => {
       at.replies('of_solicita_folios_dcto', quotaForm(100, 0), quotaForm(100, 0)),
       at.replies('of_confirma_folio', CAF_XML),
     ])
-    const report = await unsafe_replenishFolios(harness.portal, {
+    const report = await unstable_replenishFolios(harness.portal, {
       ...base,
       cafs: [held(5), held(80, OLD)],
       lastIssuedFolio: 200,
@@ -409,7 +409,7 @@ describe('unsafe_replenishFolios', () => {
 
     test('blocked, with what the SII wrote and a cool-down, and nothing annulled', async () => {
       const harness = await blocked()
-      const report = await unsafe_replenishFolios(harness.portal, { ...base, cafs: [held(0)], lastIssuedFolio: 100 })
+      const report = await unstable_replenishFolios(harness.portal, { ...base, cafs: [held(0)], lastIssuedFolio: 100 })
       expect(report).toMatchObject({
         status: 'blocked',
         steps: ['reobtain', 'quota'],
@@ -423,13 +423,13 @@ describe('unsafe_replenishFolios', () => {
 
     test('the cool-down of a refusal can be set', async () => {
       const harness = await blocked()
-      const report = await unsafe_replenishFolios(harness.portal, { ...base, coolDownMs: 5 * MINUTE })
+      const report = await unstable_replenishFolios(harness.portal, { ...base, coolDownMs: 5 * MINUTE })
       expect(report.coolUntil).toEqual(after(5 * MINUTE))
     })
 
     test('annulling there is the choice of the caller', async () => {
       const harness = await blocked()
-      const report = await unsafe_replenishFolios(harness.portal, { ...base, allowAnnul: true })
+      const report = await unstable_replenishFolios(harness.portal, { ...base, allowAnnul: true })
       expect(report).toMatchObject({
         status: 'blocked',
         steps: ['reobtain', 'quota', 'annul', 'quota'],
@@ -454,7 +454,7 @@ describe('unsafe_replenishFolios', () => {
       ),
     ])
     // The CAF held expires in five days: the policy no longer counts it, and annulling still leaves it alone.
-    const report = await unsafe_replenishFolios(harness.portal, {
+    const report = await unstable_replenishFolios(harness.portal, {
       ...base,
       cafs: [held(10, { authorizationDate: '2026-05-20' })],
       lastIssuedFolio: 90,
@@ -487,7 +487,7 @@ describe('unsafe_replenishFolios', () => {
       at.replies('of_confirma_folio', CAF_XML),
       ...at.annul(unusedRangesPage([[1, 100]])),
     ])
-    const report = await unsafe_replenishFolios(harness.portal, { ...base, quantity: 150 })
+    const report = await unstable_replenishFolios(harness.portal, { ...base, quantity: 150 })
     expect(report).toMatchObject({
       status: 'partial',
       obtained: 100,
@@ -525,7 +525,7 @@ describe('unsafe_replenishFolios', () => {
         ]),
       ),
     ])
-    const report = await unsafe_replenishFolios(harness.portal, { ...base, quantity: 150 })
+    const report = await unstable_replenishFolios(harness.portal, { ...base, quantity: 150 })
     expect(harness.posted('af_anular3').map((form) => form.FOLIO_INI)).toEqual(['301'])
     expect(report).toMatchObject({
       status: 'replenished',
@@ -543,7 +543,7 @@ describe('unsafe_replenishFolios', () => {
       at.replies('of_solicita_folios_dcto', quotaForm(100, 900), quotaForm(100, 900)),
       at.replies('of_confirma_folio', CAF_XML),
     ])
-    const report = await unsafe_replenishFolios(harness.portal, {
+    const report = await unstable_replenishFolios(harness.portal, {
       ...base,
       quantity: 200,
       maxBatches: 1,
@@ -572,7 +572,7 @@ describe('unsafe_replenishFolios', () => {
 
     test('is annulled when the SII counts more unused folios than the ones in hand, and then it asks again', async () => {
       const harness = await capped(30, quotaForm(100, 0), quotaForm(100, 0))
-      const report = await unsafe_replenishFolios(harness.portal, base)
+      const report = await unstable_replenishFolios(harness.portal, base)
       expect(report).toMatchObject({
         status: 'replenished',
         annulled: [{ from: 301, to: 306, count: 6 }],
@@ -582,21 +582,21 @@ describe('unsafe_replenishFolios', () => {
 
     test('is left alone when annulling is not allowed, when the folios are the ones in hand, or when there are none', async () => {
       const forbidden = await capped(30)
-      await expect(unsafe_replenishFolios(forbidden.portal, { ...base, allowAnnul: false })).resolves.toMatchObject({
+      await expect(unstable_replenishFolios(forbidden.portal, { ...base, allowAnnul: false })).resolves.toMatchObject({
         status: 'blocked',
         rejection: 'quotaCapReached',
         availableFolios: 30,
       })
       const inHand = await capped(5)
       await expect(
-        unsafe_replenishFolios(inHand.portal, { ...base, cafs: [held(5)], lastIssuedFolio: 95 }),
+        unstable_replenishFolios(inHand.portal, { ...base, cafs: [held(5)], lastIssuedFolio: 95 }),
       ).resolves.toMatchObject({
         status: 'blocked',
         rejection: 'quotaCapReached',
         steps: ['reobtain', 'quota', 'request'],
       })
       const none = await capped(0)
-      await expect(unsafe_replenishFolios(none.portal, base)).resolves.toMatchObject({
+      await expect(unstable_replenishFolios(none.portal, base)).resolves.toMatchObject({
         status: 'blocked',
         rejection: 'quotaCapReached',
       })
@@ -606,7 +606,7 @@ describe('unsafe_replenishFolios', () => {
 
   test('with nothing to annul, the refusal of the SII stays', async () => {
     const harness = await signedIn([...nothingToReobtain, at.entry, blockedForGood, ...at.annul(page('sin rangos'))])
-    await expect(unsafe_replenishFolios(harness.portal, base)).resolves.toMatchObject({
+    await expect(unstable_replenishFolios(harness.portal, base)).resolves.toMatchObject({
       status: 'blocked',
       rejection: 'stampingBlocked',
       portalMessage: BLOCK_WORDS,
@@ -622,7 +622,7 @@ describe('unsafe_replenishFolios', () => {
       blockedForGood,
       ...at.annul(unusedRangesPage([[301, 306]])),
     ])
-    await expect(unsafe_replenishFolios(harness.portal, base)).resolves.toMatchObject({
+    await expect(unstable_replenishFolios(harness.portal, base)).resolves.toMatchObject({
       status: 'blocked',
       rejection: 'stampingBlocked',
       portalMessage: BLOCK_WORDS,
@@ -638,7 +638,7 @@ describe('unsafe_replenishFolios', () => {
       ...blocked,
       { url: `${MAULLIN}/af_anular1`, reply: { body: refusedPage('ANULACION DE FOLIOS') } },
     ])
-    await expect(unsafe_replenishFolios(refused.portal, base)).resolves.toMatchObject({
+    await expect(unstable_replenishFolios(refused.portal, base)).resolves.toMatchObject({
       status: 'blocked',
       rejection: 'optionNotAuthorized',
       portalMessage: expect.stringContaining('autorizado'),
@@ -647,7 +647,7 @@ describe('unsafe_replenishFolios', () => {
       ...blocked,
       { url: `${MAULLIN}/af_anular1`, reply: new DteError('TRANSPORT_FAILED') },
     ])
-    await expect(unsafe_replenishFolios(broken.portal, base)).resolves.toMatchObject({
+    await expect(unstable_replenishFolios(broken.portal, base)).resolves.toMatchObject({
       status: 'failed',
       failure: { code: 'TRANSPORT_FAILED', operation: 'annulFolios' },
       coolUntil: null,
@@ -667,7 +667,7 @@ describe('unsafe_replenishFolios', () => {
       at.replies('af_anular3', ANNUL_FORM, { status: 403 }, { status: 403 }, { status: 403 }),
       { url: `${MAULLIN}/af_anular`, reply: { body: ANNUL_OK } },
     ])
-    await expect(unsafe_replenishFolios(cut.portal, base)).resolves.toMatchObject({
+    await expect(unstable_replenishFolios(cut.portal, base)).resolves.toMatchObject({
       status: 'failed',
       annulled: [{ from: 301, to: 302 }],
       knownAnnulled: ['301-302'],
@@ -682,7 +682,7 @@ describe('unsafe_replenishFolios', () => {
       at.entry,
       at.replies('of_solicita_folios_dcto', REJECTION_PAGES.companyNotAuthorized),
     ])
-    await expect(unsafe_replenishFolios(harness.portal, base)).resolves.toMatchObject({
+    await expect(unstable_replenishFolios(harness.portal, base)).resolves.toMatchObject({
       status: 'blocked',
       rejection: 'companyNotAuthorized',
       portalMessage: expect.any(String),
@@ -695,26 +695,26 @@ describe('unsafe_replenishFolios', () => {
     const failing = (reply: Error) =>
       signedIn([...nothingToReobtain, at.entry, { url: `${MAULLIN}/of_solicita_folios_dcto`, reply }])
     const transport = await failing(new DteError('TRANSPORT_FAILED'))
-    await expect(unsafe_replenishFolios(transport.portal, base)).resolves.toMatchObject({
+    await expect(unstable_replenishFolios(transport.portal, base)).resolves.toMatchObject({
       status: 'failed',
       failure: { code: 'TRANSPORT_FAILED', operation: 'queryFolioQuota' },
       coolUntil: null,
     })
     const limit = await failing(new DteError('SII_PORTAL_SESSION_LIMIT'))
-    await expect(unsafe_replenishFolios(limit.portal, base)).resolves.toMatchObject({
+    await expect(unstable_replenishFolios(limit.portal, base)).resolves.toMatchObject({
       status: 'failed',
       failure: { code: 'SII_PORTAL_SESSION_LIMIT' },
       coolUntil: after(HOUR),
     })
     const firewall = await failing(new DteError('SII_PORTAL_BLOCKED'))
-    await expect(unsafe_replenishFolios(firewall.portal, base)).resolves.toMatchObject({
+    await expect(unstable_replenishFolios(firewall.portal, base)).resolves.toMatchObject({
       status: 'failed',
       failure: { code: 'SII_PORTAL_BLOCKED' },
       coolUntil: after(HOUR),
     })
     // A longer cool-down of the caller covers them too.
     const longer = await failing(new DteError('SII_PORTAL_BLOCKED'))
-    await expect(unsafe_replenishFolios(longer.portal, { ...base, coolDownMs: 2 * HOUR })).resolves.toMatchObject({
+    await expect(unstable_replenishFolios(longer.portal, { ...base, coolDownMs: 2 * HOUR })).resolves.toMatchObject({
       coolUntil: after(2 * HOUR),
     })
     const request = await signedIn([
@@ -723,7 +723,7 @@ describe('unsafe_replenishFolios', () => {
       at.replies('of_solicita_folios_dcto', quotaForm(100, 0), quotaForm(100, 0)),
       at.replies('of_confirma_folio', new DteError('TRANSPORT_FAILED')),
     ])
-    await expect(unsafe_replenishFolios(request.portal, base)).resolves.toMatchObject({
+    await expect(unstable_replenishFolios(request.portal, base)).resolves.toMatchObject({
       status: 'failed',
       steps: ['reobtain', 'quota', 'request'],
       failure: { code: 'TRANSPORT_FAILED', operation: 'requestCaf' },
@@ -735,7 +735,7 @@ describe('unsafe_replenishFolios', () => {
     const failed = await signedIn([
       { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: new DteError('TRANSPORT_FAILED') },
     ])
-    await expect(unsafe_replenishFolios(failed.portal, base)).resolves.toMatchObject({
+    await expect(unstable_replenishFolios(failed.portal, base)).resolves.toMatchObject({
       status: 'failed',
       steps: ['reobtain'],
       failure: { code: 'TRANSPORT_FAILED', operation: 'listReobtainableRanges' },
@@ -744,7 +744,7 @@ describe('unsafe_replenishFolios', () => {
     const refused = await signedIn([
       { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: REJECTION_PAGES.optionNotAuthorized } },
     ])
-    await expect(unsafe_replenishFolios(refused.portal, base)).resolves.toMatchObject({
+    await expect(unstable_replenishFolios(refused.portal, base)).resolves.toMatchObject({
       status: 'blocked',
       steps: ['reobtain'],
       rejection: 'optionNotAuthorized',
@@ -755,7 +755,7 @@ describe('unsafe_replenishFolios', () => {
 
   test('a download that fails while reobtaining is data, with what was downloaded before it', async () => {
     const empty = await signedIn([...at.listing([[201, 300]]), ...at.download(new DteError('TRANSPORT_FAILED'))])
-    await expect(unsafe_replenishFolios(empty.portal, base)).resolves.toMatchObject({
+    await expect(unstable_replenishFolios(empty.portal, base)).resolves.toMatchObject({
       status: 'failed',
       steps: ['reobtain'],
       failure: { code: 'TRANSPORT_FAILED', operation: 'reobtainCaf' },
@@ -767,7 +767,7 @@ describe('unsafe_replenishFolios', () => {
       ]),
       ...at.download(CAF_XML, new DteError('TRANSPORT_FAILED')),
     ])
-    const report = await unsafe_replenishFolios(some.portal, base)
+    const report = await unstable_replenishFolios(some.portal, base)
     expect(report).toMatchObject({
       status: 'partial',
       steps: ['reobtain'],
@@ -791,7 +791,7 @@ describe('unsafe_replenishFolios', () => {
       ],
       { logger },
     )
-    await expect(unsafe_replenishFolios(harness.portal, base)).resolves.toMatchObject({
+    await expect(unstable_replenishFolios(harness.portal, base)).resolves.toMatchObject({
       status: 'replenished',
       obtained: 90,
       reobtained: [{ from: 211, to: 300 }],
@@ -807,7 +807,7 @@ describe('unsafe_replenishFolios', () => {
       ]),
       ...at.download(CAF_XML),
     ])
-    const report = await unsafe_replenishFolios(harness.portal, {
+    const report = await unstable_replenishFolios(harness.portal, {
       ...base,
       isFolioFree: async (folio) => {
         if (folio >= 211) throw new DteError('TRANSPORT_FAILED')
@@ -825,7 +825,7 @@ describe('unsafe_replenishFolios', () => {
 
   test('a reobtained CAF is judged by the margin of the policy: one about to expire does not count', async () => {
     const counted = await signedIn([...at.listing([[1, 100]]), ...at.download(SOON_CAF_XML)])
-    await expect(unsafe_replenishFolios(counted.portal, base)).resolves.toMatchObject({
+    await expect(unstable_replenishFolios(counted.portal, base)).resolves.toMatchObject({
       status: 'replenished',
       steps: ['reobtain'],
       obtained: 100,
@@ -838,7 +838,7 @@ describe('unsafe_replenishFolios', () => {
       at.replies('of_solicita_folios_dcto', quotaForm(100, 0), quotaForm(100, 0)),
       at.replies('of_confirma_folio', CAF_XML),
     ])
-    const report = await unsafe_replenishFolios(dropped.portal, { ...base, expiryMarginMs: 7 * DAY })
+    const report = await unstable_replenishFolios(dropped.portal, { ...base, expiryMarginMs: 7 * DAY })
     expect(report).toMatchObject({
       status: 'replenished',
       steps: ['reobtain', 'quota', 'request'],
@@ -861,7 +861,7 @@ describe('unsafe_replenishFolios', () => {
         at.always('of_solicita_folios_dcto', quotaForm(100, 0)),
         at.replies('of_confirma_folio', uncertain),
       ])
-      await expect(unsafe_replenishFolios(harness.portal, base)).resolves.toMatchObject({
+      await expect(unstable_replenishFolios(harness.portal, base)).resolves.toMatchObject({
         status: 'replenished',
         obtained: 100,
         rejection: null,
@@ -880,7 +880,7 @@ describe('unsafe_replenishFolios', () => {
         at.replies('of_confirma_folio', uncertain),
       ])
       const onObtained = jest.fn()
-      await expect(unsafe_replenishFolios(harness.portal, { ...base, onObtained })).resolves.toMatchObject({
+      await expect(unstable_replenishFolios(harness.portal, { ...base, onObtained })).resolves.toMatchObject({
         status: 'blocked',
         rejection: 'stampingUncertain',
         steps: ['reobtain', 'quota', 'request', 'reobtain'],
@@ -907,7 +907,7 @@ describe('unsafe_replenishFolios', () => {
         at.replies('of_confirma_folio', CAF_XML, uncertain),
       ])
       const isIssued = jest.fn(async (range: { readonly from: number }) => range.from === 101)
-      const report = await unsafe_replenishFolios(harness.portal, { ...base, quantity: 150, isIssued })
+      const report = await unstable_replenishFolios(harness.portal, { ...base, quantity: 150, isIssued })
       expect(isIssued.mock.calls.map(([range]) => range)).toEqual([
         { from: 101, to: 200 },
         { from: 301, to: 400 },
@@ -929,7 +929,7 @@ describe('unsafe_replenishFolios', () => {
     test('gets every CAF as it arrives, with the free folios of a reobtained range', async () => {
       const harness = await signedIn(routes())
       const handed: unknown[] = []
-      const report = await unsafe_replenishFolios(harness.portal, {
+      const report = await unstable_replenishFolios(harness.portal, {
         ...base,
         onObtained: async (obtained) => {
           handed.push(obtained)
@@ -944,7 +944,7 @@ describe('unsafe_replenishFolios', () => {
     test('an error it throws is logged and the run goes on: the CAFs come back in the report all the same', async () => {
       const { warned, logger } = captureWarnings()
       const harness = await signedIn(routes(), { logger })
-      const report = await unsafe_replenishFolios(harness.portal, {
+      const report = await unstable_replenishFolios(harness.portal, {
         ...base,
         onObtained: () => {
           throw new Error('database down')
@@ -972,7 +972,7 @@ describe('unsafe_replenishFolios', () => {
         },
       ])
       const replica = () =>
-        unsafe_replenishFolios(harness.portal, {
+        unstable_replenishFolios(harness.portal, {
           ...base,
           cafs: async () => store,
           // A write to the database of the caller, while the lock is still held.
@@ -996,7 +996,7 @@ describe('unsafe_replenishFolios', () => {
       at.replies('of_solicita_folios_dcto', quotaForm(100, 0), quotaForm(100, 0)),
       at.replies('of_confirma_folio', CAF_XML),
     ])
-    await unsafe_replenishFolios(harness.portal, base)
+    await unstable_replenishFolios(harness.portal, base)
     // One pause before every request but the first, plus the one after reading the quota and the one after the request.
     expect(harness.fake.requests).toHaveLength(7)
     expect(harness.sleeps).toEqual(Array.from({ length: 8 }, () => 1001))
@@ -1019,7 +1019,7 @@ describe('unsafe_replenishFolios', () => {
         },
       },
     )
-    const report = await unsafe_replenishFolios(harness.portal, { ...base, quantity: 150 })
+    const report = await unstable_replenishFolios(harness.portal, { ...base, quantity: 150 })
     expect(harness.posted('of_confirma_folio')).toHaveLength(1)
     expect(report).toMatchObject({
       status: 'partial',
@@ -1033,7 +1033,7 @@ describe('unsafe_replenishFolios', () => {
     const harness = await signedIn([...at.listing([[201, 300]])])
     const bug = new Error('bug')
     await expect(
-      unsafe_replenishFolios(harness.portal, {
+      unstable_replenishFolios(harness.portal, {
         ...base,
         isIssued: async () => {
           throw bug

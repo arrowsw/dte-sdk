@@ -40,7 +40,7 @@ export type {
   RequestCafExactResult,
   RequestCafInBatchesInput,
 } from './flows'
-export { planFolioReplenishment, unsafe_replenishFolios } from './replenish'
+export { planFolioReplenishment, unstable_replenishFolios } from './replenish'
 export type {
   CafHolding,
   PlanReplenishmentInput,

@@ -180,8 +180,8 @@ export const planFolioReplenishment = (input: PlanReplenishmentInput): Replenish
 }
 
 /**
- * EN: Input of `unsafe_replenishFolios`.
- * ES: Entrada de `unsafe_replenishFolios`.
+ * EN: Input of `unstable_replenishFolios`.
+ * ES: Entrada de `unstable_replenishFolios`.
  */
 export type ReplenishFoliosInput = ReplenishmentPolicy & {
   /** EN: The CAFs held, or a function that reads them. A function is read again once the portal lock is held, so a replica that waited sees what another one kept in its `onObtained`. It runs with the lock held: it must not call a portal operation of the same client. ES: Los CAF que se tienen, o una función que los lee. Una función se vuelve a leer con el candado del portal tomado, así una réplica que esperó ve lo que otra guardó en su `onObtained`. Corre con el candado tomado: no debe llamar a una operación del portal del mismo cliente. */
@@ -229,10 +229,10 @@ export type ReplenishmentStatus = 'none' | 'coolDown' | 'replenished' | 'partial
 export type ReplenishmentStep = 'reobtain' | 'quota' | 'request' | 'annul'
 
 /**
- * EN: What `unsafe_replenishFolios` did. Keep `cafs` before anything else: the SII already authorized them, and their
+ * EN: What `unstable_replenishFolios` did. Keep `cafs` before anything else: the SII already authorized them, and their
  * XML holds a private key, so the report is not something to log. Persist `coolUntil` and `knownAnnulled` and pass
  * them back next time.
- * ES: Lo que hizo `unsafe_replenishFolios`. Guarda `cafs` antes que nada: el SII ya los autorizó, y su XML contiene una
+ * ES: Lo que hizo `unstable_replenishFolios`. Guarda `cafs` antes que nada: el SII ya los autorizó, y su XML contiene una
  * llave privada, así que el informe no es algo que registrar en un log. Guarda `coolUntil` y `knownAnnulled` y
  * devuélvelos la próxima vez.
  */
@@ -560,8 +560,9 @@ const replenishInSession = async (
  * the CAFs kept in `onObtained`, two replicas do not both replenish. A refusal of the SII and any other `DteError` come
  * back as data, never thrown, so nothing already granted is lost.
  *
- * Unsafe: it has not run against the SII yet, in certification or in production. It asks the SII for folios and, where
- * allowed, annuls them, which cannot be undone. It becomes `replenishFolios` once it has run in both environments.
+ * Unstable: it has not run against the SII yet, in certification or in production, so its shape may change in any
+ * release. It asks the SII for folios and, where allowed, annuls them, which cannot be undone. It becomes
+ * `replenishFolios` once it has run in both environments.
  * ES: Mantiene el stock de folios de un tipo, pidiéndole al SII solo cuando faltan, en el orden que no agrava un
  * bloqueo: primero los folios en la mano, luego los rangos ya autorizados que nadie tiene, descargados de nuevo sin
  * gastar cupo, luego solicitudes en tandas dentro del cupo, y la anulación de folios sin usar como último recurso, solo
@@ -573,16 +574,16 @@ const replenishInSession = async (
  * con `cafs` como función y los CAF guardados en `onObtained`, dos réplicas no reponen ambas. Un rechazo del SII y
  * cualquier otro `DteError` vuelven como datos, nunca se lanzan, así no se pierde nada ya otorgado.
  *
- * Insegura: todavía no ha corrido contra el SII, ni en certificación ni en producción. Le pide folios al SII y, donde
- * se permite, los anula, lo que no se puede deshacer. Pasa a llamarse `replenishFolios` cuando haya corrido en ambos
- * ambientes.
+ * Inestable: todavía no ha corrido contra el SII, ni en certificación ni en producción, así que su forma puede cambiar
+ * en cualquier versión. Le pide folios al SII y, donde se permite, los anula, lo que no se puede deshacer. Pasa a
+ * llamarse `replenishFolios` cuando haya corrido en ambos ambientes.
  * @param portal EN: the client. ES: el cliente.
  * @param input EN: the policy, the CAFs held, the last folio issued and the memory of the last report. ES: la política, los CAF que se tienen, el último folio emitido y la memoria del último informe.
  * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
  * @returns EN: the report. ES: el informe.
  * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE`, `INVALID_OPTION`, `INVALID_RUT` and `MISSING_FIELD`, before anything goes out and before the CAFs are read. ES: `INVALID_DOCUMENT_TYPE`, `INVALID_OPTION`, `INVALID_RUT` y `MISSING_FIELD`, antes de que salga nada y antes de leer los CAF.
  */
-export const unsafe_replenishFolios = async (
+export const unstable_replenishFolios = async (
   portal: PortalClient,
   input: ReplenishFoliosInput,
   overrides?: CallOverrides,
@@ -594,7 +595,7 @@ export const unsafe_replenishFolios = async (
     planFolioReplenishment({ ...input, cafs, now: portal.now() })
   const first = planOf(await read())
   if (first.action !== 'replenish') return idleReport(first, input, portal.now())
-  return withPortalSession(portal, 'unsafe_replenishFolios', overrides, async (context) => {
+  return withPortalSession(portal, 'unstable_replenishFolios', overrides, async (context) => {
     // Another replica may have replenished while this one waited for the lock.
     const held = await read()
     const plan = planOf(held)

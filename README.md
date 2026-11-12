@@ -512,15 +512,15 @@ been seen yet: see the [portal and folios design](./docs/superpowers/specs/2026-
 
 ### Keeping folios stocked
 
-`unsafe_replenishFolios` is one call that keeps a document type stocked. It asks the SII only when the usable folios
+`unstable_replenishFolios` is one call that keeps a document type stocked. It asks the SII only when the usable folios
 fall below `minimum`, and then in the order that does not make a block worse: ranges already authorized that nobody
 holds are downloaded again, which spends no quota; what is still missing is requested in batches, within the quota;
 and unused folios are annulled as a last resort.
 
 ```typescript
-import { unsafe_replenishFolios } from 'dte-sdk/portal'
+import { unstable_replenishFolios } from 'dte-sdk/portal'
 
-const report = await unsafe_replenishFolios(portal, {
+const report = await unstable_replenishFolios(portal, {
   type: 33,
   minimum: 20, // replenish below 20 usable folios
   quantity: 100, // folios to obtain each time
@@ -534,9 +534,9 @@ const report = await unsafe_replenishFolios(portal, {
 await store.saveState({ coolUntil: report.coolUntil, knownAnnulled: report.knownAnnulled })
 ```
 
-- **`unsafe_replenishFolios` is unsafe.** It has not run against the SII yet, in certification or in production, and
-  it requests folios and can annul them, which cannot be undone. Once it has run in both environments it becomes
-  `replenishFolios`.
+- **`unstable_replenishFolios` is unstable.** Its shape may change in any release, a patch included. It has not run
+  against the SII yet, in certification or in production, and it requests folios and can annul them, which cannot be
+  undone. Once it has run in both environments it becomes `replenishFolios`.
 - **It stores nothing and schedules nothing.** Call it before issuing, or on a timer. Keep `report.cafs`, whose XML
   holds a private key, so the report is not something to log, and pass `coolUntil` and `knownAnnulled` back next time.
   `planFolioReplenishment` is the decision alone, with no I/O: `none`, `coolDown` or `replenish`.
