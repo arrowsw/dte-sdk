@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-12
+
 ### Added
 
 - **Keeping folios stocked, unstable.** `unstable_replenishFolios(portal, { type, minimum, quantity, cafs,
@@ -719,7 +721,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Jest, ESLint, Prettier, size-limit, Stryker, CI and tag-triggered publish)
   and a single `hello()` export that returns `'dte-sdk is coming'`.
 
-[Unreleased]: https://github.com/arrowsw/dte-sdk/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/arrowsw/dte-sdk/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.9.0
 [0.8.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.8.0
 [0.7.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.7.0
 [0.6.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.6.0
