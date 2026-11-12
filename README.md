@@ -84,8 +84,10 @@ request already holds when a later trip fails, and writes the folio registry for
 annulling, getting ranges back and the exact request, and logs what stopped a flow with every text redacted. 0.7.0
 settles the gaps an application found while it was built on dte-sdk, in the folio flows, CAF files and CAF parsing, and
 the receiver's answer, which reads a failed query as `unknown`. 0.8.0 reads a document the SII marked paid in cash,
-which the registry takes no answer on, as `paidInCash`, and names the registry's code 27. Every area this README
-describes ships in 0.8.0.
+which the registry takes no answer on, as `paidInCash`, and names the registry's code 27. 0.9.0 keeps a document type
+stocked with folios in one call, `unstable_replenishFolios`, still unstable because it has not run against the SII,
+and keeps the CAF a request delivered when the pause after it is cut short. Every area this README describes ships in
+0.9.0.
 Releases before 1.0.0 come out as the work lands, without waiting for the runs against the
 real SII; those runs come before 1.0.0, the first version recommended for production.
 
