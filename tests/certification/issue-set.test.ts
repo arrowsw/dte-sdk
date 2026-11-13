@@ -11,6 +11,7 @@ import type { DocumentType } from '../../src/catalogs/document-types'
 import { cafFor, certificationCafs, fullPlan, issueOptions, issuer, receiver } from '../support/certification-fixtures'
 import { ISSUER_RUT, RECEIVER_RUT } from '../support/fixtures'
 import { failure } from '../support/portal'
+import { validateAgainstXsd } from '../support/xsd'
 
 const id = (n: number) => `${ATTENTION}-${n}`
 const DATE = '2026-11-15'
@@ -179,6 +180,10 @@ describe('the basic set', () => {
       expect(verifyTed(issued.document.ted.xml, cafFor(issued.type))).toBe(true)
     }
   })
+
+  test('the envelope validates against EnvioDTE_v10.xsd', async () => {
+    expect(await validateAgainstXsd(set.envelope.xml, 'EnvioDTE')).toEqual([])
+  })
 })
 
 describe('the exempt set', () => {
@@ -222,6 +227,10 @@ describe('the exempt set', () => {
       }),
     ])
     expect(newPrice.header.totals).toEqual({ exemptAmount: 150000, totalAmount: 150000 })
+  })
+
+  test('the envelope validates against EnvioDTE_v10.xsd', async () => {
+    expect(await validateAgainstXsd(set.envelope.xml, 'EnvioDTE')).toEqual([])
   })
 })
 
@@ -272,6 +281,10 @@ describe('the guide set', () => {
     )
     expect(priced.cases[0].document.items[0].amount).toBe(1000)
     expect(priced.cases[0].document.header.totals).toEqual({ vatRate: 19, totalAmount: 0 })
+  })
+
+  test('the envelope validates against EnvioDTE_v10.xsd', async () => {
+    expect(await validateAgainstXsd(set.envelope.xml, 'EnvioDTE')).toEqual([])
   })
 })
 
@@ -355,6 +368,10 @@ describe('the purchase set', () => {
       issueOptions(),
     )
     expect(noQuantity.cases[1].document.items[0]).toMatchObject({ quantity: 1, unitPrice: 1200, amount: 1200 })
+  })
+
+  test('the envelope validates against EnvioDTE_v10.xsd', async () => {
+    expect(await validateAgainstXsd(set.envelope.xml, 'EnvioDTE')).toEqual([])
   })
 })
 
