@@ -124,15 +124,12 @@ try {
   for (const [file, options] of TYPE_CONSUMERS) {
     const project = mkdtempSync(join(dir, 'types-'))
     writeFileSync(join(project, file), TYPE_CONSUMER)
-    // skipLibCheck, as `tsc --init` sets it: three internal declarations (`dist/crypto/rsa.d.ts`, `x509.d.ts`) name
-    // node-forge types, which only the dev dependency `@types/node-forge` provides, so a strict consumer that checks
-    // library declarations gets TS7016 there. The four entries' own types are still checked: see TYPE_CONSUMER.
     const compilerOptions = {
       ...options,
       target: 'es2020',
       strict: true,
       noEmit: true,
-      skipLibCheck: true,
+      skipLibCheck: false,
       esModuleInterop: true,
       types: ['node'],
       typeRoots: [join(repo, 'node_modules', '@types')],
