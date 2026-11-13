@@ -155,6 +155,10 @@ describe('toSiiDocument', () => {
         destinationAddress: 'Bodega',
         destinationCommune: 'Maipú',
         destinationCity: 'Santiago',
+        trailerLicensePlate: 'JK1234',
+        departureDate: '2026-11-15',
+        departureTime: '08:30:00',
+        arrivalDate: '2026-11-16',
       },
     })
     const guideSii = toSiiDocument(guide)
@@ -168,12 +172,30 @@ describe('toSiiDocument', () => {
     })
     expect(guideSii.Encabezado.Transporte).toEqual({
       Patente: 'ABCD12',
+      PatenteCarro: 'JK1234',
       RUTTrans: RECEIVER_RUT,
       Chofer: { RUTChofer: RECEIVER_RUT, NombreChofer: 'Juan' },
       DirDest: 'Bodega',
       CmnaDest: 'Maipú',
       CiudadDest: 'Santiago',
+      FchSalida: '2026-11-15',
+      HraSalida: '08:30:00',
+      FchLlegada: '2026-11-16',
     })
+    // The order of the schema: the trailer plate after the vehicle's, the dates and time after the destination.
+    expect(Object.keys(guideSii.Encabezado.Transporte ?? {})).toEqual([
+      'Patente',
+      'PatenteCarro',
+      'RUTTrans',
+      'Chofer',
+      'DirDest',
+      'CmnaDest',
+      'CiudadDest',
+      'FchSalida',
+      'HraSalida',
+      'FchLlegada',
+    ])
+    expect(fromSiiDocument(guideSii).header.transport).toEqual(guide.header.transport)
 
     const purchase = createDocument({
       type: 46,
@@ -353,7 +375,15 @@ describe('fromSiiDocument', () => {
         receiver,
         items: [{ name: 'I', quantity: 1, unitPrice: 10 }],
         options: { transferType: 1 },
-        transport: { licensePlate: 'YY5678', carrierRut: RECEIVER_RUT, destinationCity: 'Santiago' },
+        transport: {
+          licensePlate: 'YY5678',
+          trailerLicensePlate: 'ZZ9012',
+          carrierRut: RECEIVER_RUT,
+          destinationCity: 'Santiago',
+          departureDate: '2026-11-15',
+          departureTime: '07:05:00',
+          arrivalDate: '2026-11-15',
+        },
       }),
       createDocument({
         type: 46,

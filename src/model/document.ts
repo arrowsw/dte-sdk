@@ -379,12 +379,20 @@ export type Driver = {
 }
 
 /**
- * EN: Transport data of a dispatch guide (`Transporte`).
- * ES: `Transporte` — Datos de transporte de una guía de despacho (52).
+ * EN: Transport data of the goods a document moves (`Transporte`): a dispatch guide (52), or an invoice that moves
+ * them. The schema declares every field optional. Res. Ex. 144/2026 asks a document that moves goods for the
+ * destination, the driver, the carrier, the plates and the departure date, lets what is unknown when issuing be
+ * completed by a later guide, and makes the departure time optional.
+ * ES: `Transporte` — Datos del transporte de los bienes que ampara el documento: una guía de despacho (52), o una
+ * factura que los traslada. El esquema declara opcional cada campo. La Res. Ex. 144/2026 pide al documento que ampara
+ * un traslado el destino, el chofer, el transportista, las patentes y la fecha de salida, deja completar con una guía
+ * posterior lo que no se conoce al emitir, y hace opcional la hora de salida.
  */
 export type Transport = {
-  /** EN: License plate (max 8). ES: `Patente` — Patente del vehículo, máximo 8. */
+  /** EN: License plate of the vehicle (max 8). ES: `Patente` — Patente del vehículo, máximo 8. */
   readonly licensePlate?: string
+  /** EN: License plate of the trailer or semi-trailer (max 8). ES: `PatenteCarro` — Patente del carro, sea remolque o semirremolque, máximo 8. */
+  readonly trailerLicensePlate?: string
   /** EN: Carrier RUT. ES: `RUTTrans` — RUT del transportista. */
   readonly carrierRut?: SiiRut
   /** EN: Driver. ES: `Chofer` — Chofer. */
@@ -395,9 +403,20 @@ export type Transport = {
   readonly destinationCommune?: string
   /** EN: Destination city (max 20). ES: `CiudadDest` — Ciudad de destino, máximo 20. */
   readonly destinationCity?: string
+  /** EN: Date the goods leave, `YYYY-MM-DD` from 2003-04-01 to 2050-12-31. ES: `FchSalida` — Fecha de salida, inicio efectivo del traslado, `AAAA-MM-DD` entre 2003-04-01 y 2050-12-31. */
+  readonly departureDate?: string
+  /** EN: Time the goods leave, `HH:MM:SS`. ES: `HraSalida` — Hora de salida, inicio del traslado, `HH:MM:SS`. */
+  readonly departureTime?: string
+  /** EN: Date the goods arrive, or are expected to on a transfer of more than one day, `YYYY-MM-DD` from 2003-04-01 to 2050-12-31. ES: `FchLlegada` — Fecha de llegada, o la estimada en un traslado de más de un día, `AAAA-MM-DD` entre 2003-04-01 y 2050-12-31. */
+  readonly arrivalDate?: string
 }
 
-/** EN: Transport as the caller provides it. ES: Transporte tal como lo entrega el llamador. */
+/**
+ * EN: Transport as the caller provides it: dates also as `DD-MM-YYYY` or `DD/MM/YYYY`, and the time also as `HH:MM`,
+ * which is written with `:00`.
+ * ES: Transporte tal como lo entrega el llamador: fechas también como `DD-MM-AAAA` o `DD/MM/AAAA`, y la hora también
+ * como `HH:MM`, que se escribe con `:00`.
+ */
 export type TransportInput = Omit<Transport, 'carrierRut' | 'driver'> & {
   readonly carrierRut?: string
   readonly driver?: { readonly rut: string; readonly name: string }
@@ -425,7 +444,7 @@ export type HeaderOptions = {
   readonly noDebitReduction?: 1
   /** EN: Dispatch type. ES: `TipoDespacho` — Tipo de despacho (1-3). */
   readonly dispatchType?: DispatchType
-  /** EN: Transfer reason. ES: `IndTraslado` — Tipo de traslado (1-9). */
+  /** EN: Transfer reason, 1 to 9 as the schema admits; `createDocument` refuses any other. ES: `IndTraslado` — Tipo de traslado, 1 a 9 como admite el esquema; `createDocument` rechaza cualquier otro. */
   readonly transferType?: TransferType
   /** EN: Print format: `N` normal, `T` ticket. ES: `TpoImpresion` — Formato de impresión: `N` normal, `T` ticket. */
   readonly printFormat?: 'N' | 'T'
@@ -511,6 +530,7 @@ export type Header = {
   readonly options: HeaderOptions
   readonly issuer: Issuer
   readonly receiver: Receiver
+  /** EN: Transport of the goods. ES: `Transporte` — Transporte de los bienes. */
   readonly transport?: Transport
   readonly totals: Totals
 }
@@ -554,6 +574,7 @@ export type DocumentInput = {
   readonly globalAdjustments?: readonly GlobalAdjustmentInput[]
   readonly subtotals?: readonly SubtotalInfo[]
   readonly commissions?: readonly CommissionLineInput[]
+  /** EN: Transport of the goods, on a dispatch guide or an invoice that moves them. ES: `Transporte` — Transporte de los bienes, en una guía de despacho o una factura que los traslada. */
   readonly transport?: TransportInput
   readonly options?: HeaderOptions
   /** EN: Unit prices already include VAT: emits `MntBruto=1` and derives net/VAT from the gross. ES: Los precios unitarios ya incluyen IVA: emite `MntBruto=1` y deriva neto/IVA del bruto. */

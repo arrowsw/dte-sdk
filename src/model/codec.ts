@@ -139,6 +139,7 @@ const toSiiTransporte = (transport: Transport | undefined): SiiTransporte | unde
     ? undefined
     : compact({
         Patente: transport.licensePlate,
+        PatenteCarro: transport.trailerLicensePlate,
         RUTTrans: transport.carrierRut,
         Chofer:
           transport.driver === undefined
@@ -147,6 +148,9 @@ const toSiiTransporte = (transport: Transport | undefined): SiiTransporte | unde
         DirDest: transport.destinationAddress,
         CmnaDest: transport.destinationCommune,
         CiudadDest: transport.destinationCity,
+        FchSalida: transport.departureDate,
+        HraSalida: transport.departureTime,
+        FchLlegada: transport.arrivalDate,
       })
 
 const toSiiTotales = (totals: Totals): SiiTotales =>
@@ -350,6 +354,7 @@ const fromSiiTransporte = (transporte: SiiTransporte | undefined): Transport | u
     ? undefined
     : compact({
         licensePlate: transporte.Patente,
+        trailerLicensePlate: transporte.PatenteCarro,
         carrierRut:
           transporte.RUTTrans === undefined ? undefined : toSiiRut(transporte.RUTTrans, 'Transporte.RUTTrans'),
         driver:
@@ -362,6 +367,9 @@ const fromSiiTransporte = (transporte: SiiTransporte | undefined): Transport | u
         destinationAddress: transporte.DirDest,
         destinationCommune: transporte.CmnaDest,
         destinationCity: transporte.CiudadDest,
+        departureDate: transporte.FchSalida,
+        departureTime: transporte.HraSalida,
+        arrivalDate: transporte.FchLlegada,
       })
 
 const fromSiiTotales = (totales: SiiTotales): Totals =>

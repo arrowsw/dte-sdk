@@ -20,8 +20,10 @@ export const REFERENCE_CODES = { cancels: 1, correctsText: 2, correctsAmounts: 3
 export type ReferenceCode = (typeof REFERENCE_CODES)[keyof typeof REFERENCE_CODES]
 
 /**
- * EN: Transfer reasons for dispatch guides (`IdDoc/IndTraslado`).
- * ES: `IndTraslado` — Tipo de traslado de la guía de despacho (1 venta, 2 ventas por efectuar, 3 consignación, 4 entrega gratuita, 5 traslado interno, 6 otros no venta, 7 devolución, 8 traslado para exportación, 9 venta para exportación).
+ * EN: Transfer reasons for dispatch guides (`IdDoc/IndTraslado`), 1 to 9, the values `DTE_v10.xsd` admits. Res. Ex.
+ * 144/2026 names three more (a transfer of more than one day, as a sale or not, and an outsourced transfer); they are
+ * left out until the SII's schema admits them, since a document that carries one fails it.
+ * ES: `IndTraslado` — Tipo de traslado de la guía de despacho (1 venta, 2 ventas por efectuar, 3 consignación, 4 entrega gratuita, 5 traslado interno, 6 otros no venta, 7 devolución, 8 traslado para exportación, 9 venta para exportación): los valores que admite `DTE_v10.xsd`. La Res. Ex. 144/2026 nombra tres más (traslado prolongado que importa venta o no, y traslado tercerizado); quedan fuera hasta que el esquema del SII los admita, porque un documento que trae uno no lo valida.
  */
 export const TRANSFER_TYPES = {
   sale: 1,

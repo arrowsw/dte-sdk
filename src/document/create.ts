@@ -1,4 +1,4 @@
-import { FINAL_CONSUMER_RUT, SERVICE_INDICATORS, VAT_RATE } from '../catalogs/codes'
+import { FINAL_CONSUMER_RUT, SERVICE_INDICATORS, TRANSFER_TYPES, VAT_RATE } from '../catalogs/codes'
 import { isDocumentType, isExemptType, isReceipt, type DocumentType } from '../catalogs/document-types'
 import { DteError } from '../errors'
 import type {
@@ -63,6 +63,7 @@ export const FIELD_LIMITS = {
   Glosa: 60,
   GlosaSTI: 40,
   Patente: 8,
+  PatenteCarro: 8,
   NombreChofer: 30,
   DirDest: 70,
   CmnaDest: 20,
@@ -99,6 +100,28 @@ const finiteNumber = (value: number | undefined, path: string): number | undefin
   if (value === undefined) return undefined
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new DteError('INVALID_AMOUNT', { field: path })
   return value
+}
+
+// `FchSalida` and `FchLlegada` restrict the schema's `FechaType` to start on 2003-04-01.
+const MIN_TRANSPORT_DATE = '2003-04-01'
+const MAX_TRANSPORT_DATE = '2050-12-31'
+
+const transportDate = (value: string | undefined, field: string): string | undefined => {
+  if (value === undefined) return undefined
+  const iso = toIsoDate(value, field)
+  if (iso < MIN_TRANSPORT_DATE || iso > MAX_TRANSPORT_DATE) throw new DteError('INVALID_DATE', { field })
+  return iso
+}
+
+// `HraSalida` is an `xs:time` from 00:00:00 to 23:59:59; a time without seconds is written with `:00`.
+const TIME = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/
+
+const transportTime = (value: string | undefined, field: string): string | undefined => {
+  if (value === undefined) return undefined
+  const raw = String(value).trim()
+  const match = TIME.exec(raw)
+  if (match === null) throw new DteError('INVALID_TIME', { field })
+  return match[2] === undefined ? `${raw}:00` : raw
 }
 
 const compact = <T extends object>(value: T): T =>
@@ -240,6 +263,7 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
     ? undefined
     : compact({
         licensePlate: text(input.licensePlate, 'Patente'),
+        trailerLicensePlate: text(input.trailerLicensePlate, 'PatenteCarro'),
         carrierRut: input.carrierRut === undefined ? undefined : toSiiRut(input.carrierRut, 'transport.carrierRut'),
         driver:
           input.driver === undefined
@@ -251,6 +275,9 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
         destinationAddress: text(input.destinationAddress, 'DirDest'),
         destinationCommune: text(input.destinationCommune, 'CmnaDest'),
         destinationCity: text(input.destinationCity, 'CiudadDest'),
+        departureDate: transportDate(input.departureDate, 'transport.departureDate'),
+        departureTime: transportTime(input.departureTime, 'transport.departureTime'),
+        arrivalDate: transportDate(input.arrivalDate, 'transport.arrivalDate'),
       })
 
 /**
@@ -262,7 +289,7 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
  * sanitiza textos y exige los largos del esquema (falla temprano en vez de dejar que el SII rechace el sobre entero),
  * numera líneas, calcula montos y totales, aplica los defaults de boleta (consumidor final, `IndServicio=3`) y fija
  * `MntBruto=1` cuando los precios incluyen IVA. Pura: misma entrada, misma salida.
- * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `MISSING_FIELD`, `FIELD_TOO_LONG`, `INVALID_AMOUNT`; `INVALID_OPTION` for `references` on a receipt or `receiptReferences` on any other type. ES: los mismos códigos; `INVALID_OPTION` por `references` en una boleta o `receiptReferences` en cualquier otro tipo.
+ * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `MISSING_FIELD`, `FIELD_TOO_LONG`, `INVALID_AMOUNT`; `INVALID_TIME` for a `transport.departureTime` that is not `HH:MM:SS` or `HH:MM`; `INVALID_OPTION` for `references` on a receipt, `receiptReferences` on any other type, or an `options.transferType` outside 1 to 9. ES: los mismos códigos; `INVALID_TIME` por un `transport.departureTime` que no es `HH:MM:SS` ni `HH:MM`; `INVALID_OPTION` por `references` en una boleta, `receiptReferences` en cualquier otro tipo, o un `options.transferType` fuera de 1 a 9.
  */
 export const createDocument = (input: DocumentInput, options: CreateDocumentOptions = {}): Document => {
   if (!isDocumentType(input.type)) throw new DteError('INVALID_DOCUMENT_TYPE', { type: input.type })
@@ -283,6 +310,10 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
   const globalAdjustments = (input.globalAdjustments ?? []).map(normalizeAdjustment)
   const commissions = (input.commissions ?? []).map(normalizeCommission)
   const transport = normalizeTransport(input.transport)
+  // The schema admits `IndTraslado` 1 to 9; the three types Res. Ex. 144/2026 names wait for a code it admits.
+  const transferType = input.options?.transferType
+  if (transferType !== undefined && !Object.values(TRANSFER_TYPES).includes(transferType))
+    throw new DteError('INVALID_OPTION', { field: 'options.transferType' })
   const totals =
     input.totals ??
     calculateTotals(items, {

@@ -147,6 +147,8 @@ export type SiiReceptor = {
 export type SiiTransporte = {
   /** EN: Vehicle licence plate. ES: `Patente` — Patente del vehículo. */
   readonly Patente?: string
+  /** EN: Trailer or semi-trailer licence plate. ES: `PatenteCarro` — Patente del carro o remolque. */
+  readonly PatenteCarro?: string
   /** EN: Carrier RUT. ES: `RUTTrans` — RUT del transportista. */
   readonly RUTTrans?: string
   /** EN: Driver: RUT and name. ES: `Chofer` — Chofer: `RUTChofer` (RUT del chofer) y `NombreChofer` (nombre del chofer). */
@@ -157,6 +159,12 @@ export type SiiTransporte = {
   readonly CmnaDest?: string
   /** EN: Destination city. ES: `CiudadDest` — Ciudad de destino. */
   readonly CiudadDest?: string
+  /** EN: Departure date, `YYYY-MM-DD`. ES: `FchSalida` — Fecha de salida. */
+  readonly FchSalida?: string
+  /** EN: Departure time, `HH:MM:SS`. ES: `HraSalida` — Hora de salida. */
+  readonly HraSalida?: string
+  /** EN: Arrival date, `YYYY-MM-DD`. ES: `FchLlegada` — Fecha de llegada. */
+  readonly FchLlegada?: string
 }
 
 /** EN: `ImptoReten`, SII shape. ES: `ImptoReten` en forma SII. */
