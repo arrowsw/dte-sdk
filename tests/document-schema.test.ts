@@ -19,6 +19,7 @@ type Variant = Omit<DocumentInput, 'type' | 'folio' | 'issueDate' | 'issuer' | '
 const invoiceReference = { documentType: 33, folio: 7, date: '2026-11-01' }
 const setReference = { documentType: 'SET', folio: 'CASO-1', date: '2026-11-15', reason: 'Set de pruebas' } as const
 const purchaseReference = { documentType: 46, folio: 7, date: '2026-11-15', code: 3, reason: 'DEVOLUCION' } as const
+const settledLine = { name: 'Venta por cuenta de terceros', unitPrice: 10000, settledDocumentType: '33' }
 const transport = {
   licensePlate: 'ABCD12',
   carrierRut: RECEIVER_RUT,
@@ -100,7 +101,7 @@ const VARIANTS: Record<Exclude<DocumentType, 39 | 41>, Record<string, Variant>> 
   },
   43: {
     'a commission with its net, exempt and VAT values': {
-      items: [{ name: 'Venta por cuenta de terceros', unitPrice: 10000, settledDocumentType: '33' }],
+      items: [settledLine],
       commissions: [
         { kind: 'commission', description: 'Comisión 10%', rate: 10, netValue: 1000, exemptValue: 0, vatValue: 190 },
       ],
@@ -109,6 +110,77 @@ const VARIANTS: Record<Exclude<DocumentType, 39 | 41>, Record<string, Variant>> 
       items: [{ name: 'Venta por cuenta de terceros', unitPrice: 100, settledDocumentType: '39' }],
       commissions: [{ kind: 'otherCharge', description: 'Flete', netValue: 10, exemptValue: 0 }],
       references: [setReference],
+    },
+    'a commission with only a net value: its exempt value is written as zero and its VAT worked out': {
+      items: [settledLine],
+      commissions: [{ kind: 'commission', description: 'Comisión 10%', rate: 10, netValue: 1000 }],
+    },
+    'a commission with a net and a VAT value, and another charge with only an exempt value': {
+      items: [settledLine],
+      commissions: [
+        { kind: 'commission', description: 'Comisión 10%', rate: 10, netValue: 1000, vatValue: 190 },
+        { kind: 'otherCharge', description: 'Flete', exemptValue: 10 },
+      ],
+    },
+    'charges equal to what it settles, so a total of zero': {
+      items: [settledLine],
+      commissions: [{ kind: 'commission', description: 'Comisión 100%', rate: 100, netValue: 10000 }],
+    },
+    'charges above what it settles, so a negative total': {
+      items: [settledLine],
+      commissions: [
+        { kind: 'commission', description: 'Comisión 100%', rate: 100, netValue: 10000 },
+        { kind: 'otherCharge', description: 'Bodegaje', exemptValue: 500 },
+      ],
+    },
+    'a negative line and a negative commission, which settle a credit note': {
+      items: [{ name: 'Nota de crédito liquidada', amount: -10000, settledDocumentType: '61' }],
+      commissions: [{ kind: 'commission', description: 'Reverso de comisión', netValue: -1000 }],
+    },
+    'a negative exempt line and a non-billable one, which the totals leave out': {
+      items: [
+        settledLine,
+        { name: 'Devolución exenta', amount: -500, exempt: true, settledDocumentType: '61' },
+        { name: 'Anticipo ya liquidado', amount: -300, exemptIndicator: 2, settledDocumentType: '99' },
+      ],
+      commissions: [{ kind: 'commission', description: 'Comisión', netValue: 1000 }],
+    },
+    'no commissions, with the payment and period fields of its header': {
+      items: [settledLine],
+      subtotals: [{ number: 1, description: 'Ventas', totalAmount: 10000, lines: [1] }],
+      options: {
+        serviceIndicator: 3,
+        paymentTerms: 2,
+        payments: [{ date: '2026-12-01', amount: 100, note: 'Cuota 1' }],
+        billingPeriod: { from: '2026-11-01', to: '2026-11-30' },
+        dueDate: '2026-12-15',
+      },
+    },
+    'prices that include VAT': {
+      items: [{ ...settledLine, unitPrice: 11900 }],
+      commissions: [{ kind: 'commission', description: 'Comisión', netValue: 1000 }],
+      pricesIncludeVat: true,
+    },
+    'totals given by the caller, with the own and third-party VAT': {
+      items: [settledLine],
+      commissions: [{ kind: 'commission', description: 'Comisión', netValue: 1000 }],
+      totals: {
+        netAmount: 10000,
+        vatRate: 19,
+        vatAmount: 1900,
+        ownVatAmount: 190,
+        thirdPartyVatAmount: 1710,
+        commissions: { netValue: 1000, exemptValue: 0, vatValue: 190 },
+        totalAmount: 10710,
+      },
+    },
+    'the 60 lines and the 20 commissions the schema admits': {
+      items: Array.from({ length: 60 }, () => settledLine),
+      commissions: Array.from({ length: 20 }, () => ({
+        kind: 'otherCharge' as const,
+        description: 'Cargo',
+        netValue: 100,
+      })),
     },
   },
   46: {
@@ -228,5 +300,142 @@ describe('what the schema refuses in the transport of a guide', () => {
     expect(await validateAgainstXsd(xml.replace('08:30:00', '08:30'), 'DTE')).toEqual([
       expect.stringContaining("Element '{http://www.sii.cl/SiiDte}HraSalida': '08:30' is not a valid value"),
     ])
+  })
+})
+
+// A settlement invoice has a root of its own, `Liquidacion`, which declares less than `Documento` does. What follows
+// is what `createDocument` refuses, requires or completes on a 43 because the schema would reject the document, each
+// written by hand into a signed one to show the rejection. If a new `DTE_v10.xsd` admits one, its test fails and the
+// model can follow.
+describe('what the schema refuses in a settlement invoice', () => {
+  const ns = (element: string): string => `{http://www.sii.cl/SiiDte}${element}`
+  let signed: SignedDocument | undefined
+  const settlement = (): string =>
+    (signed ??= issue({
+      ...base,
+      type: 43,
+      folio: 99,
+      items: [settledLine],
+      references: [invoiceReference],
+      commissions: [{ kind: 'commission', description: 'Comisión 10%', rate: 10, netValue: 1000 }],
+    })).xml
+  const rejected = async (xml: string): Promise<readonly string[]> => {
+    expect(await validateAgainstXsd(settlement(), 'DTE')).toEqual([])
+    expect(xml).not.toBe(settlement())
+    return validateAgainstXsd(xml, 'DTE')
+  }
+
+  test('the document it is written into validates, with its totals and its stamp', async () => {
+    const xml = settlement()
+    expect(xml).toContain('<Comisiones><ValComNeto>1000</ValComNeto><ValComIVA>190</ValComIVA></Comisiones>')
+    expect(xml).toContain('<MntTotal>10710</MntTotal>')
+    expect(xml).toContain('<MNT>10710</MNT>')
+    expect(await validateAgainstXsd(xml, 'DTE')).toEqual([])
+  })
+
+  // Each element only `Documento` declares, written where the codec would put it.
+  test.each([
+    ['IndNoRebaja', '<IndNoRebaja>1</IndNoRebaja>', '</FchEmis>', 'after'],
+    ['TipoDespacho', '<TipoDespacho>1</TipoDespacho>', '</FchEmis>', 'after'],
+    ['IndTraslado', '<IndTraslado>1</IndTraslado>', '</FchEmis>', 'after'],
+    ['TpoImpresion', '<TpoImpresion>T</TpoImpresion>', '</FchEmis>', 'after'],
+    ['FmaPagExp', '<FmaPagExp>1</FmaPagExp>', '</FchEmis>', 'after'],
+    ['IndMntNeto', '<IndMntNeto>2</IndMntNeto>', '</IdDoc>', 'before'],
+    ['Transporte', '<Transporte><Patente>ABCD12</Patente></Transporte>', '<Totales>', 'before'],
+    ['MontoNF', '<MontoNF>5</MontoNF>', '</MntTotal>', 'after'],
+    ['DescuentoPct', '<DescuentoPct>10</DescuentoPct><DescuentoMonto>1000</DescuentoMonto>', '<MontoItem>', 'before'],
+    ['RecargoPct', '<RecargoPct>10</RecargoPct><RecargoMonto>1000</RecargoMonto>', '<MontoItem>', 'before'],
+    [
+      'DscRcgGlobal',
+      '<DscRcgGlobal><NroLinDR>1</NroLinDR><TpoMov>D</TpoMov><TpoValor>%</TpoValor><ValorDR>5</ValorDR></DscRcgGlobal>',
+      '<Referencia>',
+      'before',
+    ],
+    ['RUTOtr', `<RUTOtr>${RECEIVER_RUT}</RUTOtr>`, '<FchRef>', 'before'],
+  ] as const)('%s, which only Documento declares, fails it', async (element, written, anchor, side) => {
+    const xml = settlement().replace(anchor, side === 'after' ? `${anchor}${written}` : `${written}${anchor}`)
+    expect(await rejected(xml)).toEqual([
+      expect.stringContaining(`Element '${ns(element)}': This element is not expected.`),
+    ])
+  })
+
+  test('a receiver without GiroRecep fails it', async () => {
+    const xml = settlement().replace(/<GiroRecep>[^<]*<\/GiroRecep>/, '')
+    expect(await rejected(xml)).toEqual([
+      `Schemas validity error : Element '${ns('DirRecep')}': This element is not expected. Expected is ( ${ns('GiroRecep')} ).`,
+    ])
+  })
+
+  test.each([
+    ['ValComExe', `Element '${ns('ValComIVA')}': This element is not expected. Expected is ( ${ns('ValComExe')} ).`],
+    [
+      'ValComNeto',
+      `Element '${ns('ValComExe')}': This element is not expected. Expected is one of ( ${ns('TasaComision')}, ${ns('ValComNeto')} ).`,
+    ],
+  ])('a commission line without %s fails it', async (element, error) => {
+    // The summary in the totals has no `ValComExe`, and its `ValComNeto` comes first: the last one is the line's.
+    const written = new RegExp(`<${element}>-?\\d+</${element}>(?![\\s\\S]*<${element}>)`)
+    const xml = settlement().replace(written, '')
+    expect(
+      await rejected(element === 'ValComNeto' ? xml.replace(/<TasaComision>[^<]*<\/TasaComision>/, '') : xml),
+    ).toEqual([`Schemas validity error : ${error}`])
+  })
+
+  test('a 61st line and a 21st commission fail it', async () => {
+    const full = issue({
+      ...base,
+      type: 43,
+      folio: 98,
+      items: Array.from({ length: 60 }, () => settledLine),
+      commissions: Array.from({ length: 20 }, () => ({
+        kind: 'otherCharge' as const,
+        description: 'Cargo',
+        netValue: 100,
+      })),
+    }).xml
+    expect(await validateAgainstXsd(full, 'DTE')).toEqual([])
+    const lastOf = (element: string): string => {
+      const start = full.lastIndexOf(`<${element}><NroLin`)
+      return full.slice(start, full.indexOf(`</${element}>`, start) + element.length + 3)
+    }
+    const oneMore = (element: string): string => full.replace(lastOf(element), lastOf(element) + lastOf(element))
+    expect(await validateAgainstXsd(oneMore('Detalle'), 'DTE')).toEqual([
+      expect.stringContaining(`Element '${ns('Detalle')}': This element is not expected.`),
+    ])
+    expect(await validateAgainstXsd(oneMore('Comisiones'), 'DTE')).toEqual([
+      expect.stringContaining(`Element '${ns('Comisiones')}': This element is not expected.`),
+    ])
+  })
+
+  test('a negative total fails it on any other type: only Liquidacion declares MntTotal and MNT as signed', async () => {
+    const negative = issue({
+      ...base,
+      type: 43,
+      folio: 97,
+      items: [settledLine],
+      commissions: [{ kind: 'commission', description: 'Comisión', netValue: 20000 }],
+    }).xml
+    expect(negative).toContain('<MntTotal>-11900</MntTotal>')
+    expect(negative).toContain('<MNT>-11900</MNT>')
+    expect(await validateAgainstXsd(negative, 'DTE')).toEqual([])
+    const invoice = issue({ ...base, type: 33, folio: 96, items: [{ name: 'Plan anual', unitPrice: 100000 }] }).xml
+    const errors = await validateAgainstXsd(
+      invoice
+        .replace('<MntTotal>119000</MntTotal>', '<MntTotal>-119000</MntTotal>')
+        .replace('<MNT>119000</MNT>', '<MNT>-119000</MNT>'),
+      'DTE',
+    )
+    expect(errors).toEqual([
+      expect.stringContaining(`Element '${ns('MntTotal')}': '-119000' is not a valid value`),
+      expect.stringContaining(`Element '${ns('MNT')}': '-119000' is not a valid value`),
+    ])
+  })
+
+  test('TpoDocLiq on the line of an invoice fails it: only Liquidacion declares it', async () => {
+    const invoice = issue({ ...base, type: 33, folio: 95, items: [{ name: 'Plan anual', unitPrice: 100000 }] }).xml
+    expect(await validateAgainstXsd(invoice, 'DTE')).toEqual([])
+    expect(await validateAgainstXsd(invoice.replace('<NmbItem>', '<TpoDocLiq>33</TpoDocLiq><NmbItem>'), 'DTE')).toEqual(
+      [expect.stringContaining(`Element '${ns('TpoDocLiq')}': This element is not expected.`)],
+    )
   })
 })

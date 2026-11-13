@@ -39,6 +39,15 @@ export const integer = (text: string | null): number | null =>
   text !== null && /^\d+$/.test(text) ? Number(text) : null
 
 /**
+ * EN: The text as a whole number that may carry a minus sign, or null when it is not one. For the amounts the schema
+ * declares as signed, such as the total of a settlement invoice.
+ * ES: El texto como número entero que puede llevar signo menos, o null si no lo es. Para los montos que el esquema
+ * declara con signo, como el total de una liquidación factura.
+ */
+export const signedInteger = (text: string | null): number | null =>
+  text !== null && /^-?\d+$/.test(text) ? Number(text) : null
+
+/**
  * EN: Every element below an element, in document order.
  * ES: Todos los elementos bajo un elemento, en el orden del documento.
  */

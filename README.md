@@ -25,7 +25,8 @@ every field.
 
 - 🧾 **Document types** 33, 34, 39, 41, 43, 46, 52, 56 and 61.
 - 🧮 **Totals done right** — per-line rounding, exempt and non-billable lines,
-  VAT-included prices (`MntBruto`), global discounts, purchase-invoice withholding.
+  VAT-included prices (`MntBruto`), global discounts, purchase-invoice withholding,
+  commissions taken off the total of a settlement invoice.
 - 🔏 **TED + XMLDSig** — the electronic stamp signed with the CAF key and the
   enveloped signature the SII validates, byte for byte.
 - ✉️ **Envelopes** — `EnvioDTE` and `EnvioBOLETA` with cover and signed `SetDTE`.
@@ -277,6 +278,56 @@ real days from 2003-04-01 to 2050-12-31 (`INVALID_DATE`) and the time to `HH:MM:
 `transferType` takes 1 to 9, the values the schema admits: the three types the resolution adds (a transfer of more than
 one day, as a sale or not, and an outsourced transfer) wait until the schema admits them, and `createDocument` refuses
 any other value with `INVALID_OPTION`. The printed sample does not print the transport area yet.
+
+### Settlement invoices
+
+A settlement invoice (43) is what an agent issues to the principal it sells for. Its lines are the documents it
+settles, each with the type of the settled document (`settledDocumentType`, the SII's `TpoDocLiq`), and `commissions`
+holds what the agent charges:
+
+```typescript
+import { createDocument } from 'dte-sdk'
+
+const settlement = createDocument({
+  type: 43,
+  folio: 1,
+  issuer,
+  receiver, // with its businessActivity: the schema asks the receiver of a 43 for GiroRecep
+  items: [{ name: 'Ventas de octubre', unitPrice: 100000, settledDocumentType: '33' }],
+  commissions: [
+    { kind: 'commission', description: 'Comisión 10%', rate: 10, netValue: 10000 }, // ValComIVA worked out: 1900
+    { kind: 'otherCharge', description: 'Flete', exemptValue: 2500 },
+  ],
+})
+
+settlement.header.totals
+// { netAmount: 100000, vatRate: 19, vatAmount: 19000,
+//   commissions: { netValue: 10000, exemptValue: 2500, vatValue: 1900 },
+//   totalAmount: 104600 }  →  119000 − 10000 − 2500 − 1900
+```
+
+The totals follow Formato DTE 2.5. The summary of commissions in the totals (`Totales/Comisiones`, fields 121 to 123)
+is the sum of each value over the lines, and the total (`MntTotal`, field 124) is net + exempt + VAT less the three
+sums. On a settlement invoice the total may be zero or negative, and so may the net, the exempt amount and the VAT when
+it settles negative lines: the schema declares them as signed values under `Liquidacion`, the root of a 43, and the
+stamp carries the same total with its sign in `MNT`.
+
+A commission line needs a net value or an exempt one. The schema asks every line for both, so the one it lacks is
+written as zero. Its `vatValue` is the one you pass or, without one, its net value by the VAT rate, rounded; pass
+`vatValue: 0` for a line that carries none. The VAT in the summary is the sum of the VAT of the lines, as the Formato
+describes field 123, so each line is rounded on its own. Totals passed in `totals` are written as given, which is also
+how the own and the third-party VAT (`IVAProp`, `IVATerc`) reach the document.
+
+`Liquidacion` declares less than the root of the other types, and `createDocument` refuses before stamping what the
+schema would reject: `transport`, `globalAdjustments`, a line's `discountPercent` or `surchargePercent`, a reference's
+`otherRut`, `totals.nonBillableAmount` and the options `noDebitReduction`, `dispatchType`, `transferType`,
+`printFormat`, `exportPaymentTerms` and `netAmountsIndicator`, each with `INVALID_OPTION` and the field in
+`details.field`. It asks for the receiver's `businessActivity` (`MISSING_FIELD`) and admits 60 lines. Commissions are
+optional, as the schema declares them, up to 20 lines. A non-billable line (`exemptIndicator: 2`) stays out of the
+totals, because a 43 has no `MontoNF`.
+
+The same sums apply to the commission lines of a purchase invoice (46) and of the notes that correct one. The printed
+sample does not print the commissions yet, and the certification runner does not issue the settlement set.
 
 ## Received documents
 

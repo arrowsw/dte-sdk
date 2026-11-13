@@ -1,6 +1,6 @@
 import { VAT_RATE, WITHHOLDING_TAX_CODES } from '../catalogs/codes'
 import { isReceipt, type DocumentType } from '../catalogs/document-types'
-import type { GlobalAdjustment, LineItem, Totals } from '../model/document'
+import type { CommissionLineInput, GlobalAdjustment, LineItem, Totals } from '../model/document'
 
 /**
  * EN: Inputs of a line amount.
@@ -63,6 +63,8 @@ export type TotalsOptions = {
   readonly globalAdjustments?: readonly GlobalAdjustment[]
   /** EN: Withhold the whole VAT (default: true for purchase invoices). ES: Retener todo el IVA (por defecto: true en facturas de compra, 46). */
   readonly withholdVat?: boolean
+  /** EN: Commission and other charge lines: summed into the summary and taken off the total; a line without `vatValue` counts its net value by the VAT rate, rounded. ES: `Comisiones` — Líneas de comisiones y otros cargos: se suman en `Totales/Comisiones` y se restan del total; una línea sin `vatValue` cuenta su valor neto por la tasa de IVA, redondeado. */
+  readonly commissions?: readonly Pick<CommissionLineInput, 'netValue' | 'exemptValue' | 'vatValue'>[]
 }
 
 type Bases = { readonly affected: number; readonly exempt: number; readonly nonBillable: number }
@@ -89,13 +91,41 @@ const applyAdjustments = (bases: Bases, adjustments: readonly GlobalAdjustment[]
     return { ...acc, [key]: acc[key] + signed }
   }, bases)
 
+// Rounds half away from zero, so the VAT of a negative amount mirrors the VAT of the same amount when positive.
+const roundSigned = (value: number): number => (value < 0 ? 0 - Math.round(-value) : Math.round(value))
+
+/**
+ * EN: VAT of a commission or other charge that carries none of its own: its net value by the VAT rate, rounded.
+ * ES: `ValComIVA` — IVA de una comisión u otro cargo que no trae el suyo: su valor neto por la tasa de IVA, redondeado.
+ */
+export const commissionVat = (netValue: number, vatRate: number = VAT_RATE): number =>
+  roundSigned((netValue * vatRate) / 100)
+
+type CommissionSums = { readonly netValue: number; readonly exemptValue: number; readonly vatValue: number }
+
+const sumCommissions = (lines: NonNullable<TotalsOptions['commissions']>, vatRate: number): CommissionSums =>
+  lines.reduce<CommissionSums>(
+    (acc, { netValue = 0, exemptValue = 0, vatValue = commissionVat(netValue, vatRate) }) => ({
+      netValue: acc.netValue + netValue,
+      exemptValue: acc.exemptValue + exemptValue,
+      vatValue: acc.vatValue + vatValue,
+    }),
+    { netValue: 0, exemptValue: 0, vatValue: 0 },
+  )
+
 /**
  * EN: Computes `Totales` from detail lines: net, exempt, VAT (derived from the gross when `pricesIncludeVat`),
- * non-billable, withholding for purchase invoices and the total. Keys come out in schema order and zero
- * sections are omitted, exactly as the SII expects.
+ * non-billable, withholding for purchase invoices, the summary of commissions and other charges, and the total, which
+ * is net + exempt + VAT (left out when withheld) less those charges (Formato DTE 2.5, field 124). Keys come out in
+ * schema order and zero sections are omitted, exactly as the SII expects. On a settlement invoice (43) the net, the
+ * exempt amount, the VAT and the total keep their sign, so the total may be zero or negative, and non-billable lines
+ * are not totalled, because `Liquidacion` declares no `MontoNF`.
  * ES: Calcula `Totales` desde las líneas: neto, exento, IVA (derivado del bruto con `pricesIncludeVat`), no facturable,
- * retención en facturas de compra y el total. Las claves salen en el orden del esquema y las secciones en cero se omiten,
- * tal como espera el SII.
+ * retención en facturas de compra, el resumen de comisiones y otros cargos, y el total, que es neto + exento + IVA (sin
+ * el IVA si está retenido) menos esos cargos (Formato DTE 2.5, campo 124). Las claves salen en el orden del esquema y
+ * las secciones en cero se omiten, tal como espera el SII. En una liquidación factura (43) el neto, el exento, el IVA y
+ * el total conservan su signo, así que el total puede ser cero o negativo, y las líneas no facturables no se totalizan,
+ * porque `Liquidacion` no declara `MontoNF`.
  */
 export const calculateTotals = (
   items: readonly Pick<LineItem, 'amount' | 'exemptIndicator'>[],
@@ -103,24 +133,43 @@ export const calculateTotals = (
 ): Totals => {
   const vatRate = options.vatRate ?? VAT_RATE
   const receipt = isReceipt(options.type)
+  const settlement = options.type === 43
   const withholdVat = options.withholdVat ?? options.type === 46
-  const { affected, exempt, nonBillable } = applyAdjustments(sumBases(items), options.globalAdjustments ?? [])
+  const bases = applyAdjustments(sumBases(items), options.globalAdjustments ?? [])
+  const { affected, exempt } = bases
+  const nonBillable = settlement ? 0 : bases.nonBillable
+  const charges = sumCommissions(options.commissions ?? [], vatRate)
+  const chargesTotal = charges.netValue + charges.exemptValue + charges.vatValue
+  const hasCharges = charges.netValue !== 0 || charges.exemptValue !== 0 || charges.vatValue !== 0
+  // Only a settlement invoice admits negative amounts: there an amount shows unless it is zero, and a negative one
+  // rounds away from zero. On any other type an amount shows when it is above zero.
+  const shown = (amount: number): boolean => (settlement ? amount !== 0 : amount > 0)
+  const round = settlement ? roundSigned : Math.round
 
-  if (affected <= 0 && exempt <= 0 && nonBillable === 0) {
+  if (!shown(affected) && !shown(exempt) && nonBillable === 0 && !hasCharges) {
     return receipt ? { totalAmount: 0 } : { vatRate, totalAmount: 0 }
   }
 
-  const net = options.pricesIncludeVat ? Math.round(affected / (1 + vatRate / 100)) : affected
-  const vat = options.pricesIncludeVat ? affected - net : Math.round((net * vatRate) / 100)
-  const total = withholdVat ? net + exempt : net + vat + exempt
+  const net = options.pricesIncludeVat ? round(affected / (1 + vatRate / 100)) : affected
+  const vat = options.pricesIncludeVat ? affected - net : round((net * vatRate) / 100)
+  const total = (withholdVat ? net + exempt : net + vat + exempt) - chargesTotal
 
   return {
-    ...(net > 0 ? { netAmount: net } : {}),
-    ...(exempt > 0 ? { exemptAmount: exempt } : {}),
-    ...(net > 0 && !receipt ? { vatRate } : {}),
-    ...(net > 0 ? { vatAmount: vat } : {}),
+    ...(shown(net) ? { netAmount: net } : {}),
+    ...(shown(exempt) ? { exemptAmount: exempt } : {}),
+    ...(shown(net) && !receipt ? { vatRate } : {}),
+    ...(shown(net) ? { vatAmount: vat } : {}),
     ...(withholdVat && vat > 0
       ? { withholdings: [{ taxCode: WITHHOLDING_TAX_CODES.totalVatWithholding, rate: vatRate, amount: vat }] }
+      : {}),
+    ...(hasCharges
+      ? {
+          commissions: {
+            ...(charges.netValue !== 0 ? { netValue: charges.netValue } : {}),
+            ...(charges.exemptValue !== 0 ? { exemptValue: charges.exemptValue } : {}),
+            ...(charges.vatValue !== 0 ? { vatValue: charges.vatValue } : {}),
+          },
+        }
       : {}),
     totalAmount: total,
     ...(nonBillable !== 0 ? { nonBillableAmount: nonBillable } : {}),

@@ -101,7 +101,6 @@ describe('bookEntryFromDocument', () => {
         withholdings: [{ taxCode: 24, rate: 31.5, amount: 5 }],
         commissions: { netValue: 1, exemptValue: 2, vatValue: 3 },
         totalAmount: 118,
-        nonBillableAmount: 7,
         periodAmount: 8,
       },
     })
@@ -110,8 +109,31 @@ describe('bookEntryFromDocument', () => {
       thirdPartyVatAmount: 10,
       otherTaxes: [{ code: 24, rate: 31.5, amount: 5 }],
       settlement: { issuerRut: ISSUER_RUT, netValue: 1, exemptValue: 2, vatValue: 3 },
-      nonBillableAmount: 7,
       periodAmount: 8,
+    })
+    // A settlement invoice has no non-billable amount in its totals, so an invoice carries this one.
+    const invoice = createDocument({
+      ...base,
+      totals: { netAmount: 100, vatRate: 19, vatAmount: 19, totalAmount: 119, nonBillableAmount: 7 },
+    })
+    expect(bookEntryFromDocument(invoice, sale)).toMatchObject({ nonBillableAmount: 7 })
+  })
+
+  test('a settlement invoice whose totals are worked out carries the sums of its commissions', () => {
+    const document = createDocument({
+      ...base,
+      type: 43,
+      items: [{ name: 'Liquidación', unitPrice: 10000, settledDocumentType: '33' }],
+      commissions: [
+        { kind: 'commission', description: 'Comisión', netValue: 1000 },
+        { kind: 'otherCharge', description: 'Flete', exemptValue: 500 },
+      ],
+    })
+    expect(bookEntryFromDocument(document, sale)).toMatchObject({
+      netAmount: 10000,
+      vatAmount: 1900,
+      settlement: { issuerRut: ISSUER_RUT, netValue: 1000, exemptValue: 500, vatValue: 190 },
+      totalAmount: 10210,
     })
   })
 

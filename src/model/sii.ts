@@ -361,10 +361,10 @@ export type SiiComisiones = {
   readonly Glosa: string
   /** EN: Commission rate, percent. ES: `TasaComision` — Tasa de comisión. */
   readonly TasaComision?: number
-  /** EN: Net value. ES: `ValComNeto` — Valor neto de la comisión. */
-  readonly ValComNeto?: number
-  /** EN: Exempt value. ES: `ValComExe` — Valor exento de la comisión. */
-  readonly ValComExe?: number
+  /** EN: Net value; the schema requires it, zero included. ES: `ValComNeto` — Valor neto de la comisión; el esquema lo exige, también en cero. */
+  readonly ValComNeto: number
+  /** EN: Exempt value; the schema requires it, zero included. ES: `ValComExe` — Valor exento de la comisión; el esquema lo exige, también en cero. */
+  readonly ValComExe: number
   /** EN: VAT. ES: `ValComIVA` — IVA de la comisión. */
   readonly ValComIVA?: number
 }

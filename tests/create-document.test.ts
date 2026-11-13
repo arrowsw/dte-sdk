@@ -207,7 +207,15 @@ describe('createDocument', () => {
     })
     expect(doc.items[0].settledDocumentType).toBe('33')
     expect(doc.commissions).toEqual([
-      { lineNumber: 1, kind: 'commission', description: 'Comisión 10%', rate: 10, netValue: 1000, vatValue: 190 },
+      {
+        lineNumber: 1,
+        kind: 'commission',
+        description: 'Comisión 10%',
+        rate: 10,
+        netValue: 1000,
+        exemptValue: 0,
+        vatValue: 190,
+      },
     ])
     expectError(
       () => createDocument({ type: 43, folio: 1, issuer, receiver, items: [{ name: 'X', unitPrice: 1 }] }),
@@ -458,4 +466,308 @@ describe('the decimals of a line price', () => {
   test.each([-1, 7, 1.5, Number.NaN])('%p decimals are refused', (decimals) => {
     expectError(() => priced(decimals), 'INVALID_OPTION', { field: 'items[0].unitPriceDecimals' })
   })
+})
+
+// Formato DTE 2.5, section F and fields 121 to 124. `DTE_v10.xsd` asks every commission line for `ValComNeto` and
+// `ValComExe`, and admits 20 of them.
+describe('commissions and other charges', () => {
+  const settle = (overrides: Partial<DocumentInput> = {}) =>
+    createDocument({
+      type: 43,
+      folio: 1,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver,
+      items: [{ name: 'Venta liquidada', unitPrice: 10000, settledDocumentType: '33' }],
+      commissions: [{ kind: 'commission', description: 'Comisión 10%', rate: 10, netValue: 1000 }],
+      ...overrides,
+    })
+  const charge = { kind: 'otherCharge', description: 'Flete' } as const
+
+  test('the totals carry the sums of the lines and take them off the total', () => {
+    const doc = settle()
+    expect(doc.commissions).toEqual([
+      {
+        lineNumber: 1,
+        kind: 'commission',
+        description: 'Comisión 10%',
+        rate: 10,
+        netValue: 1000,
+        exemptValue: 0,
+        vatValue: 190,
+      },
+    ])
+    expect(doc.header.totals).toEqual({
+      netAmount: 10000,
+      vatRate: 19,
+      vatAmount: 1900,
+      commissions: { netValue: 1000, vatValue: 190 },
+      totalAmount: 10710,
+    })
+    const sii = toSiiDocument(doc)
+    expect(sii.Encabezado.Totales).toEqual({
+      MntNeto: 10000,
+      TasaIVA: 19,
+      IVA: 1900,
+      Comisiones: { ValComNeto: 1000, ValComIVA: 190 },
+      MntTotal: 10710,
+    })
+    expect(sii.Comisiones).toEqual([
+      {
+        NroLinCom: 1,
+        TipoMovim: 'C',
+        Glosa: 'Comisión 10%',
+        TasaComision: 10,
+        ValComNeto: 1000,
+        ValComExe: 0,
+        ValComIVA: 190,
+      },
+    ])
+  })
+
+  test('a line gets the value it lacks as zero, and no VAT when its net by the rate rounds to none', () => {
+    const doc = settle({
+      commissions: [
+        { ...charge, exemptValue: 500 },
+        { ...charge, netValue: 2 },
+      ],
+    })
+    expect(doc.commissions).toEqual([
+      { lineNumber: 1, ...charge, netValue: 0, exemptValue: 500 },
+      { lineNumber: 2, ...charge, netValue: 2, exemptValue: 0 },
+    ])
+    expect(doc.header.totals).toMatchObject({ commissions: { netValue: 2, exemptValue: 500 }, totalAmount: 11398 })
+  })
+
+  test("a line's own VAT value is kept, zero included, and is what the summary adds up", () => {
+    const none = settle({ commissions: [{ ...charge, netValue: 1000, vatValue: 0 }] })
+    expect(none.commissions[0]).toMatchObject({ netValue: 1000, exemptValue: 0, vatValue: 0 })
+    expect(none.header.totals).toMatchObject({ commissions: { netValue: 1000 }, totalAmount: 10900 })
+    const own = settle({ commissions: [{ ...charge, netValue: 1000, vatValue: 200 }] })
+    expect(own.header.totals).toMatchObject({ commissions: { netValue: 1000, vatValue: 200 }, totalAmount: 10700 })
+  })
+
+  test('the total of a settlement invoice may be zero or negative', () => {
+    const items = [{ name: 'Venta liquidada', unitPrice: 1000, settledDocumentType: '33' }]
+    expect(settle({ items, commissions: [{ ...charge, netValue: 1000 }] }).header.totals.totalAmount).toBe(0)
+    expect(settle({ items, commissions: [{ ...charge, netValue: 2000 }] }).header.totals.totalAmount).toBe(-1190)
+  })
+
+  test('a negative line and a negative charge keep their sign', () => {
+    const doc = settle({
+      items: [{ name: 'Nota de crédito liquidada', amount: -1000, settledDocumentType: '61' }],
+      commissions: [{ kind: 'commission', description: 'Reverso', netValue: -100 }],
+    })
+    expect(doc.commissions[0]).toMatchObject({ netValue: -100, exemptValue: 0, vatValue: -19 })
+    expect(doc.header.totals).toEqual({
+      netAmount: -1000,
+      vatRate: 19,
+      vatAmount: -190,
+      commissions: { netValue: -100, vatValue: -19 },
+      totalAmount: -1071,
+    })
+  })
+
+  test('totals given by the caller still rule, with the own and third-party VAT they carry', () => {
+    const totals = {
+      netAmount: 10000,
+      vatRate: 19,
+      vatAmount: 1900,
+      ownVatAmount: 190,
+      thirdPartyVatAmount: 1710,
+      commissions: { netValue: 1000, exemptValue: 0, vatValue: 189 },
+      totalAmount: 10711,
+    }
+    const doc = settle({ totals })
+    expect(doc.header.totals).toBe(totals)
+    expect(toSiiDocument(doc).Encabezado.Totales).toEqual({
+      MntNeto: 10000,
+      TasaIVA: 19,
+      IVA: 1900,
+      IVAProp: 190,
+      IVATerc: 1710,
+      Comisiones: { ValComNeto: 1000, ValComExe: 0, ValComIVA: 189 },
+      MntTotal: 10711,
+    })
+  })
+
+  test('a purchase invoice takes its commission off the total too', () => {
+    const doc = createDocument({
+      type: 46,
+      folio: 1,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver,
+      items: [{ name: 'Chatarra', unitPrice: 1000 }],
+      commissions: [{ kind: 'commission', description: 'Comisión', netValue: 100 }],
+    })
+    expect(doc.header.totals).toEqual({
+      netAmount: 1000,
+      vatRate: 19,
+      vatAmount: 190,
+      withholdings: [{ taxCode: 15, rate: 19, amount: 190 }],
+      commissions: { netValue: 100, vatValue: 19 },
+      totalAmount: 881,
+    })
+  })
+
+  test('a line with neither a net nor an exempt value is refused', () => {
+    expectError(() => settle({ commissions: [{ ...charge, rate: 10 }] }), 'MISSING_FIELD', {
+      field: 'commissions[0].netValue',
+    })
+    expectError(
+      () =>
+        settle({
+          commissions: [
+            { ...charge, netValue: 1 },
+            { ...charge, vatValue: 19 },
+          ],
+        }),
+      'MISSING_FIELD',
+      {
+        field: 'commissions[1].netValue',
+      },
+    )
+  })
+
+  test.each(['netValue', 'exemptValue', 'vatValue'] as const)(
+    'a %s that is not a finite number is refused',
+    (field) => {
+      for (const value of [Number.NaN, Number.POSITIVE_INFINITY, '100' as unknown as number])
+        expectError(() => settle({ commissions: [{ ...charge, netValue: 1, [field]: value }] }), 'INVALID_AMOUNT', {
+          field: `commissions[0].${field}`,
+        })
+    },
+  )
+
+  test('the schema admits 20 lines, on any type', () => {
+    const lines = (count: number) => Array.from({ length: count }, () => ({ ...charge, netValue: 10 }))
+    expect(settle({ commissions: lines(20) }).commissions).toHaveLength(20)
+    expectError(() => settle({ commissions: lines(21) }), 'INVALID_OPTION', { field: 'commissions' })
+    expectError(
+      () =>
+        createDocument({
+          type: 46,
+          folio: 1,
+          issuer,
+          receiver,
+          items: [{ name: 'Chatarra', unitPrice: 1000 }],
+          commissions: lines(21),
+        }),
+      'INVALID_OPTION',
+      { field: 'commissions' },
+    )
+  })
+})
+
+// `DTE_v10.xsd` gives a settlement invoice a root of its own, `Liquidacion`, which declares less than `Documento`
+// does: no transport, no global or line discounts and surcharges, no `MontoNF`, no `RUTOtr`, and five fields fewer in
+// `IdDoc`. It asks the receiver for `GiroRecep` and admits 60 lines. `TpoDocLiq` exists only on its lines.
+describe('what the schema admits on a settlement invoice (43)', () => {
+  const line = { name: 'Venta liquidada', unitPrice: 10000, settledDocumentType: '33' }
+  const settle = (overrides: Partial<DocumentInput> = {}) =>
+    createDocument({
+      type: 43,
+      folio: 1,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver,
+      items: [line],
+      commissions: [{ kind: 'commission', description: 'Comisión', netValue: 1000 }],
+      ...overrides,
+    })
+
+  test('the receiver needs a business activity', () => {
+    expectError(() => settle({ receiver: { ...receiver, businessActivity: undefined } }), 'MISSING_FIELD', {
+      field: 'receiver.businessActivity',
+    })
+    expectError(() => settle({ receiver: { ...receiver, businessActivity: ' ' } }), 'MISSING_FIELD', {
+      field: 'receiver.businessActivity',
+    })
+  })
+
+  test.each<[string, Partial<DocumentInput>]>([
+    ['globalAdjustments', { globalAdjustments: [{ kind: 'discount', valueType: 'percent', value: 5 }] }],
+    ['transport', { transport: { licensePlate: 'ABCD12' } }],
+    ['transport', { transport: {} }],
+    ['items[0].discountPercent', { items: [{ ...line, discountPercent: 10 }] }],
+    ['items[1].surchargePercent', { items: [line, { ...line, surchargePercent: 10 }] }],
+    ['items[0].discountPercent', { items: [{ ...line, discountPercent: 0 }] }],
+    [
+      'references[1].otherRut',
+      {
+        references: [
+          { documentType: 33, folio: 8, date: '2026-11-10' },
+          { documentType: 33, folio: 9, date: '2026-11-10', otherRut: RECEIVER_RUT },
+        ],
+      },
+    ],
+    ['options.noDebitReduction', { options: { noDebitReduction: 1 } }],
+    ['options.dispatchType', { options: { dispatchType: 1 } }],
+    ['options.transferType', { options: { transferType: 1 } }],
+    ['options.printFormat', { options: { printFormat: 'T' } }],
+    ['options.exportPaymentTerms', { options: { exportPaymentTerms: '1' } }],
+    ['options.netAmountsIndicator', { options: { netAmountsIndicator: 2 } }],
+    [
+      'totals.nonBillableAmount',
+      { totals: { netAmount: 10000, vatRate: 19, vatAmount: 1900, totalAmount: 11900, nonBillableAmount: 5 } },
+    ],
+  ])('%s is refused: Liquidacion does not declare what it writes', (field, overrides) => {
+    expectError(() => settle(overrides), 'INVALID_OPTION', { field })
+  })
+
+  test('what Liquidacion does declare still passes', () => {
+    const doc = settle({
+      items: [line, { ...line, name: 'No facturable', amount: -300, exemptIndicator: 2 }],
+      references: [{ documentType: 33, folio: 9, date: '2026-11-10', reason: 'Factura liquidada' }],
+      subtotals: [{ number: 1, description: 'Ventas', totalAmount: 10000, lines: [1] }],
+      globalAdjustments: [],
+      options: {
+        serviceIndicator: 3,
+        paymentTerms: 2,
+        billingPeriod: { from: '2026-11-01', to: '2026-11-30' },
+        dueDate: '2026-12-15',
+      },
+    })
+    expect(doc.header.options).toEqual({
+      serviceIndicator: 3,
+      paymentTerms: 2,
+      billingPeriod: { from: '2026-11-01', to: '2026-11-30' },
+      dueDate: '2026-12-15',
+    })
+    // The non-billable line stays out of the totals: `Liquidacion` has no `MontoNF` to report it in.
+    expect(doc.header.totals).toEqual({
+      netAmount: 10000,
+      vatRate: 19,
+      vatAmount: 1900,
+      commissions: { netValue: 1000, vatValue: 190 },
+      totalAmount: 10710,
+    })
+  })
+
+  test('it admits 60 lines', () => {
+    const lines = (count: number) => Array.from({ length: count }, () => line)
+    expect(settle({ items: lines(60) }).items).toHaveLength(60)
+    expectError(() => settle({ items: lines(61) }), 'INVALID_OPTION', { field: 'items' })
+  })
+
+  test('commissions are not required: the schema declares them from none to 20', () => {
+    expect(settle({ commissions: undefined }).header.totals).toEqual({
+      netAmount: 10000,
+      vatRate: 19,
+      vatAmount: 1900,
+      totalAmount: 11900,
+    })
+  })
+
+  test.each([33, 34, 39, 46, 52, 56, 61] as const)(
+    'a settledDocumentType on a %p is refused: only Liquidacion declares TpoDocLiq',
+    (type) => {
+      expectError(
+        () => createDocument({ type, folio: 1, issuer, receiver, items: [{ ...line, exempt: type === 34 }] }),
+        'INVALID_OPTION',
+        { field: 'items[0].settledDocumentType' },
+      )
+    },
+  )
 })
