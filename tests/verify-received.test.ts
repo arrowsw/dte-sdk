@@ -389,6 +389,43 @@ describe('verifyReceivedDocuments: the inputs it takes', () => {
     expect(only(settlement.xml)).toMatchObject({ id: 'DTE_T43F3', type: 43, status: 'valid' })
   })
 
+  test('a settlement invoice whose charges exceed what it settles: its negative total is read, and matches its stamp', () => {
+    const settlement = issued(
+      4,
+      signedCaf({ type: 43 }),
+      invoiceInput(4, {
+        type: 43,
+        items: [{ name: 'Venta', unitPrice: 1000, settledDocumentType: '33' }],
+        commissions: [{ kind: 'commission', description: 'Comisión', netValue: 2000 }],
+      }),
+    )
+    expect(settlement.xml).toContain('<MntTotal>-1190</MntTotal>')
+    expect(settlement.xml).toContain('<MNT>-1190</MNT>')
+    expect(only(settlement.xml)).toMatchObject({
+      id: 'DTE_T43F4',
+      type: 43,
+      totalAmount: -1190,
+      ted: { found: true, signatureValid: true, mismatches: [], valid: true },
+      status: 'valid',
+    })
+    const tampered = only(settlement.xml.replace('<MNT>-1190</MNT>', '<MNT>1190</MNT>'))
+    expect(tampered.ted.mismatches).toEqual(['totalAmount'])
+  })
+
+  test('a settlement invoice that totals zero is valid too', () => {
+    const settlement = issued(
+      5,
+      signedCaf({ type: 43 }),
+      invoiceInput(5, {
+        type: 43,
+        items: [{ name: 'Venta', unitPrice: 1000, settledDocumentType: '33' }],
+        commissions: [{ kind: 'commission', description: 'Comisión', netValue: 1000 }],
+      }),
+    )
+    expect(settlement.xml).toContain('<MNT>0</MNT>')
+    expect(only(settlement.xml)).toMatchObject({ totalAmount: 0, status: 'valid' })
+  })
+
   test('fields the header lacks or does not give as numbers are null, and fail what compares them', () => {
     const xml = signedElsewhere(issued(1), ` xmlns="${SII_NS}" xmlns:xsi="${XSI_NS}"`, (text) =>
       text

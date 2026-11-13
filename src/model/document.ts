@@ -57,7 +57,7 @@ export type Receiver = {
   readonly internalCode?: string
   /** EN: Legal/business name (max 100). ES: `RznSocRecep` — Razón social del receptor, máximo 100. */
   readonly businessName: string
-  /** EN: Line of business (max 40). ES: `GiroRecep` — Giro del receptor, máximo 40. */
+  /** EN: Line of business (max 40); required on a settlement invoice (43). ES: `GiroRecep` — Giro del receptor, máximo 40; obligatorio en una liquidación factura (43). */
   readonly businessActivity?: string
   /** EN: Contact person (max 80). ES: `Contacto` — Persona de contacto, máximo 80. */
   readonly contact?: string
@@ -115,15 +115,15 @@ export type LineItemInput = {
   readonly exempt?: boolean
   /** EN: Explicit exemption indicator. ES: `IndExe` — Indicador de exención explícito (1 a 6). */
   readonly exemptIndicator?: ExemptIndicator
-  /** EN: Line discount percent. ES: `DescuentoPct` — Porcentaje de descuento de la línea. */
+  /** EN: Line discount percent; refused on a settlement invoice (43). ES: `DescuentoPct` — Porcentaje de descuento de la línea; se rechaza en una liquidación factura (43). */
   readonly discountPercent?: number
-  /** EN: Line surcharge percent. ES: `RecargoPct` — Porcentaje de recargo de la línea. */
+  /** EN: Line surcharge percent; refused on a settlement invoice (43). ES: `RecargoPct` — Porcentaje de recargo de la línea; se rechaza en una liquidación factura (43). */
   readonly surchargePercent?: number
   /** EN: Item codes. ES: `CdgItem` — Códigos del ítem (hasta 5). */
   readonly codes?: readonly ItemCode[]
   /** EN: Additional tax codes. ES: `CodImpAdic` — Códigos de impuesto adicional (hasta 2). */
   readonly additionalTaxCodes?: readonly number[]
-  /** EN: Settled document type, settlement invoices only. ES: `TpoDocLiq` — Tipo del documento liquidado; obligatorio en liquidación factura (43). */
+  /** EN: Type of the settled document (max 3): required on a settlement invoice (43), refused on any other type. ES: `TpoDocLiq` — Tipo del documento liquidado, máximo 3; obligatorio en liquidación factura (43) y rechazado en cualquier otro tipo. */
   readonly settledDocumentType?: string
   /** EN: Reference quantity. ES: `QtyRef` — Cantidad de referencia. */
   readonly referenceQuantity?: number
@@ -194,15 +194,17 @@ export type Withholding = {
 }
 
 /**
- * EN: Commission totals of a settlement invoice (`Totales/Comisiones`).
- * ES: `Comisiones` (dentro de `Totales`) — Totales de comisiones de una liquidación factura.
+ * EN: Totals of the commission and other charge lines (`Totales/Comisiones`): each is the sum of its value over the
+ * lines, left out when zero, and negative only on a settlement invoice.
+ * ES: `Comisiones` (dentro de `Totales`) — Totales de las líneas de comisiones y otros cargos: cada uno es la suma de
+ * su valor en las líneas, se omite si es cero, y es negativo solo en una liquidación factura.
  */
 export type CommissionTotals = {
-  /** EN: Net commission value. ES: `ValComNeto` — Valor neto de las comisiones. */
+  /** EN: Net commission value: the sum of the lines' net values. ES: `ValComNeto` — Valor neto de las comisiones: suma de los valores netos de las líneas. */
   readonly netValue?: number
-  /** EN: Exempt commission value. ES: `ValComExe` — Valor exento de las comisiones. */
+  /** EN: Exempt commission value: the sum of the lines' exempt values. ES: `ValComExe` — Valor exento de las comisiones: suma de los valores exentos de las líneas. */
   readonly exemptValue?: number
-  /** EN: VAT on commissions. ES: `ValComIVA` — IVA de las comisiones. */
+  /** EN: VAT on commissions: the sum of the lines' VAT values. ES: `ValComIVA` — IVA de las comisiones: suma del IVA de las líneas. */
   readonly vatValue?: number
 }
 
@@ -211,9 +213,9 @@ export type CommissionTotals = {
  * ES: `Totales` — Totales del documento. Enteros en pesos.
  */
 export type Totals = {
-  /** EN: Net amount: VAT-affected lines before tax; omitted when 0. ES: `MntNeto` — Monto neto: líneas afectas sin IVA; se omite si es 0. */
+  /** EN: Net amount: VAT-affected lines before tax; omitted when 0, and negative only on a settlement invoice (43). ES: `MntNeto` — Monto neto: líneas afectas sin IVA; se omite si es 0, y es negativo solo en una liquidación factura (43). */
   readonly netAmount?: number
-  /** EN: Exempt amount (`IndExe=1` lines). ES: `MntExe` — Monto exento (líneas con `IndExe=1`). */
+  /** EN: Exempt amount (`IndExe=1` lines); negative only on a settlement invoice (43). ES: `MntExe` — Monto exento (líneas con `IndExe=1`); negativo solo en una liquidación factura (43). */
   readonly exemptAmount?: number
   /** EN: VAT rate percent (19); never on receipts. ES: `TasaIVA` — Tasa de IVA (19); nunca en boletas. */
   readonly vatRate?: number
@@ -225,11 +227,11 @@ export type Totals = {
   readonly thirdPartyVatAmount?: number
   /** EN: Withholdings. ES: `ImptoReten` — Retenciones. */
   readonly withholdings?: readonly Withholding[]
-  /** EN: Commission totals (43). ES: `Comisiones` — Totales de comisiones (43). */
+  /** EN: Totals of the commission and other charge lines. ES: `Comisiones` — Totales de las líneas de comisiones y otros cargos. */
   readonly commissions?: CommissionTotals
-  /** EN: Document total: net + VAT + exempt (VAT excluded when withheld). ES: `MntTotal` — Monto total: neto + IVA + exento (sin IVA si está retenido). */
+  /** EN: Document total: net + VAT + exempt (VAT excluded when withheld), less the commissions and other charges; zero or negative only on a settlement invoice (43). ES: `MntTotal` — Monto total: neto + IVA + exento (sin IVA si está retenido), menos las comisiones y otros cargos; cero o negativo solo en una liquidación factura (43). */
   readonly totalAmount: number
-  /** EN: Non-billable amount (lines with `IndExe` 2-6). ES: `MontoNF` — Monto no facturable (líneas con `IndExe` 2 a 6). */
+  /** EN: Non-billable amount (lines with `IndExe` 2-6); refused on a settlement invoice (43), whose root has no `MontoNF`. ES: `MontoNF` — Monto no facturable (líneas con `IndExe` 2 a 6); se rechaza en una liquidación factura (43), cuya raíz no tiene `MontoNF`. */
   readonly nonBillableAmount?: number
   /** EN: Period amount. ES: `MontoPeriodo` — Monto del período. */
   readonly periodAmount?: number
@@ -256,7 +258,7 @@ export type ReferenceInput = {
   readonly reason?: string
   /** EN: Global reference (`IndGlobal=1`). ES: `IndGlobal` — Referencia global. */
   readonly global?: boolean
-  /** EN: RUT of another issuer. ES: `RUTOtr` — RUT de otro contribuyente. */
+  /** EN: RUT of another issuer; refused on a settlement invoice (43). ES: `RUTOtr` — RUT de otro contribuyente; se rechaza en una liquidación factura (43). */
   readonly otherRut?: string
 }
 
@@ -344,8 +346,10 @@ export type GlobalAdjustment = GlobalAdjustmentInput & {
 }
 
 /**
- * EN: Commission or other charge line of a settlement invoice (`Comisiones`).
- * ES: `Comisiones` — Línea de comisión u otro cargo de una liquidación factura (43).
+ * EN: Commission or other charge line (`Comisiones`): of a settlement invoice (43), or of a purchase invoice (46) and
+ * the notes that correct one. The schema admits 20 of them.
+ * ES: `Comisiones` — Línea de comisión u otro cargo: de una liquidación factura (43), o de una factura de compra (46) y
+ * las notas que la corrigen. El esquema admite 20.
  */
 export type CommissionLine = {
   /** EN: 1-based line number. ES: `NroLinCom` — Número de línea, desde 1. */
@@ -356,16 +360,26 @@ export type CommissionLine = {
   readonly description: string
   /** EN: Commission rate percent. ES: `TasaComision` — Tasa de la comisión en porcentaje. */
   readonly rate?: number
-  /** EN: Net value. ES: `ValComNeto` — Valor neto. */
-  readonly netValue?: number
-  /** EN: Exempt value. ES: `ValComExe` — Valor exento. */
-  readonly exemptValue?: number
-  /** EN: VAT value. ES: `ValComIVA` — IVA de la comisión. */
+  /** EN: Net value; zero when the charge is exempt, and negative only on a settlement invoice. ES: `ValComNeto` — Valor neto; cero si el cargo es exento, y negativo solo en una liquidación factura. */
+  readonly netValue: number
+  /** EN: Exempt value; zero when the charge is taxed, and negative only on a settlement invoice. ES: `ValComExe` — Valor exento; cero si el cargo es afecto, y negativo solo en una liquidación factura. */
+  readonly exemptValue: number
+  /** EN: VAT value: the caller's or, without one, the net value by the VAT rate, rounded and left out when zero. ES: `ValComIVA` — IVA de la comisión: el que entrega el llamador o, si falta, el valor neto por la tasa de IVA, redondeado y omitido si es cero. */
   readonly vatValue?: number
 }
 
-/** EN: Commission line as the caller provides it. ES: Línea de comisión tal como la entrega el llamador. */
-export type CommissionLineInput = Omit<CommissionLine, 'lineNumber'>
+/**
+ * EN: Commission line as the caller provides it. The schema asks every line for a net and an exempt value: it needs
+ * at least one of them, and the one it lacks is written as zero.
+ * ES: Línea de comisión tal como la entrega el llamador. El esquema exige a cada línea un valor neto y uno exento: debe
+ * traer al menos uno, y el que falta se escribe en cero.
+ */
+export type CommissionLineInput = Omit<CommissionLine, 'lineNumber' | 'netValue' | 'exemptValue'> & {
+  /** EN: Net value; zero when only the exempt value is given. ES: `ValComNeto` — Valor neto; cero si solo viene el valor exento. */
+  readonly netValue?: number
+  /** EN: Exempt value; zero when only the net value is given. ES: `ValComExe` — Valor exento; cero si solo viene el valor neto. */
+  readonly exemptValue?: number
+}
 
 /**
  * EN: Driver of the transport (`Chofer`).
@@ -571,16 +585,18 @@ export type DocumentInput = {
   readonly references?: readonly ReferenceInput[]
   /** EN: References of a receipt (39, 41); `references` is for every other type. ES: `Referencia` — Referencias de una boleta (39, 41); `references` es para los demás tipos. */
   readonly receiptReferences?: readonly ReceiptReferenceInput[]
+  /** EN: Global discounts and surcharges; refused on a settlement invoice (43). ES: `DscRcgGlobal` — Descuentos y recargos globales; se rechazan en una liquidación factura (43). */
   readonly globalAdjustments?: readonly GlobalAdjustmentInput[]
   readonly subtotals?: readonly SubtotalInfo[]
+  /** EN: Commission and other charge lines, at most 20: summed into the totals and taken off the total. ES: `Comisiones` — Líneas de comisiones y otros cargos, 20 como máximo: se suman en los totales y se restan del total. */
   readonly commissions?: readonly CommissionLineInput[]
-  /** EN: Transport of the goods, on a dispatch guide or an invoice that moves them. ES: `Transporte` — Transporte de los bienes, en una guía de despacho o una factura que los traslada. */
+  /** EN: Transport of the goods, on a dispatch guide or an invoice that moves them; refused on a settlement invoice (43). ES: `Transporte` — Transporte de los bienes, en una guía de despacho o una factura que los traslada; se rechaza en una liquidación factura (43). */
   readonly transport?: TransportInput
   readonly options?: HeaderOptions
   /** EN: Unit prices already include VAT: emits `MntBruto=1` and derives net/VAT from the gross. ES: Los precios unitarios ya incluyen IVA: emite `MntBruto=1` y deriva neto/IVA del bruto. */
   readonly pricesIncludeVat?: boolean
   /** EN: Withhold the whole VAT (`ImptoReten` 15, total without VAT); true by default on purchase invoices, settable on the notes that affect one. ES: `ImptoReten` — Retener todo el IVA (código 15, total sin IVA); true por defecto en facturas de compra (46), se puede fijar en las notas que las afectan. */
   readonly withholdVat?: boolean
-  /** EN: Explicit totals (advanced); computed when omitted. ES: Totales explícitos (uso avanzado); se calculan si se omiten. */
+  /** EN: Explicit totals (advanced), written as given; computed when omitted. ES: `Totales` — Totales explícitos (uso avanzado), escritos tal como vienen; se calculan si se omiten. */
   readonly totals?: Totals
 }

@@ -101,6 +101,29 @@ describe('stampDocument', () => {
     expect(verifyTed(stampDocument(receipt, caf39).ted.xml, caf39)).toBe(true)
   })
 
+  // `DTE_v10.xsd` declares the `MNT` of a `Liquidacion` as a signed value, as it does its `MntTotal`. The stamp writes
+  // the total as the totals carry it, with its sign.
+  test.each([
+    [1000, '0'],
+    [2000, '-1190'],
+  ])('a settlement invoice with a commission of %p net stamps MNT %s, as its total', (netValue, mnt) => {
+    const caf43 = parseCaf(fixtureText('caf-33.xml').replace(/<TD>33<\/TD>/, '<TD>43</TD>'))
+    const settlement = createDocument({
+      type: 43,
+      folio: 7,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver,
+      items: [{ name: 'Venta por cuenta de terceros', unitPrice: 1000, settledDocumentType: '33' }],
+      commissions: [{ kind: 'commission', description: 'Comisión', netValue }],
+    })
+    const { ted } = stampDocument(settlement, caf43, { now: FIXED_NOW })
+    expect(ted.totalAmount).toBe(Number(mnt))
+    expect(ted.totalAmount).toBe(settlement.header.totals.totalAmount)
+    expect(ted.xml).toContain(`<MNT>${mnt}</MNT>`)
+    expect(verifyTed(ted.xml, caf43)).toBe(true)
+  })
+
   test('verifyTed fails on tampered DD, tampered signature or foreign CAF', () => {
     const { ted } = stampDocument(invoice(), caf, { now: FIXED_NOW })
     expect(verifyTed(ted.xml.replace('<MNT>2380</MNT>', '<MNT>2381</MNT>'), caf)).toBe(false)

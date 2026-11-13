@@ -28,7 +28,7 @@ export type Ted = {
   readonly receiverRut: string
   /** EN: Receiver name folded to ASCII, max 40. ES: `RSR` — Razón social del receptor plegada a ASCII, máximo 40. */
   readonly receiverName: string
-  /** EN: Document total. ES: `MNT` — Monto total. */
+  /** EN: Document total, with its sign: zero or negative on a settlement invoice (43) whose charges reach or exceed what it settles. ES: `MNT` — Monto total, con su signo: cero o negativo en una liquidación factura (43) cuyos cargos igualan o superan lo que liquida. */
   readonly totalAmount: number
   /** EN: First item name folded to ASCII, max 40. ES: `IT1` — Nombre del primer ítem plegado a ASCII, máximo 40. */
   readonly firstItemName: string
