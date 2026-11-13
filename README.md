@@ -307,16 +307,21 @@ settlement.header.totals
 ```
 
 The totals follow Formato DTE 2.5. The summary of commissions in the totals (`Totales/Comisiones`, fields 121 to 123)
-is the sum of each value over the lines, and the total (`MntTotal`, field 124) is net + exempt + VAT less the three
-sums. On a settlement invoice the total may be zero or negative, and so may the net, the exempt amount and the VAT when
+holds the net and the exempt value of the lines added up and the VAT of the charges, and the total (`MntTotal`, field
+124) is net + exempt + VAT less the three. On a settlement invoice the total may be zero or negative, and so may the net, the exempt amount and the VAT when
 it settles negative lines: the schema declares them as signed values under `Liquidacion`, the root of a 43, and the
 stamp carries the same total with its sign in `MNT`.
 
 A commission line needs a net value or an exempt one. The schema asks every line for both, so the one it lacks is
 written as zero. Its `vatValue` is the one you pass or, without one, its net value by the VAT rate, rounded; pass
-`vatValue: 0` for a line that carries none. The VAT in the summary is the sum of the VAT of the lines, as the Formato
-describes field 123, so each line is rounded on its own. Totals passed in `totals` are written as given, which is also
-how the own and the third-party VAT (`IVAProp`, `IVATerc`) reach the document.
+`vatValue: 0` for a line that carries none. The VAT in the summary is the VAT rate by the summary's net value, rounded
+once: that is what the SII checks on a settlement invoice, in validation 38 of its
+[new validations for the books and the DTE](https://www.sii.cl/factura_electronica/compra_venta.pdf) ("el IVA de las
+Comisiones debe ser igual a la tasa del IVA (19%) por el Valor Neto de las Comisiones"). The Formato describes field 123
+as the sum of the lines' VAT, and the two can be a peso apart: three charges of 1,003 net carry 191 each, 573 if added
+up, and the summary carries 572. When a line states its `vatValue`, the summary is the sum of the lines instead. Totals
+passed in `totals` are written as given, which is also how the own and the third-party VAT (`IVAProp`, `IVATerc`) reach
+the document.
 
 `Liquidacion` declares less than the root of the other types, and `createDocument` refuses before stamping what the
 schema would reject: `transport`, `globalAdjustments`, a line's `discountPercent` or `surchargePercent`, a reference's

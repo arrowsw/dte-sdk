@@ -23,14 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the new fields in `transport`. An exhaustive `switch` on `DteErrorCode` needs the `INVALID_TIME` case.
 - **A settlement invoice (43) works out its totals.** `createDocument` now hands the commission lines to
   `calculateTotals`, which takes them in a new `commissions` option. The totals carry the summary of commissions and
-  other charges (`Totales/Comisiones`), each value the sum of its lines and left out when zero, and the total is net +
-  exempt + VAT less the three sums, as Formato DTE 2.5 defines `MntTotal` in field 124. Before, the summary was only
+  other charges (`Totales/Comisiones`), the net and the exempt value each the sum of its lines, and every value left
+  out when zero, and the total is net + exempt + VAT less the three, as Formato DTE 2.5 defines `MntTotal` in field 124. Before, the summary was only
   written from totals passed by hand, and the total worked out for a 43 ignored its commissions. On a 43 the net, the
   exempt amount, the VAT and the total keep their sign, so a settlement whose charges reach or exceed what it settles
   totals zero or less, and negative lines are totalled instead of dropped: `DTE_v10.xsd` declares those amounts, and
   the `MNT` of the stamp, as signed values under `Liquidacion`. A non-billable line of a 43 stays out of its totals,
-  because `Liquidacion` has no `MontoNF`. The VAT of the summary is the sum of the VAT of the lines, each rounded on
-  its own, as the Formato describes field 123. The same sums apply to the commission lines of a purchase invoice (46)
+  because `Liquidacion` has no `MontoNF`. The VAT of the summary is the VAT rate by the summary's net value, rounded
+  once, which is what the SII checks on a settlement invoice (validation 38 of its "Nuevas validaciones a la IECV, DTE
+  y DJ 3327 y 3328"); it can be a peso off the sum of the lines' VAT, which the Formato gives for field 123, and it is
+  that sum when a line states its `vatValue`. The same sums apply to the commission lines of a purchase invoice (46)
   and of the notes that correct one.
   - **What to change:** nothing for a 43 issued with `totals` passed by hand: they are still written as given. A 43
     issued without `totals` now carries `Totales/Comisiones` and a `MntTotal` with the commissions taken off, where it
@@ -55,8 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   In the types, `netValue` and `exemptValue` are required numbers on `CommissionLine` and on `SiiComisiones`, and stay
   optional on `CommissionLineInput`.
   - **What to change:** a line that must carry no VAT passes `vatValue: 0`. If you pass `totals` by hand for a 43, the
-    lines can now carry a `ValComIVA` you did not write: check that `totals.commissions.vatValue` is the sum of the
-    lines, or drop `totals` and let `createDocument` work them out. Code that builds a `Document` or a `SiiDocumento`
+    lines can now carry a `ValComIVA` you did not write: check that `totals.commissions.vatValue` is the VAT rate by
+    `totals.commissions.netValue`, or drop `totals` and let `createDocument` work them out. Code that builds a `Document` or a `SiiDocumento`
     by hand gives every commission line both values.
 - **`createDocument` refuses on a settlement invoice (43) what its root does not declare.** `DTE_v10.xsd` gives a 43 a
   root of its own, `Liquidacion`, which declares less than `Documento`, and the codec wrote under it whatever the input
