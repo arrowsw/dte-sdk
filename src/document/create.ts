@@ -310,7 +310,7 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
   const globalAdjustments = (input.globalAdjustments ?? []).map(normalizeAdjustment)
   const commissions = (input.commissions ?? []).map(normalizeCommission)
   const transport = normalizeTransport(input.transport)
-  // The schema admits `IndTraslado` 1 to 9; the codes Res. Ex. 144/2026 adds wait until it admits them.
+  // The schema admits `IndTraslado` 1 to 9; the three types Res. Ex. 144/2026 names wait for a code it admits.
   const transferType = input.options?.transferType
   if (transferType !== undefined && !Object.values(TRANSFER_TYPES).includes(transferType))
     throw new DteError('INVALID_OPTION', { field: 'options.transferType' })
