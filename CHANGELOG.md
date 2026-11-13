@@ -7,14 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-13
+
 ### Fixed
 
 - **The published types compile without `@types/node-forge`.** The declarations of `crypto/rsa` and `crypto/x509`,
   which `dte-sdk`, `dte-sdk/node` and `dte-sdk/portal` reach, began with `import forge from 'node-forge'`, a package
   that ships no types of its own: a consumer on `strict` with `skipLibCheck: false` got TS7016, "Could not find a
-  declaration file for module 'node-forge'", unless they installed `@types/node-forge` themselves. The three internal helpers whose signatures
-  named it are now left out of the declarations, so no declaration file imports `node-forge`, and a test fails if
-  one names a module that ships no types of its own. No exported name, signature or runtime code changes.
+  declaration file for module 'node-forge'", unless they installed `@types/node-forge` themselves. The three internal
+  helpers whose signatures named it are now left out of the declarations, so no declaration file imports `node-forge`,
+  and a test fails if one names a module that ships no types of its own. No exported name, signature or runtime code
+  changes.
   - **What to change:** nothing. A project that added `@types/node-forge` only for this can drop it.
 
 ### Security
@@ -36,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `rut.ts` 5.1.2 reads options only from the object passed, not from its prototype, and only `incremental: true`
     turns its incremental mode on. dte-sdk passes object literals and never asks for incremental mode, so every RUT
     reads and prints as before.
-  - **What to change:** nothing. The built files are byte for byte the same, since the dependencies stay external.
+  - **What to change:** nothing. The dependencies stay external, so the package's own code is the same as in 0.9.0.
 
 ## [0.9.0] - 2026-11-12
 
@@ -752,7 +755,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Jest, ESLint, Prettier, size-limit, Stryker, CI and tag-triggered publish)
   and a single `hello()` export that returns `'dte-sdk is coming'`.
 
-[Unreleased]: https://github.com/arrowsw/dte-sdk/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/arrowsw/dte-sdk/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.9.1
 [0.9.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.9.0
 [0.8.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.8.0
 [0.7.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.7.0
