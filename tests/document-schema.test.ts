@@ -211,7 +211,9 @@ describe('what the schema refuses in the transport of a guide', () => {
       transport: wholeTransport,
     }))
 
-  test.each([10, 11, 12])('IndTraslado %p, which Res. Ex. 144/2026 names, is not in the schema', async (code) => {
+  // Res. Ex. 144/2026 names three transfer types, a transfer of more than one day as a sale or not and an outsourced
+  // transfer, and neither it nor the Formato gives them a code. The schema admits 1 to 9, so a code after 9 fails.
+  test.each([10, 11, 12])('IndTraslado %p, past the 9 the schema admits, fails it', async (code) => {
     const xml = issued().xml.replace('<IndTraslado>1</IndTraslado>', `<IndTraslado>${code}</IndTraslado>`)
     expect(await validateAgainstXsd(xml, 'DTE')).toEqual([
       expect.stringContaining(
