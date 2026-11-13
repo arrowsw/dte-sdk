@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The four transport fields of 2026.** `Transport` gains `trailerLicensePlate` (`PatenteCarro`), `departureDate`
+  (`FchSalida`), `departureTime` (`HraSalida`) and `arrivalDate` (`FchLlegada`), the fields Formato DTE 2.5 adds to
+  `Transporte` for Res. Ex. 144/2026, in force since November 1, 2026. `createDocument` writes them in the order of
+  `DTE_v10.xsd`, the trailer plate after the vehicle's and the dates and time after the destination, and
+  `fromSiiDocument` reads them back. Before stamping, the trailer plate is held to 8 characters (`FIELD_TOO_LONG`), the
+  dates must be real days from 2003-04-01 to 2050-12-31, given as `YYYY-MM-DD`, `DD-MM-YYYY` or `DD/MM/YYYY`
+  (`INVALID_DATE`), and the time `HH:MM:SS` or `HH:MM`, written with its seconds because the schema's `xs:time` asks
+  for them (`INVALID_TIME`, a new code). All four are optional on every type, as the schema declares them: Formato 2.5
+  marks them mandatory on a dispatch guide, while the resolution makes the departure time optional and lets what is
+  unknown when issuing be completed by a later guide. The printed sample does not print the transport area yet.
+  - **What to change:** nothing for documents already issued. A dispatch guide, or an invoice that moves goods, passes
+    the new fields in `transport`. An exhaustive `switch` on `DteErrorCode` needs the `INVALID_TIME` case.
+
+### Changed
+
+- **`createDocument` refuses an `options.transferType` outside 1 to 9.** Res. Ex. 144/2026 names three more transfer
+  types, a transfer of more than one day as a sale or not and an outsourced transfer, but `DTE_v10.xsd` admits only 1 to
+  9 in `IndTraslado`, and a document that carries another value fails it. `TRANSFER_TYPES` keeps them out until the
+  schema admits them, and any other value now throws `INVALID_OPTION { field: 'options.transferType' }` before
+  stamping, where it used to be written as given.
+  - **What to change:** nothing in TypeScript, where `TransferType` already allowed only 1 to 9. A JavaScript caller
+    that passed another number gets the error.
+
 ## [0.9.1] - 2026-11-13
 
 ### Fixed

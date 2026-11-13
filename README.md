@@ -239,6 +239,44 @@ verifyDocumentSignature(signed.xml) // { digestValid: true, signatureValid: true
 
 Every function that depends on "now" accepts `{ now: Date }`, so tests are deterministic.
 
+### Transport of goods
+
+A dispatch guide (52), or an invoice that moves goods, carries its transport in `transport`, with the fields
+Res. Ex. 144/2026 asks for since November 1, 2026:
+
+```typescript
+import { createDocument, DISPATCH_TYPES, TRANSFER_TYPES } from 'dte-sdk'
+
+const guide = createDocument({
+  type: 52,
+  folio: 1,
+  issuer,
+  receiver,
+  items: [{ name: 'Cajón de manzanas', quantity: 10, unitPrice: 8000 }],
+  options: { transferType: TRANSFER_TYPES.sale, dispatchType: DISPATCH_TYPES.byIssuerToReceiver },
+  transport: {
+    licensePlate: 'ABCD12', // Patente
+    trailerLicensePlate: 'JK1234', // PatenteCarro
+    carrierRut: '12345678-5', // RUTTrans
+    driver: { rut: '12345678-5', name: 'Juan Pérez' }, // Chofer
+    destinationAddress: 'Bodega 1', // DirDest
+    destinationCommune: 'Maipú', // CmnaDest
+    destinationCity: 'Santiago', // CiudadDest
+    departureDate: '2026-11-15', // FchSalida
+    departureTime: '08:30', // HraSalida, written as 08:30:00
+    arrivalDate: '2026-11-16', // FchLlegada
+  },
+})
+```
+
+Every field is optional, as the SII's schema declares them: Formato DTE 2.5 marks the plates, the departure and the
+arrival mandatory on a guide, but the resolution makes the departure time optional and lets what is unknown when
+issuing be completed by a later guide. Before stamping, `createDocument` holds both plates to 8 characters, the dates to
+real days from 2003-04-01 to 2050-12-31 (`INVALID_DATE`) and the time to `HH:MM:SS` or `HH:MM` (`INVALID_TIME`).
+`transferType` takes 1 to 9, the values the schema admits: the three types the resolution adds (a transfer of more than
+one day, as a sale or not, and an outsourced transfer) wait until the schema admits them, and `createDocument` refuses
+any other value with `INVALID_OPTION`. The printed sample does not print the transport area yet.
+
 ## Received documents
 
 ```typescript

@@ -27,6 +27,14 @@ const transport = {
   destinationCommune: 'Maipú',
   destinationCity: 'Santiago',
 }
+// Every element of `Transporte` dte-sdk writes, the four of 2026 (Res. Ex. 144/2026) included.
+const wholeTransport = {
+  ...transport,
+  trailerLicensePlate: 'JK1234',
+  departureDate: '2026-11-15',
+  departureTime: '08:30',
+  arrivalDate: '2026-11-16',
+}
 
 const VARIANTS: Record<Exclude<DocumentType, 39 | 41>, Record<string, Variant>> = {
   33: {
@@ -77,6 +85,10 @@ const VARIANTS: Record<Exclude<DocumentType, 39 | 41>, Record<string, Variant>> 
       pricesIncludeVat: true,
     },
     transport: { items: [{ name: 'Cajón', quantity: 10, unitPrice: 8000 }], transport },
+    'the whole transport area, with the trailer plate and the departure and arrival of 2026': {
+      items: [{ name: 'Cajón', quantity: 10, unitPrice: 8000 }],
+      transport: wholeTransport,
+    },
   },
   34: {
     'exempt lines': { items: [{ name: 'Asesoría exenta', quantity: 2, unit: 'UN', unitPrice: 50000 }] },
@@ -120,6 +132,16 @@ const VARIANTS: Record<Exclude<DocumentType, 39 | 41>, Record<string, Variant>> 
       items: [{ name: 'Pallet', quantity: 2, unit: 'UN', amount: 0 }],
       options: { transferType: 5 },
       transport: { licensePlate: 'XX1234', driver: { rut: RECEIVER_RUT, name: 'Ana' } },
+    },
+    'the whole transport area, with the trailer plate and the departure and arrival of 2026': {
+      items: [{ name: 'Cajón de manzanas', quantity: 10, unitPrice: 8000 }],
+      options: { transferType: 1, dispatchType: 2 },
+      transport: wholeTransport,
+    },
+    'only the departure date of 2026, with a trailer and no time': {
+      items: [{ name: 'Pallet', quantity: 2, unit: 'UN', amount: 0 }],
+      options: { transferType: 5 },
+      transport: { licensePlate: 'XX1234', trailerLicensePlate: 'RR5678', departureDate: '2026-11-15' },
     },
   },
   56: {
@@ -172,5 +194,37 @@ describe.each(Object.entries(VARIANTS))('type %s', (type, variants) => {
 
   test('every variant together in one signed envelope validates against EnvioDTE_v10.xsd', async () => {
     expect(await validateAgainstXsd(envelopeXml(entries.map((_, index) => issued(index))), 'EnvioDTE')).toEqual([])
+  })
+})
+
+// What `createDocument` refuses or rewrites because the schema would reject it. If a new `DTE_v10.xsd` admits these,
+// the test fails and the model can follow.
+describe('what the schema refuses in the transport of a guide', () => {
+  let guide: SignedDocument | undefined
+  const issued = (): SignedDocument =>
+    (guide ??= issue({
+      ...base,
+      type: 52,
+      folio: 99,
+      items: [{ name: 'Cajón de manzanas', quantity: 10, unitPrice: 8000 }],
+      options: { transferType: 1 },
+      transport: wholeTransport,
+    }))
+
+  test.each([10, 11, 12])('IndTraslado %p, which Res. Ex. 144/2026 names, is not in the schema', async (code) => {
+    const xml = issued().xml.replace('<IndTraslado>1</IndTraslado>', `<IndTraslado>${code}</IndTraslado>`)
+    expect(await validateAgainstXsd(xml, 'DTE')).toEqual([
+      expect.stringContaining(
+        `The value '${code}' is not an element of the set {'1', '2', '3', '4', '5', '6', '7', '8', '9'}`,
+      ),
+    ])
+  })
+
+  test('HraSalida needs its seconds, so a time given as HH:MM is written with :00', async () => {
+    const xml = issued().xml
+    expect(xml).toContain('<HraSalida>08:30:00</HraSalida>')
+    expect(await validateAgainstXsd(xml.replace('08:30:00', '08:30'), 'DTE')).toEqual([
+      expect.stringContaining("Element '{http://www.sii.cl/SiiDte}HraSalida': '08:30' is not a valid value"),
+    ])
   })
 })
