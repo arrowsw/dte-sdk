@@ -17,6 +17,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one names a module that ships no types of its own. No exported name, signature or runtime code changes.
   - **What to change:** nothing. A project that added `@types/node-forge` only for this can drop it.
 
+### Security
+
+- **The runtime dependencies move past their published advisories.** `node-forge` goes from 1.4.2 to 1.4.3,
+  `fast-xml-parser` from 5.11.2 to 5.12.0 and `rut.ts` from 5.0.0 to 5.1.2, still pinned to exact versions. Because
+  they are exact, an app that installs 0.9.0 or older gets the affected versions until it upgrades, unless it sets
+  `overrides` itself.
+  - `node-forge` 1.4.3 fixes four moderate advisories: Ed25519 verification accepting small-order public keys
+    ([GHSA-6889-vf6x-f3g5](https://github.com/advisories/GHSA-6889-vf6x-f3g5)), two crashes of its TLS client
+    ([GHSA-w4xr-hqv8-ch44](https://github.com/advisories/GHSA-w4xr-hqv8-ch44),
+    [GHSA-j8rw-jp99-435v](https://github.com/advisories/GHSA-j8rw-jp99-435v)) and a ReDoS in `forge.http`
+    ([GHSA-6cv4-p8m7-4r25](https://github.com/advisories/GHSA-6cv4-p8m7-4r25)). dte-sdk calls none of them: it uses
+    node-forge for PKCS#12, X.509, RSA and digests, and sends its requests through `fetch` or `node:https`. The release
+    also enforces name constraints in `verifyCertificateChain`, which dte-sdk does not call either.
+  - `fast-xml-parser` 5.12.0 fixes a low advisory, quadratic CPU time on an unterminated stop-node tag
+    ([GHSA-474x-hrwr-fgx4](https://github.com/advisories/GHSA-474x-hrwr-fgx4)). dte-sdk sets no stop nodes. The other
+    change, the offsets of `captureMetaData` on CRLF input, is an option dte-sdk does not set.
+  - `rut.ts` 5.1.2 reads options only from the object passed, not from its prototype, and only `incremental: true`
+    turns its incremental mode on. dte-sdk passes object literals and never asks for incremental mode, so every RUT
+    reads and prints as before.
+  - **What to change:** nothing. The built files are byte for byte the same, since the dependencies stay external.
+
 ## [0.9.0] - 2026-11-12
 
 ### Added

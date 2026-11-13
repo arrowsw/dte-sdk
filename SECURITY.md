@@ -52,10 +52,12 @@ package has four, pinned to exact versions (`@xmldom/xmldom`, `fast-xml-parser`,
 
 ## Supply chain
 
-Releases are published from CI on a signed tag with
-[npm provenance](https://docs.npmjs.com/generating-provenance-statements)
+Releases are published from CI, from a version tag on a commit of `canary`,
+with [npm provenance](https://docs.npmjs.com/generating-provenance-statements)
 (a Sigstore attestation linking each tarball to its source commit and build).
-You can verify an installed copy with:
+The tarball is built and tested in a job without the publish credential, and a
+separate job publishes that exact file without running any of its code. See
+[RELEASING.md](RELEASING.md). You can verify an installed copy with:
 
 ```bash
 npm audit signatures
