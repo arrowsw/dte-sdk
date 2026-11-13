@@ -5,6 +5,8 @@ import { validateXML } from 'xmllint-wasm'
 const XSD_DIR = join(__dirname, '..', 'fixtures', 'xsd')
 
 const SCHEMAS = {
+  DTE: { main: 'DTE_v10.xsd', imports: ['SiiTypes_v10.xsd', 'xmldsignature_v10.xsd'] },
+  EnvioDTE: { main: 'EnvioDTE_v10.xsd', imports: ['DTE_v10.xsd', 'SiiTypes_v10.xsd', 'xmldsignature_v10.xsd'] },
   LibroCV: {
     main: 'LibroCV_v10.xsd',
     imports: ['LceCal_v10.xsd', 'LceCoCertif_v10.xsd', 'LceSiiTypes_v10.xsd', 'xmldsignature_v10.xsd'],
