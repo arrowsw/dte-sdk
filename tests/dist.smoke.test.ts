@@ -13,6 +13,7 @@ import {
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { preProcessFile } from 'typescript'
 
 /**
  * Smoke test for the built `dist/` artefacts and their `package.json` wiring. Jest cannot `require()` an ES module, so
@@ -354,7 +355,73 @@ const TYPE_CONSUMERS: ReadonlyArray<readonly [string, string, Record<string, str
   ['a project on node10 resolution', 'consumer.ts', { module: 'commonjs', moduleResolution: 'node10' }],
 ]
 
+/** Every module a declaration file names: imports, re-exports, `import()` types and `/// <reference types>`. */
+const namedModules = (source: string): string[] => {
+  const { importedFiles, typeReferenceDirectives } = preProcessFile(source, true, true)
+  return [...importedFiles, ...typeReferenceDirectives].map(({ fileName }) => fileName)
+}
+
+const declarationFiles = (): string[] =>
+  readdirSync(distRoot, { recursive: true, encoding: 'utf8' }).filter((file) => file.endsWith('.d.ts'))
+
+const packageName = (specifier: string): string =>
+  specifier
+    .split('/')
+    .slice(0, specifier.startsWith('@') ? 2 : 1)
+    .join('/')
+
+const declaresTypes = (exports: unknown): boolean =>
+  typeof exports === 'object' &&
+  exports !== null &&
+  Object.entries(exports).some(([condition, target]) => condition === 'types' || declaresTypes(target))
+
+/** Whether a consumer that installs dte-sdk gets `name` and its types: a dependency or peer that ships its own. */
+const typedForConsumers = (name: string): boolean => {
+  const { dependencies = {}, peerDependencies = {} } = JSON.parse(
+    readFileSync(join(packageRoot, 'package.json'), 'utf8'),
+  ) as { dependencies?: Record<string, string>; peerDependencies?: Record<string, string> }
+  if (!(name in dependencies) && !(name in peerDependencies)) return false
+  const own = JSON.parse(readFileSync(join(packageRoot, 'node_modules', name, 'package.json'), 'utf8')) as {
+    types?: unknown
+    typings?: unknown
+    exports?: unknown
+  }
+  return typeof own.types === 'string' || typeof own.typings === 'string' || declaresTypes(own.exports)
+}
+
 guarded('dist smoke: published types', () => {
+  // A consumer has the dependencies, not the dev dependencies: a declaration that names a module typed only by an
+  // `@types/*` package, as `node-forge` is, fails to compile for them under `skipLibCheck: false` (TS7016). The type
+  // consumers below miss that, because the symlinked package resolves the repo's own `node_modules/@types`. A helper
+  // whose signature names such a module stays out of the declarations with `@internal`. `node:` modules come from
+  // `@types/node`, which a Node consumer has.
+  test('every module a declaration names is relative, node: or a dependency that ships its own types', () => {
+    const untyped = declarationFiles().flatMap((file) =>
+      namedModules(readFileSync(join(distRoot, file), 'utf8'))
+        .filter((specifier) => !/^\.\.?\//.test(specifier) && !specifier.startsWith('node:'))
+        .filter((specifier) => !typedForConsumers(packageName(specifier)))
+        .map((specifier) => `${file}: ${specifier}`),
+    )
+    expect(untyped).toEqual([])
+  })
+
+  test('the declaration scan does find the modules named, and does flag one typed only by @types', () => {
+    const named = new Set(
+      declarationFiles().flatMap((file) => namedModules(readFileSync(join(distRoot, file), 'utf8'))),
+    )
+    expect([...named]).toEqual(expect.arrayContaining(['./digest.js', '@xmldom/xmldom', 'node:https', 'pdf-lib']))
+    expect(
+      namedModules("/** import x from 'a' */\nimport forge from 'node-forge'\nexport type B = import('b').B"),
+    ).toEqual(['node-forge', 'b'])
+    expect(
+      ['@xmldom/xmldom', 'fast-xml-parser', 'rut.ts', 'pdf-lib', 'bwip-js'].filter(typedForConsumers),
+    ).toHaveLength(5)
+    expect(typedForConsumers('node-forge')).toBe(false)
+    expect(typedForConsumers('typescript')).toBe(false)
+    expect(packageName('@xmldom/xmldom/lib/dom')).toBe('@xmldom/xmldom')
+    expect(packageName('fast-xml-parser/src/fxp')).toBe('fast-xml-parser')
+  })
+
   test.each(TYPE_CONSUMERS)(
     '%s sees the real types of every entry',
     (_name, file, options) => {

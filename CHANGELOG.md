@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The published types compile without `@types/node-forge`.** The declarations of `crypto/rsa` and `crypto/x509`,
+  which `dte-sdk`, `dte-sdk/node` and `dte-sdk/portal` reach, began with `import forge from 'node-forge'`, a package
+  that ships no types of its own: a consumer on `strict` with `skipLibCheck: false` got TS7016, "Could not find a
+  declaration file for module 'node-forge'", unless they installed `@types/node-forge` themselves. The three internal helpers whose signatures
+  named it are now left out of the declarations, so no declaration file imports `node-forge`, and a test fails if
+  one names a module that ships no types of its own. No exported name, signature or runtime code changes.
+  - **What to change:** nothing. A project that added `@types/node-forge` only for this can drop it.
+
 ## [0.9.0] - 2026-11-12
 
 ### Added
