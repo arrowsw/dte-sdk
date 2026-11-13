@@ -36,6 +36,7 @@ const asSiiRut = (candidate: string | undefined): SiiRut | null => {
 /**
  * EN: Subject attributes keyed by short name (falls back to the long name).
  * ES: Atributos del sujeto por nombre corto (o el nombre largo si no hay corto).
+ * @internal
  */
 export const subjectFields = (certificate: forge.pki.Certificate): Readonly<Record<string, string>> =>
   Object.fromEntries(
@@ -71,6 +72,7 @@ const rutFromSubjectAltName = (certificate: forge.pki.Certificate): SiiRut | nul
  * Each candidate must pass rut.ts; invalid ones fall through to the next source.
  * ES: RUT del titular desde el certificado: primero el otherName del SAN, luego `serialNumber`, `OU` y un token con forma
  * de RUT en `CN`. Cada candidato debe pasar rut.ts; los inválidos caen al siguiente origen.
+ * @internal
  */
 export const rutFromCertificate = (certificate: forge.pki.Certificate): SiiRut | null => {
   const fromSan = rutFromSubjectAltName(certificate)

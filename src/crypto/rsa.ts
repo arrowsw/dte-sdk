@@ -40,6 +40,7 @@ export const rsaPublicKeyParts = (privateKeyPem: string): RsaPublicKeyParts => {
  * the base64 and leading zero bytes change nothing.
  * ES: Si una llave privada es el par de una clave pública dada como módulo/exponente, comparadas como números: los
  * espacios en el base64 y los bytes cero al inicio no cambian nada.
+ * @internal
  */
 export const isRsaKeyPair = (privateKey: forge.pki.rsa.PrivateKey, publicKey: RsaPublicKeyParts): boolean =>
   privateKey.n.equals(base64ToBigInt(publicKey.modulus)) && privateKey.e.equals(base64ToBigInt(publicKey.exponent))
