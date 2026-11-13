@@ -31,11 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commissions. On a 43 the net, the exempt amount, the VAT and the total keep their sign, so a settlement whose charges
   reach or exceed what it settles totals zero or less, and negative lines are totalled instead of dropped:
   `DTE_v10.xsd` declares those amounts, and the `MNT` of the stamp, as signed values under `Liquidacion`. A
-  non-billable line of a 43 stays out of its totals, because `Liquidacion` has no `MontoNF`. The VAT of the summary is the VAT rate by the summary's net value, rounded
-  once, which is what the SII checks on a settlement invoice (validation 38 of its "Nuevas validaciones a la IECV, DTE
-  y DJ 3327 y 3328"); it can be a peso off the sum of the lines' VAT, which the Formato gives for field 123, and it is
-  that sum when a line states its `vatValue`. The same sums apply to the commission lines of a purchase invoice (46)
-  and of the notes that correct one.
+  non-billable line of a 43 stays out of its totals, because `Liquidacion` has no `MontoNF`. The VAT of the summary is
+  the VAT rate by the summary's net value, rounded once, which is what the SII checks on a settlement invoice
+  (validation 38 of its "Nuevas validaciones a la IECV, DTE y DJ 3327 y 3328"); it can be a peso off the sum of the
+  lines' VAT, which the Formato gives for field 123, and it is that sum when a line states its `vatValue`. The same
+  applies to the commission lines of a purchase invoice (46) and of the notes that correct one.
   - **What to change:** nothing for a 43 issued with `totals` passed by hand: they are still written as given. A 43
     issued without `totals` now carries `Totales/Comisiones` and a `MntTotal` with the commissions taken off, where it
     used to carry net + VAT + exempt: drop any correction applied afterwards. A purchase invoice or a note with
