@@ -51,8 +51,8 @@ How `dte-sdk` versions are cut and published to npm.
      downloads that tarball and runs `npm publish <tarball> --provenance`
      with npm 12.2.1. It checks out no code, installs no project
      dependencies and runs no package scripts.
-6. If the `npm` environment requires reviewers, approve the publish job in the
-   workflow run.
+6. Approve the publish job in the workflow run: the `npm` environment requires
+   reviewers (see below).
 7. Verify: `npm view dte-sdk version` and the provenance attestation on
    [npmjs.com/package/dte-sdk](https://www.npmjs.com/package/dte-sdk).
 
@@ -69,9 +69,11 @@ or to the workflow:
 - **Tag ruleset.** Settings → Rules → Rulesets: an active ruleset on tags
   matching `v*` that restricts creation, update and deletion to the release
   owner, with no bypass.
-- **`npm` environment.** Settings → Environments → `npm` (created by the first
-  run of the publish job): required reviewers, and deployments limited to tags
-  matching `v*`.
+- **`npm` environment.** Settings → Environments → `npm`: required reviewers,
+  and deployments limited to tags matching `v*`. Create it before the first tag
+  is pushed. A job that names an environment that does not exist creates it
+  with no protection, so the first run of the publish job would publish without
+  waiting for anyone.
 - **npm Trusted Publisher.** npmjs.com → `dte-sdk` → Settings → Trusted
   Publisher: repository `arrowsw/dte-sdk`, workflow `publish.yml`, environment
   `npm`. With the environment named here, only the protected job can publish.
