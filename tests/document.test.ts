@@ -99,8 +99,10 @@ describe('buildDocumentXml', () => {
     })
     const xml = buildDocumentXml(doc)
     expect(xml).toContain('<Liquidacion ID="DTE_T43F1">')
+    expect(xml).toContain('<Comisiones><ValComNeto>100</ValComNeto><ValComIVA>19</ValComIVA></Comisiones>')
+    expect(xml).toContain('<MntTotal>1071</MntTotal></Totales>')
     expect(xml).toContain(
-      '</Detalle>\n<Comisiones><NroLinCom>1</NroLinCom><TipoMovim>C</TipoMovim><Glosa>Comisión</Glosa><ValComNeto>100</ValComNeto></Comisiones></Liquidacion></DTE>',
+      '</Detalle>\n<Comisiones><NroLinCom>1</NroLinCom><TipoMovim>C</TipoMovim><Glosa>Comisión</Glosa><ValComNeto>100</ValComNeto><ValComExe>0</ValComExe><ValComIVA>19</ValComIVA></Comisiones></Liquidacion></DTE>',
     )
   })
 })

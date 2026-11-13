@@ -21,6 +21,7 @@ import {
   isPlain,
   named,
   signedForms,
+  signedInteger,
   textAt,
   writeXml,
 } from '../xml/elements'
@@ -133,7 +134,7 @@ export type ReceivedDocument = {
   readonly issuerRut: string | null
   /** EN: Receiver RUT as written. ES: `RUTRecep` — RUT del receptor tal como viene. */
   readonly receiverRut: string | null
-  /** EN: Total amount. ES: `MntTotal` — Monto total. */
+  /** EN: Total amount; zero or negative on a settlement invoice whose charges reach or exceed what it settles. ES: `MntTotal` — Monto total; cero o negativo en una liquidación factura cuyos cargos igualan o superan lo que liquida. */
   readonly totalAmount: number | null
   /** EN: The document's XMLDSig signature over its signed element. ES: La firma XMLDSig del documento sobre su elemento firmado. */
   readonly signature: ReceivedSignatureCheck
@@ -242,7 +243,7 @@ const readHeader = (signed: Element): Header => {
     issueDate: textAt(header, 'IdDoc', 'FchEmis'),
     issuerRut: textAt(header, 'Emisor', 'RUTEmisor'),
     receiverRut: textAt(header, 'Receptor', 'RUTRecep'),
-    totalAmount: integer(textAt(header, 'Totales', 'MntTotal')),
+    totalAmount: signedInteger(textAt(header, 'Totales', 'MntTotal')),
   }
 }
 
@@ -267,7 +268,7 @@ const tedMismatches = (dd: Element, header: Header): readonly TedMismatch[] => {
     folio: header.folio === null || integer(textAt(dd, 'F')) !== header.folio,
     issueDate: header.issueDate === null || textAt(dd, 'FE') !== header.issueDate,
     receiverRut: !sameRut(textAt(dd, 'RR'), header.receiverRut),
-    totalAmount: header.totalAmount === null || integer(textAt(dd, 'MNT')) !== header.totalAmount,
+    totalAmount: header.totalAmount === null || signedInteger(textAt(dd, 'MNT')) !== header.totalAmount,
   }
   return (Object.keys(differs) as TedMismatch[]).filter((field) => differs[field])
 }

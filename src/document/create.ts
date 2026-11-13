@@ -25,7 +25,7 @@ import type {
 import { toSiiRut } from '../model/rut'
 import { assertMaxLength, sanitizeText } from '../text/sanitize'
 import { chileDate, toIsoDate } from '../time/chile'
-import { calculateLineAmount, calculateTotals } from '../totals/calculate'
+import { calculateLineAmount, calculateTotals, commissionVat } from '../totals/calculate'
 
 /**
  * EN: `xs:maxLength` of the SII schema per element; `createDocument` enforces them on sanitized text.
@@ -71,6 +71,21 @@ export const FIELD_LIMITS = {
 } as const
 
 type LimitedField = keyof typeof FIELD_LIMITS
+
+// `maxOccurs` of the SII schema: the detail lines of a settlement invoice, and the commission lines of any document.
+const MAX_SETTLEMENT_LINES = 60
+const MAX_COMMISSIONS = 20
+
+// The `IdDoc` fields that `Documento` declares and `Liquidacion`, the root of a settlement invoice, does not; and
+// `IndMntNeto`, which only a receipt declares.
+const NOT_IN_SETTLEMENT = [
+  'noDebitReduction',
+  'dispatchType',
+  'transferType',
+  'printFormat',
+  'exportPaymentTerms',
+  'netAmountsIndicator',
+] as const
 
 /**
  * EN: Options of `createDocument`.
@@ -127,6 +142,27 @@ const transportTime = (value: string | undefined, field: string): string | undef
 const compact = <T extends object>(value: T): T =>
   Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T
 
+const refuse = (field: string): never => {
+  throw new DteError('INVALID_OPTION', { field })
+}
+
+// `Liquidacion` declares less than `Documento`: no transport, no global or line discounts and surcharges, no `RUTOtr`
+// in a reference, no `MontoNF`. Each of these would be written under it and fail the schema.
+const assertSettlement = (input: DocumentInput): void => {
+  if (input.items.length > MAX_SETTLEMENT_LINES) refuse('items')
+  if ((input.globalAdjustments ?? []).length > 0) refuse('globalAdjustments')
+  if (input.transport !== undefined) refuse('transport')
+  input.items.forEach((item, index) => {
+    if (item.discountPercent !== undefined) refuse(`items[${index}].discountPercent`)
+    if (item.surchargePercent !== undefined) refuse(`items[${index}].surchargePercent`)
+  })
+  ;(input.references ?? []).forEach((reference, index) => {
+    if (reference.otherRut !== undefined) refuse(`references[${index}].otherRut`)
+  })
+  for (const option of NOT_IN_SETTLEMENT) if (input.options?.[option] !== undefined) refuse(`options.${option}`)
+  if (input.totals?.nonBillableAmount !== undefined) refuse('totals.nonBillableAmount')
+}
+
 const normalizeIssuer = (input: IssuerInput): Issuer => {
   const commune = requiredText(input.commune, 'CmnaOrigen', 'issuer.commune')
   return compact({
@@ -152,7 +188,8 @@ const FINAL_CONSUMER: Receiver = {
   commune: 'Santiago',
 }
 
-const normalizeReceiver = (input: ReceiverInput | undefined, receipt: boolean): Receiver => {
+const normalizeReceiver = (input: ReceiverInput | undefined, type: DocumentType): Receiver => {
+  const receipt = isReceipt(type)
   if (input === undefined) {
     if (receipt) return FINAL_CONSUMER
     throw new DteError('MISSING_FIELD', { field: 'receiver' })
@@ -165,7 +202,11 @@ const normalizeReceiver = (input: ReceiverInput | undefined, receipt: boolean): 
     rut: toSiiRut(input.rut, 'receiver.rut'),
     internalCode: text(input.internalCode, 'CdgIntRecep'),
     businessName: requiredText(input.businessName, 'RznSocRecep', 'receiver.businessName'),
-    businessActivity: text(input.businessActivity, 'GiroRecep'),
+    // `Liquidacion` asks the receiver for `GiroRecep`; `Documento` leaves it optional.
+    businessActivity:
+      type === 43
+        ? requiredText(input.businessActivity, 'GiroRecep', 'receiver.businessActivity')
+        : text(input.businessActivity, 'GiroRecep'),
     contact: text(input.contact, 'Contacto'),
     email: input.email,
     address,
@@ -188,8 +229,10 @@ const normalizeItem = (input: LineItemInput, index: number, type: DocumentType):
   const surchargePercent = finiteNumber(input.surchargePercent, `${path}.surchargePercent`)
   const computed = calculateLineAmount({ quantity, unitPrice, discountPercent, surchargePercent })
   const settledDocumentType = text(input.settledDocumentType, 'TpoDocLiq')
+  // `TpoDocLiq` is a line of `Liquidacion`: required there, and declared nowhere else.
   if (type === 43 && settledDocumentType === undefined)
     throw new DteError('MISSING_FIELD', { field: `${path}.settledDocumentType` })
+  if (type !== 43 && settledDocumentType !== undefined) refuse(`${path}.settledDocumentType`)
   const exemptIndicator = input.exemptIndicator ?? (input.exempt || isExemptType(type) ? 1 : undefined)
   return compact({
     lineNumber: index + 1,
@@ -247,16 +290,24 @@ const normalizeAdjustment = (input: GlobalAdjustmentInput, index: number): Globa
     exemptIndicator: input.exemptIndicator,
   })
 
-const normalizeCommission = (input: CommissionLineInput, index: number): CommissionLine =>
-  compact({
+// The schema asks every line for `ValComNeto` and `ValComExe`, so a line needs one of them and gets the other as
+// zero. Its `ValComIVA` is the caller's or, without one, its net value by the VAT rate, left out when that is zero.
+const normalizeCommission = (input: CommissionLineInput, index: number): CommissionLine => {
+  const path = `commissions[${index}]`
+  const netValue = finiteNumber(input.netValue, `${path}.netValue`)
+  const exemptValue = finiteNumber(input.exemptValue, `${path}.exemptValue`)
+  if (netValue === undefined && exemptValue === undefined)
+    throw new DteError('MISSING_FIELD', { field: `${path}.netValue` })
+  return compact({
     lineNumber: index + 1,
     kind: input.kind,
-    description: requiredText(input.description, 'Glosa', `commissions[${index}].description`),
+    description: requiredText(input.description, 'Glosa', `${path}.description`),
     rate: input.rate,
-    netValue: input.netValue,
-    exemptValue: input.exemptValue,
-    vatValue: input.vatValue,
+    netValue: netValue ?? 0,
+    exemptValue: exemptValue ?? 0,
+    vatValue: finiteNumber(input.vatValue, `${path}.vatValue`) ?? (commissionVat(netValue ?? 0) || undefined),
   })
+}
 
 const normalizeTransport = (input: TransportInput | undefined): Transport | undefined =>
   input === undefined
@@ -284,12 +335,21 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
  * EN: Builds a normalized `Document` from caller input: validates type, folio and dates, normalizes RUTs with rut.ts,
  * sanitizes text and enforces schema lengths (fails early instead of letting the SII reject the whole envelope),
  * numbers lines, computes amounts and totals, applies receipt defaults (final consumer, `IndServicio=3`) and sets
- * `MntBruto=1` when prices include VAT. Pure: same input, same output.
+ * `MntBruto=1` when prices include VAT. Commission lines are completed (the value a line lacks is zero, and its VAT
+ * is its net value by the VAT rate when it brings none), summed into the totals and taken off the total. A settlement
+ * invoice (43) is held to what its root, `Liquidacion`, declares: no transport, no global or line discounts and
+ * surcharges, no `otherRut` in a reference, no non-billable amount in its totals, none of the `IdDoc` options only
+ * `Documento` declares, a receiver with its business activity and at most 60 lines. Pure: same input, same output.
  * ES: Construye un `Document` normalizado desde la entrada: valida tipo, folio y fechas, normaliza RUT con rut.ts,
  * sanitiza textos y exige los largos del esquema (falla temprano en vez de dejar que el SII rechace el sobre entero),
  * numera líneas, calcula montos y totales, aplica los defaults de boleta (consumidor final, `IndServicio=3`) y fija
- * `MntBruto=1` cuando los precios incluyen IVA. Pura: misma entrada, misma salida.
- * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `MISSING_FIELD`, `FIELD_TOO_LONG`, `INVALID_AMOUNT`; `INVALID_TIME` for a `transport.departureTime` that is not `HH:MM:SS` or `HH:MM`; `INVALID_OPTION` for `references` on a receipt, `receiptReferences` on any other type, or an `options.transferType` outside 1 to 9. ES: los mismos códigos; `INVALID_TIME` por un `transport.departureTime` que no es `HH:MM:SS` ni `HH:MM`; `INVALID_OPTION` por `references` en una boleta, `receiptReferences` en cualquier otro tipo, o un `options.transferType` fuera de 1 a 9.
+ * `MntBruto=1` cuando los precios incluyen IVA. Las líneas de comisión se completan (el valor que falta va en cero, y
+ * su IVA es su valor neto por la tasa de IVA cuando no lo trae), se suman en los totales y se restan del total. Una
+ * liquidación factura (43) se atiene a lo que declara su raíz, `Liquidacion`: sin transporte, sin descuentos ni
+ * recargos globales o por línea, sin `otherRut` en una referencia, sin monto no facturable en sus totales, sin las
+ * opciones de `IdDoc` que solo declara `Documento`, con el giro del receptor y con 60 líneas como máximo. Pura: misma
+ * entrada, misma salida.
+ * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `MISSING_FIELD` (also a commission line with neither a net nor an exempt value, and a settlement invoice whose receiver has no `businessActivity`), `FIELD_TOO_LONG`, `INVALID_AMOUNT`; `INVALID_TIME` for a `transport.departureTime` that is not `HH:MM:SS` or `HH:MM`; `INVALID_OPTION` for `references` on a receipt, `receiptReferences` on any other type, an `options.transferType` outside 1 to 9, more than 20 `commissions`, a `settledDocumentType` on a type other than 43, and on a 43 whatever `Liquidacion` does not declare, with the field in `details.field`. ES: los mismos códigos; `MISSING_FIELD` también por una línea de comisión sin valor neto ni exento y por una liquidación factura cuyo receptor no trae `businessActivity`; `INVALID_TIME` por un `transport.departureTime` que no es `HH:MM:SS` ni `HH:MM`; `INVALID_OPTION` por `references` en una boleta, `receiptReferences` en cualquier otro tipo, un `options.transferType` fuera de 1 a 9, más de 20 `commissions`, un `settledDocumentType` en un tipo distinto del 43, y en un 43 lo que `Liquidacion` no declara, con el campo en `details.field`.
  */
 export const createDocument = (input: DocumentInput, options: CreateDocumentOptions = {}): Document => {
   if (!isDocumentType(input.type)) throw new DteError('INVALID_DOCUMENT_TYPE', { type: input.type })
@@ -298,8 +358,10 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
   const receipt = isReceipt(type)
   const issueDate = input.issueDate === undefined ? chileDate(options.now) : toIsoDate(input.issueDate, 'issueDate')
   const issuer = normalizeIssuer(input.issuer)
-  const receiver = normalizeReceiver(input.receiver, receipt)
+  const receiver = normalizeReceiver(input.receiver, type)
   if (input.items.length === 0) throw new DteError('MISSING_FIELD', { field: 'items' })
+  if (type === 43) assertSettlement(input)
+  if ((input.commissions ?? []).length > MAX_COMMISSIONS) refuse('commissions')
   const items = input.items.map((item, index) => normalizeItem(item, index, type))
   // A receipt's `Referencia` has no date: the invoice shape would fail the receipts schema, and the other way round.
   if (receipt && (input.references ?? []).length > 0) throw new DteError('INVALID_OPTION', { field: 'references' })
@@ -322,6 +384,7 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
       vatRate: VAT_RATE,
       globalAdjustments,
       withholdVat: input.withholdVat,
+      commissions,
     })
   const headerOptions: HeaderOptions = compact({
     ...input.options,

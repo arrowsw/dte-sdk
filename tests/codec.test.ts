@@ -246,7 +246,15 @@ describe('toSiiDocument', () => {
       MntTotal: 10710,
     })
     expect(settlementSii.Comisiones).toEqual([
-      { NroLinCom: 1, TipoMovim: 'C', Glosa: 'Comisión', TasaComision: 10, ValComNeto: 1000, ValComIVA: 190 },
+      {
+        NroLinCom: 1,
+        TipoMovim: 'C',
+        Glosa: 'Comisión',
+        TasaComision: 10,
+        ValComNeto: 1000,
+        ValComExe: 0,
+        ValComIVA: 190,
+      },
     ])
   })
 

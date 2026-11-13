@@ -21,6 +21,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unknown when issuing be completed by a later guide. The printed sample does not print the transport area yet.
   - **What to change:** nothing for documents already issued. A dispatch guide, or an invoice that moves goods, passes
     the new fields in `transport`. An exhaustive `switch` on `DteErrorCode` needs the `INVALID_TIME` case.
+- **A settlement invoice (43) works out its totals.** `createDocument` now hands the commission lines to
+  `calculateTotals`, which takes them in a new `commissions` option. The totals carry the summary of commissions and
+  other charges (`Totales/Comisiones`), each value the sum of its lines and left out when zero, and the total is net +
+  exempt + VAT less the three sums, as Formato DTE 2.5 defines `MntTotal` in field 124. Before, the summary was only
+  written from totals passed by hand, and the total worked out for a 43 ignored its commissions. On a 43 the net, the
+  exempt amount, the VAT and the total keep their sign, so a settlement whose charges reach or exceed what it settles
+  totals zero or less, and negative lines are totalled instead of dropped: `DTE_v10.xsd` declares those amounts, and
+  the `MNT` of the stamp, as signed values under `Liquidacion`. A non-billable line of a 43 stays out of its totals,
+  because `Liquidacion` has no `MontoNF`. The VAT of the summary is the sum of the VAT of the lines, each rounded on
+  its own, as the Formato describes field 123. The same sums apply to the commission lines of a purchase invoice (46)
+  and of the notes that correct one.
+  - **What to change:** nothing for a 43 issued with `totals` passed by hand: they are still written as given. A 43
+    issued without `totals` now carries `Totales/Comisiones` and a `MntTotal` with the commissions taken off, where it
+    used to carry net + VAT + exempt: drop any correction applied afterwards. A purchase invoice or a note with
+    commission lines and no `totals` changes the same way.
 
 ### Changed
 
@@ -31,6 +46,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stamping, where it used to be written as given.
   - **What to change:** nothing in TypeScript, where `TransferType` already allowed only 1 to 9. A JavaScript caller
     that passed another value, a number written as text included, gets the error.
+- **Commission lines are written the way the schema requires them.** `DTE_v10.xsd` asks every line of `Comisiones` for
+  `ValComNeto` and `ValComExe`, and a line that brought only one of them was written without the other, which fails
+  the schema. `createDocument` now writes the missing one as zero, refuses a line with neither (`MISSING_FIELD
+  { field: 'commissions[i].netValue' }`), and refuses values that are not finite numbers (`INVALID_AMOUNT`) and more
+  than the 20 lines the schema admits (`INVALID_OPTION { field: 'commissions' }`). A line without `vatValue` now
+  carries its `ValComIVA`: its net value by the VAT rate, rounded half away from zero, and left out when that is zero.
+  In the types, `netValue` and `exemptValue` are required numbers on `CommissionLine` and on `SiiComisiones`, and stay
+  optional on `CommissionLineInput`.
+  - **What to change:** a line that must carry no VAT passes `vatValue: 0`. If you pass `totals` by hand for a 43, the
+    lines can now carry a `ValComIVA` you did not write: check that `totals.commissions.vatValue` is the sum of the
+    lines, or drop `totals` and let `createDocument` work them out. Code that builds a `Document` or a `SiiDocumento`
+    by hand gives every commission line both values.
+- **`createDocument` refuses on a settlement invoice (43) what its root does not declare.** `DTE_v10.xsd` gives a 43 a
+  root of its own, `Liquidacion`, which declares less than `Documento`, and the codec wrote under it whatever the input
+  carried, so the SII rejected the document after its folio was spent. These now throw `INVALID_OPTION` with the field
+  in `details.field`: `transport` (`Transporte`), `globalAdjustments` (`DscRcgGlobal`), a line's `discountPercent` or
+  `surchargePercent` (`DescuentoPct`, `RecargoPct` and their amounts), a reference's `otherRut` (`RUTOtr`),
+  `totals.nonBillableAmount` (`MontoNF`) and the options `noDebitReduction` (`IndNoRebaja`), `dispatchType`
+  (`TipoDespacho`), `transferType` (`IndTraslado`), `printFormat` (`TpoImpresion`), `exportPaymentTerms`
+  (`FmaPagExp`) and `netAmountsIndicator` (`IndMntNeto`). The receiver of a 43 needs its `businessActivity`
+  (`GiroRecep`, `MISSING_FIELD`), and a 43 with more than 60 lines is refused (`INVALID_OPTION { field: 'items' }`).
+  Commissions stay optional, as the schema declares them.
+  - **What to change:** remove those fields from a 43, and give its receiver a `businessActivity`. A discount on a
+    settled line goes into the line's `amount`.
+- **`settledDocumentType` is refused on every type but the 43.** Only a line of `Liquidacion` declares `TpoDocLiq`;
+  on an invoice, a note, a guide or a receipt it failed the schema. It now throws `INVALID_OPTION
+  { field: 'items[i].settledDocumentType' }`.
+  - **What to change:** pass `settledDocumentType` only on the lines of a 43.
+
+### Fixed
+
+- **`verifyReceivedDocuments` reads a negative total.** `MntTotal` and the `MNT` of the stamp were read as runs of
+  digits, so a settlement invoice whose charges exceed what it settles came back with `totalAmount: null`, a
+  `totalAmount` mismatch in its stamp and `status: 'invalid'`. Both are now read with their sign.
+  - **What to change:** nothing.
 
 ## [0.9.1] - 2026-11-13
 
