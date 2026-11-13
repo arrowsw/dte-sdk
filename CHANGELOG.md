@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   schema admits them, and any other value now throws `INVALID_OPTION { field: 'options.transferType' }` before
   stamping, where it used to be written as given.
   - **What to change:** nothing in TypeScript, where `TransferType` already allowed only 1 to 9. A JavaScript caller
-    that passed another number gets the error.
+    that passed another value, a number written as text included, gets the error.
 
 ## [0.9.1] - 2026-11-13
 

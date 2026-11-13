@@ -367,12 +367,26 @@ describe('the transport fields of 2026', () => {
     })
   })
 
-  test.each([0, 10, 11, 12])('transfer type %p is outside the 1 to 9 the schema admits', (transferType) => {
-    expectError(
-      () => guide({ licensePlate: 'ABCD12' }, { transferType } as unknown as DocumentInput['options']),
-      'INVALID_OPTION',
-      { field: 'options.transferType' },
-    )
+  test.each([0, 10, 11, 12, '1', 1.5, Number.NaN, null])(
+    'transfer type %p is outside the 1 to 9 the schema admits',
+    (transferType) => {
+      expectError(
+        () => guide({ licensePlate: 'ABCD12' }, { transferType } as unknown as DocumentInput['options']),
+        'INVALID_OPTION',
+        { field: 'options.transferType' },
+      )
+    },
+  )
+
+  test('transfer types 1 and 9 are the bounds the schema admits', () => {
+    expect(guide({ licensePlate: 'ABCD12' }, { transferType: 1 }).header.options.transferType).toBe(1)
+    expect(guide({ licensePlate: 'ABCD12' }, { transferType: 9 }).header.options.transferType).toBe(9)
+  })
+
+  test('a time is trimmed, and runs from 00:00 to 23:59:59', () => {
+    expect(guide({ departureTime: ' 08:30 ' }).header.transport).toEqual({ departureTime: '08:30:00' })
+    expect(guide({ departureTime: '00:00' }).header.transport).toEqual({ departureTime: '00:00:00' })
+    expect(guide({ departureTime: '23:59:59' }).header.transport).toEqual({ departureTime: '23:59:59' })
   })
 })
 

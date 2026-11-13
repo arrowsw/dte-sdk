@@ -69,7 +69,7 @@ const MESSAGES: Readonly<Record<DteErrorCode, string>> = {
   INVALID_DOCUMENT_TYPE: 'Unsupported document type',
   INVALID_FOLIO: 'Folio must be a positive integer',
   INVALID_DATE: 'Date must be YYYY-MM-DD',
-  INVALID_TIME: 'Time must be HH:MM:SS',
+  INVALID_TIME: 'Time must be HH:MM:SS or HH:MM',
   INVALID_AMOUNT: 'Amount must be a finite number',
   MISSING_FIELD: 'Required field is missing',
   FIELD_TOO_LONG: 'Field exceeds the maximum length allowed by the SII schema',
