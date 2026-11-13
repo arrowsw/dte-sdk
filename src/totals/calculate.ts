@@ -63,7 +63,7 @@ export type TotalsOptions = {
   readonly globalAdjustments?: readonly GlobalAdjustment[]
   /** EN: Withhold the whole VAT (default: true for purchase invoices). ES: Retener todo el IVA (por defecto: true en facturas de compra, 46). */
   readonly withholdVat?: boolean
-  /** EN: Commission and other charge lines: summed into the summary and taken off the total; a line without `vatValue` counts its net value by the VAT rate, rounded. ES: `Comisiones` — Líneas de comisiones y otros cargos: se suman en `Totales/Comisiones` y se restan del total; una línea sin `vatValue` cuenta su valor neto por la tasa de IVA, redondeado. */
+  /** EN: Commission and other charge lines: summed into the summary and taken off the total; the summary's VAT is the VAT rate by their total net value, rounded once, unless a line states its `vatValue`, and then it is the sum of the lines' VAT. ES: `Comisiones` — Líneas de comisiones y otros cargos: se suman en `Totales/Comisiones` y se restan del total; el IVA del resumen es la tasa de IVA por su valor neto total, redondeado una vez, salvo que una línea declare su `vatValue`, y entonces es la suma del IVA de las líneas. */
   readonly commissions?: readonly Pick<CommissionLineInput, 'netValue' | 'exemptValue' | 'vatValue'>[]
 }
 
@@ -103,15 +103,18 @@ export const commissionVat = (netValue: number, vatRate: number = VAT_RATE): num
 
 type CommissionSums = { readonly netValue: number; readonly exemptValue: number; readonly vatValue: number }
 
-const sumCommissions = (lines: NonNullable<TotalsOptions['commissions']>, vatRate: number): CommissionSums =>
-  lines.reduce<CommissionSums>(
-    (acc, { netValue = 0, exemptValue = 0, vatValue = commissionVat(netValue, vatRate) }) => ({
-      netValue: acc.netValue + netValue,
-      exemptValue: acc.exemptValue + exemptValue,
-      vatValue: acc.vatValue + vatValue,
-    }),
-    { netValue: 0, exemptValue: 0, vatValue: 0 },
-  )
+// The SII checks the VAT of the summary against the VAT rate by the summary's net value (validation 38 of its "Nuevas
+// validaciones a la IECV, DTE y DJ 3327 y 3328"), so it is rounded once, over the total, and may be a peso off the sum
+// of the lines' VAT. Lines that state their VAT are added up instead: they state what the rate does not give.
+const sumCommissions = (lines: NonNullable<TotalsOptions['commissions']>, vatRate: number): CommissionSums => {
+  const netValue = lines.reduce((sum, line) => sum + (line.netValue ?? 0), 0)
+  const exemptValue = lines.reduce((sum, line) => sum + (line.exemptValue ?? 0), 0)
+  const stated = lines.some((line) => line.vatValue !== undefined)
+  const vatValue = stated
+    ? lines.reduce((sum, line) => sum + (line.vatValue ?? commissionVat(line.netValue ?? 0, vatRate)), 0)
+    : commissionVat(netValue, vatRate)
+  return { netValue, exemptValue, vatValue }
+}
 
 /**
  * EN: Computes `Totales` from detail lines: net, exempt, VAT (derived from the gross when `pricesIncludeVat`),

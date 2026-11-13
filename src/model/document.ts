@@ -194,17 +194,19 @@ export type Withholding = {
 }
 
 /**
- * EN: Totals of the commission and other charge lines (`Totales/Comisiones`): each is the sum of its value over the
- * lines, left out when zero, and negative only on a settlement invoice.
- * ES: `Comisiones` (dentro de `Totales`) — Totales de las líneas de comisiones y otros cargos: cada uno es la suma de
- * su valor en las líneas, se omite si es cero, y es negativo solo en una liquidación factura.
+ * EN: Totals of the commission and other charge lines (`Totales/Comisiones`): the net and the exempt value are the
+ * sums of the lines', and the VAT is the VAT rate by the net value; each is left out when zero, and negative only on a
+ * settlement invoice.
+ * ES: `Comisiones` (dentro de `Totales`) — Totales de las líneas de comisiones y otros cargos: el valor neto y el
+ * exento son la suma de los de las líneas, y el IVA es la tasa de IVA por el valor neto; cada uno se omite si es cero,
+ * y es negativo solo en una liquidación factura.
  */
 export type CommissionTotals = {
   /** EN: Net commission value: the sum of the lines' net values. ES: `ValComNeto` — Valor neto de las comisiones: suma de los valores netos de las líneas. */
   readonly netValue?: number
   /** EN: Exempt commission value: the sum of the lines' exempt values. ES: `ValComExe` — Valor exento de las comisiones: suma de los valores exentos de las líneas. */
   readonly exemptValue?: number
-  /** EN: VAT on commissions: the sum of the lines' VAT values. ES: `ValComIVA` — IVA de las comisiones: suma del IVA de las líneas. */
+  /** EN: VAT on commissions: the VAT rate by the net commission value, rounded once, or the sum of the lines' VAT values when a line states its own. ES: `ValComIVA` — IVA de las comisiones: la tasa de IVA por el valor neto de las comisiones, redondeado una vez, o la suma del IVA de las líneas cuando una línea declara el suyo. */
   readonly vatValue?: number
 }
 

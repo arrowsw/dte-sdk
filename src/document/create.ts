@@ -336,7 +336,8 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
  * sanitizes text and enforces schema lengths (fails early instead of letting the SII reject the whole envelope),
  * numbers lines, computes amounts and totals, applies receipt defaults (final consumer, `IndServicio=3`) and sets
  * `MntBruto=1` when prices include VAT. Commission lines are completed (the value a line lacks is zero, and its VAT
- * is its net value by the VAT rate when it brings none), summed into the totals and taken off the total. A settlement
+ * is its net value by the VAT rate when it brings none), summed into the totals, where their VAT is the VAT rate by
+ * their total net value unless a line states its own, and taken off the total. A settlement
  * invoice (43) is held to what its root, `Liquidacion`, declares: no transport, no global or line discounts and
  * surcharges, no `otherRut` in a reference, no non-billable amount in its totals, none of the `IdDoc` options only
  * `Documento` declares, a receiver with its business activity and at most 60 lines. Pure: same input, same output.
@@ -344,7 +345,8 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
  * sanitiza textos y exige los largos del esquema (falla temprano en vez de dejar que el SII rechace el sobre entero),
  * numera líneas, calcula montos y totales, aplica los defaults de boleta (consumidor final, `IndServicio=3`) y fija
  * `MntBruto=1` cuando los precios incluyen IVA. Las líneas de comisión se completan (el valor que falta va en cero, y
- * su IVA es su valor neto por la tasa de IVA cuando no lo trae), se suman en los totales y se restan del total. Una
+ * su IVA es su valor neto por la tasa de IVA cuando no lo trae), se suman en los totales, donde su IVA es la tasa de
+ * IVA por su valor neto total salvo que una línea declare el suyo, y se restan del total. Una
  * liquidación factura (43) se atiene a lo que declara su raíz, `Liquidacion`: sin transporte, sin descuentos ni
  * recargos globales o por línea, sin `otherRut` en una referencia, sin monto no facturable en sus totales, sin las
  * opciones de `IdDoc` que solo declara `Documento`, con el giro del receptor y con 60 líneas como máximo. Pura: misma
@@ -384,7 +386,8 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
       vatRate: VAT_RATE,
       globalAdjustments,
       withholdVat: input.withholdVat,
-      commissions,
+      // The lines as the caller gave them, checked above: the summary's VAT depends on whether a line states its own.
+      commissions: input.commissions,
     })
   const headerOptions: HeaderOptions = compact({
     ...input.options,

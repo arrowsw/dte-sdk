@@ -175,12 +175,27 @@ describe('calculateTotals with commissions and other charges', () => {
     ).toMatchObject({ commissions: { netValue: 1000, vatValue: 200 }, totalAmount: 10700 })
   })
 
-  test('the VAT of the summary is the sum of the VAT of the lines, each rounded on its own', () => {
-    // Three charges of 1,003 net: 190.57 each, so 191 a line and 573 in all. One rounding over 3,009 would give 572.
+  test('the VAT of the summary is the rate by the total net value, rounded once, not the sum of the lines', () => {
+    // Three charges of 1,003 net: 190.57 each, so 191 a line and 573 if added up. The SII checks the rate by the total
+    // net value, 3,009: 571.71, so 572.
     const three = [{ netValue: 1003 }, { netValue: 1003 }, { netValue: 1003 }]
     expect(calculateTotals([line(10000)], { type: 43, commissions: three })).toMatchObject({
-      commissions: { netValue: 3009, vatValue: 573 },
-      totalAmount: 11900 - 3009 - 573,
+      commissions: { netValue: 3009, vatValue: 572 },
+      totalAmount: 11900 - 3009 - 572,
+    })
+    // 630 and -2,197: 120 and -417 a line, -297 if added up, and -298 over the total of -1,567.
+    const mixed = [{ netValue: 630 }, { netValue: -2197 }]
+    expect(calculateTotals([line(10000)], { type: 43, commissions: mixed })).toMatchObject({
+      commissions: { netValue: -1567, vatValue: -298 },
+      totalAmount: 11900 + 1567 + 298,
+    })
+  })
+
+  test('a line that states its VAT makes the summary the sum of the lines, the others at their net by the rate', () => {
+    const lines = [{ netValue: 1003, vatValue: 191 }, { netValue: 1003 }, { exemptValue: 50 }]
+    expect(calculateTotals([line(10000)], { type: 43, commissions: lines })).toMatchObject({
+      commissions: { netValue: 2006, exemptValue: 50, vatValue: 382 },
+      totalAmount: 11900 - 2006 - 50 - 382,
     })
   })
 
