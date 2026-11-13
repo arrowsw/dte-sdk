@@ -290,6 +290,103 @@ describe('createDocument', () => {
     expect(FIELD_LIMITS.RznSoc).toBe(100)
     expect(FIELD_LIMITS.GiroRecep).toBe(40)
     expect(FIELD_LIMITS.DscItem).toBe(1000)
+    expect(FIELD_LIMITS.PatenteCarro).toBe(8)
+  })
+})
+
+describe('the transport fields of 2026', () => {
+  const guide = (transport: DocumentInput['transport'], options?: DocumentInput['options']) =>
+    createDocument({
+      type: 52,
+      folio: 1,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver,
+      items,
+      options: { transferType: 1, ...options },
+      transport,
+    })
+
+  test('a guide keeps the trailer plate, the departure date and time and the arrival date', () => {
+    const doc = guide({
+      licensePlate: 'ABCD12',
+      trailerLicensePlate: 'JK1234',
+      departureDate: '2026-11-15',
+      departureTime: '08:30:00',
+      arrivalDate: '2026-11-16',
+    })
+    expect(doc.header.transport).toEqual({
+      licensePlate: 'ABCD12',
+      trailerLicensePlate: 'JK1234',
+      departureDate: '2026-11-15',
+      departureTime: '08:30:00',
+      arrivalDate: '2026-11-16',
+    })
+  })
+
+  test('dates take the day first, a time without seconds gets them, and the plate is sanitized', () => {
+    const doc = guide({
+      trailerLicensePlate: ' jk-1234 ',
+      departureDate: '15-11-2026',
+      departureTime: '23:59',
+      arrivalDate: '17/11/2026',
+    })
+    expect(doc.header.transport).toEqual({
+      trailerLicensePlate: 'jk-1234',
+      departureDate: '2026-11-15',
+      departureTime: '23:59:00',
+      arrivalDate: '2026-11-17',
+    })
+  })
+
+  test('none of the four is required, as the schema declares them', () => {
+    expect(guide({ licensePlate: 'ABCD12' }).header.transport).toEqual({ licensePlate: 'ABCD12' })
+    expect(guide(undefined).header.transport).toBeUndefined()
+  })
+
+  test.each([
+    [{ trailerLicensePlate: 'ABCDE1234' }, 'FIELD_TOO_LONG', { field: 'PatenteCarro', maxLength: 8, length: 9 }],
+    [{ departureDate: 'mañana' }, 'INVALID_DATE', { field: 'transport.departureDate' }],
+    [{ departureDate: '2026-02-30' }, 'INVALID_DATE', { field: 'transport.departureDate' }],
+    [{ departureDate: '2003-03-31' }, 'INVALID_DATE', { field: 'transport.departureDate' }],
+    [{ arrivalDate: '2051-01-01' }, 'INVALID_DATE', { field: 'transport.arrivalDate' }],
+    [{ departureTime: '24:00:00' }, 'INVALID_TIME', { field: 'transport.departureTime' }],
+    [{ departureTime: '12:60' }, 'INVALID_TIME', { field: 'transport.departureTime' }],
+    [{ departureTime: '12:00:60' }, 'INVALID_TIME', { field: 'transport.departureTime' }],
+    [{ departureTime: '9:30' }, 'INVALID_TIME', { field: 'transport.departureTime' }],
+    [{ departureTime: '09:30:00Z' }, 'INVALID_TIME', { field: 'transport.departureTime' }],
+    [{ departureTime: '' }, 'INVALID_TIME', { field: 'transport.departureTime' }],
+  ] as const)('%p → %s', (transport, code, details) => {
+    expectError(() => guide(transport), code, details)
+  })
+
+  test('the schema bounds both dates from 2003-04-01 to 2050-12-31', () => {
+    expect(guide({ departureDate: '2003-04-01', arrivalDate: '2050-12-31' }).header.transport).toEqual({
+      departureDate: '2003-04-01',
+      arrivalDate: '2050-12-31',
+    })
+  })
+
+  test.each([0, 10, 11, 12, '1', 1.5, Number.NaN, null])(
+    'transfer type %p is outside the 1 to 9 the schema admits',
+    (transferType) => {
+      expectError(
+        () => guide({ licensePlate: 'ABCD12' }, { transferType } as unknown as DocumentInput['options']),
+        'INVALID_OPTION',
+        { field: 'options.transferType' },
+      )
+    },
+  )
+
+  test('transfer types 1 and 9 are the bounds the schema admits', () => {
+    expect(guide({ licensePlate: 'ABCD12' }, { transferType: 1 }).header.options.transferType).toBe(1)
+    expect(guide({ licensePlate: 'ABCD12' }, { transferType: 9 }).header.options.transferType).toBe(9)
+  })
+
+  test('a time is trimmed, and runs from 00:00 to 23:59:59', () => {
+    expect(guide({ departureTime: ' 08:30 ' }).header.transport).toEqual({ departureTime: '08:30:00' })
+    expect(guide({ departureTime: '00:00' }).header.transport).toEqual({ departureTime: '00:00:00' })
+    expect(guide({ departureTime: '23:59:59' }).header.transport).toEqual({ departureTime: '23:59:59' })
   })
 })
 
