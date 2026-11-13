@@ -14,7 +14,7 @@ D40 and D41 of the design specs). Tracks [issue #5](https://github.com/arrowsw/d
 
 Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
 it. The decision was taken at phase 5b-2, which took `dte-sdk/portal` from 39.35 kB to 55.86 kB; each limit was then the
-measure rounded up to the next 2 kB. The sizes above were measured again on 2026-11-12, for 0.9.0. `createDirectoryTokenCache` took
+measure rounded up to the next 2 kB. The sizes above were measured again on 2026-11-13, for 0.9.1. `createDirectoryTokenCache` took
 `dte-sdk/node` from 4.19 kB to 4.71 kB, and the CAF file search, which parses CAFs, took it to 6.30 kB, over its 6 kB
 limit, which went to 8 kB. The SII office table took `dte-sdk/pdf` from 8.49 kB to 10.45 kB. That table is about 1.9 kB
 of data that the renderer needs for its default office, so it fits neither the root (30.49 kB plus the table is
