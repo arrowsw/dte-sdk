@@ -547,6 +547,16 @@ describe('commissions and other charges', () => {
     expect(own.header.totals).toMatchObject({ commissions: { netValue: 1000, vatValue: 200 }, totalAmount: 10700 })
   })
 
+  test('the VAT of the summary is worked out once, over the total net value, and each line keeps its own', () => {
+    const each = { ...charge, netValue: 1003 }
+    const doc = settle({ commissions: [each, each, each] })
+    expect(doc.commissions.map(({ vatValue }) => vatValue)).toEqual([191, 191, 191])
+    expect(doc.header.totals).toMatchObject({ commissions: { netValue: 3009, vatValue: 572 } })
+    // A line that states its VAT makes the summary the sum of the lines.
+    const stated = settle({ commissions: [{ ...each, vatValue: 191 }, each, each] })
+    expect(stated.header.totals).toMatchObject({ commissions: { netValue: 3009, vatValue: 573 } })
+  })
+
   test('the total of a settlement invoice may be zero or negative', () => {
     const items = [{ name: 'Venta liquidada', unitPrice: 1000, settledDocumentType: '33' }]
     expect(settle({ items, commissions: [{ ...charge, netValue: 1000 }] }).header.totals.totalAmount).toBe(0)
