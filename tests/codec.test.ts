@@ -1,5 +1,6 @@
 import { toSiiDocument, fromSiiDocument } from '../src/model/codec'
 import { createDocument } from '../src/document/create'
+import type { Document } from '../src/model/document'
 import { ISSUER_RUT, RECEIVER_RUT } from './support/fixtures'
 
 const issuer = {
@@ -434,5 +435,223 @@ describe('fromSiiDocument', () => {
       Detalle: [{ NroLinDet: 1, NmbItem: 'x', MontoItem: 0 }],
     })
     expect(doc.header.issuer).toMatchObject({ businessName: '', businessActivity: '' })
+  })
+})
+
+// `EnvioBOLETA_v11.xsd` declares a receipt's own `IdDoc`, issuer, totals and line, shorter than the invoice's and in
+// an order of their own. The codec writes that shape for a 39 and a 41, whatever the document carries.
+describe('the shape of a receipt', () => {
+  const receipt = createDocument({
+    type: 39,
+    folio: 5,
+    issueDate: '2026-11-15',
+    issuer: { ...issuer, siiBranchCode: 12, branch: 'Casa Matriz', salespersonCode: 'V-1' },
+    receiver: { ...receiver, internalCode: 'CLI-1', contact: 'Ana', city: 'Santiago', postalAddress: 'Casilla 1' },
+    softwareProviderRut: ISSUER_RUT,
+    items: [
+      {
+        name: 'Internet hogar',
+        description: 'Plan 600 megas',
+        quantity: 1,
+        unit: 'UN',
+        unitPrice: 10000,
+        discountPercent: 10,
+        surchargePercent: 5,
+        codes: [{ type: 'INT1', value: 'NET-600' }],
+      },
+      { name: 'Arriendo de equipo', unitPrice: 2000, exemptIndicator: 2 },
+    ],
+    options: {
+      serviceIndicator: 2,
+      netAmountsIndicator: 2,
+      billingPeriod: { from: '2026-11-01', to: '2026-11-30' },
+      dueDate: '2026-12-10',
+      paymentMedium: '3',
+    },
+    totals: {
+      netAmount: 9500,
+      exemptAmount: 0,
+      vatAmount: 1805,
+      totalAmount: 11305,
+      nonBillableAmount: 2000,
+      periodAmount: 13305,
+      previousBalance: -305,
+      amountDue: 13000,
+    },
+  })
+
+  test('every element is written under the tag and in the order its schema gives it', () => {
+    const sii = toSiiDocument(receipt)
+    expect(Object.keys(sii)).toEqual(['Encabezado', 'Detalle'])
+    expect(Object.keys(sii.Encabezado)).toEqual(['IdDoc', 'Emisor', 'Receptor', 'RUTProvSW', 'Totales'])
+    expect(sii.Encabezado.RUTProvSW).toBe(ISSUER_RUT)
+    expect(Object.entries(sii.Encabezado.IdDoc)).toEqual([
+      ['TipoDTE', 39],
+      ['Folio', 5],
+      ['FchEmis', '2026-11-15'],
+      ['IndServicio', 2],
+      ['IndMntNeto', 2],
+      ['PeriodoDesde', '2026-11-01'],
+      ['PeriodoHasta', '2026-11-30'],
+      ['FchVenc', '2026-12-10'],
+      ['MedioPago', '3'],
+    ])
+    expect(Object.keys(sii.Encabezado.Emisor)).toEqual([
+      'RUTEmisor',
+      'RznSocEmisor',
+      'GiroEmisor',
+      'CdgSIISucur',
+      'DirOrigen',
+      'CmnaOrigen',
+      'CiudadOrigen',
+    ])
+    expect(Object.keys(sii.Encabezado.Receptor)).toEqual([
+      'RUTRecep',
+      'CdgIntRecep',
+      'RznSocRecep',
+      'Contacto',
+      'DirRecep',
+      'CmnaRecep',
+      'CiudadRecep',
+    ])
+    expect(Object.entries(sii.Encabezado.Totales)).toEqual([
+      ['MntNeto', 9500],
+      ['MntExe', 0],
+      ['IVA', 1805],
+      ['MntTotal', 11305],
+      ['MontoNF', 2000],
+      ['TotalPeriodo', 13305],
+      ['SaldoAnterior', -305],
+      ['VlrPagar', 13000],
+    ])
+    expect(Object.keys(sii.Detalle[0])).toEqual([
+      'NroLinDet',
+      'CdgItem',
+      'NmbItem',
+      'DscItem',
+      'QtyItem',
+      'UnmdItem',
+      'PrcItem',
+      'DescuentoPct',
+      'DescuentoMonto',
+      'RecargoPct',
+      'RecargoMonto',
+      'MontoItem',
+    ])
+    expect(sii.Detalle[1]).toEqual({
+      NroLinDet: 2,
+      IndExe: 2,
+      NmbItem: 'Arriendo de equipo',
+      PrcItem: 2000,
+      MontoItem: 2000,
+    })
+  })
+
+  test('a receipt without them writes no RUTProvSW and no TotalPeriodo, and keeps the decimals of a price', () => {
+    const plain = createDocument({
+      type: 41,
+      folio: 6,
+      issueDate: '2026-11-15',
+      issuer,
+      items: [{ name: 'Consulta', unitPrice: 30000.5, unitPriceDecimals: 2 }],
+    })
+    const sii = toSiiDocument(plain)
+    expect(Object.keys(sii.Encabezado)).toEqual(['IdDoc', 'Emisor', 'Receptor', 'Totales'])
+    expect(sii.Encabezado.Totales).toEqual({ MntExe: 30001, MntTotal: 30001 })
+    expect(sii.Detalle[0].PrcItem).toBe('30000.50')
+  })
+
+  // `createDocument` refuses these on a receipt. A document put together by hand can still carry them, and the codec
+  // has no element of a receipt to write them under.
+  test('a document built by hand writes nothing its schema does not declare', () => {
+    const byHand: Document = {
+      ...receipt,
+      header: {
+        ...receipt.header,
+        options: {
+          ...receipt.header.options,
+          noDebitReduction: 1,
+          dispatchType: 1,
+          transferType: 1,
+          printFormat: 'T',
+          grossAmounts: 1,
+          purchaseTransactionType: 1,
+          saleTransactionType: 1,
+          paymentTerms: 1,
+          exportPaymentTerms: '1',
+          settlementDate: '2026-11-15',
+          settledAmount: 1,
+          outstandingBalance: 1,
+          payments: [{ date: '2026-12-01', amount: 1 }],
+          paymentAccountType: 'CORRIENTE',
+          paymentAccountNumber: '1',
+          paymentBank: 'Banco',
+          paymentTermsCode: 'A',
+          paymentTermsNote: 'Nota',
+          paymentTermsDays: 30,
+        },
+        transport: { licensePlate: 'ABCD12' },
+        totals: {
+          ...receipt.header.totals,
+          vatRate: 19,
+          ownVatAmount: 1,
+          thirdPartyVatAmount: 1,
+          withholdings: [{ taxCode: 15, rate: 19, amount: 1 }],
+          commissions: { netValue: 1 },
+        },
+      },
+      items: receipt.items.map((item) => ({
+        ...item,
+        settledDocumentType: '33',
+        referenceQuantity: 1,
+        referenceUnit: 'KG',
+        referencePrice: 1,
+        additionalTaxCodes: [27],
+      })),
+      commissions: [{ lineNumber: 1, kind: 'commission', description: 'Comisión', netValue: 1, exemptValue: 0 }],
+    }
+    expect(toSiiDocument(byHand)).toEqual(toSiiDocument(receipt))
+  })
+
+  test('it maps back: TotalPeriodo to the period amount and RUTProvSW to the software provider', () => {
+    const sii = toSiiDocument(receipt)
+    const back = fromSiiDocument(sii)
+    expect(back.header.softwareProviderRut).toBe(ISSUER_RUT)
+    expect(back.header.totals).toEqual(receipt.header.totals)
+    expect(back.header.options).toEqual(receipt.header.options)
+    expect(back.items).toEqual(receipt.items)
+    expect(fromSiiDocument(toSiiDocument(back))).toEqual(back)
+    expect(() => fromSiiDocument({ ...sii, Encabezado: { ...sii.Encabezado, RUTProvSW: '76543210-K' } })).toThrow(
+      expect.objectContaining({ code: 'INVALID_RUT', details: { field: 'Encabezado.RUTProvSW' } }),
+    )
+  })
+})
+
+describe('what only a receipt declares', () => {
+  test('an invoice writes no IndMntNeto and no RUTProvSW, even from a document built by hand', () => {
+    const invoice = createDocument({
+      type: 33,
+      folio: 1,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver,
+      items: [{ name: 'Servicio', unitPrice: 1000 }],
+      totals: { netAmount: 1000, vatRate: 19, vatAmount: 190, totalAmount: 1190, periodAmount: 1190 },
+    })
+    const byHand: Document = {
+      ...invoice,
+      header: {
+        ...invoice.header,
+        softwareProviderRut: invoice.header.issuer.rut,
+        options: { ...invoice.header.options, netAmountsIndicator: 2 },
+      },
+    }
+    const sii = toSiiDocument(byHand)
+    expect(sii).toEqual(toSiiDocument(invoice))
+    expect(sii.Encabezado.IdDoc).toEqual({ TipoDTE: 33, Folio: 1, FchEmis: '2026-11-15' })
+    expect(Object.keys(sii.Encabezado)).toEqual(['IdDoc', 'Emisor', 'Receptor', 'Totales'])
+    expect(sii.Encabezado.Totales.MontoPeriodo).toBe(1190)
+    expect(sii.Encabezado.Totales).not.toHaveProperty('TotalPeriodo')
+    expect(fromSiiDocument(sii).header.totals.periodAmount).toBe(1190)
   })
 })

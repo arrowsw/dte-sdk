@@ -20,13 +20,13 @@ export type Issuer = {
   readonly businessName: string
   /** EN: Line of business (max 80). ES: `GiroEmis` (`GiroEmisor` en boletas) — Giro comercial, máximo 80. */
   readonly businessActivity: string
-  /** EN: SII economic activity code. ES: `Acteco` — Código de actividad económica del SII. */
+  /** EN: SII economic activity code; left out of a receipt, which has no element for it. ES: `Acteco` — Código de actividad económica del SII; no se escribe en una boleta, que no tiene elemento para él. */
   readonly activityCode?: number
-  /** EN: Phone. ES: `Telefono` — Teléfono. */
+  /** EN: Phone; left out of a receipt. ES: `Telefono` — Teléfono; no se escribe en una boleta. */
   readonly phone?: string
-  /** EN: Email. ES: `CorreoEmisor` — Correo electrónico del emisor. */
+  /** EN: Email; left out of a receipt. ES: `CorreoEmisor` — Correo electrónico del emisor; no se escribe en una boleta. */
   readonly email?: string
-  /** EN: Branch name (max 20). ES: `Sucursal` — Nombre de la sucursal, máximo 20. */
+  /** EN: Branch name (max 20); left out of a receipt, which only has the SII branch code. ES: `Sucursal` — Nombre de la sucursal, máximo 20; no se escribe en una boleta, que solo tiene el código de sucursal del SII. */
   readonly branch?: string
   /** EN: SII branch code (1-999999999). ES: `CdgSIISucur` — Código de sucursal inscrito en el SII, entero de 1 a 999999999. */
   readonly siiBranchCode?: number
@@ -36,7 +36,7 @@ export type Issuer = {
   readonly commune: string
   /** EN: City (max 20); defaults to the commune. ES: `CiudadOrigen` — Ciudad de origen, máximo 20; por defecto la comuna. */
   readonly city?: string
-  /** EN: Salesperson code. ES: `CdgVendedor` — Código del vendedor. */
+  /** EN: Salesperson code; left out of a receipt. ES: `CdgVendedor` — Código del vendedor; no se escribe en una boleta. */
   readonly salespersonCode?: string
 }
 
@@ -57,11 +57,11 @@ export type Receiver = {
   readonly internalCode?: string
   /** EN: Legal/business name (max 100). ES: `RznSocRecep` — Razón social del receptor, máximo 100. */
   readonly businessName: string
-  /** EN: Line of business (max 40); required on a settlement invoice (43). ES: `GiroRecep` — Giro del receptor, máximo 40; obligatorio en una liquidación factura (43). */
+  /** EN: Line of business (max 40); required on a settlement invoice (43), and left out of a receipt, which has no element for it. ES: `GiroRecep` — Giro del receptor, máximo 40; obligatorio en una liquidación factura (43), y no se escribe en una boleta, que no tiene elemento para él. */
   readonly businessActivity?: string
   /** EN: Contact person (max 80). ES: `Contacto` — Persona de contacto, máximo 80. */
   readonly contact?: string
-  /** EN: Email (max 80). ES: `CorreoRecep` — Correo del receptor, máximo 80. */
+  /** EN: Email (max 80); not written on a receipt. ES: `CorreoRecep` — Correo del receptor, máximo 80; no se escribe en una boleta. */
   readonly email?: string
   /** EN: Street address (max 70); required except on receipts. ES: `DirRecep` — Dirección del receptor, máximo 70; obligatoria salvo en boletas. */
   readonly address?: string
@@ -69,11 +69,11 @@ export type Receiver = {
   readonly commune?: string
   /** EN: City (max 20). ES: `CiudadRecep` — Ciudad del receptor, máximo 20. */
   readonly city?: string
-  /** EN: Postal address (max 70). ES: `DirPostal` — Dirección postal, máximo 70. */
+  /** EN: Postal address (max 70); not written on a receipt. ES: `DirPostal` — Dirección postal, máximo 70; no se escribe en una boleta. */
   readonly postalAddress?: string
-  /** EN: Postal commune (max 20). ES: `CmnaPostal` — Comuna postal, máximo 20. */
+  /** EN: Postal commune (max 20); not written on a receipt. ES: `CmnaPostal` — Comuna postal, máximo 20; no se escribe en una boleta. */
   readonly postalCommune?: string
-  /** EN: Postal city (max 20). ES: `CiudadPostal` — Ciudad postal, máximo 20. */
+  /** EN: Postal city (max 20); not written on a receipt. ES: `CiudadPostal` — Ciudad postal, máximo 20; no se escribe en una boleta. */
   readonly postalCity?: string
 }
 
@@ -113,7 +113,7 @@ export type LineItemInput = {
   readonly unitPriceDecimals?: number
   /** EN: Shorthand for `exemptIndicator: 1`. ES: Atajo para `exemptIndicator: 1` (`IndExe=1`). */
   readonly exempt?: boolean
-  /** EN: Explicit exemption indicator. ES: `IndExe` — Indicador de exención explícito (1 a 6). */
+  /** EN: Explicit exemption indicator; a receipt admits 1, 2 and 6, and any other is refused there. ES: `IndExe` — Indicador de exención explícito (1 a 6); una boleta admite 1, 2 y 6, y cualquier otro se rechaza en ella. */
   readonly exemptIndicator?: ExemptIndicator
   /** EN: Line discount percent; refused on a settlement invoice (43). ES: `DescuentoPct` — Porcentaje de descuento de la línea; se rechaza en una liquidación factura (43). */
   readonly discountPercent?: number
@@ -121,15 +121,15 @@ export type LineItemInput = {
   readonly surchargePercent?: number
   /** EN: Item codes. ES: `CdgItem` — Códigos del ítem (hasta 5). */
   readonly codes?: readonly ItemCode[]
-  /** EN: Additional tax codes. ES: `CodImpAdic` — Códigos de impuesto adicional (hasta 2). */
+  /** EN: Additional tax codes; refused on a receipt. ES: `CodImpAdic` — Códigos de impuesto adicional (hasta 2); se rechazan en una boleta. */
   readonly additionalTaxCodes?: readonly number[]
   /** EN: Type of the settled document (max 3): required on a settlement invoice (43), refused on any other type. ES: `TpoDocLiq` — Tipo del documento liquidado, máximo 3; obligatorio en liquidación factura (43) y rechazado en cualquier otro tipo. */
   readonly settledDocumentType?: string
-  /** EN: Reference quantity. ES: `QtyRef` — Cantidad de referencia. */
+  /** EN: Reference quantity; refused on a receipt. ES: `QtyRef` — Cantidad de referencia; se rechaza en una boleta. */
   readonly referenceQuantity?: number
-  /** EN: Reference unit (max 4). ES: `UnmdRef` — Unidad de referencia, máximo 4. */
+  /** EN: Reference unit (max 4); refused on a receipt. ES: `UnmdRef` — Unidad de referencia, máximo 4; se rechaza en una boleta. */
   readonly referenceUnit?: string
-  /** EN: Reference price. ES: `PrcRef` — Precio de referencia. */
+  /** EN: Reference price; refused on a receipt. ES: `PrcRef` — Precio de referencia; se rechaza en una boleta. */
   readonly referencePrice?: number
   /** EN: Explicit line amount; skips the quantity × price computation. ES: `MontoItem` — Monto explícito de la línea; omite el cálculo cantidad × precio. */
   readonly amount?: number
@@ -219,23 +219,23 @@ export type Totals = {
   readonly netAmount?: number
   /** EN: Exempt amount (`IndExe=1` lines); negative only on a settlement invoice (43). ES: `MntExe` — Monto exento (líneas con `IndExe=1`); negativo solo en una liquidación factura (43). */
   readonly exemptAmount?: number
-  /** EN: VAT rate percent (19); never on receipts. ES: `TasaIVA` — Tasa de IVA (19); nunca en boletas. */
+  /** EN: VAT rate percent (19); never on receipts, where it is refused. ES: `TasaIVA` — Tasa de IVA (19); nunca en boletas, donde se rechaza. */
   readonly vatRate?: number
   /** EN: VAT amount. ES: `IVA` — Monto del IVA. */
   readonly vatAmount?: number
-  /** EN: Own VAT (settlement invoices). ES: `IVAProp` — IVA propio (liquidaciones). */
+  /** EN: Own VAT (settlement invoices); refused on a receipt. ES: `IVAProp` — IVA propio (liquidaciones); se rechaza en una boleta. */
   readonly ownVatAmount?: number
-  /** EN: Third-party VAT (settlement invoices). ES: `IVATerc` — IVA de terceros (liquidaciones). */
+  /** EN: Third-party VAT (settlement invoices); refused on a receipt. ES: `IVATerc` — IVA de terceros (liquidaciones); se rechaza en una boleta. */
   readonly thirdPartyVatAmount?: number
-  /** EN: Withholdings. ES: `ImptoReten` — Retenciones. */
+  /** EN: Withholdings; refused on a receipt. ES: `ImptoReten` — Retenciones; se rechazan en una boleta. */
   readonly withholdings?: readonly Withholding[]
-  /** EN: Totals of the commission and other charge lines. ES: `Comisiones` — Totales de las líneas de comisiones y otros cargos. */
+  /** EN: Totals of the commission and other charge lines; refused on a receipt. ES: `Comisiones` — Totales de las líneas de comisiones y otros cargos; se rechazan en una boleta. */
   readonly commissions?: CommissionTotals
   /** EN: Document total: net + VAT + exempt (VAT excluded when withheld), less the commissions and other charges; zero or negative only on a settlement invoice (43). ES: `MntTotal` — Monto total: neto + IVA + exento (sin IVA si está retenido), menos las comisiones y otros cargos; cero o negativo solo en una liquidación factura (43). */
   readonly totalAmount: number
   /** EN: Non-billable amount (lines with `IndExe` 2-6); refused on a settlement invoice (43), whose root has no `MontoNF`. ES: `MontoNF` — Monto no facturable (líneas con `IndExe` 2 a 6); se rechaza en una liquidación factura (43), cuya raíz no tiene `MontoNF`. */
   readonly nonBillableAmount?: number
-  /** EN: Period amount. ES: `MontoPeriodo` — Monto del período. */
+  /** EN: Period amount, written as given; on a receipt its tag is `TotalPeriodo`, which the SII defines as the total plus the non-billable amount. ES: `MontoPeriodo` (`TotalPeriodo` en boletas) — Monto del período, escrito tal como viene; en una boleta su etiqueta es `TotalPeriodo`, que el SII define como el monto total más el monto no facturable. */
   readonly periodAmount?: number
   /** EN: Previous balance. ES: `SaldoAnterior` — Saldo anterior. */
   readonly previousBalance?: number
@@ -452,8 +452,12 @@ export type Payment = {
 }
 
 /**
- * EN: Optional `IdDoc` fields. Only the ones you set are emitted, in schema order.
- * ES: Campos opcionales de `IdDoc`. Solo se emiten los que se fijan, en el orden del esquema.
+ * EN: Optional `IdDoc` fields. Only the ones you set are emitted, in schema order. A receipt (39, 41) declares five
+ * of them, `serviceIndicator`, `netAmountsIndicator`, `billingPeriod`, `dueDate` and `paymentMedium`, and
+ * `createDocument` refuses any other on it.
+ * ES: Campos opcionales de `IdDoc`. Solo se emiten los que se fijan, en el orden del esquema. Una boleta (39, 41)
+ * declara cinco, `serviceIndicator`, `netAmountsIndicator`, `billingPeriod`, `dueDate` y `paymentMedium`, y
+ * `createDocument` rechaza en ella cualquier otro.
  */
 export type HeaderOptions = {
   /** EN: Credit note that does not reduce the debit (`IndNoRebaja=1`). ES: `IndNoRebaja` — Nota de crédito sin derecho a descontar débito (1). */
@@ -502,8 +506,8 @@ export type HeaderOptions = {
   readonly paymentTermsDays?: number
   /** EN: Due date. ES: `FchVenc` — Fecha de vencimiento. */
   readonly dueDate?: string
-  /** EN: Net amounts indicator. ES: `IndMntNeto` — Indicador de montos netos. */
-  readonly netAmountsIndicator?: number
+  /** EN: Net amounts indicator of a receipt: 2 when its lines carry net amounts; refused on any other type, since only a receipt declares it. ES: `IndMntNeto` — Indicador de montos netos de una boleta: 2 cuando sus líneas traen montos netos; se rechaza en cualquier otro tipo, porque solo la boleta lo declara. */
+  readonly netAmountsIndicator?: 2
 }
 
 /**
@@ -546,6 +550,8 @@ export type Header = {
   readonly options: HeaderOptions
   readonly issuer: Issuer
   readonly receiver: Receiver
+  /** EN: RUT of the provider of the software that issues a receipt (39, 41). ES: `RUTProvSW` — RUT del proveedor del software que emite una boleta (39, 41). */
+  readonly softwareProviderRut?: SiiRut
   /** EN: Transport of the goods. ES: `Transporte` — Transporte de los bienes. */
   readonly transport?: Transport
   readonly totals: Totals
@@ -583,6 +589,8 @@ export type DocumentInput = {
   readonly issuer: IssuerInput
   /** EN: Receiver; optional on receipts (anonymous final consumer). ES: Receptor; opcional en boletas (consumidor final anónimo). */
   readonly receiver?: ReceiverInput
+  /** EN: RUT of the company that provides the software a receipt (39, 41) is issued with, in any shape; the issuer's own RUT when the software is its own. Written only when given, and refused on any other type. ES: `RUTProvSW` — RUT de la empresa proveedora del sistema con que se emite una boleta (39, 41), en cualquier forma; el RUT del propio emisor si el desarrollo es propio. Se escribe solo si viene, y se rechaza en cualquier otro tipo. */
+  readonly softwareProviderRut?: string
   readonly items: readonly LineItemInput[]
   readonly references?: readonly ReferenceInput[]
   /** EN: References of a receipt (39, 41); `references` is for every other type. ES: `Referencia` — Referencias de una boleta (39, 41); `references` es para los demás tipos. */
@@ -590,14 +598,14 @@ export type DocumentInput = {
   /** EN: Global discounts and surcharges; refused on a settlement invoice (43). ES: `DscRcgGlobal` — Descuentos y recargos globales; se rechazan en una liquidación factura (43). */
   readonly globalAdjustments?: readonly GlobalAdjustmentInput[]
   readonly subtotals?: readonly SubtotalInfo[]
-  /** EN: Commission and other charge lines, at most 20: summed into the totals and taken off the total. ES: `Comisiones` — Líneas de comisiones y otros cargos, 20 como máximo: se suman en los totales y se restan del total. */
+  /** EN: Commission and other charge lines, at most 20: summed into the totals and taken off the total; refused on a receipt. ES: `Comisiones` — Líneas de comisiones y otros cargos, 20 como máximo: se suman en los totales y se restan del total; se rechazan en una boleta. */
   readonly commissions?: readonly CommissionLineInput[]
-  /** EN: Transport of the goods, on a dispatch guide or an invoice that moves them; refused on a settlement invoice (43). ES: `Transporte` — Transporte de los bienes, en una guía de despacho o una factura que los traslada; se rechaza en una liquidación factura (43). */
+  /** EN: Transport of the goods, on a dispatch guide or an invoice that moves them; refused on a settlement invoice (43) and on a receipt. ES: `Transporte` — Transporte de los bienes, en una guía de despacho o una factura que los traslada; se rechaza en una liquidación factura (43) y en una boleta. */
   readonly transport?: TransportInput
   readonly options?: HeaderOptions
   /** EN: Unit prices already include VAT: emits `MntBruto=1` and derives net/VAT from the gross. ES: Los precios unitarios ya incluyen IVA: emite `MntBruto=1` y deriva neto/IVA del bruto. */
   readonly pricesIncludeVat?: boolean
-  /** EN: Withhold the whole VAT (`ImptoReten` 15, total without VAT); true by default on purchase invoices, settable on the notes that affect one. ES: `ImptoReten` — Retener todo el IVA (código 15, total sin IVA); true por defecto en facturas de compra (46), se puede fijar en las notas que las afectan. */
+  /** EN: Withhold the whole VAT (`ImptoReten` 15, total without VAT); true by default on purchase invoices, settable on the notes that affect one, and refused on a receipt when true. ES: `ImptoReten` — Retener todo el IVA (código 15, total sin IVA); true por defecto en facturas de compra (46), se puede fijar en las notas que las afectan, y en true se rechaza en una boleta. */
   readonly withholdVat?: boolean
   /** EN: Explicit totals (advanced), written as given; computed when omitted. ES: `Totales` — Totales explícitos (uso avanzado), escritos tal como vienen; se calculan si se omiten. */
   readonly totals?: Totals

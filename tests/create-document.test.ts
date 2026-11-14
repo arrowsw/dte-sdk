@@ -121,9 +121,9 @@ describe('createDocument', () => {
       folio: 1,
       issuer,
       items: [{ name: 'X', unitPrice: 100 }],
-      options: { serviceIndicator: 1, paymentTerms: 1 },
+      options: { serviceIndicator: 1, dueDate: '2026-12-01' },
     })
-    expect(doc.header.options).toEqual({ serviceIndicator: 1, paymentTerms: 1 })
+    expect(doc.header.options).toEqual({ serviceIndicator: 1, dueDate: '2026-12-01' })
   })
 
   test('references, adjustments, transport, subtotals and explicit totals', () => {
@@ -778,6 +778,185 @@ describe('what the schema admits on a settlement invoice (43)', () => {
         'INVALID_OPTION',
         { field: 'items[0].settledDocumentType' },
       )
+    },
+  )
+})
+
+// `EnvioBOLETA_v11.xsd` gives a receipt a shape of its own, which declares much less than the invoice's `Documento`:
+// nine fields in `IdDoc`, no transport, no commissions, no withholdings, eight totals and a shorter line. Its issuer
+// and its receiver are the exception: what they carry that the codec does not write on a receipt is left out.
+describe('what the schema admits on a receipt (39, 41)', () => {
+  const coffee = { name: 'Café', quantity: 2, unitPrice: 1500 }
+  const receipt = (overrides: Partial<DocumentInput> = {}, type: 39 | 41 = 39) =>
+    createDocument({
+      type,
+      folio: 1,
+      issueDate: '2026-11-15',
+      issuer,
+      items: [coffee],
+      pricesIncludeVat: type === 39,
+      ...overrides,
+    })
+  const totals = { netAmount: 2521, vatAmount: 479, totalAmount: 3000 }
+
+  test.each<[string, Partial<DocumentInput>]>([
+    ['transport', { transport: { licensePlate: 'ABCD12' } }],
+    ['transport', { transport: {} }],
+    ['commissions', { commissions: [{ kind: 'commission', description: 'Comisión', netValue: 100 }] }],
+    ['withholdVat', { withholdVat: true }],
+    ['options.noDebitReduction', { options: { noDebitReduction: 1 } }],
+    ['options.dispatchType', { options: { dispatchType: 1 } }],
+    ['options.transferType', { options: { transferType: 1 } }],
+    ['options.printFormat', { options: { printFormat: 'T' } }],
+    ['options.grossAmounts', { options: { grossAmounts: 1 } }],
+    ['options.purchaseTransactionType', { options: { purchaseTransactionType: 1 } }],
+    ['options.saleTransactionType', { options: { saleTransactionType: 1 } }],
+    ['options.paymentTerms', { options: { paymentTerms: 1 } }],
+    ['options.exportPaymentTerms', { options: { exportPaymentTerms: '1' } }],
+    ['options.settlementDate', { options: { settlementDate: '2026-11-15' } }],
+    ['options.settledAmount', { options: { settledAmount: 3000 } }],
+    ['options.outstandingBalance', { options: { outstandingBalance: 0 } }],
+    ['options.payments', { options: { payments: [{ date: '2026-12-01', amount: 3000 }] } }],
+    ['options.paymentAccountType', { options: { paymentAccountType: 'CORRIENTE' } }],
+    ['options.paymentAccountNumber', { options: { paymentAccountNumber: '123' } }],
+    ['options.paymentBank', { options: { paymentBank: 'Banco' } }],
+    ['options.paymentTermsCode', { options: { paymentTermsCode: 'A' } }],
+    ['options.paymentTermsNote', { options: { paymentTermsNote: '30 días' } }],
+    ['options.paymentTermsDays', { options: { paymentTermsDays: 30 } }],
+    ['totals.vatRate', { totals: { ...totals, vatRate: 19 } }],
+    ['totals.ownVatAmount', { totals: { ...totals, ownVatAmount: 100 } }],
+    ['totals.thirdPartyVatAmount', { totals: { ...totals, thirdPartyVatAmount: 100 } }],
+    ['totals.withholdings', { totals: { ...totals, withholdings: [{ taxCode: 15, rate: 19, amount: 479 }] } }],
+    ['totals.commissions', { totals: { ...totals, commissions: { netValue: 100 } } }],
+    ['items[0].referenceQuantity', { items: [{ ...coffee, referenceQuantity: 2 }] }],
+    ['items[1].referenceUnit', { items: [coffee, { ...coffee, referenceUnit: 'KG' }] }],
+    ['items[0].referencePrice', { items: [{ ...coffee, referencePrice: 0 }] }],
+    ['items[0].additionalTaxCodes', { items: [{ ...coffee, additionalTaxCodes: [27] }] }],
+  ])('%s is refused: a receipt does not declare what it writes', (field, overrides) => {
+    expectError(() => receipt(overrides), 'INVALID_OPTION', { field })
+    expectError(() => receipt(overrides, 41), 'INVALID_OPTION', { field })
+  })
+
+  test('its IdDoc declares five options, and any other is refused, one this model does not know included', () => {
+    const unknown = { loyaltyPoints: 10 } as DocumentInput['options']
+    expectError(() => receipt({ options: unknown }), 'INVALID_OPTION', { field: 'options.loyaltyPoints' })
+    expect(
+      receipt({ options: { ...unknown, loyaltyPoints: undefined } as DocumentInput['options'] }).header.options,
+    ).toEqual({ serviceIndicator: 3 })
+  })
+
+  test.each([3, 4, 5] as const)('an exempt indicator of %p is refused: a receipt admits 1, 2 and 6', (indicator) => {
+    expectError(() => receipt({ items: [coffee, { ...coffee, exemptIndicator: indicator }] }), 'INVALID_OPTION', {
+      field: 'items[1].exemptIndicator',
+    })
+  })
+
+  test('a net amounts indicator other than 2 is refused: it is the one value its schema admits', () => {
+    expectError(() => receipt({ options: { netAmountsIndicator: 1 as 2 } }), 'INVALID_OPTION', {
+      field: 'options.netAmountsIndicator',
+    })
+    expect(receipt({ options: { netAmountsIndicator: 2 } }).header.options).toEqual({
+      serviceIndicator: 3,
+      netAmountsIndicator: 2,
+    })
+  })
+
+  test('what a receipt does declare still passes', () => {
+    const doc = receipt({
+      receiver: { rut: RECEIVER_RUT, businessName: 'Ana Rojas', address: 'Pasaje Los Olmos 88', commune: 'Ñuñoa' },
+      softwareProviderRut: '76.543.210-3',
+      items: [
+        { ...coffee, discountPercent: 10, codes: [{ type: 'INT1', value: 'C-1' }] },
+        { name: 'Propina', unitPrice: 300, exemptIndicator: 1 },
+        { name: 'Envase', unitPrice: 500, exemptIndicator: 2 },
+        { name: 'Recaudación de terceros', unitPrice: 700, exemptIndicator: 6 },
+      ],
+      globalAdjustments: [{ kind: 'discount', valueType: 'percent', value: 5 }],
+      subtotals: [{ number: 1, totalAmount: 2700, lines: [1] }],
+      receiptReferences: [{ code: 'SET', reason: 'CASO-1' }],
+      options: {
+        serviceIndicator: 2,
+        billingPeriod: { from: '2026-11-01', to: '2026-11-30' },
+        dueDate: '2026-12-10',
+        paymentMedium: '1',
+      },
+    })
+    expect(doc.header.softwareProviderRut).toBe(ISSUER_RUT)
+    expect(doc.header.options).toEqual({
+      serviceIndicator: 2,
+      billingPeriod: { from: '2026-11-01', to: '2026-11-30' },
+      dueDate: '2026-12-10',
+      paymentMedium: '1',
+    })
+    expect(doc.items.map((item) => item.exemptIndicator)).toEqual([undefined, 1, 2, 6])
+    expect(doc.header.totals).toEqual({
+      netAmount: 2155,
+      exemptAmount: 300,
+      vatAmount: 410,
+      totalAmount: 2865,
+      nonBillableAmount: 1200,
+    })
+  })
+
+  test('totals given by the caller keep the amounts a receipt declares', () => {
+    const given = { ...totals, nonBillableAmount: 500, periodAmount: 3500, previousBalance: -200, amountDue: 3300 }
+    expect(receipt({ pricesIncludeVat: undefined, totals: given }).header.totals).toEqual(given)
+  })
+
+  test('an empty list or a withholding turned off writes nothing, so it is not refused', () => {
+    const doc = receipt({
+      commissions: [],
+      withholdVat: false,
+      options: { payments: [] },
+      items: [{ ...coffee, additionalTaxCodes: [] }],
+    })
+    expect(doc.commissions).toEqual([])
+    expect(doc.header.totals).toEqual(totals)
+    expect(receipt({ pricesIncludeVat: undefined, totals: { ...totals, withholdings: [] } }).header.totals).toEqual({
+      ...totals,
+      withholdings: [],
+    })
+  })
+
+  test('what the issuer and the receiver carry that is not written on a receipt is kept in the document, not refused', () => {
+    const everything = {
+      ...issuer,
+      branch: 'Casa Matriz',
+      phone: '+56 2 2345 6789',
+      email: 'ventas@example.cl',
+      salespersonCode: 'V-1',
+    }
+    const doc = receipt({
+      issuer: everything,
+      receiver: { rut: RECEIVER_RUT, businessName: 'Ana Rojas', businessActivity: 'Particular' },
+    })
+    expect(doc.header.issuer).toMatchObject({ branch: 'Casa Matriz', activityCode: 620200, salespersonCode: 'V-1' })
+    expect(doc.header.receiver.businessActivity).toBe('Particular')
+  })
+
+  test("the software provider's RUT is checked with rut.ts and left out when not given", () => {
+    expectError(() => receipt({ softwareProviderRut: '76543210-K' }), 'INVALID_RUT', { field: 'softwareProviderRut' })
+    expect(receipt().header).not.toHaveProperty('softwareProviderRut')
+    expect(receipt({ softwareProviderRut: ISSUER_RUT }, 41).header.softwareProviderRut).toBe(ISSUER_RUT)
+  })
+
+  test.each([33, 34, 43, 46, 52, 56, 61] as const)(
+    'a net amounts indicator or a software provider on a %p is refused: only a receipt declares them',
+    (type) => {
+      const document = {
+        type,
+        folio: 1,
+        issuer,
+        receiver,
+        items: [{ name: 'Plan anual', unitPrice: 1000, settledDocumentType: type === 43 ? '33' : undefined }],
+      }
+      expectError(() => createDocument({ ...document, options: { netAmountsIndicator: 2 } }), 'INVALID_OPTION', {
+        field: 'options.netAmountsIndicator',
+      })
+      expectError(() => createDocument({ ...document, softwareProviderRut: ISSUER_RUT }), 'INVALID_OPTION', {
+        field: 'softwareProviderRut',
+      })
+      expect(createDocument(document).header).not.toHaveProperty('softwareProviderRut')
     },
   )
 })

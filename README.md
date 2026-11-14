@@ -227,6 +227,8 @@ const receipt = issueDocument({
 })
 ```
 
+A receipt has a schema of its own, and `createDocument` holds it to that schema: see [Receipts](#receipts).
+
 ## Step by step
 
 ```typescript
@@ -336,6 +338,44 @@ totals, because a 43 has no `MontoNF`.
 
 The same sums apply to the commission lines of a purchase invoice (46) and of the notes that correct one. The printed
 sample does not print the commissions yet, and the certification runner does not issue the settlement set.
+
+### Receipts
+
+A receipt (39, 41) has a schema of its own, `EnvioBOLETA_v11.xsd`, much shorter than the invoice's, and
+`createDocument` holds it to that schema before the folio is spent:
+
+```typescript
+const periodic = createDocument({
+  type: 39,
+  folio: 11,
+  issuer, // the same issuer as an invoice: what a receipt is not written with is left out
+  receiver: { rut: '12345678-5', businessName: 'Ana Rojas', address: 'Pasaje Los Olmos 88', commune: 'Ñuñoa' },
+  softwareProviderRut: '76543210-3', // RUTProvSW: who provides the issuing software; the issuer's own if in-house
+  items: [{ name: 'Internet hogar', unitPrice: 21840 }],
+  options: {
+    serviceIndicator: 2, // IndServicio: 1 and 2 periodic services, 3 sales and services (the default), 4 shows
+    netAmountsIndicator: 2, // IndMntNeto: the lines carry net amounts; leave it out with pricesIncludeVat
+    billingPeriod: { from: '2026-11-01', to: '2026-11-30' }, // PeriodoDesde, PeriodoHasta
+    dueDate: '2026-12-10', // FchVenc
+    paymentMedium: '2', // MedioPago: on a receipt, a number from 1 to 5
+  },
+})
+```
+
+- **What a receipt admits.** Of `options`, the five above. Global discounts and surcharges, informative subtotals and
+  its own `receiptReferences`. Lines with codes, a description, a discount or a surcharge, and an `exemptIndicator` of
+  1, 2 or 6. Totals passed by hand may carry `nonBillableAmount`, `periodAmount` (written as the receipt's
+  `TotalPeriodo`), `previousBalance` and `amountDue`.
+- **What it refuses.** `transport`, `commissions`, `withholdVat: true`, any other field of `options`, a rate, an own
+  or third-party VAT, withholdings or commissions in `totals`, and a line's reference quantity, unit or price, its
+  additional tax codes, or an `exemptIndicator` of 3, 4 or 5: each throws `INVALID_OPTION` with the field in
+  `details.field`, because the schema declares no element for it. `softwareProviderRut` and `netAmountsIndicator` are
+  the reverse: only a receipt declares them, and any other type refuses them.
+- **What is left out without an error.** The issuer's branch name, phone, e-mail, activity code and salesperson, and
+  the receiver's business activity, which a receipt has no element for, so the same issuer serves both. The receiver's
+  e-mail and postal address are left out too: the schema declares them and dte-sdk does not write them yet.
+- **Not checked yet.** A receipt's `paymentMedium` has to be a number from 1 to 5 and is written as given; the rules
+  for receipts over 135 UF, and the fields of tickets to shows, are not there either.
 
 ## Received documents
 
