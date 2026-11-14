@@ -137,6 +137,26 @@ describe('createEnvelope', () => {
     )
   })
 
+  // `NroResol` is a non-negative integer of at most six digits in `EnvioDTE_v10.xsd` and `EnvioBOLETA_v11.xsd`.
+  test.each([1.5, -1, 1_234_567, Number.NaN])('a resolution number of %p is refused', (resolutionNumber) => {
+    const bad = { ...cover, resolutionNumber }
+    try {
+      createEnvelope({ kind: 'dte', documents: [issue(33, 1)], cover: bad })
+      throw new Error('expected DteError')
+    } catch (err) {
+      expect(err).toBeInstanceOf(DteError)
+      expect(err).toMatchObject({ code: 'INVALID_OPTION', details: { field: 'cover.resolutionNumber' } })
+    }
+    expectCode(() => createEnvelope({ kind: 'receipt', documents: [receipt(1)], cover: bad }), 'INVALID_OPTION')
+  })
+
+  test('a resolution number of 0, the one of certification, and of 999 999 pass', () => {
+    const numbered = (resolutionNumber: number) =>
+      createEnvelope({ kind: 'dte', documents: [issue(33, 1)], cover: { ...cover, resolutionNumber } })
+    expect(numbered(0).cover.resolutionNumber).toBe(0)
+    expect(numbered(999_999).cover.resolutionNumber).toBe(999_999)
+  })
+
   test('generateSetId pads milliseconds', () => {
     expect(generateSetId('X', new Date('2026-11-15T18:30:05.007Z'))).toBe('X_15_11_2026_15_30_05_007')
     expect(generateSetId('X')).toMatch(/^X_\d{2}_\d{2}_\d{4}_\d{2}_\d{2}_\d{2}_\d{3}$/)

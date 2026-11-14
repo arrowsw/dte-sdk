@@ -1,4 +1,10 @@
-import { FINAL_CONSUMER_RUT, SERVICE_INDICATORS, TRANSFER_TYPES, VAT_RATE } from '../catalogs/codes'
+import {
+  FINAL_CONSUMER_RUT,
+  SERVICE_INDICATORS,
+  TRANSFER_TYPES,
+  VAT_RATE,
+  WITHHOLDING_TAX_CODES,
+} from '../catalogs/codes'
 import { isDocumentType, isExemptType, isReceipt, type DocumentType } from '../catalogs/document-types'
 import { DteError } from '../errors'
 import type {
@@ -72,6 +78,8 @@ export const FIELD_LIMITS = {
 
 type LimitedField = keyof typeof FIELD_LIMITS
 
+// `CdgSIISucur` is a positive integer of at most nine digits.
+const MAX_SII_BRANCH_CODE = 999_999_999
 // `maxOccurs` of the SII schema: the detail lines of a settlement invoice, and the commission lines of any document.
 const MAX_SETTLEMENT_LINES = 60
 const MAX_COMMISSIONS = 20
@@ -123,6 +131,28 @@ const finiteNumber = (value: number | undefined, path: string): number | undefin
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new DteError('INVALID_AMOUNT', { field: path })
   return value
 }
+
+// The decimal types of the SII schema, as digits before the point and decimals after it: `Dec12_6Type` (`QtyItem`,
+// `PrcItem`, `QtyRef`, `PrcRef`), `PctType` (`DescuentoPct`, `RecargoPct`, `TasaComision`) and `Dec16_2Type`
+// (`ValorDR`). A number with more decimals fails the schema, and with it the whole envelope.
+const DECIMAL_TYPES = {
+  quantity: { digits: 12, decimals: 6 },
+  percent: { digits: 3, decimals: 2 },
+  value: { digits: 16, decimals: 2 },
+} as const
+
+// Rounds a number to the decimals its type holds, as the amounts of a line are rounded to pesos, so what plain
+// arithmetic gives (0.1 + 0.2) is written as the schema admits it; a number that does not fit the digits is refused.
+const rounded = (value: number, type: keyof typeof DECIMAL_TYPES, path: string): number => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new DteError('INVALID_AMOUNT', { field: path })
+  const { digits, decimals } = DECIMAL_TYPES[type]
+  const fitted = Number(value.toFixed(decimals))
+  if (Math.abs(fitted) >= 10 ** digits) throw new DteError('INVALID_AMOUNT', { field: path })
+  return fitted
+}
+
+const decimal = (value: number | undefined, type: keyof typeof DECIMAL_TYPES, path: string): number | undefined =>
+  value === undefined ? undefined : rounded(value, type, path)
 
 // `FchSalida` and `FchLlegada` restrict the schema's `FechaType` to start on 2003-04-01.
 const MIN_TRANSPORT_DATE = '2003-04-01'
@@ -192,6 +222,12 @@ const assertReceipt = (input: DocumentInput): void => {
   })
 }
 
+const siiBranchCode = (value: number | undefined): number | undefined => {
+  if (value !== undefined && !(Number.isSafeInteger(value) && value > 0 && value <= MAX_SII_BRANCH_CODE))
+    throw new DteError('INVALID_OPTION', { field: 'issuer.siiBranchCode' })
+  return value
+}
+
 const normalizeIssuer = (input: IssuerInput): Issuer => {
   const commune = requiredText(input.commune, 'CmnaOrigen', 'issuer.commune')
   return compact({
@@ -202,7 +238,7 @@ const normalizeIssuer = (input: IssuerInput): Issuer => {
     phone: input.phone,
     email: input.email,
     branch: text(input.branch, 'Sucursal'),
-    siiBranchCode: input.siiBranchCode,
+    siiBranchCode: siiBranchCode(input.siiBranchCode),
     address: requiredText(input.address, 'DirOrigen', 'issuer.address'),
     commune,
     city: text(input.city, 'CiudadOrigen') ?? commune,
@@ -249,13 +285,16 @@ const normalizeReceiver = (input: ReceiverInput | undefined, type: DocumentType)
 
 const normalizeItem = (input: LineItemInput, index: number, type: DocumentType): LineItem => {
   const path = `items[${index}]`
-  const quantity = finiteNumber(input.quantity, `${path}.quantity`)
-  const unitPrice = finiteNumber(input.unitPrice, `${path}.unitPrice`)
-  const discountPercent = finiteNumber(input.discountPercent, `${path}.discountPercent`)
+  const unitPrice = decimal(input.unitPrice, 'quantity', `${path}.unitPrice`)
+  // A priced line is computed with a quantity of 1 when it brings none, and is written with it. A dispatch guide
+  // needs the quantity on every line (Formato DTE 2.5, field 15), priced or not.
+  const counted = unitPrice !== undefined || type === 52
+  const quantity = decimal(input.quantity, 'quantity', `${path}.quantity`) ?? (counted ? 1 : undefined)
+  const discountPercent = decimal(input.discountPercent, 'percent', `${path}.discountPercent`)
   const decimals = input.unitPriceDecimals
   if (decimals !== undefined && !(Number.isInteger(decimals) && decimals >= 0 && decimals <= 6))
     throw new DteError('INVALID_OPTION', { field: `${path}.unitPriceDecimals` })
-  const surchargePercent = finiteNumber(input.surchargePercent, `${path}.surchargePercent`)
+  const surchargePercent = decimal(input.surchargePercent, 'percent', `${path}.surchargePercent`)
   const computed = calculateLineAmount({ quantity, unitPrice, discountPercent, surchargePercent })
   const settledDocumentType = text(input.settledDocumentType, 'TpoDocLiq')
   // `TpoDocLiq` is a line of `Liquidacion`: required there, and declared nowhere else.
@@ -270,9 +309,9 @@ const normalizeItem = (input: LineItemInput, index: number, type: DocumentType):
     exemptIndicator,
     name: requiredText(input.name, 'NmbItem', `${path}.name`),
     description: text(input.description, 'DscItem'),
-    referenceQuantity: finiteNumber(input.referenceQuantity, `${path}.referenceQuantity`),
+    referenceQuantity: decimal(input.referenceQuantity, 'quantity', `${path}.referenceQuantity`),
     referenceUnit: text(input.referenceUnit, 'UnmdRef'),
-    referencePrice: finiteNumber(input.referencePrice, `${path}.referencePrice`),
+    referencePrice: decimal(input.referencePrice, 'quantity', `${path}.referencePrice`),
     quantity,
     unit: text(input.unit, 'UnmdItem'),
     unitPrice,
@@ -285,6 +324,16 @@ const normalizeItem = (input: LineItemInput, index: number, type: DocumentType):
     amount: finiteNumber(input.amount, `${path}.amount`) ?? computed.amount,
   })
 }
+
+// The withheld amount is the rate by the sum of the lines that carry the code of the withholding (Formato DTE 2.5,
+// field 117), so when the totals worked out here withhold the whole VAT, each line that VAT is charged on carries the
+// code, unless it brings codes of its own. A line with an exempt indicator pays no VAT and gets none.
+const withTotalWithholdingCode = (items: readonly LineItem[]): readonly LineItem[] =>
+  items.map((item) =>
+    item.exemptIndicator === undefined && item.additionalTaxCodes === undefined
+      ? { ...item, additionalTaxCodes: [WITHHOLDING_TAX_CODES.totalVatWithholding] }
+      : item,
+  )
 
 const normalizeReference = (input: ReferenceInput, index: number): Reference =>
   compact({
@@ -314,7 +363,7 @@ const normalizeAdjustment = (input: GlobalAdjustmentInput, index: number): Globa
     lineNumber: index + 1,
     kind: input.kind,
     valueType: input.valueType,
-    value: input.value,
+    value: rounded(input.value, 'value', `globalAdjustments[${index}].value`),
     description: text(input.description, 'GlosaDR'),
     exemptIndicator: input.exemptIndicator,
   })
@@ -331,7 +380,7 @@ const normalizeCommission = (input: CommissionLineInput, index: number): Commiss
     lineNumber: index + 1,
     kind: input.kind,
     description: requiredText(input.description, 'Glosa', `${path}.description`),
-    rate: input.rate,
+    rate: decimal(input.rate, 'percent', `${path}.rate`),
     netValue: netValue ?? 0,
     exemptValue: exemptValue ?? 0,
     vatValue: finiteNumber(input.vatValue, `${path}.vatValue`) ?? (commissionVat(netValue ?? 0) || undefined),
@@ -364,7 +413,12 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
  * EN: Builds a normalized `Document` from caller input: validates type, folio and dates, normalizes RUTs with rut.ts,
  * sanitizes text and enforces schema lengths (fails early instead of letting the SII reject the whole envelope),
  * numbers lines, computes amounts and totals, applies receipt defaults (final consumer, `IndServicio=3`) and sets
- * `MntBruto=1` when prices include VAT. Commission lines are completed (the value a line lacks is zero, and its VAT
+ * `MntBruto=1` when prices include VAT. Quantities and prices are rounded to the six decimals the schema holds, and
+ * percentages, the value of a global adjustment and the rate of a commission to two, before anything is computed
+ * from them, so each amount is the one of the numbers written; a line with a price and no quantity is written with
+ * the quantity it is computed with, 1, and so is every line of a dispatch guide (52) that brings none. When the totals worked out here withhold the whole VAT (a purchase invoice,
+ * or `withholdVat`), each VAT-affected line that brings no additional tax code carries code 15, the one the
+ * withholding is summed over. Commission lines are completed (the value a line lacks is zero, and its VAT
  * is its net value by the VAT rate when it brings none), summed into the totals, where their VAT is the VAT rate by
  * their total net value unless a line states its own, and taken off the total. A settlement
  * invoice (43) is held to what its root, `Liquidacion`, declares: no transport, no global or line discounts and
@@ -381,7 +435,13 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
  * ES: Construye un `Document` normalizado desde la entrada: valida tipo, folio y fechas, normaliza RUT con rut.ts,
  * sanitiza textos y exige los largos del esquema (falla temprano en vez de dejar que el SII rechace el sobre entero),
  * numera líneas, calcula montos y totales, aplica los defaults de boleta (consumidor final, `IndServicio=3`) y fija
- * `MntBruto=1` cuando los precios incluyen IVA. Las líneas de comisión se completan (el valor que falta va en cero, y
+ * `MntBruto=1` cuando los precios incluyen IVA. Las cantidades y los precios se redondean a los seis decimales que
+ * admite el esquema, y los porcentajes, el valor de un ajuste global y la tasa de una comisión a dos, antes de
+ * calcular nada con ellos, así cada monto es el de los números escritos; una línea con precio y sin cantidad se
+ * escribe con la cantidad con que se calcula, 1, y también cada línea de una guía de despacho (52) que no la trae.
+ * Cuando los totales calculados aquí retienen todo el IVA (una
+ * factura de compra, o `withholdVat`), cada línea afecta que no trae código de impuesto adicional lleva el código
+ * 15, sobre el que se suma la retención. Las líneas de comisión se completan (el valor que falta va en cero, y
  * su IVA es su valor neto por la tasa de IVA cuando no lo trae), se suman en los totales, donde su IVA es la tasa de
  * IVA por su valor neto total salvo que una línea declare el suyo, y se restan del total. Una
  * liquidación factura (43) se atiene a lo que declara su raíz, `Liquidacion`: sin transporte, sin descuentos ni
@@ -395,7 +455,7 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
  * sucursal, el teléfono, el correo, el código de actividad y el vendedor del emisor y el giro del receptor, para los
  * que la boleta no tiene elemento, y el correo y la dirección postal del receptor. `softwareProviderRut`
  * (`RUTProvSW`) y `netAmountsIndicator` (`IndMntNeto`) son solo de la boleta. Pura: misma entrada, misma salida.
- * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `MISSING_FIELD` (also a commission line with neither a net nor an exempt value, and a settlement invoice whose receiver has no `businessActivity`), `FIELD_TOO_LONG`, `INVALID_AMOUNT`; `INVALID_TIME` for a `transport.departureTime` that is not `HH:MM:SS` or `HH:MM`; `INVALID_OPTION` for `references` on a receipt, `receiptReferences` on any other type, an `options.transferType` outside 1 to 9, more than 20 `commissions`, a `settledDocumentType` on a type other than 43, on a 43 whatever `Liquidacion` does not declare, on a receipt whatever its schema does not declare, and an `options.netAmountsIndicator` or a `softwareProviderRut` on a type that is not a receipt, with the field in `details.field`. ES: los mismos códigos; `MISSING_FIELD` también por una línea de comisión sin valor neto ni exento y por una liquidación factura cuyo receptor no trae `businessActivity`; `INVALID_TIME` por un `transport.departureTime` que no es `HH:MM:SS` ni `HH:MM`; `INVALID_OPTION` por `references` en una boleta, `receiptReferences` en cualquier otro tipo, un `options.transferType` fuera de 1 a 9, más de 20 `commissions`, un `settledDocumentType` en un tipo distinto del 43, en un 43 lo que `Liquidacion` no declara, en una boleta lo que su esquema no declara, y un `options.netAmountsIndicator` o un `softwareProviderRut` en un tipo que no es boleta, con el campo en `details.field`.
+ * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `MISSING_FIELD` (also a commission line with neither a net nor an exempt value, and a settlement invoice whose receiver has no `businessActivity`), `FIELD_TOO_LONG`, `INVALID_AMOUNT` (also a quantity, a price, a percentage, an adjustment value or a commission rate with more digits than its schema type holds); `INVALID_TIME` for a `transport.departureTime` that is not `HH:MM:SS` or `HH:MM`; `INVALID_OPTION` for `references` on a receipt, `receiptReferences` on any other type, an `options.transferType` outside 1 to 9, more than 20 `commissions`, a `settledDocumentType` on a type other than 43, on a 43 whatever `Liquidacion` does not declare, on a receipt whatever its schema does not declare, and an `options.netAmountsIndicator` or a `softwareProviderRut` on a type that is not a receipt, with the field in `details.field`. ES: los mismos códigos; `INVALID_AMOUNT` también por una cantidad, un precio, un porcentaje, el valor de un ajuste o la tasa de una comisión con más dígitos de los que admite su tipo del esquema; `MISSING_FIELD` también por una línea de comisión sin valor neto ni exento y por una liquidación factura cuyo receptor no trae `businessActivity`; `INVALID_TIME` por un `transport.departureTime` que no es `HH:MM:SS` ni `HH:MM`; `INVALID_OPTION` por `references` en una boleta, `receiptReferences` en cualquier otro tipo, un `options.transferType` fuera de 1 a 9, más de 20 `commissions`, un `settledDocumentType` en un tipo distinto del 43, en un 43 lo que `Liquidacion` no declara, en una boleta lo que su esquema no declara, y un `options.netAmountsIndicator` o un `softwareProviderRut` en un tipo que no es boleta, con el campo en `details.field`.
  */
 export const createDocument = (input: DocumentInput, options: CreateDocumentOptions = {}): Document => {
   if (!isDocumentType(input.type)) throw new DteError('INVALID_DOCUMENT_TYPE', { type: input.type })
@@ -414,7 +474,7 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
   const softwareProviderRut =
     input.softwareProviderRut === undefined ? undefined : toSiiRut(input.softwareProviderRut, 'softwareProviderRut')
   if ((input.commissions ?? []).length > MAX_COMMISSIONS) refuse('commissions')
-  const items = input.items.map((item, index) => normalizeItem(item, index, type))
+  const lines = input.items.map((item, index) => normalizeItem(item, index, type))
   // A receipt's `Referencia` has no date: the invoice shape would fail the receipts schema, and the other way round.
   if (receipt && (input.references ?? []).length > 0) throw new DteError('INVALID_OPTION', { field: 'references' })
   if (!receipt && (input.receiptReferences ?? []).length > 0)
@@ -430,7 +490,7 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
     throw new DteError('INVALID_OPTION', { field: 'options.transferType' })
   const totals =
     input.totals ??
-    calculateTotals(items, {
+    calculateTotals(lines, {
       type,
       pricesIncludeVat: input.pricesIncludeVat,
       vatRate: VAT_RATE,
@@ -439,6 +499,9 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
       // The lines as the caller gave them, checked above: the summary's VAT depends on whether a line states its own.
       commissions: input.commissions,
     })
+  // Totals the caller gave are the caller's to match with the lines.
+  const withheld = input.totals === undefined && totals.withholdings !== undefined
+  const items = withheld ? withTotalWithholdingCode(lines) : lines
   const headerOptions: HeaderOptions = compact({
     ...input.options,
     serviceIndicator: input.options?.serviceIndicator ?? (receipt ? SERVICE_INDICATORS.salesAndServices : undefined),

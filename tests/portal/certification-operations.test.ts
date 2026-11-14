@@ -665,6 +665,20 @@ describe('readProgress', () => {
     expect(referer('pe_avance6')).toBe(`${MAULLIN}/pe_avance5`)
   })
 
+  // What the SII writes around a label is the reason of a rejection, and it is gone once the page is.
+  test('the report carries the readable text of the progress page, up to 6000 characters', async () => {
+    const progress = progressPage('SET', { 'SET BASICO': 'ENVIO CON ERRORES O REPAROS' })
+    const explained = progress.replace('</body>', '<p>Detalle: el folio 12 no corresponde al caso 3.</p></body>')
+    const harness = await reading(certificationPage(), explained)
+    const report = await readProgress(harness.portal)
+    expect(report.text).toContain('SET BASICO ENVIO CON ERRORES O REPAROS')
+    expect(report.text).toContain('Detalle: el folio 12 no corresponde al caso 3.')
+    expect(report.text).not.toContain('<')
+    const long = progress.replace('</body>', `<p>${'palabra '.repeat(2000)}</p></body>`)
+    const cut = await readProgress((await reading(certificationPage(), long)).portal)
+    expect(cut.text).toHaveLength(6000)
+  })
+
   test('while the stage reads SIMULACION and nothing offers to confirm, the declaration form is asked for once more', async () => {
     const offer = progressPage('SIMULACION', {}, { confirm: true })
     const onForm = await reading(certificationPage(), progressPage('SIMULACION', {}), offer)

@@ -6,6 +6,7 @@ import {
 } from '../../src/certification/steps'
 import { fullPlan } from '../support/certification-fixtures'
 import {
+  cafXml,
   certificationHarness,
   estUp,
   estUpRoute,
@@ -35,7 +36,7 @@ import {
 import { DteError } from '../../src/errors'
 import type { FakeRoute } from '../support/fake-sii'
 import { failure } from '../support/portal'
-import { page } from '../support/portal-pages'
+import { page, quotaForm, STAMP_ENTRY } from '../support/portal-pages'
 
 const plan = fullPlan()
 const entry = get('pe_avance1', ...repeat(page('entry'), 200))
@@ -85,6 +86,92 @@ describe('sendSimulation', () => {
     const stats = await harness.registry.stats({ companyRut: '76543210-3', type: 33, environment: 'certification' })
     expect(stats.totalSent).toBe(plan.basic!.invoices.length)
     expect((await failure(sendSimulation(harness.deps, stateWith()))).details).toEqual({ field: 'plan' })
+  })
+})
+
+// Every CAF the SII stamps and nobody issues with counts against the next request, so an attempt that stamped some
+// types and stopped must not leave them behind: the next one issues with them.
+describe('a simulation that is tried again', () => {
+  // The stamping pages of `stampingRoutes`, with a range of its own for each CAF and one failure for a type.
+  const stamping = (failOnce?: number): FakeRoute[] => {
+    const box = { type: 33, failed: false, serial: 0 }
+    return [
+      { url: `${MAULLIN}/of_solicita_folios`, method: 'GET', reply: () => ({ body: STAMP_ENTRY }) },
+      {
+        url: `${MAULLIN}/of_solicita_folios_dcto`,
+        method: 'POST',
+        reply: (request) => {
+          const type = /COD_DOCTO=(\d+)/.exec(request.text)
+          if (type !== null) box.type = Number(type[1])
+          return { body: quotaForm(undefined, undefined, box.type) }
+        },
+      },
+      {
+        url: `${MAULLIN}/of_confirma_folio`,
+        method: 'POST',
+        reply: () => {
+          if (box.type === failOnce && !box.failed) {
+            box.failed = true
+            return { body: page('otra cosa') }
+          }
+          box.serial += 1
+          return { body: cafXml(box.type, { from: box.serial * 1000 + 1, to: box.serial * 1000 + 100 }) }
+        },
+      },
+    ]
+  }
+  const typesAsked = (harness: Awaited<ReturnType<typeof certificationHarness>>): readonly string[] => [
+    ...new Set(harness.posted('of_solicita_folios_dcto').map((form) => form.COD_DOCTO)),
+  ]
+  const requests = (harness: Awaited<ReturnType<typeof certificationHarness>>): number =>
+    harness.posted('of_confirma_folio').length
+
+  test('the CAFs of an attempt that never got to send are in hand at the next one, which asks only for the rest', async () => {
+    const harness = await certificationHarness([...stamping(61), uploadRoute(reception('777'))])
+    const first = await failure(sendSimulation(harness.deps, stateWith({ plan, cafs: [] })))
+    expect(first.code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
+    expect(first.details).toMatchObject({ operation: 'requestCafExact', step: 'of_confirma_folio' })
+    const stopped = (await harness.store.load())!
+    expect(typesAsked(harness)).toEqual(['33', '34', '46', '52', '56', '61'])
+    expect(stopped.simulationCafs).toHaveLength(5)
+    expect(stopped.cafs).toEqual(stopped.simulationCafs)
+    expect(stopped.usedFolios).toEqual([])
+    const before = requests(harness)
+
+    const second = await sendSimulation(harness.deps, stopped)
+    expect(second.outcome).toBe('sent')
+    // One more request, for the type that was missing; the five CAFs in hand are the ones issued with.
+    expect(requests(harness) - before).toBe(1)
+    expect(second.state.cafs).toHaveLength(6)
+    const stats = await harness.registry.stats({ companyRut: '76543210-3', type: 33, environment: 'certification' })
+    expect(stats.ranges.map((range) => [range.from, range.sent])).toEqual([[1001, plan.basic!.invoices.length]])
+    // Sent with, so no longer in hand.
+    expect(second.state.simulationCafs).toEqual([])
+  })
+
+  test('once a send was tried the CAFs are spent, as the folios are: the next attempt asks for new ones', async () => {
+    const harness = await certificationHarness([
+      ...stamping(),
+      uploadRoute({ status: 500, body: 'down' }, reception('777')),
+    ])
+    await failure(sendSimulation(harness.deps, stateWith({ plan, cafs: [] })))
+    const failed = (await harness.store.load())!
+    expect(failed.simulationCafs).toEqual([])
+    expect(requests(harness)).toBe(6)
+    const second = await sendSimulation(harness.deps, failed)
+    expect(second.outcome).toBe('sent')
+    expect(requests(harness)).toBe(12)
+    expect(second.state.cafs).toHaveLength(12)
+  })
+
+  test('the CAFs of the sets are still never the simulation’s', async () => {
+    const harness = await certificationHarness([...stamping(), uploadRoute(reception('777'))])
+    const sets = [33, 34, 46, 52, 56, 61].map((type) => cafXml(type, { from: 1, to: 100 }))
+    const result = await sendSimulation(harness.deps, stateWith({ plan, cafs: sets }))
+    expect(requests(harness)).toBe(6)
+    expect(result.state.cafs).toHaveLength(12)
+    const stats = await harness.registry.stats({ companyRut: '76543210-3', type: 33, environment: 'certification' })
+    expect(stats.ranges.map((range) => range.from)).toEqual([1001])
   })
 })
 

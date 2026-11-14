@@ -1418,6 +1418,23 @@ describe('waitForTestSetsApproval', () => {
     expect(harness.steps()).toEqual(['POLLING', 'SETS_REJECTED'])
   })
 
+  test('the text of the page that rejected is kept as an artefact, and an approval keeps none', async () => {
+    const rejected = progressPage('SET', { 'SET BASICO': 'ENVIO CON ERRORES O REPAROS' }).replace(
+      '</body>',
+      '<p>Detalle: el folio 12 no corresponde al caso 3.</p></body>',
+    )
+    const harness = await certificationHarness(progressRoutes(rejected))
+    await waitForTestSetsApproval(harness.deps, stateWith({ sets: sent }))
+    const kept = await harness.store.readArtefact('sets-prueba/avance-rechazo.txt')
+    expect(kept).toContain('SET BASICO ENVIO CON ERRORES O REPAROS')
+    expect(kept).toContain('Detalle: el folio 12 no corresponde al caso 3.')
+    const approved = await certificationHarness(
+      progressRoutes(progressPage('SET', { 'SET BASICO': 'REVISADO CONFORME', 'SET GUIA DESP.': 'REVISADO CONFORME' })),
+    )
+    await waitForTestSetsApproval(approved.deps, stateWith({ sets: sent }))
+    expect(await approved.store.readArtefact('sets-prueba/avance-rechazo.txt')).toBeNull()
+  })
+
   test('a wording that says rejected stops the wait even on a set that also reads approved', async () => {
     const harness = await certificationHarness(
       progressRoutes(

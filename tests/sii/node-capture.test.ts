@@ -1,4 +1,4 @@
-import { readdir, readFile, writeFile } from 'node:fs/promises'
+import { readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { HttpExchange } from '../../src/sii/capture'
 import type { Logger } from '../../src/sii/logger'
@@ -93,6 +93,109 @@ describe('createDirectoryCapture', () => {
       expect(line.file).toBe(`${String(line.seq).padStart(4, '0')}-${String(line.operation)}-200.json`)
       expect(JSON.parse(await readFile(join(dir, String(line.file)), 'utf8')).operation).toBe(line.operation)
     }
+  })
+
+  // A run that is resumed starts a new process, and with it a new capture over the directory of the first one.
+  test('a capture started over a directory that already holds captures goes on from the last number', async () => {
+    const dir = await temp.make('dte-sdk-capture-')
+    const first = createDirectoryCapture({ dir })
+    await first({ ...exchange, attempt: 1 })
+    await first({ ...exchange, attempt: 2 })
+    const resumed = createDirectoryCapture({ dir })
+    await resumed({ ...exchange, attempt: 3 })
+    expect((await readdir(dir)).sort()).toEqual([
+      '0001-getSeed-200.json',
+      '0002-getSeed-200.json',
+      '0003-getSeed-200.json',
+      'index.jsonl',
+    ])
+    const index = await readIndex(dir)
+    expect(index.map((line) => [line.seq, line.file])).toEqual([
+      [1, '0001-getSeed-200.json'],
+      [2, '0002-getSeed-200.json'],
+      [3, '0003-getSeed-200.json'],
+    ])
+    for (const line of index)
+      expect(JSON.parse(await readFile(join(dir, String(line.file)), 'utf8')).attempt).toBe(line.seq)
+  })
+
+  test('each prefix keeps its own numbers, and what is not a capture is not counted', async () => {
+    const dir = await temp.make('dte-sdk-capture-')
+    await writeFile(join(dir, 'notes.txt'), 'x')
+    await writeFile(join(dir, 'a-notes-9999.json'), 'x')
+    const a = createDirectoryCapture({ dir, prefix: 'a-' })
+    await a(exchange)
+    await a(exchange)
+    await createDirectoryCapture({ dir, prefix: 'b-' })(exchange)
+    await createDirectoryCapture({ dir, prefix: 'a-' })(exchange)
+    expect((await readdir(dir)).filter((name) => /^[ab]-\d/.test(name)).sort()).toEqual([
+      'a-0001-getSeed-200.json',
+      'a-0002-getSeed-200.json',
+      'a-0003-getSeed-200.json',
+      'b-0001-getSeed-200.json',
+    ])
+  })
+
+  test('a name another process took in the meantime is left alone, and the exchange takes the next one', async () => {
+    const dir = await temp.make('dte-sdk-capture-')
+    const capture = createDirectoryCapture({ dir })
+    await capture(exchange)
+    await writeFile(join(dir, '0002-getSeed-200.json'), 'theirs')
+    await capture(exchange)
+    expect(await readFile(join(dir, '0002-getSeed-200.json'), 'utf8')).toBe('theirs')
+    expect((await readIndex(dir)).map((line) => line.file)).toEqual(['0001-getSeed-200.json', '0003-getSeed-200.json'])
+  })
+
+  test.each(['../out-', 'a/b', 'a\\b', 'with space', 'x'.repeat(41)])(
+    'the prefix %p is refused: it goes into a file name',
+    (prefix) => {
+      expect(() => createDirectoryCapture({ dir: 'unused', prefix })).toThrow(
+        expect.objectContaining({ code: 'INVALID_OPTION', details: { field: 'prefix' } }),
+      )
+    },
+  )
+
+  test('a prefix of letters, digits, dots, hyphens and underscores, up to 40 of them, is taken', async () => {
+    const dir = await temp.make('dte-sdk-capture-')
+    const prefix = `run_1.${'x'.repeat(33)}-`
+    await createDirectoryCapture({ dir, prefix })(exchange)
+    expect((await readdir(dir)).sort()).toEqual(['index.jsonl', `${prefix}0001-getSeed-200.json`])
+  })
+
+  test('a write that fails for another reason goes to logger.warn, and the next exchange is still captured', async () => {
+    const dir = await temp.make('dte-sdk-capture-')
+    const logger = recordingLogger()
+    const failing = { times: 1 }
+    const capture = createDirectoryCapture({ dir, logger }, async () => {
+      const modules = await loadNodeFs()
+      const writeFileOnce: typeof modules.fs.writeFile = async (...args) => {
+        if (failing.times > 0) {
+          failing.times -= 1
+          throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })
+        }
+        return modules.fs.writeFile(...args)
+      }
+      return { ...modules, fs: { ...modules.fs, writeFile: writeFileOnce } }
+    })
+    await capture(exchange)
+    expect(logger.warnings).toEqual([
+      ['HTTP capture failed', { operation: 'getSeed', reason: 'EACCES: permission denied' }],
+    ])
+    await capture(exchange)
+    expect((await readIndex(dir)).map((line) => line.file)).toEqual(['0002-getSeed-200.json'])
+  })
+
+  test('a directory that cannot be made yet is tried again at the next exchange', async () => {
+    const base = await temp.make('dte-sdk-capture-')
+    const blocker = join(base, 'later')
+    await writeFile(blocker, 'x')
+    const logger = recordingLogger()
+    const capture = createDirectoryCapture({ dir: join(blocker, 'captures'), logger })
+    await capture(exchange)
+    expect(logger.warnings).toHaveLength(1)
+    await rm(blocker)
+    await capture(exchange)
+    expect(await readdir(join(blocker, 'captures'))).toContain('0001-getSeed-200.json')
   })
 
   test('never throws: filesystem and loader failures go to logger.warn', async () => {
