@@ -63,6 +63,7 @@ every field.
 - [Entry points](#entry-points)
 - [Quick start](#quick-start)
 - [Step by step](#step-by-step)
+- [Answering a received envelope](#answering-a-received-envelope)
 - [Received documents](#received-documents)
 - [SII web services](#sii-web-services)
 - [SII books](#sii-books)
@@ -95,7 +96,11 @@ commissions, refusing before stamping what the schema of its root does not decla
 `DTE_v10.xsd`, and neither has been sent to the SII. 0.11.0 writes a receipt (39, 41) in the shape of its own schema,
 `EnvioBOLETA_v11.xsd`, refusing before stamping what that schema does not declare, and prints the transport area of a
 dispatch guide, or of an invoice that moves goods, on the printed sample; receipts are checked against that schema, and
-none has been sent to the SII. Every area this README describes ships in 0.11.0.
+none has been sent to the SII. 0.12.0 answers a received envelope document by document, with the reception answer, the
+commercial result and the receipts of goods, where nothing is accepted or receipted unless the caller decides it;
+prints a receipt on continuous paper, with the printed stamp as an option; and writes the numbers of a document with
+the decimals its schema holds and holds an upload to the cover of its file. The answers and the documents are checked
+against the SII's schemas, and none has been sent. Every area this README describes ships in 0.12.0.
 Releases before 1.0.0 come out as the work lands, without waiting for the runs against the
 real SII; those runs come before 1.0.0, the first version recommended for production.
 
