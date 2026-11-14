@@ -191,16 +191,25 @@ describe('createReceptionAnswer', () => {
     expect(thrown(() => createReceptionAnswer('<nope/>', base)).code).toBe('XML_PARSE_FAILED')
   })
 
-  test('validates against the official schema with every state', async () => {
+  // One validation per test: each runs the schema validator, which is slow under coverage.
+  test('validates the default answer against the official schema', async () => {
     await expect(validateAgainstXsd(createReceptionAnswer(ENVELOPE, base), 'RespuestaEnvioDTE')).resolves.toEqual([])
-    for (const state of [1, 2, 3, 90, 91, 99] as const) {
+  })
+
+  test.each([1, 2, 3, 90, 91, 99] as const)(
+    'validates the envelope state %i against the official schema',
+    async (state) => {
       const xml = createReceptionAnswer(ENVELOPE, { ...base, envelope: { state } })
       await expect(validateAgainstXsd(xml, 'RespuestaEnvioDTE')).resolves.toEqual([])
-    }
-    for (const state of [1, 2, 3, 4, 99] as const) {
-      const xml = createReceptionAnswer(ENVELOPE, { ...base, documents: () => ({ state }) })
-      await expect(validateAgainstXsd(xml, 'RespuestaEnvioDTE')).resolves.toEqual([])
-    }
+    },
+  )
+
+  test.each([1, 2, 3, 4, 99] as const)('validates the document state %i against the official schema', async (state) => {
+    const xml = createReceptionAnswer(ENVELOPE, { ...base, documents: () => ({ state }) })
+    await expect(validateAgainstXsd(xml, 'RespuestaEnvioDTE')).resolves.toEqual([])
+  })
+
+  test('validates an answer with no documents against the official schema', async () => {
     const none = createReceptionAnswer(ENVELOPE, { ...base, documents: () => null })
     await expect(validateAgainstXsd(none, 'RespuestaEnvioDTE')).resolves.toEqual([])
   })
@@ -263,13 +272,16 @@ describe('createResultAnswer', () => {
     expect(run({ state: 0, envelopeCode: 0 }).details).toEqual({ field: 'envelopeCode' })
   })
 
-  test('validates against the official schema', async () => {
+  test('validates the default answer against the official schema', async () => {
+    await expect(validateAgainstXsd(createResultAnswer(ENVELOPE, base), 'RespuestaEnvioDTE')).resolves.toEqual([])
+  })
+
+  test('validates a discrepancy and a rejection against the official schema', async () => {
     const mixed = createResultAnswer(ENVELOPE, {
       ...base,
       documents: { '33:1': { state: 1, rejectionCode: -999 }, '61:2': { state: 2 } },
     })
     await expect(validateAgainstXsd(mixed, 'RespuestaEnvioDTE')).resolves.toEqual([])
-    await expect(validateAgainstXsd(createResultAnswer(ENVELOPE, base), 'RespuestaEnvioDTE')).resolves.toEqual([])
   })
 })
 
@@ -325,8 +337,11 @@ describe('createGoodsReceipts', () => {
     })
   })
 
-  test('validates against the official schema', async () => {
+  test('validates the default receipts against the official schema', async () => {
     await expect(validateAgainstXsd(createGoodsReceipts(ENVELOPE, base), 'EnvioRecibos')).resolves.toEqual([])
+  })
+
+  test('validates several receipts against the official schema', async () => {
     const several = createGoodsReceipts(ENVELOPE, { ...base, documents: () => ({}) })
     await expect(validateAgainstXsd(several, 'EnvioRecibos')).resolves.toEqual([])
   })
