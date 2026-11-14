@@ -1,6 +1,5 @@
-import type { PDFDocument, PDFFont, PDFImage, PDFPage, RGB } from 'pdf-lib'
-import { format } from 'rut.ts'
-import { documentTypeName, isDocumentType, isTransferable } from '../catalogs/document-types'
+import type { PDFDocument, PDFImage } from 'pdf-lib'
+import { isDocumentType, isReceipt, isTransferable } from '../catalogs/document-types'
 import { siiOfficeForCommune } from '../catalogs/sii-offices'
 import { DteError, errorMessage, isDteError } from '../errors'
 import {
@@ -13,13 +12,32 @@ import {
   LINE,
   MARGIN,
   PAGE,
+  ROLL,
   STAMP,
   TABLE,
   TRANSFER_REASON_NAMES,
   TYPE_BOX,
   defaultResolution,
 } from './layout'
-import type { PrintableDocument, PrintableItem } from './parse'
+import {
+  dottedRut,
+  drawRect,
+  drawRule,
+  drawText,
+  drawTextCentered,
+  formatAmount,
+  itemRow,
+  printedTypeName,
+  referenceTypeName,
+  totalRows,
+  transportGroups,
+  wrapText,
+  type Canvas,
+  type Field,
+  type Fonts,
+} from './draw'
+import type { PrintableDocument } from './parse'
+import { buildRoll, drawRoll, rollHeight } from './roll'
 import { loadBarcodeModule, renderTedBarcodeWith, type BarcodeModule } from './stamp'
 
 /**
@@ -55,6 +73,10 @@ export type PrintedSampleOptions = {
 export type RenderPrintedSampleOptions = PrintedSampleOptions & {
   /** EN: Draw the transferable copy (acknowledgement box and `CEDIBLE` mark) when the document admits one; default false. ES: Dibujar la copia cedible (acuse de recibo y marca `CEDIBLE`) cuando el documento la admite; por defecto false. */
   readonly transferable?: boolean
+  /** EN: `'sheet'`, the 21.5 cm sheet of the manual, or `'roll'`, continuous paper 80 mm wide and as tall as its content (the manual's "papel continuo", the format of a point of sale printer); default `'sheet'`. Every type admits both. ES: `'sheet'`, la hoja de 21,5 cm del manual, o `'roll'`, papel continuo de 80 mm de ancho y tan alto como su contenido (el "papel continuo" del manual, el formato de las impresoras de punto de venta); por defecto `'sheet'`. Todos los tipos admiten ambos. */
+  readonly paper?: 'sheet' | 'roll'
+  /** EN: Print the PDF417 stamp and its legends; default true. `false` is allowed only for receipts, 39 and 41, whose printed stamp is optional from 1 January 2026 (Res. Ex. SII N° 207 of 2025); the legends go with it, and the XML keeps its `TED`. ES: Imprimir el timbre PDF417 y sus leyendas; por defecto true. `false` solo se admite en boletas, 39 y 41, cuyo timbre impreso es opcional desde el 1 de enero de 2026 (Res. Ex. SII N° 207 de 2025); las leyendas se van con él, y el XML conserva su `TED`. */
+  readonly stamp?: boolean
 }
 
 /**
@@ -98,18 +120,6 @@ export const loadPdfModules = async (): Promise<PdfModules> => {
 export const needsTransferableCopy = (doc: PrintableDocument): boolean =>
   isDocumentType(doc.type) && isTransferable(doc.type) && (doc.type !== 52 || [1, 9].includes(doc.transferReason ?? 1))
 
-type Fonts = { readonly normal: PDFFont; readonly bold: PDFFont }
-type Rgb = readonly [number, number, number]
-type Canvas = {
-  readonly page: PDFPage
-  readonly fonts: Fonts
-  readonly height: number
-  readonly paint: (colour: Rgb) => RGB
-}
-type RectStyle = { readonly fill: RGB } | { readonly stroke: RGB; readonly strokeWidth: number }
-type TotalRow = readonly [label: string, value: string, bold: boolean]
-type Field = readonly [label: string, value: string]
-
 const TABLE_WIDTH = PAGE.width - 2 * MARGIN
 const BOX_INNER_WIDTH = TABLE_WIDTH - BOX.padX * 2
 const boxHeight = (lines: number): number => BOX.padY * 2 + LINE.small * lines + GAP.tiny * (lines - 1)
@@ -132,96 +142,6 @@ const REFERENCE_COLUMNS = (() => {
   const date = Math.round(TABLE_WIDTH * 0.2)
   return [type, folio, date, TABLE_WIDTH - type - folio - date] as const
 })()
-
-const formatAmount = (value: number): string => value.toLocaleString('es-CL')
-const dottedRut = (rut: string): string => format(rut, { dots: true, throwOnError: false }) ?? rut
-const printedTypeName = (type: number): string =>
-  isDocumentType(type) ? documentTypeName(type, 'printed') : `DTE ${type}`
-const referenceTypeName = (code: string): string => {
-  if (code === '') return ''
-  const type = Number(code)
-  return isDocumentType(type) ? documentTypeName(type, 'printed') : `Tipo ${code}`
-}
-
-const wrapText = (text: string, font: PDFFont, size: number, maxWidth: number): readonly string[] => {
-  const fits = (candidate: string): boolean => font.widthOfTextAtSize(candidate, size) <= maxWidth
-  const lines: string[] = []
-  let line = ''
-  for (const word of text.trim().split(' ')) {
-    const candidate = line ? `${line} ${word}` : word
-    if (fits(candidate)) {
-      line = candidate
-      continue
-    }
-    if (line) lines.push(line)
-    // The word starts a new line; one wider than the column is split by characters.
-    line = ''
-    for (const char of word) {
-      if (fits(line + char)) line += char
-      else {
-        lines.push(line)
-        line = char
-      }
-    }
-  }
-  lines.push(line)
-  return lines
-}
-
-const drawText = (
-  canvas: Canvas,
-  text: string,
-  x: number,
-  yFromTop: number,
-  font: PDFFont,
-  size: number,
-  colour: RGB,
-): void => {
-  const y = canvas.height - yFromTop - size
-  if (y < -size || y > canvas.height + size) return
-  canvas.page.drawText(text, { x: Math.round(x), y: Math.round(y), font, size, color: colour })
-}
-
-const drawTextCentered = (
-  canvas: Canvas,
-  text: string,
-  x: number,
-  width: number,
-  yFromTop: number,
-  font: PDFFont,
-  size: number,
-  colour: RGB,
-): void => {
-  const textWidth = font.widthOfTextAtSize(text, size)
-  drawText(canvas, text, x + Math.max(0, (width - textWidth) / 2), yFromTop, font, size, colour)
-}
-
-const drawRect = (
-  canvas: Canvas,
-  x: number,
-  yFromTop: number,
-  width: number,
-  height: number,
-  style: RectStyle,
-): void => {
-  canvas.page.drawRectangle({
-    x: Math.round(x),
-    y: Math.round(canvas.height - yFromTop - height),
-    width: Math.round(width),
-    height: Math.round(height),
-    ...('fill' in style ? { color: style.fill } : { borderColor: style.stroke, borderWidth: style.strokeWidth }),
-  })
-}
-
-const drawRule = (canvas: Canvas, x1: number, x2: number, yFromTop: number, colour: RGB): void => {
-  const y = Math.round(canvas.height - yFromTop)
-  canvas.page.drawLine({
-    start: { x: Math.round(x1), y },
-    end: { x: Math.round(x2), y },
-    thickness: 0.5,
-    color: colour,
-  })
-}
 
 // ── Measuring pass ───────────────────────────────────────────────────────────
 
@@ -249,27 +169,7 @@ const fieldWidth = (fonts: Fonts, [label, value]: Field): number =>
 const transportLines = (doc: PrintableDocument, fonts: Fonts): readonly (readonly Field[])[] => {
   const transport = doc.transport
   if (!transport) return []
-  const groups: readonly (readonly Field[])[] = [
-    [
-      ['Patente: ', transport.licensePlate],
-      ['Patente Carro: ', transport.trailerLicensePlate],
-    ],
-    [
-      ['RUT Transportista: ', transport.carrierRut],
-      ['Chofer: ', transport.driverName],
-      ['RUT Chofer: ', transport.driverRut],
-    ],
-    [
-      ['Dirección Destino: ', transport.destinationAddress],
-      ['Comuna Destino: ', transport.destinationCommune],
-      ['Ciudad Destino: ', transport.destinationCity],
-    ],
-    [
-      ['Fecha de Salida: ', transport.departureDate],
-      ['Hora de Salida: ', transport.departureTime],
-      ['Fecha de Llegada: ', transport.arrivalDate],
-    ],
-  ]
+  const groups = transportGroups(transport)
   const lines: Field[][] = []
   for (const group of groups) {
     let width = Infinity // a group starts a line
@@ -292,42 +192,11 @@ const measureReferences = (doc: PrintableDocument): number =>
     ? 0
     : LINE.normal + GAP.small + TABLE.headerHeight + doc.references.length * TABLE.rowHeight + GAP.section
 
-const itemRow = (item: PrintableItem, fonts: Fonts, descriptionWidth: number) => {
-  const lines = wrapText(item.name, fonts.normal, FONT.tiny, descriptionWidth)
-  const hasDiscount = Boolean(item.discountAmount || item.discountPercent)
-  const height = Math.max(TABLE.rowHeight, lines.length * LINE.tiny + TABLE.padY * 2 + (hasDiscount ? LINE.tiny : 0))
-  return { lines, hasDiscount, height }
-}
-
 const measureDetail = (doc: PrintableDocument, fonts: Fonts): number =>
   LINE.normal +
   GAP.small +
   TABLE.headerHeight +
   doc.items.reduce((sum, item) => sum + itemRow(item, fonts, MEASURED_DESCRIPTION_WIDTH).height, 0)
-
-const totalRows = (doc: PrintableDocument): readonly TotalRow[] => {
-  const { totals } = doc
-  const rows: TotalRow[] = []
-  if (doc.type === 34) {
-    if (totals.exempt) rows.push(['Monto Exento', `$${formatAmount(totals.exempt)}`, false])
-    if (totals.total) rows.push(['Monto Total', `$${formatAmount(totals.total)}`, true])
-    return rows
-  }
-  for (const adjustment of doc.globalAdjustments) {
-    const label = adjustment.kind === 'D' ? 'Descuento Global' : 'Recargo Global'
-    const value = !adjustment.value
-      ? ''
-      : adjustment.valueType === '%'
-        ? `${adjustment.value}%`
-        : `$${formatAmount(adjustment.value)}`
-    rows.push([label, value, false])
-  }
-  if (totals.net) rows.push(['Monto Neto', `$${formatAmount(totals.net)}`, false])
-  if (totals.exempt) rows.push(['Monto Exento', `$${formatAmount(totals.exempt)}`, false])
-  if (totals.vat) rows.push([`IVA (${totals.vatRate || 19}%)`, `$${formatAmount(totals.vat)}`, false])
-  if (totals.total) rows.push(['Monto Total', `$${formatAmount(totals.total)}`, true])
-  return rows
-}
 
 const measureTotals = (doc: PrintableDocument): number => totalRows(doc).length * (TABLE.rowHeight + 2) + 8
 
@@ -690,8 +559,19 @@ const draw = async (
   }
   const logo = await embedLogo(document, options.logo)
   const stamp =
-    doc.tedXml === '' ? null : await document.embedPng(await renderTedBarcodeWith(modules.barcode, doc.tedXml))
+    doc.tedXml === '' || options.stamp === false
+      ? null
+      : await document.embedPng(await renderTedBarcodeWith(modules.barcode, doc.tedXml))
   const transferable = options.transferable === true && needsTransferableCopy(doc)
+  const office = options.siiOffice ?? siiOfficeForCommune(doc.issuer.commune) ?? DEFAULT_SII_OFFICE
+  const resolution = options.resolution ?? defaultResolution((options.now ?? (() => new Date()))().getFullYear())
+  if (options.paper === 'roll') {
+    const rows = buildRoll({ doc, fonts, office, resolution, logo, stamp, transferable })
+    const height = rollHeight(rows, fonts)
+    const roll = document.addPage([ROLL.width, height])
+    drawRoll({ page: roll, fonts, height, paint: ([r, g, b]) => pdf.rgb(r, g, b) }, rows)
+    return document.save()
+  }
   const legendLines = transferable ? wrapText(ACKNOWLEDGEMENT_TEXT, fonts.normal, FONT.legal, BOX_INNER_WIDTH) : []
   const transferReason = doc.type === 52 ? doc.transferReason : null
   const transport = transportLines(doc, fonts)
@@ -718,7 +598,6 @@ const draw = async (
   const page = document.addPage([PAGE.width, height])
   const canvas: Canvas = { page, fonts, height, paint: ([r, g, b]) => pdf.rgb(r, g, b) }
   let y = MARGIN
-  const office = options.siiOffice ?? siiOfficeForCommune(doc.issuer.commune) ?? DEFAULT_SII_OFFICE
   y = drawHeader(canvas, doc, logo, y, office) + GAP.section
   y = drawIssueDate(canvas, doc, y) + GAP.small
   y = drawReceiver(canvas, doc, y) + GAP.section
@@ -728,32 +607,48 @@ const draw = async (
   y = drawDetail(canvas, doc, y) + GAP.section
   y = drawTotals(canvas, doc, y) + GAP.section
   if (transferable) y = drawAcknowledgement(canvas, legendLines, y) + GAP.section
-  if (stamp) {
-    const resolution = options.resolution ?? defaultResolution((options.now ?? (() => new Date()))().getFullYear())
-    drawStamp(canvas, stamp, y, resolution)
-  }
+  if (stamp) drawStamp(canvas, stamp, y, resolution)
   if (transferable) drawTransferableMark(canvas, doc)
   return document.save()
+}
+
+// `paper` is one of two values and the stamp may be left out only on a receipt (Res. Ex. SII N° 207 of 2025).
+const checkPaperAndStamp = (doc: PrintableDocument, { paper, stamp }: RenderPrintedSampleOptions): void => {
+  if (paper !== undefined && paper !== 'sheet' && paper !== 'roll')
+    throw new DteError('INVALID_OPTION', { field: 'paper', value: paper })
+  if (stamp !== undefined && typeof stamp !== 'boolean')
+    throw new DteError('INVALID_OPTION', { field: 'stamp', value: stamp })
+  if (stamp === false && !(isDocumentType(doc.type) && isReceipt(doc.type)))
+    throw new DteError('INVALID_OPTION', { field: 'stamp', type: doc.type })
 }
 
 /**
  * EN: The printed sample of one document as a single-page PDF per the SII printed-samples manual: issuer and the red
  * type box, issue date, receiver, transfer reason (guides), the transport area, references, detail, totals, the
- * acknowledgement box and the `CEDIBLE` mark on a transferable copy, and the PDF417 stamp with its legends. The
+ * acknowledgement box and the `CEDIBLE` mark on a transferable copy, and the PDF417 stamp with its legends, which a receipt may leave out with
+ * `stamp: false`. The
  * transport area prints what the document's `Transporte` carries, the fields Formato DTE 2.5 marks to be printed and
  * the destination city, and leaves out what it lacks. The page is 21.5 cm wide and as tall as its content between 11
- * and 33 cm; what falls past 33 cm is not drawn. Node only (D45).
+ * and 33 cm; what falls past 33 cm is not drawn. With `paper: 'roll'` it is continuous paper 80 mm wide and as tall as
+ * its content, with no cap, in the order the manual gives for that format: centred type box, SII office, issuer,
+ * receiver, date, references, detail, totals, acknowledgement box (transferable copy) and stamp. With `stamp: false`,
+ * a receipt (39 or 41) leaves out the electronic stamp and its legends, as Res. Ex. SII N° 207 of 2025 allows. Node
+ * only (D45).
  * ES: La muestra impresa de un documento como PDF de una página según el manual de muestras impresas del SII: emisor y
  * recuadro rojo del tipo, fecha de emisión, receptor, tipo de traslado (guías), el área de transporte, referencias,
  * detalle, totales, el acuse de recibo y la marca `CEDIBLE` en una copia cedible, y el timbre PDF417 con sus leyendas.
  * El área de transporte imprime lo que trae el `Transporte` del documento, los campos que el Formato DTE 2.5 marca para
  * imprimir y la ciudad de destino, y omite lo que falta. La página mide 21,5 cm de ancho y tan alto como su contenido
- * entre 11 y 33 cm; lo que cae más allá de 33 cm no se dibuja. Solo Node (D45).
+ * entre 11 y 33 cm; lo que cae más allá de 33 cm no se dibuja. Con `paper: 'roll'` es papel continuo de 80 mm de ancho
+ * y tan alto como su contenido, sin tope, con el orden del manual para ese formato: recuadro del tipo centrado, oficina
+ * del SII, emisor, receptor, fecha, referencias, detalle, totales, acuse de recibo (copia cedible) y timbre. Con
+ * `stamp: false`, una boleta (39 o 41) omite el timbre electrónico y sus leyendas, como lo permite la Res. Ex. SII
+ * N° 207 de 2025. Solo Node (D45).
  * @param doc EN: a document of `parsePrintableDocuments`. ES: un documento de `parsePrintableDocuments`.
- * @param options EN: office, resolution, logo, clock and `transferable`. ES: oficina, resolución, logo, reloj y `transferable`.
+ * @param options EN: office, resolution, logo, clock, `transferable`, `paper` and `stamp`. ES: oficina, resolución, logo, reloj, `transferable`, `paper` y `stamp`.
  * @param load EN: loader of the two libraries, for tests. ES: cargador de las dos librerías, para tests.
  * @returns EN: the PDF bytes. ES: los bytes del PDF.
- * @throws {DteError} EN: `MISSING_FIELD` (field `TipoDTE`) when the type is 0, `ENCODING_UNSUPPORTED_CHAR` for a TED with a code point above U+00FF, `DEPENDENCY_UNAVAILABLE` when a library cannot be loaded, `PDF_RENDER_FAILED` (with `type` and `folio`) when a library throws while drawing, for example on a character outside WinAnsi. ES: `MISSING_FIELD` (campo `TipoDTE`) cuando el tipo es 0, `ENCODING_UNSUPPORTED_CHAR` ante un TED con un code point mayor a U+00FF, `DEPENDENCY_UNAVAILABLE` si una librería no se puede cargar, `PDF_RENDER_FAILED` (con `type` y `folio`) si una librería lanza al dibujar, por ejemplo ante un carácter fuera de WinAnsi.
+ * @throws {DteError} EN: `MISSING_FIELD` (field `TipoDTE`) when the type is 0, `INVALID_OPTION` (`paper` when it is neither `'sheet'` nor `'roll'`; `stamp` when it is not a boolean, or is `false` on a document that is not a receipt), `ENCODING_UNSUPPORTED_CHAR` for a TED with a code point above U+00FF, `DEPENDENCY_UNAVAILABLE` when a library cannot be loaded, `PDF_RENDER_FAILED` (with `type` and `folio`) when a library throws while drawing, for example on a character outside WinAnsi. ES: `MISSING_FIELD` (campo `TipoDTE`) cuando el tipo es 0, `INVALID_OPTION` (`paper` si no es `'sheet'` ni `'roll'`; `stamp` si no es booleano, o es `false` en un documento que no es boleta), `ENCODING_UNSUPPORTED_CHAR` ante un TED con un code point mayor a U+00FF, `DEPENDENCY_UNAVAILABLE` si una librería no se puede cargar, `PDF_RENDER_FAILED` (con `type` y `folio`) si una librería lanza al dibujar, por ejemplo ante un carácter fuera de WinAnsi.
  */
 export const renderPrintedSample = async (
   doc: PrintableDocument,
@@ -761,6 +656,7 @@ export const renderPrintedSample = async (
   load: () => Promise<PdfModules> = loadPdfModules,
 ): Promise<Uint8Array> => {
   if (!doc.type) throw new DteError('MISSING_FIELD', { field: 'TipoDTE' })
+  checkPaperAndStamp(doc, options)
   const modules = await load()
   try {
     return await draw(modules, doc, options)
