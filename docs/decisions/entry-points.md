@@ -7,9 +7,9 @@ D40 and D41 of the design specs). Tracks [issue #5](https://github.com/arrowsw/d
 
 | Entry | Holds | Size | Reaches `node:` |
 |---|---|---|---|
-| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 37.62 kB | No |
+| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 37.66 kB | No |
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.36 kB | Yes, on first use |
-| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 78.98 kB | Yes, on first use |
+| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 79.02 kB | Yes, on first use |
 | `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 13.2 kB | Yes, on first use |
 
 Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
@@ -58,6 +58,9 @@ Numbers written with the decimals the schema holds, the withholding code on the 
 its file, a capture that never writes over a file, CAF files by environment and a simulation that keeps what it
 stamped, after 0.11.0, took `dte-sdk` from 37.27 kB to 37.62 kB, `dte-sdk/node` from 7.09 kB to 7.36 kB and
 `dte-sdk/portal` from 78.51 kB to 78.98 kB, all under their limits; `dte-sdk/pdf` did not move.
+The strict reading of a received envelope, which the answers share with the verification, and the checks on the
+decisions of the commercial result and the receipts, also after 0.11.0, took `dte-sdk` from 37.62 kB to 37.66 kB and
+`dte-sdk/portal` from 78.98 kB to 79.02 kB, both under their limits; `dte-sdk/node` and `dte-sdk/pdf` did not move.
 
 ## Why
 
