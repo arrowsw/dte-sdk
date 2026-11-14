@@ -98,6 +98,43 @@ export const guide = (transferType: 1 | 5 | 9): SignedDocument =>
     options: { transferType },
   })
 
+/** Every field of `Transporte`, with fictitious plates, people and places. */
+export const fullTransport = {
+  licensePlate: 'ABCD12',
+  trailerLicensePlate: 'JK1234',
+  carrierRut: '7654321-6',
+  driver: { rut: '11111111-1', name: 'Juan Pérez Soto' },
+  destinationAddress: 'Camino a Melipilla 9870, Bodega 4',
+  destinationCommune: 'Maipú',
+  destinationCity: 'Santiago',
+  departureDate: '2026-11-15',
+  departureTime: '08:30',
+  arrivalDate: '2026-11-16',
+} as const
+
+/** A sale guide that carries the whole transport area. */
+export const guideWithTransport = issue({
+  type: 52,
+  folio: 30,
+  issueDate: '2026-11-15',
+  issuer,
+  receiver,
+  items: [{ name: 'Cajón de manzanas', quantity: 10, unitPrice: 8000 }],
+  options: { transferType: 1, dispatchType: 2 },
+  transport: fullTransport,
+})
+
+/** An invoice that moves goods: the transport of an invoice carries no transfer type. */
+export const invoiceWithTransport = issue({
+  type: 33,
+  folio: 31,
+  issueDate: '2026-11-15',
+  issuer,
+  receiver,
+  items: [{ name: 'Saco de cemento', quantity: 40, unitPrice: 5200 }],
+  transport: { licensePlate: 'WXYZ98', destinationAddress: 'Pasaje Los Olmos 88', departureDate: '2026-11-15' },
+})
+
 export const creditNote = issue({
   type: 61,
   folio: 5,

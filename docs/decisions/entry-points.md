@@ -10,7 +10,7 @@ D40 and D41 of the design specs). Tracks [issue #5](https://github.com/arrowsw/d
 | `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 35.1 kB | No |
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.09 kB | Yes, on first use |
 | `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 77.43 kB | Yes, on first use |
-| `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 10.98 kB | Yes, on first use |
+| `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 11.45 kB | Yes, on first use |
 
 Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
 it. The decision was taken at phase 5b-2, which took `dte-sdk/portal` from 39.35 kB to 55.86 kB; each limit was then the
@@ -43,6 +43,8 @@ limit, which went to 78 kB.
 The transport fields of 2026 and the totals and rules of the settlement invoice, on 2026-11-13, took `dte-sdk` from
 34.33 kB to 35.1 kB, `dte-sdk/portal` from 76.73 kB to 77.43 kB and `dte-sdk/pdf` from 10.93 kB to 10.98 kB, all under
 their limits; `dte-sdk/node` did not move.
+The transport area of the printed sample, after 0.10.0, took `dte-sdk/pdf` from 10.98 kB to 11.45 kB, over its 11 kB
+limit, which went to 12 kB; the other entries did not move.
 
 ## Why
 

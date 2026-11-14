@@ -16,6 +16,7 @@ export type {
   PrintableParty,
   PrintableReference,
   PrintableTotals,
+  PrintableTransport,
 } from './parse'
 export { renderTedBarcode } from './stamp'
 export { needsTransferableCopy, renderPrintedSample } from './render'

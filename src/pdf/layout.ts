@@ -38,8 +38,8 @@ export const LINE = { normal: 13, small: 11, tiny: 10, legal: 9 } as const
 /** EN: Table rows and cell padding. ES: Filas de tabla y relleno de celda. */
 export const TABLE = { rowHeight: 12, headerHeight: 14, padX: 3, padY: 2 } as const
 
-/** EN: Padding of the receiver and acknowledgement boxes and the height of an acknowledgement field. ES: Relleno de las cajas de receptor y acuse, y alto de un campo del acuse. */
-export const BOX = { padX: 8, padY: 8, fieldHeight: 14 } as const
+/** EN: Padding of the receiver, transport and acknowledgement boxes, the height of an acknowledgement field and the space between two fields on a line of the transport box. ES: Relleno de las cajas de receptor, transporte y acuse, alto de un campo del acuse y espacio entre dos campos de una línea de la caja de transporte. */
+export const BOX = { padX: 8, padY: 8, fieldHeight: 14, fieldGap: 12 } as const
 
 /** EN: Colours as RGB fractions. ES: Colores como fracciones RGB. */
 export const COLOURS = {
