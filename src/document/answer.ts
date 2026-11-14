@@ -107,10 +107,14 @@ export type AnswerInput = {
 /**
  * EN: The decisions about the documents of an envelope: a function of the document and its position (1 for the first),
  * or a record by `documentKey` (`'33:1234'`); `undefined` leaves the document to the default and `null` leaves it out
- * of the answer.
+ * of the answer. A record names a document by its type and folio alone, so it is refused (`INVALID_OPTION`, with
+ * `details.field` `documents` and the key in `details.key`) for an envelope where two documents share them, whether
+ * the record names that key or not; the function decides each of those by its position.
  * ES: Las decisiones sobre los documentos de un sobre: una función del documento y su posición (1 el primero), o un
  * registro por `documentKey` (`'33:1234'`); `undefined` deja el documento al valor por defecto y `null` lo deja fuera
- * de la respuesta.
+ * de la respuesta. Un registro nombra un documento solo por su tipo y folio, así que se rechaza (`INVALID_OPTION`, con
+ * `details.field` `documents` y la clave en `details.key`) para un sobre en que dos documentos los comparten, nombre o
+ * no el registro esa clave; la función decide cada uno de esos por su posición.
  */
 export type DocumentDecisions<Decision> =
   | ((document: ReceivedEnvelopeDocument, position: number) => Decision | null | undefined)
@@ -210,8 +214,12 @@ export type GoodsReceiptsInput = AnswerInput & {
 const RECEIPT_TYPES: readonly number[] = [33, 34, 43, 46, 52]
 
 /**
- * EN: The key a record of decisions uses for a document: its type and folio, `'33:1234'`.
- * ES: La clave que usa un registro de decisiones para un documento: su tipo y folio, `'33:1234'`.
+ * EN: The key a record of decisions uses for a document: its type and folio, `'33:1234'`. It does not name the issuer
+ * or the position, so it tells apart the documents of one envelope only while no two share a type and a folio; a
+ * record is refused for an envelope where two do.
+ * ES: La clave que usa un registro de decisiones para un documento: su tipo y folio, `'33:1234'`. No nombra al emisor
+ * ni la posición, así que distingue los documentos de un sobre solo mientras no haya dos con el mismo tipo y folio; un
+ * registro se rechaza para un sobre en que los hay.
  * @param document EN: the document of the envelope. ES: el documento del sobre.
  * @returns EN: the key. ES: la clave.
  */
@@ -234,17 +242,37 @@ const checkGloss = (gloss: string): string => (gloss.length > MAX_GLOSS ? invali
 const checkCode = (value: number, field: string, max: number): number =>
   Number.isInteger(value) && value >= 1 && value <= max ? value : invalid(field)
 
+// The first key two documents of the envelope share, in one pass: a set does not grow when it already holds the key.
+const repeatedKey = (envelope: ReceivedEnvelope): string | undefined => {
+  const seen = new Set<string>()
+  return envelope.documents.map(documentKey).find((key) => seen.size === seen.add(key).size)
+}
+
+// A record names a document by its type and folio alone, so it decides only an envelope where no two documents share
+// them: otherwise one decision would answer both, whatever their issuer or their content.
+const checkRecord = (envelope: ReceivedEnvelope): void => {
+  const key = repeatedKey(envelope)
+  if (key !== undefined)
+    throw new DteError('INVALID_OPTION', { field: 'documents', key, reason: 'two documents share this key' })
+}
+
 const resolveDecisions = <Decision>(
   envelope: ReceivedEnvelope,
   decisions: DocumentDecisions<Decision> | undefined,
   fallback: (document: ReceivedEnvelopeDocument) => Decision | null,
-): readonly { readonly document: ReceivedEnvelopeDocument; readonly position: number; readonly decision: Decision }[] =>
-  envelope.documents.flatMap((document, index) => {
+): readonly {
+  readonly document: ReceivedEnvelopeDocument
+  readonly position: number
+  readonly decision: Decision
+}[] => {
+  if (decisions !== undefined && typeof decisions !== 'function') checkRecord(envelope)
+  return envelope.documents.flatMap((document, index) => {
     const position = index + 1
     const given = typeof decisions === 'function' ? decisions(document, position) : decisions?.[documentKey(document)]
     const decision = given === undefined ? fallback(document) : given
     return decision === null ? [] : [{ document, position, decision }]
   })
+}
 
 const rootAttributes = (schema: string): Readonly<Record<string, string>> => ({
   '@_xmlns': SII_NS,
@@ -359,10 +387,10 @@ const envelopeOf = (received: string | ReceivedEnvelope): ReceivedEnvelope =>
  * demás se reciben (0), y el sobre se recibe (0) salvo que su carátula nombre otro receptor (3). Un documento
  * decidido `null` queda fuera. Una línea, UTF-8, sin declaración; los ids llevan el reloj en milisegundos y cada marca
  * de tiempo es la hora local de Chile.
- * @param received EN: the envelope as received, or read with `readReceivedEnvelope`. ES: el sobre como se recibió, o leído con `readReceivedEnvelope`.
+ * @param received EN: the envelope as received, which is read as `readReceivedEnvelope` reads it, or one already read. ES: el sobre como se recibió, que se lee como lo lee `readReceivedEnvelope`, o uno ya leído.
  * @param input EN: the company, the certificate, the decisions and the clock. ES: la empresa, el certificado, las decisiones y el reloj.
  * @returns EN: the signed `RespuestaDTE`. ES: la `RespuestaDTE` firmada.
- * @throws {DteError} EN: the codes of `readReceivedEnvelope`; `INVALID_RUT { field: 'companyRut' }`; `INVALID_OPTION` (`state`, `gloss`, `answerId`, `envelopeCode`). ES: los mismos códigos.
+ * @throws {DteError} EN: the codes of `readReceivedEnvelope`; `INVALID_RUT { field: 'companyRut' }`; `INVALID_OPTION` (`state`, `gloss`, `answerId`, `envelopeCode`, and `documents` for a record when two documents share a key). ES: los mismos códigos.
  */
 export const createReceptionAnswer = (received: string | ReceivedEnvelope, input: ReceptionAnswerInput): string => {
   const envelope = envelopeOf(received)
@@ -417,10 +445,10 @@ export const createReceptionAnswer = (received: string | ReceivedEnvelope, input
  * se acepta (0) y cualquier otro se rechaza (2) con `CodRchDsc` -1, y un rechazo sin código escribe -1. Un documento
  * decidido `null` queda fuera. Una línea, UTF-8, sin declaración; los ids llevan el reloj en milisegundos y cada marca
  * de tiempo es la hora local de Chile.
- * @param received EN: the envelope as received, or read with `readReceivedEnvelope`. ES: el sobre como se recibió, o leído con `readReceivedEnvelope`.
+ * @param received EN: the envelope as received, which is read as `readReceivedEnvelope` reads it, or one already read. ES: el sobre como se recibió, que se lee como lo lee `readReceivedEnvelope`, o uno ya leído.
  * @param input EN: the company, the certificate, the decisions and the clock. ES: la empresa, el certificado, las decisiones y el reloj.
  * @returns EN: the signed `RespuestaDTE`. ES: la `RespuestaDTE` firmada.
- * @throws {DteError} EN: the codes of `readReceivedEnvelope`; `INVALID_RUT { field: 'companyRut' }`; `INVALID_OPTION` (`state`, `gloss`, `rejectionCode`, `envelopeCode`, `answerId`); `ENVELOPE_EMPTY` when every document is left out. ES: los mismos códigos.
+ * @throws {DteError} EN: the codes of `readReceivedEnvelope`; `INVALID_RUT { field: 'companyRut' }`; `INVALID_OPTION` (`state`, `gloss`, `rejectionCode`, `envelopeCode`, `answerId`, and `documents` for a record when two documents share a key); `ENVELOPE_EMPTY` when every document is left out. ES: los mismos códigos.
  */
 export const createResultAnswer = (received: string | ReceivedEnvelope, input: ResultAnswerInput): string => {
   const envelope = envelopeOf(received)
@@ -466,10 +494,10 @@ export const createResultAnswer = (received: string | ReceivedEnvelope, input: R
  * llama puede decidir cada documento (`null` lo deja fuera) y su recinto. La declaración es la que fija el formato.
  * Una línea, UTF-8, sin declaración; los ids llevan el reloj en milisegundos y cada marca de tiempo es la hora local
  * de Chile.
- * @param received EN: the envelope as received, or read with `readReceivedEnvelope`. ES: el sobre como se recibió, o leído con `readReceivedEnvelope`.
+ * @param received EN: the envelope as received, which is read as `readReceivedEnvelope` reads it, or one already read. ES: el sobre como se recibió, que se lee como lo lee `readReceivedEnvelope`, o uno ya leído.
  * @param input EN: the company, the certificate, the decisions and the clock. ES: la empresa, el certificado, las decisiones y el reloj.
  * @returns EN: the signed `EnvioRecibos`. ES: el `EnvioRecibos` firmado.
- * @throws {DteError} EN: the codes of `readReceivedEnvelope`; `INVALID_RUT` (`companyRut`, `signerRut`); `INVALID_OPTION { field: 'place' }`; `ENVELOPE_EMPTY` when no document is left to receipt. ES: los mismos códigos.
+ * @throws {DteError} EN: the codes of `readReceivedEnvelope`; `INVALID_RUT` (`companyRut`, `signerRut`); `INVALID_OPTION` (`place`, and `documents` for a record when two documents share a key); `ENVELOPE_EMPTY` when no document is left to receipt. ES: los mismos códigos.
  */
 export const createGoodsReceipts = (received: string | ReceivedEnvelope, input: GoodsReceiptsInput): string => {
   const envelope = envelopeOf(received)

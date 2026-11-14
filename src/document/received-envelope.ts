@@ -1,7 +1,7 @@
 import { DteError } from '../errors'
-import { parseXmlLoosely } from '../xml/parse'
+import { child, textAt } from '../xml/elements'
+import { readReceivedStructure, type ReceivedHeader } from './received-structure'
 
-const ENVELOPE_ROOTS = ['EnvioDTE', 'EnvioDTEB', 'EnvioDTETraslado', 'EnvioBOLETA'] as const
 const DEFAULT_SET_ID = 'SetDTE'
 
 /**
@@ -13,13 +13,13 @@ export type ReceivedEnvelopeDocument = {
   readonly type: number
   /** EN: Folio. ES: `Folio` — Folio. */
   readonly folio: number
-  /** EN: Issue date, `YYYY-MM-DD`, or null when the document has none (the answers then carry an empty element). ES: `FchEmis` — Fecha de emisión, `AAAA-MM-DD`, o null si el documento no trae (las respuestas llevan entonces un elemento vacío). */
+  /** EN: Issue date as the document wrote it, `YYYY-MM-DD`. `readReceivedEnvelope` always gives one; null only in an envelope built another way, and the answers then carry an empty element. ES: `FchEmis` — Fecha de emisión como la escribió el documento, `AAAA-MM-DD`. `readReceivedEnvelope` siempre la entrega; null solo en un sobre armado de otra forma, y las respuestas llevan entonces un elemento vacío. */
   readonly issueDate: string | null
-  /** EN: The issuer, the document's or the cover's, as the envelope wrote it without dots and upper-cased; `''` when neither names one. ES: `RUTEmisor` — El emisor, el del documento o el de la carátula, como lo escribió el sobre sin puntos y en mayúsculas; `''` si ninguno lo nombra. */
+  /** EN: The issuer the document names, without dots and upper-cased. ES: `RUTEmisor` — El emisor que nombra el documento, sin puntos y en mayúsculas. */
   readonly issuerRut: string
-  /** EN: The receiver, the document's or the cover's, as the envelope wrote it without dots and upper-cased; `''` when neither names one. ES: `RUTRecep` — El receptor, el del documento o el de la carátula, como lo escribió el sobre sin puntos y en mayúsculas; `''` si ninguno lo nombra. */
+  /** EN: The receiver the document names, without dots and upper-cased. ES: `RUTRecep` — El receptor que nombra el documento, sin puntos y en mayúsculas. */
   readonly receiverRut: string
-  /** EN: The total, 0 when the document has none or it is not a number. ES: `MntTotal` — El total, 0 si el documento no trae o no es un número. */
+  /** EN: The total, which may be zero or negative. ES: `MntTotal` — El total, que puede ser cero o negativo. */
   readonly total: number
 }
 
@@ -40,94 +40,77 @@ export type ReceivedEnvelope = {
   readonly documents: readonly ReceivedEnvelopeDocument[]
 }
 
-type Node = Readonly<Record<string, unknown>>
+// The RUTs of an envelope are the sender's: they are not validated (so rut.ts has nothing to say here); only the dots
+// go and the verifier letter is upper-cased, so one written with dots still compares with the company's.
+const envelopeRut = (value: string): string => value.replace(/\./g, '').toUpperCase()
 
-const nodeOf = (value: unknown): Node | null =>
-  typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Node) : null
+const optionalEnvelopeRut = (value: string | null): string | null => (value === null ? null : envelopeRut(value))
 
-// The loose parser hands a number for a text that reads as one; both are what the element says.
-type Scalar = string | number
-
-const scalarOf = (node: Node | null, key: string): Scalar | null => {
-  const value = node?.[key]
-  return typeof value === 'string' || typeof value === 'number' ? value : null
+// A document gives each field itself, or the envelope is refused: nothing is taken from the cover and nothing is
+// converted, so what an answer says of a document is what the document says.
+const refuse = (field: string, index: number, reason: string): never => {
+  throw new DteError('XML_PARSE_FAILED', { field, index, reason })
 }
 
-const listOf = (value: unknown): readonly unknown[] =>
-  Array.isArray(value) ? value : value === undefined ? [] : [value]
+const textOf = (value: string | null, field: string, index: number): string =>
+  value ?? refuse(field, index, 'the document does not give it')
 
-// The first of these that the envelope really gives, the way its fields chain: an absent element, an empty one and a
-// zero all count as not given.
-const firstOf = (...values: readonly (Scalar | null)[]): string | null => {
-  const given = values.find((value) => value !== null && value !== '' && value !== 0)
-  return given === undefined ? null : String(given)
-}
+// A whole number written in digits that JavaScript holds exactly, and no less than `least`.
+const wholeOf = (value: number | null, field: string, index: number, least: number): number =>
+  value !== null && Number.isSafeInteger(value) && value >= least
+    ? value
+    : refuse(field, index, 'expected a whole number written in digits')
 
-// A number the envelope writes loosely reads as its leading digits, and as 0 when it has none.
-const looseInteger = (value: Scalar | null): number => Number.parseInt(String(value ?? ''), 10) || 0
-
-// The RUTs of an envelope are the sender's: they are not validated, as the SII's own test companies need (so rut.ts has
-// nothing to say here); only the dots go and the verifier letter is upper-cased.
-const envelopeRut = (value: string | null): string => (value === null ? '' : value.replace(/\./g, '').toUpperCase())
-
-const optionalEnvelopeRut = (value: Scalar | null): string | null => {
-  const rut = firstOf(value)
-  return rut === null ? null : envelopeRut(rut)
-}
-
-const documentOf = (dte: Node | null, coverIssuer: string, coverReceiver: string | null): ReceivedEnvelopeDocument => {
-  // Only a plain `Documento` is read, or one nested inside a second `DTE`; any other kind of document reads as empty.
-  const document = nodeOf(dte?.['Documento']) ?? nodeOf(nodeOf(dte?.['DTE'])?.['Documento'])
-  const header = nodeOf(document?.['Encabezado'])
-  const idDoc = nodeOf(header?.['IdDoc'])
-  const issuer = nodeOf(header?.['Emisor'])
-  const receiver = nodeOf(header?.['Receptor'])
-  const coverIssuerRut = coverIssuer === '' ? null : coverIssuer
-  return {
-    type: looseInteger(scalarOf(idDoc, 'TipoDTE') ?? scalarOf(idDoc, 'TpoDoc')),
-    folio: looseInteger(scalarOf(idDoc, 'Folio')),
-    issueDate: firstOf(scalarOf(idDoc, 'FchEmis')),
-    issuerRut: envelopeRut(firstOf(scalarOf(issuer, 'RUTEmisor'), scalarOf(issuer, 'RutEmisor'), coverIssuerRut)),
-    receiverRut: envelopeRut(firstOf(scalarOf(receiver, 'RUTRecep'), scalarOf(receiver, 'RutRecep'), coverReceiver)),
-    total: looseInteger(scalarOf(nodeOf(header?.['Totales']), 'MntTotal')),
-  }
-}
+const documentOf = (header: ReceivedHeader, index: number): ReceivedEnvelopeDocument => ({
+  type: wholeOf(header.type, 'TipoDTE', index, 1),
+  folio: wholeOf(header.folio, 'Folio', index, 1),
+  issueDate: textOf(header.issueDate, 'FchEmis', index),
+  issuerRut: envelopeRut(textOf(header.issuerRut, 'RUTEmisor', index)),
+  receiverRut: envelopeRut(textOf(header.receiverRut, 'RUTRecep', index)),
+  total: wholeOf(header.totalAmount, 'MntTotal', index, Number.MIN_SAFE_INTEGER),
+})
 
 /**
- * EN: Reads a received envelope loosely, to answer it: the XML is not checked for well-formedness and its tags are
- * read by their full name, so a prefixed envelope is no envelope; the root is `EnvioDTE`, `EnvioDTEB`,
- * `EnvioDTETraslado` or `EnvioBOLETA`; the set id (the `ID` attribute, else an `ID` child, else `SetDTE`), the cover's
- * RUTs and, per document, its type (`TipoDTE` or `TpoDoc`), folio, issue date, issuer and receiver (the cover's when
- * the document names none) and total. A number is read as the parser reads it (`1e3` is 1000) and is 0 when it cannot
- * be read, an absent date is null and an absent RUT is empty. The RUTs are not validated: only their dots are removed
- * and their letter is upper-cased. It does not check the signature or the stamps: `verifyReceivedDocuments` does.
- * ES: Lee un sobre recibido con tolerancia, para responderlo: no se comprueba que el XML esté bien formado y sus
- * etiquetas se leen por su nombre completo, así que un sobre con prefijo no es un sobre; la raíz es `EnvioDTE`,
- * `EnvioDTEB`, `EnvioDTETraslado` o `EnvioBOLETA`; el id del set (el atributo `ID`, si no un hijo `ID`, si no
- * `SetDTE`), los RUT de la carátula y, por documento, su tipo (`TipoDTE` o `TpoDoc`), folio, fecha de emisión, emisor y
- * receptor (los de la carátula cuando el documento no los nombra) y total. Un número se lee como lo lee el parser
- * (`1e3` es 1000) y vale 0 si no se puede leer, una fecha ausente es null y un RUT ausente queda vacío. Los RUT no se
- * validan: solo se les quitan los puntos y se sube su letra a mayúscula. No chequea la firma ni los timbres:
- * `verifyReceivedDocuments` lo hace.
+ * EN: Reads a received envelope, to answer it, the way `verifyReceivedDocuments` reads it: the same strict reading of
+ * the same elements, so the documents answered are the documents verified. The root is `EnvioDTE` or `EnvioBOLETA`,
+ * with no DOCTYPE, exactly one `SetDTE` and every `DTE` a child of it, each with one `Documento` or `Liquidacion`. Each
+ * document gives its own type (`TipoDTE`), folio, issue date, issuer, receiver and total: nothing is taken from the
+ * cover, and of a repeated element the first is read, as the verification does. A document that lacks one of them, or
+ * whose type, folio or total is not a whole number written in digits (the type and the folio from 1), refuses the
+ * envelope; a number is never converted (`1e3`, `0x10` and `12abc` are refused). The set id is the `ID` attribute of
+ * the `SetDTE`, `SetDTE` when absent; the cover gives its issuer, sender and receiver. The RUTs are not validated:
+ * only their dots are removed and their letter is upper-cased. It does not check the signatures or the stamps:
+ * `verifyReceivedDocuments` does, over the same text. To answer an envelope that cannot be read (`EstadoRecepEnv` 1 or
+ * 91), build the `ReceivedEnvelope` by hand, with no documents.
+ * ES: Lee un sobre recibido, para responderlo, como lo lee `verifyReceivedDocuments`: la misma lectura estricta de los
+ * mismos elementos, así los documentos que se responden son los que se verificaron. La raíz es `EnvioDTE` o
+ * `EnvioBOLETA`, sin DOCTYPE, con exactamente un `SetDTE` y todo `DTE` hijo suyo, cada uno con un `Documento` o
+ * `Liquidacion`. Cada documento entrega su propio tipo (`TipoDTE`), folio, fecha de emisión, emisor, receptor y total:
+ * nada se toma de la carátula, y de un elemento repetido se lee el primero, como hace la verificación. Un documento al
+ * que le falta alguno, o cuyo tipo, folio o total no es un entero escrito en dígitos (el tipo y el folio desde 1),
+ * hace que el sobre se rechace; un número nunca se convierte (`1e3`, `0x10` y `12abc` se rechazan). El id del set es el
+ * atributo `ID` del `SetDTE`, `SetDTE` si falta; la carátula entrega su emisor, enviador y receptor. Los RUT no se
+ * validan: solo se les quitan los puntos y se sube su letra a mayúscula. No chequea las firmas ni los timbres:
+ * `verifyReceivedDocuments` lo hace, sobre el mismo texto. Para responder un sobre que no se puede leer
+ * (`EstadoRecepEnv` 1 o 91), arma el `ReceivedEnvelope` a mano, sin documentos.
  * @param envelopeXml EN: the envelope as received. ES: el sobre como se recibió.
  * @returns EN: the envelope read. ES: el sobre leído.
- * @throws {DteError} EN: `XML_PARSE_FAILED` (the parser gives up, or there is no envelope root), `ENVELOPE_EMPTY` (no document at all). ES: los mismos códigos.
+ * @throws {DteError} EN: `XML_PARSE_FAILED` for empty or malformed XML, a DOCTYPE, a root that is not `EnvioDTE` or `EnvioBOLETA` (`details.field` `root`), an envelope without exactly one `SetDTE`, a `DTE` out of place or prefixed, a `DTE` without one unprefixed `Documento` or `Liquidacion`, or a document that lacks a field or gives a number that is not one (`details.field` names the element and `details.index` the document, from 0); `ENVELOPE_EMPTY` for an envelope without documents. ES: `XML_PARSE_FAILED` para XML vacío o malformado, un DOCTYPE, una raíz que no es `EnvioDTE` ni `EnvioBOLETA` (`details.field` `root`), un sobre sin exactamente un `SetDTE`, un `DTE` fuera de lugar o con prefijo, un `DTE` sin un `Documento` o `Liquidacion` sin prefijo, o un documento al que le falta un campo o trae un número que no lo es (`details.field` nombra el elemento y `details.index` el documento, desde 0); `ENVELOPE_EMPTY` para un sobre sin documentos.
  */
 export const readReceivedEnvelope = (envelopeXml: string): ReceivedEnvelope => {
-  const parsed = parseXmlLoosely(envelopeXml)
-  const root = ENVELOPE_ROOTS.map((name) => nodeOf(parsed[name])).find((node) => node !== null) ?? null
-  const set = nodeOf(root?.['SetDTE']) ?? nodeOf(parsed['SetDTE'])
-  if (set === null) throw new DteError('XML_PARSE_FAILED', { field: 'SetDTE', reason: 'no envelope root' })
-  const cover = nodeOf(set['Caratula'])
-  const issuerRut = envelopeRut(firstOf(scalarOf(cover, 'RutEmisor')))
-  const receiverRut = optionalEnvelopeRut(scalarOf(cover, 'RutReceptor'))
-  const documents = listOf(set['DTE']).map((dte) => documentOf(nodeOf(dte), issuerRut, receiverRut))
-  if (documents.length === 0) throw new DteError('ENVELOPE_EMPTY', { field: 'DTE' })
+  const { rootTag, set, documents } = readReceivedStructure(envelopeXml)
+  if (set === undefined)
+    throw new DteError('XML_PARSE_FAILED', {
+      field: 'root',
+      root: rootTag,
+      reason: 'expected EnvioDTE or EnvioBOLETA',
+    })
+  const cover = child(set, 'Caratula')
   return {
-    setId: firstOf(scalarOf(set, '@_ID'), scalarOf(set, 'ID')) ?? DEFAULT_SET_ID,
-    issuerRut,
-    senderRut: optionalEnvelopeRut(scalarOf(cover, 'RutEnvia')),
-    receiverRut,
-    documents,
+    setId: set.getAttribute('ID') || DEFAULT_SET_ID,
+    issuerRut: envelopeRut(textAt(cover, 'RutEmisor') ?? ''),
+    senderRut: optionalEnvelopeRut(textAt(cover, 'RutEnvia')),
+    receiverRut: optionalEnvelopeRut(textAt(cover, 'RutReceptor')),
+    documents: documents.map(({ header }, index) => documentOf(header, index)),
   }
 }

@@ -9,7 +9,6 @@ import {
 } from '../caf/sii-signature'
 import { rsaSha1VerifyBase64 } from '../crypto/rsa'
 import type { Environment } from '../catalogs/codes'
-import { DteError } from '../errors'
 import { toSiiRut } from '../model/rut'
 import { verifyEnveloped, type SignatureVerification } from '../signature/xmldsig'
 import {
@@ -25,11 +24,14 @@ import {
   textAt,
   writeXml,
 } from '../xml/elements'
-import { parseXmlDom } from '../xml/parse'
+import {
+  readReceivedStructure,
+  type ReceivedDocumentElements,
+  type ReceivedHeader,
+  type ReceivedRoot,
+} from './received-structure'
 
 const SII_NS = 'http://www.sii.cl/SiiDte'
-const ROOTS = ['DTE', 'EnvioDTE', 'EnvioBOLETA'] as const
-const SIGNED_ELEMENTS = ['Documento', 'Liquidacion']
 
 /**
  * EN: Options of `verifyReceivedDocuments`.
@@ -152,7 +154,7 @@ export type ReceivedDocument = {
  */
 export type ReceivedDocumentsVerification = {
   /** EN: Root of the input: one document or an envelope. ES: Raíz de la entrada: un documento o un sobre. */
-  readonly root: 'DTE' | 'EnvioDTE' | 'EnvioBOLETA'
+  readonly root: ReceivedRoot
   /** EN: The envelope's own signature over `SetDTE`; null for a single `DTE`. ES: La firma del propio sobre sobre `SetDTE`; null para un `DTE` solo. */
   readonly envelope: ReceivedSignatureCheck | null
   /** EN: Every document, in the order of the input. ES: Cada documento, en el orden de la entrada. */
@@ -226,26 +228,7 @@ const checkSignature = (root: Element, forms: readonly string[], elementTag: str
   return { found: true, ...(alone ?? inPlace) }
 }
 
-type Header = {
-  readonly type: number | null
-  readonly folio: number | null
-  readonly issueDate: string | null
-  readonly issuerRut: string | null
-  readonly receiverRut: string | null
-  readonly totalAmount: number | null
-}
-
-const readHeader = (signed: Element): Header => {
-  const header = child(signed, 'Encabezado')
-  return {
-    type: integer(textAt(header, 'IdDoc', 'TipoDTE')),
-    folio: integer(textAt(header, 'IdDoc', 'Folio')),
-    issueDate: textAt(header, 'IdDoc', 'FchEmis'),
-    issuerRut: textAt(header, 'Emisor', 'RUTEmisor'),
-    receiverRut: textAt(header, 'Receptor', 'RUTRecep'),
-    totalAmount: signedInteger(textAt(header, 'Totales', 'MntTotal')),
-  }
-}
+type Header = ReceivedHeader
 
 const NO_TED: ReceivedTedCheck = { found: false, signatureValid: false, mismatches: [], valid: false }
 const NO_CAF: ReceivedCafCheck = {
@@ -358,18 +341,8 @@ const checkStamp = (
 
 // Everything is read from the element itself: the signature is checked over forms written from it, and the header and
 // the stamp are read from it, so what is checked and what is reported are the same node.
-const verifyDocument = (element: Element, index: number, rules: StampRules): ReceivedDocument => {
-  const forms = namespaceForms(element)
-  const signedElements = childElements(element).filter((node) => SIGNED_ELEMENTS.includes(node.localName))
-  if (signedElements.length !== 1 || signedElements[0].tagName !== signedElements[0].localName)
-    throw new DteError('XML_PARSE_FAILED', {
-      field: 'Documento',
-      index,
-      reason: 'expected one Documento or Liquidacion',
-    })
-  const signed = signedElements[0]
-  const header = readHeader(signed)
-  const signature = checkSignature(element, forms, signed.tagName)
+const verifyDocument = ({ element, signed, header }: ReceivedDocumentElements, rules: StampRules): ReceivedDocument => {
+  const signature = checkSignature(element, namespaceForms(element), signed.tagName)
   const { ted, caf } = checkStamp(element, signed, header, rules)
   return {
     xml: writeXml(element),
@@ -412,30 +385,9 @@ export const verifyReceivedDocuments = (
   xml: string,
   options: VerifyReceivedDocumentsOptions = {},
 ): ReceivedDocumentsVerification => {
-  if (typeof xml !== 'string' || xml.trim() === '') throw new DteError('XML_PARSE_FAILED', { reason: 'empty' })
-  // The parsers read a DOCTYPE differently (xmldom takes markup in an entity for elements), so none is read.
-  if (/<!DOCTYPE/i.test(xml))
-    throw new DteError('XML_PARSE_FAILED', { field: 'DOCTYPE', reason: 'a DOCTYPE is not read' })
-  const dom = parseXmlDom(xml)
-  const root = dom.documentElement
-  const rootTag = ROOTS.find((tag) => tag === root.tagName)
-  if (rootTag === undefined)
-    throw new DteError('XML_PARSE_FAILED', {
-      field: 'root',
-      root: root.tagName,
-      reason: 'expected DTE, EnvioDTE or EnvioBOLETA',
-    })
-  // One SetDTE, so the one the envelope's signature covers is the one whose documents are read.
-  const sets = rootTag === 'DTE' ? [] : childElements(root).filter((element) => element.tagName === 'SetDTE')
-  if (rootTag !== 'DTE' && sets.length !== 1)
-    throw new DteError('XML_PARSE_FAILED', { field: 'SetDTE', reason: 'expected one SetDTE' })
-  const set = sets[0]
-  const placed = set === undefined ? [root] : childElements(set).filter((element) => element.tagName === 'DTE')
-  const total = named([root, ...descendants(root)], 'DTE').length
-  if (total === 0) throw new DteError('ENVELOPE_EMPTY', { field: 'SetDTE' })
-  if (placed.length !== total) throw new DteError('XML_PARSE_FAILED', { field: 'DTE', reason: 'a DTE out of place' })
+  const { rootTag, root, documents: read } = readReceivedStructure(xml)
   const rules = { keys: options.siiKeys ?? SII_CAF_KEYS, environment: options.environment ?? 'production' }
-  const documents = placed.map((element, index) => verifyDocument(element, index, rules))
+  const documents = read.map((document) => verifyDocument(document, rules))
   const envelope = rootTag === 'DTE' ? null : checkEnvelope(xml, root)
   return {
     root: rootTag,
