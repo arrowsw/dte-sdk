@@ -1242,7 +1242,7 @@ const written = await writePrintedSamples({
 const samples = await readPrintedSamples('./certification/samples')
 ```
 
-The printed sample follows the SII printed-samples manual: one page 21.5 cm wide and as tall as its content between 11
+The printed sample follows the SII printed-samples manual: a page 21.5 cm wide and as tall as its content between 11
 and 33 cm, the red type box with the RUT, the type name and the folio, issuer, date, receiver, a guide's transfer type,
 the transport area, references, detail, totals, the acknowledgement box and `CEDIBLE` mark on the transferable copy
 (33, 34, 43, 46 and sale guides), and the PDF417 stamp of the TED with its legends. The transport area is a box under
@@ -1250,8 +1250,15 @@ the receiver with what the document's `Transporte` carries, in the order of Form
 RUT, the driver's name and RUT, the destination's address, commune and city, and the departure date and time and the
 arrival date. Formato 2.5 marks every field of the area to be printed but the destination city, which is printed when
 the document has it. A dispatch guide and an invoice that moves goods print it alike; a field the document lacks is
-left out, and a document without `Transporte` has no box. `parsePrintableDocuments` reads the area into
-`transport` (`PrintableTransport`), every field as written. The legend under the type box is `siiOffice` when given;
+left out, and a document without `Transporte` has no box. A document taller than 33 cm goes on to further pages: each
+repeats the issuer, the type box and the SII office, numbered under the office (`Página 1 de 2`); the date, the receiver
+and the transport area print on the first page only; a table that breaks repeats its column head on the next page; and
+the totals, the acknowledgement box, the stamp and the `CEDIBLE` mark go on the last page with at least the last detail
+line. Every page but the last is 33 cm tall, and the last as tall as its content. A document that fits one page has no
+page number. Formato DTE 2.5 admits in a document only the lines one sheet can print, and the upload of the
+certification takes one page per sample, so a document that needs a second page is better split, and a sample must fit
+one; the pages keep a longer document whole instead of cutting it.
+`parsePrintableDocuments` reads the area into `transport` (`PrintableTransport`), every field as written. The legend under the type box is `siiOffice` when given;
 otherwise the office of the issuer's commune (`CmnaOrigen`), looked up with `siiOfficeForCommune` in
 `SII_OFFICES` (355 commune names in 40
 offices, every official commune included, ignoring case, surrounding spaces and accents), and `S.I.I. - SANTIAGO CENTRO` for a commune the table lacks.

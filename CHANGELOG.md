@@ -37,6 +37,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `011101`, is the number 11101. Like the root, the entry runs anywhere, names no `node:` module and bundles for the
   browser. It is 10.65 kB, under a limit of 12 kB; the other entries do not move.
   - **What to change:** nothing. Import `dte-sdk/catalogs` for the business activities.
+- **A printed sample of several pages.** A document taller than the 33 cm of the sheet lost what fell past it; now
+  `renderPrintedSample` goes on to further pages, 21.5 cm wide. Every page repeats the issuer, the type box and the SII
+  office, and is numbered under the office (`Página 1 de 2`); the date, the receiver and the transport area print on the
+  first page only; a table that breaks, the detail or the documents it refers to, repeats its column head on the next
+  page; and the totals, the acknowledgement box, the stamp and the `CEDIBLE` mark go on the last page, which takes at
+  least the last detail line with them. Every page but the last is 33 cm tall and the last is as tall as its content,
+  between 11 and 33 cm, so the stamp stays at the bottom of the document, where the printed-samples manual puts it. A
+  document that fits one page prints as before, with no page number, and `paper: 'roll'` keeps its one page with no
+  cap. Formato DTE 2.5 admits in a document only the lines one sheet can print (page 36), and the manual's upload takes
+  one page per sample, so a document that needs a second page is better split, and a certification sample must fit
+  one; the pages keep a longer document whole on paper instead of cutting it. `dte-sdk/pdf` grows from 13.2 kB to
+  13.72 kB, under its 14 kB limit.
+  - **What to change:** nothing.
 
 ### Changed
 

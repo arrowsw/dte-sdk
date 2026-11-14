@@ -11,7 +11,7 @@ by Hans on 2026-11-14.
 | `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 38.95 kB | No |
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.36 kB | Yes, on first use |
 | `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 79.27 kB | Yes, on first use |
-| `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 13.2 kB | Yes, on first use |
+| `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 13.72 kB | Yes, on first use |
 | `dte-sdk/catalogs` | The SII's large code tables: the business activities | 10.65 kB | No |
 
 Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
@@ -71,6 +71,8 @@ The business activities, also after 0.12.0, went to an entry of their own, `dte-
 root for every consumer, or on `dte-sdk/portal` past its 80 kB limit. In an entry of its own only who imports it pays
 for it, and the name leaves room for the next large tables, such as communes or customs. Its limit is the measure
 rounded up to the next 2 kB, 12 kB; the other entries did not move.
+The printed sample of several pages took `dte-sdk/pdf` from 13.2 kB to 13.72 kB, under its 14 kB limit; the other
+entries did not move.
 The days reobtaining reaches in production, with the ranges left outside them in the report, and the days of an
 annulment counted in Chile, also after 0.12.0, took `dte-sdk` from 38.87 kB to 38.95 kB and `dte-sdk/portal` from
 79.03 kB to 79.27 kB, both under their limits; the other entries did not move.
