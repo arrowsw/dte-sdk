@@ -1,45 +1,40 @@
 <!-- Captured in the SII certification environment on 2026-11-06; company, RUT and representative replaced with fictitious data. -->
-<!doctype html>
+<!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="utf-8" />
-    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="description" content="" />
-    <meta name="author" content="" />
-    <title>Autenticaci&oacute;n</title>
-    <script type="text/javascript" src="/AUT2000/js/loadBarra.js"></script>
-    <script type="text/javascript" src="/AUT2000/js/AutAll.js"></script>
-  </head>
+<head>
+        <meta charset="utf-8"/>
+        <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+        <meta name="description" content=""/>
+        <meta name="author" content=""/>
+        <title>Autenticaci&oacute;n</title>
+        <script type="text/javascript" src="/AUT2000/js/loadBarra.js"></script>
+	   <script type='text/javascript' src="/AUT2000/js/AutAll.js"></script>
+</head>
 
-  <body>
-    <div id="my-wrapper">
-      <script type="text/javascript">
-        mostrar('0')
-      </script>
-      <div class="web-sii cuerpo">
-        <div class="container">
-          <form name="myform" method="post" action="https://herculesr.sii.cl/cgi_AUT2000/CAutInicio.cgi">
-            <input type="hidden" name="referencia" id="referencia" value="" />
-          </form>
+	<body>
+         <div id="my-wrapper">
+          <script type="text/javascript">mostrar("0")</script>
+          <div class="web-sii cuerpo">
+           <div class="container">
+	    <form NAME="myform" METHOD="post" ACTION="https://herculesr.sii.cl/cgi_AUT2000/CAutInicio.cgi">
+	     <input type="hidden" name="referencia" id="referencia" value="">
+	    </form>
 
-          <script type="text/javascript">
-            var msg =
-              'Sr. Contribuyente:\n\nPara identificarse utilizando certificado digital seleccione el bot\u00F3n Aceptar, luego se desplegar\u00E1 una ventana que mostrar\u00E1 todos los certificados digitales que usted tiene instalados en su PC y podr\u00E1 escoger el certificado digital con el cu\u00E1l desea identificarse.\n\nSi usted no tiene certificado digital, seleccione el bot\u00F3n Cancelar para volver al men\u00FA principal, en caso contrario se desplegar\u00E1 una ventana vac\u00EDa.\n\nEn caso de que usted tenga un certificado digital y la ventana se despliegue vac\u00EDa, le sugerimos que se contacte con la entidad certificadora para solucionar este problema.\n\nSi usted utiliza una versi\u00F3n de Browser o Navegador de Internet en Ingl\u00E9s, las ventanas que se desplieguen tambi\u00E9n estar\u00E1n en Ingl\u00E9s o en el idioma que utilice el Browser.'
-            if (confirm(msg)) {
-              asignaReferencia()
-              document.myform.action += '?' + referencia
-              document.myform.submit()
-            } else location.replace('http://www.sii.cl')
-          </script>
+	    <script type="text/javascript">
+	     var msg = 'Sr. Contribuyente:\n\nPara identificarse utilizando certificado digital seleccione el bot\u00F3n Aceptar, luego se desplegar\u00E1 una ventana que mostrar\u00E1 todos los certificados digitales que usted tiene instalados en su PC y podr\u00E1 escoger el certificado digital con el cu\u00E1l desea identificarse.\n\nSi usted no tiene certificado digital, seleccione el bot\u00F3n Cancelar para volver al men\u00FA principal, en caso contrario se desplegar\u00E1 una ventana vac\u00EDa.\n\nEn caso de que usted tenga un certificado digital y la ventana se despliegue vac\u00EDa, le sugerimos que se contacte con la entidad certificadora para solucionar este problema.\n\nSi usted utiliza una versi\u00F3n de Browser o Navegador de Internet en Ingl\u00E9s, las ventanas que se desplieguen tambi\u00E9n estar\u00E1n en Ingl\u00E9s o en el idioma que utilice el Browser.';
+	        if (confirm(msg)){
+			    asignaReferencia();
+			    document.myform.action += '?'+referencia;
+			    document.myform.submit();
+	        } else location.replace('http://www.sii.cl');
+            </script>
+           </div>
+         </div>
         </div>
-      </div>
-    </div>
-  </body>
+       </body>
 
-  <footer>
-    <script type="text/javascript">
-      mostrarPie()
-    </script>
-  </footer>
+        <footer>
+                <script type="text/javascript">mostrarPie()</script>
+        </footer>	   
 </html>
