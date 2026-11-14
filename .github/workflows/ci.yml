@@ -89,6 +89,24 @@ jobs:
       - name: Check bundle size
         run: npm run size
 
+  audit:
+    name: audit (runtime dependencies)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      # Reads package-lock.json, so there is nothing to install. Fails on any
+      # published advisory against what a user of the package installs. The
+      # development tools stay out of it: they never reach a consumer.
+      - name: Audit the runtime dependencies
+        run: npm audit --omit=dev
+
   smoke-deno:
     name: smoke (Deno)
     runs-on: ubuntu-latest
