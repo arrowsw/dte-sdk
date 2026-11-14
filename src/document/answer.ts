@@ -108,15 +108,17 @@ export type AnswerInput = {
  * EN: The decisions about the documents of an envelope: a function of the document and its position (1 for the first),
  * or a record by `documentKey` (`'33:1234'`); `undefined` leaves the document to the default and `null` leaves it out
  * of the answer. Only the reception answer has a default: in the commercial result and in the receipts a document
- * without a decision is left out too. A record names a document by its type and folio alone, so it is refused (`INVALID_OPTION`, with
- * `details.field` `documents` and the key in `details.key`) for an envelope where two documents share them, whether
- * the record names that key or not; the function decides each of those by its position.
+ * without a decision is left out too. A record names a document by its type and folio alone, so it is refused
+ * (`INVALID_OPTION`, with `details.field` `documents` and the key in `details.key`) for an envelope where two
+ * documents share them, whether the record names that key or not (the function decides each of those by its
+ * position), and when one of its keys names no document of the envelope, so a mistyped key never drops its decision.
  * ES: Las decisiones sobre los documentos de un sobre: una función del documento y su posición (1 el primero), o un
  * registro por `documentKey` (`'33:1234'`); `undefined` deja el documento al valor por defecto y `null` lo deja fuera
  * de la respuesta. Solo la respuesta de recepción tiene valor por defecto: en el resultado comercial y en los recibos
- * un documento sin decisión también queda fuera. Un registro nombra un documento solo por su tipo y folio, así que se rechaza (`INVALID_OPTION`, con
- * `details.field` `documents` y la clave en `details.key`) para un sobre en que dos documentos los comparten, nombre o
- * no el registro esa clave; la función decide cada uno de esos por su posición.
+ * un documento sin decisión también queda fuera. Un registro nombra un documento solo por su tipo y folio, así que se
+ * rechaza (`INVALID_OPTION`, con `details.field` `documents` y la clave en `details.key`) para un sobre en que dos
+ * documentos los comparten, nombre o no el registro esa clave (la función decide cada uno de esos por su posición), y
+ * cuando una de sus claves no nombra ningún documento del sobre, así una clave mal escrita nunca pierde su decisión.
  */
 export type DocumentDecisions<Decision> =
   | ((document: ReceivedEnvelopeDocument, position: number) => Decision | null | undefined)
@@ -216,10 +218,10 @@ export type GoodsReceiptsInput = AnswerInput & {
 /**
  * EN: The key a record of decisions uses for a document: its type and folio, `'33:1234'`. It does not name the issuer
  * or the position, so it tells apart the documents of one envelope only while no two share a type and a folio; a
- * record is refused for an envelope where two do.
+ * record is refused for an envelope where two do, and when one of its keys is the key of no document of the envelope.
  * ES: La clave que usa un registro de decisiones para un documento: su tipo y folio, `'33:1234'`. No nombra al emisor
  * ni la posición, así que distingue los documentos de un sobre solo mientras no haya dos con el mismo tipo y folio; un
- * registro se rechaza para un sobre en que los hay.
+ * registro se rechaza para un sobre en que los hay, y cuando una de sus claves no es la de ningún documento del sobre.
  * @param document EN: the document of the envelope. ES: el documento del sobre.
  * @returns EN: the key. ES: la clave.
  */
@@ -253,18 +255,20 @@ const requiredDecisions = <Decision>(
 
 const undecided = (): null => null
 
-// The first key two documents of the envelope share, in one pass: a set does not grow when it already holds the key.
-const repeatedKey = (envelope: ReceivedEnvelope): string | undefined => {
-  const seen = new Set<string>()
-  return envelope.documents.map(documentKey).find((key) => seen.size === seen.add(key).size)
+const refuseKey = (key: string, reason: string): never => {
+  throw new DteError('INVALID_OPTION', { field: 'documents', key, reason })
 }
 
-// A record names a document by its type and folio alone, so it decides only an envelope where no two documents share
-// them: otherwise one decision would answer both, whatever their issuer or their content.
-const checkRecord = (envelope: ReceivedEnvelope): void => {
-  const key = repeatedKey(envelope)
-  if (key !== undefined)
-    throw new DteError('INVALID_OPTION', { field: 'documents', key, reason: 'two documents share this key' })
+// A record names a document by its type and folio alone, so it decides only an envelope where each key is one
+// document. Two documents that share a key would take the one decision, whatever their issuer or their content; and a
+// key that names no document, a mistyped one, would drop its decision without a word.
+const checkRecord = (envelope: ReceivedEnvelope, record: Readonly<Record<string, unknown>>): void => {
+  // In one pass: a set does not grow when it already holds the key.
+  const keys = new Set<string>()
+  const repeated = envelope.documents.map(documentKey).find((key) => keys.size === keys.add(key).size)
+  if (repeated !== undefined) refuseKey(repeated, 'two documents share this key')
+  const unknown = Object.keys(record).find((key) => !keys.has(key))
+  if (unknown !== undefined) refuseKey(unknown, 'no document of the envelope has this key')
 }
 
 const resolveDecisions = <Decision>(
@@ -276,7 +280,7 @@ const resolveDecisions = <Decision>(
   readonly position: number
   readonly decision: Decision
 }[] => {
-  if (decisions !== undefined && typeof decisions !== 'function') checkRecord(envelope)
+  if (typeof decisions === 'object' && decisions !== null) checkRecord(envelope, decisions)
   return envelope.documents.flatMap((document, index) => {
     const position = index + 1
     const given = typeof decisions === 'function' ? decisions(document, position) : decisions?.[documentKey(document)]
@@ -449,7 +453,7 @@ export const receptionAnswerOf = (envelope: ReceivedEnvelope, input: ReceptionAn
  * @param received EN: the envelope as received, which is read as `readReceivedEnvelope` reads it, or one already read. ES: el sobre como se recibió, que se lee como lo lee `readReceivedEnvelope`, o uno ya leído.
  * @param input EN: the company, the certificate, the decisions and the clock. ES: la empresa, el certificado, las decisiones y el reloj.
  * @returns EN: the signed `RespuestaDTE`. ES: la `RespuestaDTE` firmada.
- * @throws {DteError} EN: the codes of `readReceivedEnvelope`; `INVALID_RUT { field: 'companyRut' }`; `INVALID_OPTION` (`state`, `gloss`, `answerId`, `envelopeCode`, and `documents` for a record when two documents share a key). ES: los mismos códigos.
+ * @throws {DteError} EN: the codes of `readReceivedEnvelope`; `INVALID_RUT { field: 'companyRut' }`; `INVALID_OPTION` (`state`, `gloss`, `answerId`, `envelopeCode`, and `documents` for a record when two documents share a key or a key names no document). ES: los mismos códigos.
  */
 export const createReceptionAnswer = (received: string | ReceivedEnvelope, input: ReceptionAnswerInput): string =>
   receptionAnswerOf(envelopeOf(received), input)
@@ -510,7 +514,7 @@ export const resultAnswerOf = (envelope: ReceivedEnvelope, input: ResultAnswerIn
  * @param received EN: the envelope as received, which is read as `readReceivedEnvelope` reads it, or one already read. ES: el sobre como se recibió, que se lee como lo lee `readReceivedEnvelope`, o uno ya leído.
  * @param input EN: the company, the certificate, the decisions and the clock. ES: la empresa, el certificado, las decisiones y el reloj.
  * @returns EN: the signed `RespuestaDTE`. ES: la `RespuestaDTE` firmada.
- * @throws {DteError} EN: the codes of `readReceivedEnvelope`; `INVALID_RUT { field: 'companyRut' }`; `INVALID_OPTION` (`documents` when it is missing or is not a function or a record, or for a record when two documents share a key; `state`, `gloss`, `rejectionCode`, `envelopeCode`, `answerId`); `ENVELOPE_EMPTY` when no document is decided. ES: los mismos códigos.
+ * @throws {DteError} EN: the codes of `readReceivedEnvelope`; `INVALID_RUT { field: 'companyRut' }`; `INVALID_OPTION` (`documents` when it is missing or is not a function or a record, or for a record when two documents share a key or a key names no document; `state`, `gloss`, `rejectionCode`, `envelopeCode`, `answerId`); `ENVELOPE_EMPTY` when no document is decided. ES: los mismos códigos.
  */
 export const createResultAnswer = (received: string | ReceivedEnvelope, input: ResultAnswerInput): string =>
   resultAnswerOf(envelopeOf(received), input)
@@ -579,7 +583,7 @@ export const goodsReceiptsOf = (envelope: ReceivedEnvelope, input: GoodsReceipts
  * @param received EN: the envelope as received, which is read as `readReceivedEnvelope` reads it, or one already read. ES: el sobre como se recibió, que se lee como lo lee `readReceivedEnvelope`, o uno ya leído.
  * @param input EN: the company, the certificate, the decisions and the clock. ES: la empresa, el certificado, las decisiones y el reloj.
  * @returns EN: the signed `EnvioRecibos`. ES: el `EnvioRecibos` firmado.
- * @throws {DteError} EN: the codes of `readReceivedEnvelope`; `INVALID_RUT` (`companyRut`, `signerRut`); `INVALID_OPTION` (`documents` when it is missing or is not a function or a record, or for a record when two documents share a key; `place`); `ENVELOPE_EMPTY` when no document is decided. ES: los mismos códigos.
+ * @throws {DteError} EN: the codes of `readReceivedEnvelope`; `INVALID_RUT` (`companyRut`, `signerRut`); `INVALID_OPTION` (`documents` when it is missing or is not a function or a record, or for a record when two documents share a key or a key names no document; `place`); `ENVELOPE_EMPTY` when no document is decided. ES: los mismos códigos.
  */
 export const createGoodsReceipts = (received: string | ReceivedEnvelope, input: GoodsReceiptsInput): string =>
   goodsReceiptsOf(envelopeOf(received), input)

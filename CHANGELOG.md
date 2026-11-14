@@ -38,8 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   document). The caller decides each document through a function of the document and its position, or a record keyed
   by `documentKey` (`'33:1234'`), choosing its state and its gloss, and a `null` leaves the document out. A record
   names a document by its type and folio alone, so it is refused with `INVALID_OPTION` (`details.key` names the key)
-  for an envelope where two documents share them; the function decides those by their position. Only the reception
-  answer has defaults, which follow the format of the SII: a document addressed to another RUT than the company's is
+  for an envelope where two documents share them, which the function decides by their position, and when one of its
+  keys names no document of the envelope, so a mistyped key never drops its decision. Only the reception answer has
+  defaults, which follow the format of the SII: a document addressed to another RUT than the company's is
   `EstadoRecepDTE` 3 ("DTE No Recibido - Error en RUT Receptor") and any other is received (0). The commercial result
   and the receipts have none, because accepting a document and acknowledging its goods have legal effect under Ley
   19.983: `documents` is required in `createResultAnswer` and in `createGoodsReceipts` (`INVALID_OPTION` without it),
@@ -50,8 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the states are typed unions (`EnvelopeReceptionState`, `DocumentReceptionState`, `CommercialResultState`). A state
   outside them, a gloss over 256 characters and a `CodRchDsc` that is not a negative integer of up to 3 digits are
   refused with `INVALID_OPTION` (`details.field` names it); the format defines no codes for `CodRchDsc`, so the caller
-  picks them. All of it is in the root entry. `dte-sdk` grows from 35.51 kB to 37.29 kB, over its 36 kB limit, which
-  went to 38 kB; `dte-sdk/portal` grows from 77.82 kB to 78.52 kB, and its limit from 78 kB to 80 kB.
+  picks them. All of it is in the root entry. `dte-sdk` grows from 35.51 kB to 37.35 kB, over its 36 kB limit, which
+  went to 38 kB; `dte-sdk/portal` grows from 77.82 kB to 78.65 kB, and its limit from 78 kB to 80 kB.
   - **What to change:** nothing. `createExchangeAnswers` of `dte-sdk/portal` is now built on these answers and writes
     the same bytes as before; `parseExchangeSet` keeps its loose reading, for the set the SII itself serves in the
     certification.
@@ -73,7 +74,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       `RutRecep` tags of a document and an `ID` child as the id of the set are read by `parseExchangeSet` alone.
     - `documentKey` keeps its format, so no key changes. A record is now refused for an envelope where two documents
       share a type and a folio, whether they come from one issuer or from two and whether the record names that key or
-      not; before, the two took the one decision. Decide such an envelope with the function.
+      not; before, the two took the one decision. Decide such an envelope with the function. A record is refused too
+      when one of its keys names no document of the envelope; before, the key was ignored, so a mistyped rejection was
+      never sent. A record that held keys of other envelopes has to be cut down to the one it decides.
 
 ## [0.11.0] - 2026-11-14
 

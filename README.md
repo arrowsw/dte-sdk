@@ -447,9 +447,10 @@ converted: a document that lacks one of them, or writes a folio such as `12abc`,
 `XML_PARSE_FAILED`, and `details.field` and `details.index` name the element and the document. To answer an envelope
 that cannot be read (`EstadoRecepEnv` 1 or 91), pass a `ReceivedEnvelope` built by hand with no documents.
 
-A record names a document by its type and folio alone. For an envelope where two documents share them, a repeated
-document among them, a record is refused with `INVALID_OPTION` (`details.key` names the key): decide those with the
-function, which receives each document's position.
+A record names a document by its type and folio alone, so each of its keys has to be one document of the envelope. A
+record is refused with `INVALID_OPTION` (`details.key` names the key) when one of its keys names no document, so a
+mistyped key never drops its decision, and for an envelope where two documents share a type and a folio, a repeated
+document among them: decide those with the function, which receives each document's position.
 
 ## Received documents
 

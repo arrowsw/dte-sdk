@@ -127,6 +127,32 @@ describe('a record of decisions', () => {
     expect(receipts).toMatchObject({ code: 'INVALID_OPTION', details: { field: 'documents', key: '33:1' } })
   })
 
+  test('is refused when a key names no document of the envelope, so a mistyped key never drops its decision', () => {
+    const reception = thrown(() =>
+      createReceptionAnswer(ENVELOPE, { ...base, documents: { '33:1': { state: 4 }, '33:9': { state: 4 } } }),
+    )
+    expect(reception).toMatchObject({ code: 'INVALID_OPTION', details: { field: 'documents', key: '33:9' } })
+    const result = thrown(() => createResultAnswer(ENVELOPE, { ...base, documents: { '61:02': { state: 2 } } }))
+    expect(result).toMatchObject({ code: 'INVALID_OPTION', details: { field: 'documents', key: '61:02' } })
+    // A key decided `null` names a document too.
+    const receipts = thrown(() => createGoodsReceipts(ENVELOPE, { ...base, documents: { '33:1': {}, '34:1': null } }))
+    expect(receipts).toMatchObject({ code: 'INVALID_OPTION', details: { field: 'documents', key: '34:1' } })
+    // A list is no record: its positions name no document.
+    const list = [{ state: 0 }] as unknown as Record<string, { state: 0 }>
+    expect(thrown(() => createResultAnswer(ENVELOPE, { ...base, documents: list })).details).toMatchObject({
+      field: 'documents',
+      key: '0',
+    })
+  })
+
+  test('an empty record decides nothing, and in the reception answer a null is no decisions at all', () => {
+    expect(
+      receptions(createReceptionAnswer(ENVELOPE, { ...base, documents: {} })).map((r) => r['EstadoRecepDTE']),
+    ).toEqual([0, 0, 3])
+    const none = { ...base, documents: null } as unknown as Parameters<typeof createReceptionAnswer>[1]
+    expect(receptions(createReceptionAnswer(ENVELOPE, none)).map((r) => r['EstadoRecepDTE'])).toEqual([0, 0, 3])
+  })
+
   test('is refused too when the documents that share them come from different issuers', () => {
     const issuers = envelope(
       document(33, 1, COMPANY, 100) +
@@ -447,9 +473,7 @@ describe('createGoodsReceipts', () => {
       code: 'ENVELOPE_EMPTY',
       details: { field: 'Recibo' },
     })
-    expect(thrown(() => createGoodsReceipts(ENVELOPE, { ...base, documents: { '33:9': {} } })).code).toBe(
-      'ENVELOPE_EMPTY',
-    )
+    expect(thrown(() => createGoodsReceipts(ENVELOPE, { ...base, documents: {} })).code).toBe('ENVELOPE_EMPTY')
   })
 
   test('is refused without decisions: documents is required, a function or a record', () => {
