@@ -67,6 +67,19 @@ export const chileTimestamp = (now: Date = new Date()): string => {
   return `${year}-${month}-${day}T${hour}:${minute}:${second}`
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * EN: Whether a day, `YYYY-MM-DD` as the SII writes it, started in Chile no more than `days` days before `now`. With
+ * one day that is today in Chile, at any hour: a day read as UTC falls out of it in the evening, when UTC is already
+ * in the next day.
+ * ES: Si un día, `AAAA-MM-DD` como lo escribe el SII, comenzó en Chile a lo más `days` días antes de `now`. Con un día
+ * eso es hoy en Chile, a cualquier hora: un día leído como UTC queda fuera en la noche, cuando UTC ya está en el día
+ * siguiente.
+ */
+export const startedWithinDays = (date: string, days: number, now: Date): boolean =>
+  date > chileDate(new Date(now.getTime() - days * DAY_MS))
+
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
 const PERIOD = /^\d{4}-(0[1-9]|1[0-2])$/
 

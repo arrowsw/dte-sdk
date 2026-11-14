@@ -1,3 +1,4 @@
+import { isIsoDate } from '../../time/chile'
 import { selectOptions } from '../html'
 
 // Each form is chosen by its exact opening tag, as field behaviour does: double quotes, and the name right after
@@ -21,6 +22,20 @@ const hasRange = (fields: Readonly<Record<string, string>>): boolean => Boolean(
  */
 export const parseReobtainList = (html: string): readonly Readonly<Record<string, string>>[] =>
   Array.from(html.matchAll(LIST_FORM), ([block]) => inputValues(block)).filter(hasRange)
+
+const STAMPED_ON = /^(\d{4})-(\d{1,2})-(\d{1,2})$/
+
+/**
+ * EN: The day a range of the list was stamped, `YYYY-MM-DD`, from the three fields of its row; null when they are not
+ * a day.
+ * ES: `DIA`, `MES`, `ANO` — El día en que se timbró un rango de la lista, `AAAA-MM-DD`; null si no forman un día.
+ */
+export const stampedOn = (fields: Readonly<Record<string, string>>): string | null => {
+  const match = STAMPED_ON.exec(`${fields.ANO}-${fields.MES}-${fields.DIA}`)
+  if (match === null) return null
+  const date = `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`
+  return isIsoDate(date) ? date : null
+}
 
 /**
  * EN: The detail page says the range is annulled: the list itself does not.
