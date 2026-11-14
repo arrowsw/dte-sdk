@@ -568,8 +568,8 @@ export const signCertificationEnvelope = (
 
 /**
  * EN: Issues every document of a set plan and signs its envelope. Invoices (or guides) go first, then credit notes,
- * then debit notes, each with the SET reference (`SET`, folio 1, the issue date, `CASO <id>`) and, on notes, the
- * reference to the document of the referenced case with the code and reason of the set. Basic invoices carry
+ * then debit notes, each with the SET reference (`SET`, folio 1, the issue date, `CASO <id>`) and, on notes, a second
+ * one, to the document of the case they refer to, with the code and reason of the set. Basic invoices carry
  * `TpoTranVenta` 1 and the global discount of the case; purchase documents name the issuer as receiver and carry the
  * withholding; an internal transfer names the issuer and totals 0. A settlement set issues one settlement invoice (43)
  * per case, in the set's order and in one envelope: it names the customer of the options, the principal it settles
@@ -578,8 +578,8 @@ export const signCertificationEnvelope = (
  * the UTC clock: the issue date is the UTC day the run starts on, and `TSTED`, `TmstFirma` and `TmstFirmaEnv` are UTC
  * instants with milliseconds. Late in the Chilean evening that is already the next day.
  * ES: Emite cada documento del plan de un set y firma su sobre. Primero las facturas (o guías), luego las notas de
- * crédito, luego las de débito, cada una con la referencia SET (`SET`, folio 1, la fecha de emisión, `CASO <id>`) y, en
- * las notas, la referencia al documento del caso referido con el código y la razón del set. Las facturas del set básico
+ * crédito, luego las de débito, cada una con su referencia SET (`SET`, folio 1, la fecha de emisión, `CASO <id>`) y,
+ * en las notas, otra al documento del caso referido con el código y la razón del set. Las facturas del set básico
  * llevan `TpoTranVenta` 1 y el descuento global del caso; los documentos de compra nombran al emisor como receptor y
  * llevan la retención; un traslado interno nombra al emisor y totaliza 0. Un set de liquidación emite una liquidación
  * factura (43) por caso, en el orden del set y en un solo sobre: nombra al cliente de las opciones, el mandante con
