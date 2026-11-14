@@ -53,6 +53,21 @@ const VARIANTS: Record<Exclude<DocumentType, 39 | 41>, Record<string, Variant>> 
         { name: 'Despacho', unitPrice: 5000, exemptIndicator: 2 },
       ],
     },
+    'a quantity, a price, a reference pair, a discount and a surcharge with more decimals than the schema holds': {
+      items: [
+        {
+          name: 'Granel',
+          quantity: 1 / 3,
+          unitPrice: 100000 / 3,
+          referenceQuantity: 2 / 3,
+          referenceUnit: 'KG',
+          referencePrice: 1000 / 7,
+          discountPercent: 100 / 3,
+        },
+        { name: 'Flete', quantity: 0.1 + 0.2, unitPrice: 1000, surchargePercent: 100 / 3 },
+      ],
+      globalAdjustments: [{ kind: 'discount', valueType: 'percent', value: 100 / 3, description: 'Pronto pago' }],
+    },
     'references, one to another issuer and one to the SET': {
       items: [{ name: 'Plan anual', unitPrice: 100000 }],
       references: [

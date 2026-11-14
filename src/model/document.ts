@@ -103,11 +103,11 @@ export type LineItemInput = {
   readonly name: string
   /** EN: Description (max 1000). ES: `DscItem` — Descripción, máximo 1000. */
   readonly description?: string
-  /** EN: Quantity (default 1). ES: `QtyItem` — Cantidad, por defecto 1. */
+  /** EN: Quantity, rounded to the six decimals the schema holds; 1 on a line with a price and no quantity, and on any line of a dispatch guide (52) without one. ES: `QtyItem` — Cantidad, redondeada a los seis decimales que admite el esquema; 1 en una línea con precio y sin cantidad, y en cualquier línea de una guía de despacho (52) que no la traiga. */
   readonly quantity?: number
   /** EN: Unit of measure (max 4). ES: `UnmdItem` — Unidad de medida, máximo 4. */
   readonly unit?: string
-  /** EN: Unit price, net or VAT-included according to `pricesIncludeVat`. ES: `PrcItem` — Precio unitario, neto o con IVA según `pricesIncludeVat`. */
+  /** EN: Unit price, net or VAT-included according to `pricesIncludeVat`, rounded to the six decimals the schema holds. ES: `PrcItem` — Precio unitario, neto o con IVA según `pricesIncludeVat`, redondeado a los seis decimales que admite el esquema. */
   readonly unitPrice?: number
   /** EN: Decimals `PrcItem` is written with (0 to 6); the plain number when omitted. ES: `PrcItem` — Decimales con que se escribe el precio (0 a 6); el número tal cual si se omite. */
   readonly unitPriceDecimals?: number
@@ -115,21 +115,21 @@ export type LineItemInput = {
   readonly exempt?: boolean
   /** EN: Explicit exemption indicator; a receipt admits 1, 2 and 6, and any other is refused there. ES: `IndExe` — Indicador de exención explícito (1 a 6); una boleta admite 1, 2 y 6, y cualquier otro se rechaza en ella. */
   readonly exemptIndicator?: ExemptIndicator
-  /** EN: Line discount percent; refused on a settlement invoice (43). ES: `DescuentoPct` — Porcentaje de descuento de la línea; se rechaza en una liquidación factura (43). */
+  /** EN: Line discount percent, rounded to two decimals; refused on a settlement invoice (43). ES: `DescuentoPct` — Porcentaje de descuento de la línea, redondeado a dos decimales; se rechaza en una liquidación factura (43). */
   readonly discountPercent?: number
-  /** EN: Line surcharge percent; refused on a settlement invoice (43). ES: `RecargoPct` — Porcentaje de recargo de la línea; se rechaza en una liquidación factura (43). */
+  /** EN: Line surcharge percent, rounded to two decimals; refused on a settlement invoice (43). ES: `RecargoPct` — Porcentaje de recargo de la línea, redondeado a dos decimales; se rechaza en una liquidación factura (43). */
   readonly surchargePercent?: number
   /** EN: Item codes. ES: `CdgItem` — Códigos del ítem (hasta 5). */
   readonly codes?: readonly ItemCode[]
-  /** EN: Additional tax codes; refused on a receipt. ES: `CodImpAdic` — Códigos de impuesto adicional (hasta 2); se rechazan en una boleta. */
+  /** EN: Additional tax codes; refused on a receipt. A VAT-affected line that brings none gets code 15 when the document withholds the whole VAT; an empty list keeps it without one. ES: `CodImpAdic` — Códigos de impuesto adicional (hasta 2); se rechazan en una boleta. Una línea afecta que no trae ninguno recibe el código 15 cuando el documento retiene todo el IVA; una lista vacía la deja sin código. */
   readonly additionalTaxCodes?: readonly number[]
   /** EN: Type of the settled document (max 3): required on a settlement invoice (43), refused on any other type. ES: `TpoDocLiq` — Tipo del documento liquidado, máximo 3; obligatorio en liquidación factura (43) y rechazado en cualquier otro tipo. */
   readonly settledDocumentType?: string
-  /** EN: Reference quantity; refused on a receipt. ES: `QtyRef` — Cantidad de referencia; se rechaza en una boleta. */
+  /** EN: Reference quantity, rounded to six decimals; refused on a receipt. ES: `QtyRef` — Cantidad de referencia, redondeada a seis decimales; se rechaza en una boleta. */
   readonly referenceQuantity?: number
   /** EN: Reference unit (max 4); refused on a receipt. ES: `UnmdRef` — Unidad de referencia, máximo 4; se rechaza en una boleta. */
   readonly referenceUnit?: string
-  /** EN: Reference price; refused on a receipt. ES: `PrcRef` — Precio de referencia; se rechaza en una boleta. */
+  /** EN: Reference price, rounded to six decimals; refused on a receipt. ES: `PrcRef` — Precio de referencia, redondeado a seis decimales; se rechaza en una boleta. */
   readonly referencePrice?: number
   /** EN: Explicit line amount; skips the quantity × price computation. ES: `MontoItem` — Monto explícito de la línea; omite el cálculo cantidad × precio. */
   readonly amount?: number
@@ -330,7 +330,7 @@ export type GlobalAdjustmentInput = {
   readonly kind: 'discount' | 'surcharge'
   /** EN: `percent` (%) or `amount` ($). ES: `TpoValor` — `percent` (%) o `amount` ($). */
   readonly valueType: 'percent' | 'amount'
-  /** EN: Value in the unit of `valueType`. ES: `ValorDR` — Valor en la unidad de `valueType`. */
+  /** EN: Value in the unit of `valueType`, rounded to two decimals. ES: `ValorDR` — Valor en la unidad de `valueType`, redondeado a dos decimales. */
   readonly value: number
   /** EN: Description (max 45). ES: `GlosaDR` — Glosa, máximo 45. */
   readonly description?: string
@@ -360,7 +360,7 @@ export type CommissionLine = {
   readonly kind: 'commission' | 'otherCharge'
   /** EN: Description (max 60). ES: `Glosa` — Glosa, máximo 60. */
   readonly description: string
-  /** EN: Commission rate percent. ES: `TasaComision` — Tasa de la comisión en porcentaje. */
+  /** EN: Commission rate percent, rounded to two decimals. ES: `TasaComision` — Tasa de la comisión en porcentaje, redondeada a dos decimales. */
   readonly rate?: number
   /** EN: Net value; zero when the charge is exempt, and negative only on a settlement invoice. ES: `ValComNeto` — Valor neto; cero si el cargo es exento, y negativo solo en una liquidación factura. */
   readonly netValue: number

@@ -46,11 +46,13 @@ export const hardRejection = (html: string): PortalRejection | null => {
 }
 
 /**
- * EN: The reason the SII writes on the block page, without its boilerplate; null when there is none.
- * ES: El motivo que el SII escribe en la página de bloqueo, sin su texto de relleno; null si no hay.
+ * EN: The reason the SII writes on the block page, without its boilerplate ("Si necesita más información…", with its
+ * accents or without them); null when there is none.
+ * ES: El motivo que el SII escribe en la página de bloqueo, sin su texto de relleno ("Si necesita más información…",
+ * con sus acentos o sin ellos); null si no hay.
  */
 export const stampingBlockReason = (html: string): string | null =>
-  /(NO\s+(?:SE\s+)?AUTORIZA\s+TIMBRAJE[\s\S]{0,600}?)(?:\s+Si necesita mas informacion|$)/i
+  /(NO\s+(?:SE\s+)?AUTORIZA\s+TIMBRAJE[\s\S]{0,600}?)(?:\s+Si necesita m[aá]s informaci[oó]n|$)/i
     .exec(pageText(html))?.[1]
     ?.trim() ?? null
 

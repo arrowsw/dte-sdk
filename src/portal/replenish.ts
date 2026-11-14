@@ -28,8 +28,10 @@ const LEAVE_THE_PORTAL_ALONE: ReadonlySet<DteErrorCode> = new Set<DteErrorCode>(
   'SII_PORTAL_BLOCKED',
 ])
 const DEFAULT_EXPIRY_MARGIN_MS = 24 * 60 * 60 * 1000
-// Annulling reaches the ranges stamped in the last six months, the ones that weigh on the quota, a few at a time.
-const ANNUL_WINDOW_DAYS = 180
+// Annulling reaches, a few ranges at a time, the ones stamped in the last six months in certification, which are the
+// ones that weigh on the quota, and in the last day in production: it cannot be undone, and there a range stamped days
+// ago may be one another system of the company holds.
+const ANNUL_WINDOW_DAYS = { certification: 180, production: 1 } as const
 const ANNUL_MAX_RANGES = 10
 // Refusals after which the SII may hold a range it did not hand over: the listing says whether it does.
 const MAYBE_GRANTED: ReadonlySet<PortalRejection> = new Set<PortalRejection>([
@@ -194,6 +196,8 @@ export type ReplenishFoliosInput = ReplenishmentPolicy & {
   readonly coolDownMs?: number
   /** EN: Annul unused folios as a last resort, when the SII counts more of them than the ones in hand and they are what keeps it from stamping. Only in certification by default: it cannot be undone and counts against the quota for six months. ES: Anular folios sin usar como último recurso, cuando el SII cuenta más de los que hay en la mano y son lo que le impide timbrar. Por defecto solo en certificación: no se puede deshacer y pesa contra el cupo seis meses. */
   readonly allowAnnul?: boolean
+  /** EN: How many days back annulling reaches, by the date each range was stamped. By default 1 in production, where a range stamped days ago may be another system's, and 180 in certification, the six months unused folios weigh on the quota. ES: Cuántos días hacia atrás alcanza la anulación, por la fecha en que se timbró cada rango. Por defecto 1 en producción, donde un rango timbrado hace días puede ser de otro sistema, y 180 en certificación, los seis meses que los folios sin usar pesan en el cupo. */
+  readonly annulWithinDays?: number
   /** EN: Folios annulling never touches, such as those of documents signed and not received by the SII yet; the CAFs held and the ranges this run downloads are always left out. ES: Folios que la anulación no toca, como los de documentos firmados que el SII aún no recibe; los CAF que se tienen y los rangos que esta corrida descarga siempre quedan fuera. */
   readonly exclude?: readonly { readonly from: number; readonly to: number }[]
   /** EN: `knownAnnulled` of the last report. ES: `knownAnnulled` del último informe. */
@@ -309,6 +313,7 @@ const idleReport = (
 const assertOptions = (portal: PortalClient, input: ReplenishFoliosInput): void => {
   assertPolicy(input)
   assertPositive(input.coolDownMs, 'coolDownMs')
+  assertPositive(input.annulWithinDays, 'annulWithinDays')
   // Zero batches would read as the SII's cap without ever asking it.
   if (input.maxBatches !== undefined) assertQuantity(input.maxBatches, 'maxBatches')
   if (input.maxChecksPerRange !== undefined) assertQuantity(input.maxChecksPerRange, 'maxChecksPerRange')
@@ -530,7 +535,7 @@ const replenishInSession = async (
   if (!liftable) return finish(asked)
   const annulment = await annulFoliosInSession(context, {
     type: input.type,
-    withinDays: ANNUL_WINDOW_DAYS,
+    withinDays: input.annulWithinDays ?? ANNUL_WINDOW_DAYS[portal.environment],
     maxRanges: ANNUL_MAX_RANGES,
     knownAnnulled: asked.knownAnnulled,
     exclude: [...own.map((holding) => holding.caf.range), ...brought(asked), ...(input.exclude ?? [])],
@@ -553,7 +558,8 @@ const replenishInSession = async (
  * block worse: the folios in hand first, then ranges already authorized that nobody holds, downloaded again without
  * spending quota, then requests in batches within the quota, and annulling unused folios as a last resort, only in
  * certification unless allowed. Annulling never touches a CAF held nor a range this run downloaded, and reaches only
- * ranges stamped in the last 180 days. A request the SII may have granted without handing it over is settled in the
+ * ranges stamped in the last 180 days in certification and in the last day in production, or in `annulWithinDays`. A
+ * request the SII may have granted without handing it over is settled in the
  * same run, by reading the listing again. Requests go out a second apart. It stores nothing and schedules nothing: the
  * caller decides when to call it (before issuing, or on a timer), keeps the CAFs it returns and passes back `coolUntil`
  * and `knownAnnulled`. It waits for the portal lock and then reads the CAFs again, so with `cafs` as a function and
@@ -567,7 +573,8 @@ const replenishInSession = async (
  * bloqueo: primero los folios en la mano, luego los rangos ya autorizados que nadie tiene, descargados de nuevo sin
  * gastar cupo, luego solicitudes en tandas dentro del cupo, y la anulación de folios sin usar como último recurso, solo
  * en certificación salvo que se permita. La anulación nunca toca un CAF que se tiene ni un rango que esta corrida
- * descargó, y alcanza solo rangos timbrados en los últimos 180 días. Una solicitud que el SII pudo otorgar sin entregarla
+ * descargó, y alcanza solo rangos timbrados en los últimos 180 días en certificación y en el último día en producción, o
+ * en `annulWithinDays`. Una solicitud que el SII pudo otorgar sin entregarla
  * se resuelve en la misma corrida, leyendo el listado otra vez. Las peticiones salen a un segundo una de otra. No guarda
  * nada ni agenda nada: quien llama decide cuándo llamarla (antes de emitir o con un temporizador), guarda los CAF que
  * devuelve y devuelve `coolUntil` y `knownAnnulled`. Espera el candado del portal y luego vuelve a leer los CAF, así que

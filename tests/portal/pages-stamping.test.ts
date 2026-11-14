@@ -72,6 +72,21 @@ test('the reason of a block, without the boilerplate around it', () => {
   expect(stampingBlockReason(page('nada'))).toBeNull()
 })
 
+// The SII writes accents as entities, and the page text decodes them: the boilerplate reads "más información".
+test('the reason of a block stops at the boilerplate when the page writes it with accents', () => {
+  expect(stampingBlockReason(capturedPage('no-autoriza-timbraje'))).toBe(
+    'NO SE AUTORIZA TIMBRAJE ELECTRÓNICO Sr. Contribuyente: de acuerdo a nuestros registros, usted tiene disponible ' +
+      'una cantidad de folios suficiente para emitir documentos electrónicos. Debe emitir y enviar documentos ' +
+      'electrónicos al SII o anular folios.',
+  )
+  expect(
+    stampingBlockReason(page('NO AUTORIZA TIMBRAJE: el motivo. Si necesita m&aacute;s informaci&oacute;n, llame')),
+  ).toBe('NO AUTORIZA TIMBRAJE: el motivo.')
+  expect(stampingBlockReason(page('NO AUTORIZA TIMBRAJE: el motivo. Si necesita mas informacion, llame'))).toBe(
+    'NO AUTORIZA TIMBRAJE: el motivo.',
+  )
+})
+
 test('the selector offers what it lists, and nothing with the placeholder', () => {
   const html = typeSelector(`${FACTURA_OPTION}${BOLETA_OPTION}`)
   expect(stampableTypes(html)).toEqual([

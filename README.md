@@ -260,6 +260,13 @@ verifyDocumentSignature(signed.xml) // { digestValid: true, signatureValid: true
 
 Every function that depends on "now" accepts `{ now: Date }`, so tests are deterministic.
 
+`createDocument` writes numbers the way the schema holds them. A quantity and a unit price are rounded to six
+decimals, and a percentage, the value of a global adjustment and the rate of a commission to two, before any amount is
+computed: `0.1 + 0.2` is written `0.3`, and every amount is the one of the numbers written. A number too large for its
+type is refused with `INVALID_AMOUNT`. A line with a price and no quantity is written with the quantity it is computed
+with, 1, and so is every line of a dispatch guide (52) that brings none. On a purchase invoice (46), or any document with `withholdVat: true`, each VAT-affected line carries
+additional tax code 15, the one the withholding is summed over, unless it brings codes of its own.
+
 ### Transport of goods
 
 A dispatch guide (52), or an invoice that moves goods, carries its transport in `transport`, with the fields
@@ -520,8 +527,13 @@ Options worth knowing:
   retry loop around seed, signature and token, so every attempt signs a fresh seed.
   `waitForUploadStatus` polls every `intervalMs` instead of following the retry policy, and its
   `timeoutMs` is a budget: each poll and each sleep is cut to the time that remains.
+- An upload names its company and its sender apart from the file, and they must be the ones on the file's cover
+  (`RutEmisor` or `RutEmisorLibro`, and `RutEnvia`): from a client set up for another company it throws
+  `INVALID_OPTION { field: 'companyRut' }` (or `senderRut`) and nothing is sent.
 - `capture: createDirectoryCapture({ dir })` from `dte-sdk/node` writes every HTTP exchange, redacted (tokens,
-  seeds, cookies, private keys), for SII support tickets.
+  seeds, cookies, private keys), for SII support tickets. Its numbers go on from the last capture in the directory, so
+  a run that is resumed keeps the files of the one before it, and no file is ever written over. `prefix` (letters,
+  digits, `_`, `.` and `-`) keeps apart replicas that share a volume.
   `archive: createDirectoryUploadArchive({ dir })` keeps the exact bytes of every upload the SII answered,
   with its TrackID and the SII's reply (tokens redacted). A duplicate answer is kept as
   `<trackId>-<kind>-duplicate-<yyyymmddHHMMSS>` and never replaces the record of the original.
@@ -593,7 +605,12 @@ present a client certificate.
   restart logs in again; `createDirectoryTokenCache({ dir })` from `dte-sdk/node` keeps the session on disk, one
   owner-only file per certificate, and a restart reuses it. The default `lock` holds within one process only: two
   processes that share the directory and run at once can send requests of one session at the same time or replace
-  each other's session, so give them a shared `lock` too, or keep one process per certificate.
+  each other's session, so give them a shared `lock` too, or keep one process per certificate. Two clients made with
+  one certificate in the same process do not share a session either: each `createPortalClient` makes its own cache and
+  lock, so pass both the same `sessionCache` and `lock`, or make one client per certificate.
+- **A portal request has 20 s in all,** body included, and is retried. The register and the MIPYME backup can answer
+  more slowly than the folio pages: raise it with `timeoutMs` on the client, or `{ timeoutMs }` as the last argument
+  of a call.
 - **Rationing.** `MAX_AUTOR` and `FOLIOS_DISP` appear only while the SII rations a type. Unused folios lower what it
   authorizes and eventually block stamping.
 - **To lift a block, issue with the folios you have.** `reobtainFolios` gets lost CAFs back without spending quota.
@@ -645,7 +662,9 @@ files are listed too, with `expired` set. `findLatestCafFile` gives the first of
 type, issuerRut, required, registry, environment })` gives the newest one that still has `required` free folios,
 `remaining` in the registry for the scope of the file (or its whole range without a registry), with that `scope` to
 reserve from, and null when none has: then it is time to ask the SII for a new CAF. Neither `findLatestCafFile` nor
-`resolveCafFile` takes an expired file. `cafFileScope(file, environment)` builds the same scope from a CAF's text and
+`resolveCafFile` takes an expired file. With `environment`, the three leave out a CAF the SII signed with the key of
+the other environment (its `IDK`: 100 in certification, 300 in production), so one folder can hold the CAFs of both
+and never hand the ones of one to the other. `cafFileScope(file, environment)` builds the same scope from a CAF's text and
 the CAF parsed from it, such as the portal's `ObtainedCaf`: give it the text the file holds, since the scope's
 `cafFingerprint` is of that text.
 
@@ -709,8 +728,9 @@ await store.saveState({ coolUntil: report.coolUntil, knownAnnulled: report.known
   range nobody holds is free; with it, the SII is asked about each one, up to `maxChecksPerRange` per range.
 - **Annulling is off in production** unless you pass `allowAnnul: true`, and on in certification. It runs only for a
   refusal that unused folios cause, and only when the SII counts more of them (`FOLIOS_DISP`) than the ones in hand. It
-  never touches a CAF held, a range the run downloaded or `exclude`, and it reaches only ranges stamped in the last 180
-  days, ten per pass. Put in `exclude` the folios of documents signed and not received by the SII yet.
+  never touches a CAF held, a range the run downloaded or `exclude`, and it reaches only ranges stamped in the last
+  day in production, where an older range may be another system's, and in the last 180 days in certification
+  (`annulWithinDays` sets it), ten per pass. Put in `exclude` the folios of documents signed and not received by the SII yet.
 - **A run that ends short cools down.** With no failure, `coolUntil` is 15 minutes ahead (`coolDownMs`); after a
   session limit or a firewall block, an hour. Until then the call answers `coolDown` and nothing goes out. Any other
   failure sets none, and a report with enough folios hands back a cool-down still running.
@@ -952,6 +972,12 @@ and the runner makes it only with `declareCompliance: true`.
   touches a range the run downloaded, and the ranges the SII reported annulled are kept in the state
   (`annulledRanges`) and not tried again. Every CAF obtained is saved in the state at once, so a step that ends short
   leaves it in hand for the next attempt.
+- **The simulation keeps what it stamped.** It never issues with the sets' CAFs. An attempt that stops before the
+  upload leaves the CAFs it obtained in the state (`simulationCafs`), and the next one issues with them and asks only
+  for what is missing; once the upload was tried they are spent, and a new attempt asks for new ones.
+- **A rejected set keeps its page.** When the progress page rejects a set, the step returns the labels and saves the
+  readable text of the page as the artefact `sets-prueba/avance-rechazo.txt`: what the SII wrote around a label is the
+  reason.
 - **The operator gives less.** Without `receiver` the documents go to the test receiver (`DEFAULT_CERTIFICATION_RECEIVER`);
   without `resolution` every envelope of the run carries number 0 and the UTC date of the day the run started, which
   is only right on the day the SII resolved the application, so give `resolution.date` on any other day; the issuer's

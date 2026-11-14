@@ -7,9 +7,9 @@ D40 and D41 of the design specs). Tracks [issue #5](https://github.com/arrowsw/d
 
 | Entry | Holds | Size | Reaches `node:` |
 |---|---|---|---|
-| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 35.51 kB | No |
-| `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.09 kB | Yes, on first use |
-| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 77.82 kB | Yes, on first use |
+| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 35.83 kB | No |
+| `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.36 kB | Yes, on first use |
+| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 78.26 kB | Yes, on first use |
 | `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 11.47 kB | Yes, on first use |
 
 Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
@@ -50,6 +50,10 @@ to 35.51 kB and `dte-sdk/portal` from 77.43 kB to 77.82 kB, and reading a receip
 from 11.45 kB to 11.47 kB, all under their limits; `dte-sdk/node` did not move.
 The printed sample on continuous paper, with the stamp as an option for receipts, took `dte-sdk/pdf` from 11.47 kB to
 13.2 kB, over its 12 kB limit, which went to 14 kB; the other entries did not move.
+Numbers written with the decimals the schema holds, the withholding code on the lines, an upload held to the cover of
+its file, a capture that never writes over a file, CAF files by environment and a simulation that keeps what it
+stamped, after 0.11.0, took `dte-sdk` from 35.51 kB to 35.83 kB, `dte-sdk/node` from 7.09 kB to 7.36 kB and
+`dte-sdk/portal` from 77.82 kB to 78.26 kB, over its 78 kB limit, which went to 80 kB; `dte-sdk/pdf` did not move.
 
 ## Why
 

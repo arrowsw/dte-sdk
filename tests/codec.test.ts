@@ -83,7 +83,7 @@ describe('toSiiDocument', () => {
     expect(sii.Encabezado.Totales).toEqual({ MntNeto: 1800, MntExe: 500, TasaIVA: 19, IVA: 342, MntTotal: 2642 })
     expect(sii.Detalle).toEqual([
       { NroLinDet: 1, NmbItem: 'Servicio', DscItem: 'Detalle', QtyItem: 2, PrcItem: 1000, MontoItem: 2000 },
-      { NroLinDet: 2, IndExe: 1, NmbItem: 'Exento', PrcItem: 500, MontoItem: 500 },
+      { NroLinDet: 2, IndExe: 1, NmbItem: 'Exento', QtyItem: 1, PrcItem: 500, MontoItem: 500 },
     ])
     expect(sii.DscRcgGlobal).toEqual([{ NroLinDR: 1, TpoMov: 'D', GlosaDR: 'Desc.', TpoValor: '%', ValorDR: 10 }])
     expect(sii.Referencia).toEqual([
@@ -236,6 +236,7 @@ describe('toSiiDocument', () => {
       NroLinDet: 1,
       TpoDocLiq: '33',
       NmbItem: 'Venta',
+      QtyItem: 1,
       PrcItem: 10000,
       MontoItem: 10000,
     })
@@ -542,6 +543,7 @@ describe('the shape of a receipt', () => {
       NroLinDet: 2,
       IndExe: 2,
       NmbItem: 'Arriendo de equipo',
+      QtyItem: 1,
       PrcItem: 2000,
       MontoItem: 2000,
     })

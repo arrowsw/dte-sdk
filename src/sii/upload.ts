@@ -3,7 +3,7 @@ import { classifyReceptionStatus, isSchemaRejection, receptionStatusMessage } fr
 import type { EnvelopeKind } from '../envelope/create'
 import type { SignedEnvelope } from '../envelope/sign'
 import { DteError, errorMessage } from '../errors'
-import { splitSiiRut, type SiiRut } from '../model/rut'
+import { siiRutOrNull, splitSiiRut, type SiiRut } from '../model/rut'
 import { encodeLatin1 } from '../text/latin1'
 import { chileTimestamp } from '../time/chile'
 import { decodeXmlEntities, extractTagContent } from '../xml/parse'
@@ -54,9 +54,9 @@ export type UploadableEnvelope = SignedEnvelope | { readonly kind: EnvelopeKind;
 export type UploadEnvelopeInput = {
   /** EN: The envelope to upload. ES: `EnvioDTE` / `EnvioBOLETA` — El sobre a subir. */
   readonly envelope: UploadableEnvelope
-  /** EN: Company RUT; defaults to the client's. ES: `rutCompany` — RUT de la empresa; por defecto el del cliente. */
+  /** EN: Company RUT; defaults to the client's. It must be the one the cover of the file names. ES: `rutCompany` — RUT de la empresa; por defecto el del cliente. Debe ser el que nombra la carátula del archivo. */
   readonly companyRut?: string
-  /** EN: Sender RUT; defaults to the client's. ES: `rutSender` — RUT de quien envía; por defecto el del cliente. */
+  /** EN: Sender RUT; defaults to the client's. It must be the one the cover of the file names. ES: `rutSender` — RUT de quien envía; por defecto el del cliente. Debe ser el que nombra la carátula del archivo. */
   readonly senderRut?: string
   /** EN: Force a channel for receipts (`rest` or `soap`); `EnvioDTE` always uses `soap`. ES: Forzar el canal de boletas (`rest` o `soap`); `EnvioDTE` siempre usa `soap`. */
   readonly channel?: TokenChannel
@@ -69,9 +69,9 @@ export type UploadEnvelopeInput = {
 export type UploadXmlInput = {
   /** EN: The signed XML document; it must open with an XML declaration naming ISO-8859-1 (leading whitespace is dropped). ES: `LibroCompraVenta` / `LibroGuia` / `ConsumoFolios` — El documento XML firmado; debe abrir con una declaración XML que nombre ISO-8859-1 (se descarta el espacio inicial). */
   readonly xml: string
-  /** EN: Company RUT; defaults to the client's. ES: `rutCompany` — RUT de la empresa; por defecto el del cliente. */
+  /** EN: Company RUT; defaults to the client's. It must be the one the cover of the file names. ES: `rutCompany` — RUT de la empresa; por defecto el del cliente. Debe ser el que nombra la carátula del archivo. */
   readonly companyRut?: string
-  /** EN: Sender RUT; defaults to the client's. ES: `rutSender` — RUT de quien envía; por defecto el del cliente. */
+  /** EN: Sender RUT; defaults to the client's. It must be the one the cover of the file names. ES: `rutSender` — RUT de quien envía; por defecto el del cliente. Debe ser el que nombra la carátula del archivo. */
   readonly senderRut?: string
   /** EN: Name of the multipart file; letters, digits, `_`, `.` and `-`, ending in `.xml`. Defaults to `LibroGuia.xml` for a guide book, `LibroCV.xml` for any other book and `ConsumoFolios.xml` for a report. ES: Nombre del archivo del multipart; letras, dígitos, `_`, `.` y `-`, terminado en `.xml`. Por defecto `LibroGuia.xml` en un libro de guías, `LibroCV.xml` en otro libro y `ConsumoFolios.xml` en un reporte. */
   readonly fileName?: string
@@ -208,6 +208,23 @@ const latin1Xml = (xml: string): string => {
   return trimmed
 }
 
+// The cover of the file names the company (`RutEmisor`, or `RutEmisorLibro` in a book) and who sends it (`RutEnvia`).
+// The form names them too, apart from the file, and one that contradicts its file is a file the SII takes for another
+// company's or another sender's. So the form is held to the cover before anything is sent; a file with no cover to
+// read is left to the SII. A cover's RUT that is not one matches nothing.
+const COVER = /<Caratula[\s>][\s\S]*?<\/Caratula>/
+const assertCoverRut = (
+  cover: string,
+  tags: readonly string[],
+  rut: SiiRut,
+  field: string,
+  operation: string,
+): void => {
+  const written = tags.map((tag) => extractTagContent(cover, tag)).find((value) => value !== null)
+  if (written === undefined) return
+  if (siiRutOrNull(written) !== rut) throw new DteError('INVALID_OPTION', { field, operation })
+}
+
 const buildJob = (
   sii: SiiClient,
   kind: UploadKind,
@@ -215,17 +232,26 @@ const buildJob = (
   xml: string,
   ruts: { readonly companyRut?: string; readonly senderRut?: string; readonly fileName?: string },
   channel: TokenChannel,
-): UploadJob => ({
-  kind,
-  operation,
-  fileName: resolveFileName(kind, xml, ruts.fileName),
-  // The declaration names ISO-8859-1, so the file bytes are Latin-1 on both channels.
-  bytes: encodeLatin1(latin1Xml(xml)),
-  companyRut: resolveCompanyRut(sii, ruts.companyRut),
-  senderRut: resolveSenderRut(sii, ruts.senderRut),
-  channel,
-  url: channel === 'rest' ? sii.endpoints.rest.upload : sii.endpoints.soap.upload,
-})
+): UploadJob => {
+  const companyRut = resolveCompanyRut(sii, ruts.companyRut)
+  const senderRut = resolveSenderRut(sii, ruts.senderRut)
+  const cover = COVER.exec(xml)?.[0]
+  if (cover !== undefined) {
+    assertCoverRut(cover, ['RutEmisor', 'RutEmisorLibro'], companyRut, 'companyRut', operation)
+    assertCoverRut(cover, ['RutEnvia'], senderRut, 'senderRut', operation)
+  }
+  return {
+    kind,
+    operation,
+    fileName: resolveFileName(kind, xml, ruts.fileName),
+    // The declaration names ISO-8859-1, so the file bytes are Latin-1 on both channels.
+    bytes: encodeLatin1(latin1Xml(xml)),
+    companyRut,
+    senderRut,
+    channel,
+    url: channel === 'rest' ? sii.endpoints.rest.upload : sii.endpoints.soap.upload,
+  }
+}
 
 const rutFields = (senderRut: SiiRut, companyRut: SiiRut): readonly MultipartField[] => {
   const sender = splitSiiRut(senderRut)
@@ -427,7 +453,7 @@ const performUpload = (sii: SiiClient, job: UploadJob, overrides?: CallOverrides
  * envía como bytes ISO-8859-1, así que debe abrir con una declaración XML que nombre ISO-8859-1 (en cualquier caja y con
  * cualquier tipo de comillas); el espacio antes de ella se descarta y cualquier otra cosa se rechaza antes de enviar
  * nada.
- * @throws {DteError} EN: `SII_UPLOAD_REJECTED { status (a number), errors }`, `SII_TOKEN_INVALID`, `SII_HTTP_ERROR`, `SII_RESPONSE_INVALID`, `INVALID_OPTION { field: 'channel' | 'xml' }`, `MISSING_FIELD`, `INVALID_RUT`, `ENCODING_UNSUPPORTED_CHAR`, transport codes. ES: los mismos códigos.
+ * @throws {DteError} EN: `SII_UPLOAD_REJECTED { status (a number), errors }`, `SII_TOKEN_INVALID`, `SII_HTTP_ERROR`, `SII_RESPONSE_INVALID`, `INVALID_OPTION { field: 'channel' | 'xml' }`, `INVALID_OPTION { field: 'companyRut' | 'senderRut' }` when the cover of the file names another company or another sender (nothing is sent), `MISSING_FIELD`, `INVALID_RUT`, `ENCODING_UNSUPPORTED_CHAR`, transport codes. ES: los mismos códigos; `INVALID_OPTION { field: 'companyRut' | 'senderRut' }` cuando la carátula del archivo nombra otra empresa u otro remitente (no se envía nada).
  */
 export const uploadEnvelope = async (
   sii: SiiClient,

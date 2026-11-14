@@ -1,4 +1,5 @@
 import { parseCaf, type Caf } from '../caf/parse'
+import { cafEnvironment } from '../caf/sii-signature'
 import { availableFolios, isCafExpired } from '../caf/validity'
 import type { Environment } from '../catalogs/codes'
 import { isDocumentType, type DocumentType } from '../catalogs/document-types'
@@ -20,6 +21,8 @@ export type FindCafFilesOptions = {
   readonly type: DocumentType
   /** EN: Company RUT the CAF must be issued to, in any shape. ES: `RE` — RUT de la empresa a la que debe estar emitido el CAF, en cualquier forma. */
   readonly issuerRut: string
+  /** EN: Environment the CAF must be for: a CAF the SII signed with the key of the other environment (`IDK` 100 certification, 300 production) is left out, one of an unknown key is kept. Without it the CAFs of both come. ES: `IDK` — Ambiente para el que debe ser el CAF: un CAF que el SII firmó con la llave del otro ambiente (`IDK` 100 certificación, 300 producción) queda fuera, y uno de una llave desconocida se conserva. Sin él vienen los CAF de ambos. */
+  readonly environment?: Environment
   /** EN: Clock for the expiry check. ES: Reloj para revisar el vencimiento. */
   readonly now?: () => Date
   /** EN: `findCafFiles` only: also the files whose CAF expired, marked `expired`, so a caller can say why one is not used; false by default. `findLatestCafFile` and `resolveCafFile` never take one. ES: Solo `findCafFiles`: también los archivos cuyo CAF venció, marcados `expired`, para que quien llama pueda decir por qué uno no se usa; false por defecto. `findLatestCafFile` y `resolveCafFile` nunca toman uno. */
@@ -54,13 +57,13 @@ export type ResolveCafFileOptions = FindCafFilesOptions & {
     | {
         /** EN: No registry: every folio of the range counts as free. ES: Sin registro: todos los folios del rango cuentan como libres. */
         readonly registry?: undefined
-        /** EN: Environment of the `scope` returned; without it `scope` is null. ES: Ambiente del `scope` devuelto; sin él `scope` es null. */
+        /** EN: Environment of the CAF and of the `scope` returned; without it `scope` is null and the CAFs of both environments count. ES: Ambiente del CAF y del `scope` devuelto; sin él `scope` es null y cuentan los CAF de ambos ambientes. */
         readonly environment?: Environment
       }
     | {
         /** EN: Registry that says how many folios of each CAF are still unused. ES: Registro que dice cuántos folios de cada CAF siguen sin usar. */
         readonly registry: FolioRegistry
-        /** EN: Environment of the registry scopes. ES: Ambiente de los alcances del registro. */
+        /** EN: Environment of the CAF and of the registry scopes. ES: Ambiente del CAF y de los alcances del registro. */
         readonly environment: Environment
       }
   )
@@ -83,6 +86,7 @@ type Search = {
   readonly dir: string
   readonly type: DocumentType
   readonly rut: SiiRut
+  readonly environment: Environment | undefined
   readonly now: Date
   readonly includeExpired: boolean
 }
@@ -91,7 +95,14 @@ const checkSearch = (options: FindCafFilesOptions, includeExpired: boolean): Sea
   if (typeof options.dir !== 'string' || options.dir === '') throw new DteError('INVALID_OPTION', { field: 'dir' })
   if (!isDocumentType(options.type)) throw new DteError('INVALID_DOCUMENT_TYPE', { field: 'type' })
   const rut = toSiiRut(options.issuerRut, 'issuerRut')
-  return { dir: options.dir, type: options.type, rut, now: (options.now ?? (() => new Date()))(), includeExpired }
+  return {
+    dir: options.dir,
+    type: options.type,
+    rut,
+    environment: options.environment,
+    now: (options.now ?? (() => new Date()))(),
+    includeExpired,
+  }
 }
 
 const UTF8_BOM = [0xef, 0xbb, 0xbf]
@@ -138,13 +149,16 @@ const xmlFiles = async ({ fs, path }: NodeFsModules, dir: string, depth: number)
 }
 
 // The file as a CAF of the search, or null: unreadable, not in the encoding it declares, not a CAF, another type or
-// issuer, or expired unless the search includes those.
+// issuer, signed by the SII key of the other environment when the search names one, or expired unless the search
+// includes those. A key that is neither environment's says nothing, so its CAF stays.
 const usableCaf = async ({ fs }: NodeFsModules, file: string, search: Search): Promise<CafFile | null> => {
   try {
     const xml = decodeFile(await fs.readFile(file))
     if (xml === null) return null
     const caf = parseCaf(xml)
     if (caf.documentType !== search.type || caf.issuerRut !== search.rut) return null
+    const environment = cafEnvironment(caf.keyId)
+    if (search.environment !== undefined && environment !== null && environment !== search.environment) return null
     const expired = isCafExpired(caf, { now: search.now })
     if (expired && !search.includeExpired) return null
     return { path: file, xml, caf, modifiedAt: (await fs.stat(file)).mtime, expired }
@@ -171,7 +185,8 @@ const searchCafs = async (search: Search, load: () => Promise<NodeFsModules>): P
  * too, marked `expired`. Only `.xml` files count, each read in the encoding its XML declaration names: ISO-8859-1 as
  * such, UTF-8 or no encoding named as UTF-8, strictly, so a file whose bytes are not that encoding, or that names
  * another, is skipped rather than misread. A folder or file that cannot be read is skipped, and a directory that does
- * not exist gives an empty list.
+ * not exist gives an empty list. With `environment`, a CAF signed by the SII key of the other environment is not
+ * usable either: a folder that holds the CAFs of both never hands the ones of one to the other.
  * ES: Todos los archivos CAF utilizables de un tipo y empresa bajo un directorio, del más nuevo al más viejo (por fecha de
  * modificación, luego ruta). Utilizable quiere decir que se parsea como CAF, su `TD` es el tipo, su `RE` es la empresa
  * (leído del archivo, nunca de dónde está: una carpeta compartida puede tener CAF de otras empresas, y un timbre firmado
@@ -179,8 +194,10 @@ const searchCafs = async (search: Search, load: () => Promise<NodeFsModules>): P
  * `includeExpired` vienen también los vencidos, marcados `expired`. Solo cuentan los archivos `.xml`, cada uno leído en la
  * codificación que nombra su declaración XML: ISO-8859-1 como tal, UTF-8 o ninguna como UTF-8, de forma estricta, así que
  * un archivo cuyos bytes no son esa codificación, o que nombra otra, se salta en vez de leerse mal. Una carpeta o archivo
- * que no se pueda leer se salta, y un directorio que no existe da una lista vacía.
- * @param options EN: directory, type, company and clock. ES: directorio, tipo, empresa y reloj.
+ * que no se pueda leer se salta, y un directorio que no existe da una lista vacía. Con `environment`, un CAF firmado
+ * por la llave del SII del otro ambiente tampoco es utilizable: una carpeta que tiene los CAF de ambos nunca entrega los
+ * de uno al otro.
+ * @param options EN: directory, type, company, environment and clock. ES: directorio, tipo, empresa, ambiente y reloj.
  * @throws {DteError} EN: `INVALID_OPTION` (`dir`), `INVALID_DOCUMENT_TYPE`, `INVALID_RUT`, and `TRANSPORT_UNAVAILABLE` when `node:fs` cannot be loaded. ES: `INVALID_OPTION` (`dir`), `INVALID_DOCUMENT_TYPE`, `INVALID_RUT`, y `TRANSPORT_UNAVAILABLE` si `node:fs` no se puede cargar.
  */
 export const findCafFiles = async (

@@ -9,8 +9,10 @@
 export type PortalLock = <T>(key: string, run: () => Promise<T>) => Promise<T>
 
 /**
- * EN: Mutex per key inside one process.
- * ES: Exclusión mutua por clave dentro de un proceso.
+ * EN: Mutex per key, for the callers that share this lock: each call makes a lock of its own, so two portal clients
+ * exclude each other only when both were given the same one.
+ * ES: Exclusión mutua por clave, para quienes comparten este candado: cada llamada crea un candado propio, así que dos
+ * clientes del portal se excluyen entre sí solo si a ambos se les pasó el mismo.
  */
 export const createMemoryPortalLock = (): PortalLock => {
   const queues = new Map<string, Promise<void>>()

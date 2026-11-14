@@ -1,3 +1,4 @@
+import { assertResolutionNumber } from '../books/common'
 import { SII_RUT } from '../catalogs/codes'
 import { isReceipt, type DocumentType } from '../catalogs/document-types'
 import type { SignedDocument } from '../document/sign'
@@ -64,7 +65,7 @@ const rank = (type: number): number => {
  * documents per type (`SubTotDTE`, with 33/61/56 first on `EnvioDTE`) and generates the set id.
  * ES: Agrupa documentos firmados bajo una carátula: valida el tipo de sobre, normaliza RUT y fecha de resolución,
  * cuenta documentos por tipo (`SubTotDTE`, con 33/61/56 primero en `EnvioDTE`) y genera el id del set.
- * @throws {DteError} EN: `ENVELOPE_EMPTY`, `ENVELOPE_KIND_MISMATCH`, `INVALID_RUT`, `INVALID_DATE`. ES: los mismos códigos.
+ * @throws {DteError} EN: `ENVELOPE_EMPTY`, `ENVELOPE_KIND_MISMATCH`, `INVALID_RUT`, `INVALID_DATE`, `INVALID_OPTION` (a resolution number that is not an integer from 0 to 999999). ES: los mismos códigos; `INVALID_OPTION` por un número de resolución que no es un entero de 0 a 999999.
  */
 export const createEnvelope = ({ kind, documents, cover, now }: CreateEnvelopeInput): Envelope => {
   if (documents.length === 0) throw new DteError('ENVELOPE_EMPTY', { kind })
@@ -72,6 +73,7 @@ export const createEnvelope = ({ kind, documents, cover, now }: CreateEnvelopeIn
     if (isReceipt(document.header.type) !== (kind === 'receipt'))
       throw new DteError('ENVELOPE_KIND_MISMATCH', { kind, type: document.header.type })
   }
+  assertResolutionNumber(cover.resolutionNumber)
   const subtotals = countByType(documents)
   return {
     kind,

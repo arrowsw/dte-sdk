@@ -282,6 +282,83 @@ describe('uploadEnvelope through DTEUpload', () => {
   })
 })
 
+// The multipart form names the company and the sender apart from the file, and the file's own cover names them too
+// (`RutEmisor` or `RutEmisorLibro`, and `RutEnvia`). A client set up for another company would send a form that
+// contradicts the file it carries.
+describe("the RUTs of an upload are those of the file's cover", () => {
+  const PROLOG = '<?xml version="1.0" encoding="ISO-8859-1"?>\n'
+  const covered = (root: string, issuerTag: string, issuerRut: string, senderRut: string): string =>
+    `${PROLOG}<${root}><Caratula version="1.0"><${issuerTag}>${issuerRut}</${issuerTag}>` +
+    `<RutEnvia>${senderRut}</RutEnvia></Caratula></${root}>`
+  const envelope = (issuerRut: string, senderRut: string) =>
+    ({ envelope: { kind: 'dte', xml: covered('EnvioDTE', 'RutEmisor', issuerRut, senderRut) } }) as const
+
+  test('a file whose cover names the company and the sender of the call is sent', async () => {
+    const { sii, fake } = cachedSii(cgi(reception('reception-ok.xml')))
+    await uploadEnvelope(sii, envelope(COMPANY_RUT, ISSUER_RUT))
+    expect(fake.requests[0].parts.slice(0, 4).map((p) => p.value)).toEqual(['76543210', '3', '10000004', '0'])
+    // The verifier is compared whatever its case.
+    await uploadEnvelope(sii, { ...envelope('14625621-k', ISSUER_RUT), companyRut: '14625621-K' })
+    expect(fake.requests).toHaveLength(2)
+  })
+
+  test('a cover that names another company is refused before anything is sent', async () => {
+    const { sii, fake } = cachedSii(cgi(reception('reception-ok.xml')))
+    await expectCode(uploadEnvelope(sii, envelope('12345678-5', ISSUER_RUT)), 'INVALID_OPTION', {
+      field: 'companyRut',
+      operation: 'uploadEnvelope',
+    })
+    // The RUTs of the call are the ones compared, so naming the cover's company makes it pass.
+    await uploadEnvelope(sii, { ...envelope('12345678-5', ISSUER_RUT), companyRut: '12345678-5' })
+    expect(fake.requests).toHaveLength(1)
+  })
+
+  test('a cover that names another sender is refused before anything is sent', async () => {
+    const { sii, fake } = cachedSii(cgi(reception('reception-ok.xml')))
+    await expectCode(uploadEnvelope(sii, envelope(COMPANY_RUT, '12345678-5')), 'INVALID_OPTION', {
+      field: 'senderRut',
+      operation: 'uploadEnvelope',
+    })
+    await expectCode(uploadEnvelope(sii, envelope(COMPANY_RUT, 'no es un RUT')), 'INVALID_OPTION', {
+      field: 'senderRut',
+    })
+    expect(fake.requests).toHaveLength(0)
+  })
+
+  test('a book names its company in RutEmisorLibro and a folio report in RutEmisor', async () => {
+    const { sii, fake } = cachedSii(cgi(reception('reception-ok.xml')))
+    const book = (issuerRut: string) => covered('LibroCompraVenta', 'RutEmisorLibro', issuerRut, ISSUER_RUT)
+    const report = (issuerRut: string) => covered('ConsumoFolios', 'RutEmisor', issuerRut, ISSUER_RUT)
+    await uploadBook(sii, { xml: book(COMPANY_RUT) })
+    await uploadFolioConsumption(sii, { xml: report(COMPANY_RUT) })
+    expect(fake.requests).toHaveLength(2)
+    await expectCode(uploadBook(sii, { xml: book('12345678-5') }), 'INVALID_OPTION', {
+      field: 'companyRut',
+      operation: 'uploadBook',
+    })
+    await expectCode(uploadFolioConsumption(sii, { xml: report('12345678-5') }), 'INVALID_OPTION', {
+      field: 'companyRut',
+      operation: 'uploadFolioConsumption',
+    })
+    expect(fake.requests).toHaveLength(2)
+  })
+
+  test('a cover that names neither of them is left to the SII', async () => {
+    const { sii, fake } = cachedSii(cgi(reception('reception-ok.xml')))
+    const xml = `${PROLOG}<EnvioDTE><Caratula version="1.0"><NroResol>0</NroResol></Caratula></EnvioDTE>`
+    await uploadEnvelope(sii, { envelope: { kind: 'dte', xml } })
+    expect(fake.requests).toHaveLength(1)
+  })
+
+  test('a document signed inside the file does not stand for its cover', async () => {
+    const { sii, fake } = cachedSii(cgi(reception('reception-ok.xml')))
+    // No cover: only a document that names another issuer, in the tag of a document.
+    const xml = `${PROLOG}<EnvioDTE><SetDTE ID="SetDoc"><DTE><RUTEmisor>12345678-5</RUTEmisor></DTE></SetDTE></EnvioDTE>`
+    await uploadEnvelope(sii, { envelope: { kind: 'dte', xml } })
+    expect(fake.requests).toHaveLength(1)
+  })
+})
+
 describe('the declared encoding is the encoding sent', () => {
   type EntryPoint = (sii: ReturnType<typeof cachedSii>['sii'], xml: string) => Promise<unknown>
   const entryPoints: readonly (readonly [string, EntryPoint])[] = [
