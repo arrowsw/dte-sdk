@@ -22,17 +22,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`createDocument` requires `issuer.activityCode` on every type but a receipt.** Every root of `DTE_v10.xsd`
+  (`Documento`, `Liquidacion`, `Exportaciones`) requires one to four `Acteco`, a positive integer of at most six digits,
+  and Formato DTE 2.5 (field 37) marks it as required on every type; an issuer without it was written without the
+  element, and the SII's schema rejected the whole envelope. It now throws `MISSING_FIELD` with `issuer.activityCode`
+  in `details.field` on a 33, 34, 43, 46, 52, 56 or 61, and `INVALID_OPTION` for one that is not a positive integer of
+  at most six digits. A receipt (39, 41) has no element for it: it is still optional there, and left out of the XML.
+  In the same way, an informative subtotal needs its `description` on every type but a receipt, since `DTE_v10.xsd`
+  requires `GlosaSTI` and `EnvioBOLETA_v11.xsd` leaves it optional (`MISSING_FIELD`, `subtotals[i].description`); the
+  description is now sanitized and held to its 40 characters (`FIELD_TOO_LONG`) on every type, as the other texts are.
+  - **What to change:** give the issuer of every invoice, exempt invoice, settlement invoice, purchase invoice,
+    dispatch guide and note its `activityCode`, the SII's code of the activity of the transaction (`fetchIssuerProfile`
+    of `dte-sdk/portal` reads the first one as `activityCode`), and every informative subtotal of those types its
+    `description`. An issuer used only for receipts needs neither.
 - **`createDocument` refuses before stamping what the SII rejects in a document's content.** The SII rejects these
   documents after their folio is spent, and some of them take the whole envelope down with them. They now throw
   before anything is stamped, each with the field in `details.field`, and each check stops at the first fault:
   - more than 60 `items` on any type but a receipt, and more than 1,000 on a receipt, as `Detalle` admits in each root
     of `DTE_v10.xsd` and in `EnvioBOLETA_v11.xsd`: `INVALID_OPTION` (`items`). Only a 43 was held to the 60 before;
-  - an `issuer.activityCode` missing on any type but a receipt, which every root of `DTE_v10.xsd` requires as `Acteco`
-    (Formato DTE 2.5, field 37): `MISSING_FIELD` (`issuer.activityCode`); one that is not a positive integer of at
-    most six digits: `INVALID_OPTION`. A receipt still leaves it out of its XML;
-  - an informative subtotal without its `description` on any type but a receipt, which `DTE_v10.xsd` requires as
-    `GlosaSTI`: `MISSING_FIELD` (`subtotals[i].description`). The description is now sanitized and held to its 40
-    characters (`FIELD_TOO_LONG`) on every type, as the other texts are;
   - a line amount that is not a whole number, or that is below zero on any type but a settlement invoice (43), since
     `MontoItem` is a whole number from zero up in `Documento` and in a receipt: `INVALID_AMOUNT` (`items[i].amount`).
     A line discount above 100 % gave one;
@@ -47,11 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     that is not the total plus the non-billable amount (field 126): the new `TOTAL_MISMATCH`, with `expected` and
     `actual`. A total whose totals carry a tax code other than 15 is not checked, because which of those codes add to
     the total and which come off it waits for the catalog of additional taxes.
-  - **What to change:** give every issuer of an invoice, a guide or a note its `activityCode`, and every informative
-    subtotal its `description`: without them the SII's schema rejected the envelope. An invoice whose lines are all
-    exempt is an exempt invoice (34). Totals given by hand have to add up. A global amount discount on an exempt
-    invoice needs `exemptIndicator: 1`: without it the discount was taken from the affected amounts, of which the
-    invoice has none, and the total came out below the exempt amount.
+  - **What to change:** an invoice whose lines are all exempt is an exempt invoice (34). Totals given by hand have to
+    add up. A global amount discount on an exempt invoice needs `exemptIndicator: 1`: without it the discount was
+    taken from the affected amounts, of which the invoice has none, and the total came out below the exempt amount.
 - **A receipt (39) issued without `pricesIncludeVat` carries `IndMntNeto` 2.** Its totals were worked out from net
   lines, and without the indicator Formato de Boletas 4.2 (`IdDoc`, field 6) reads a receipt's lines as VAT included.
   `createDocument` now sets `options.netAmountsIndicator: 2` on a 39 whose totals carry a net amount and whose prices
