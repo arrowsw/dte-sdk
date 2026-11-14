@@ -31,6 +31,10 @@ export {
   DISPATCH_TYPES,
   SERVICE_INDICATORS,
   PAYMENT_TERMS,
+  PAYMENT_MEDIA,
+  isPaymentMedium,
+  RECEIPT_PAYMENT_MEDIA,
+  isReceiptPaymentMedium,
   EXEMPT_INDICATORS,
   WITHHOLDING_TAX_CODES,
   VAT_RATE,
@@ -45,8 +49,19 @@ export type {
   DispatchType,
   ServiceIndicator,
   PaymentTerms,
+  PaymentMedium,
+  ReceiptPaymentMedium,
   ExemptIndicator,
 } from './catalogs/codes'
+export { ADDITIONAL_TAXES, isAdditionalTaxCode } from './catalogs/additional-taxes'
+export type { AdditionalTax, AdditionalTaxCode, AdditionalTaxKind } from './catalogs/additional-taxes'
+export {
+  REFERENCE_DOCUMENT_TYPES,
+  isReferenceDocumentType,
+  RECEIPT_REFERENCE_DOCUMENT_TYPES,
+  isReceiptReferenceDocumentType,
+} from './catalogs/reference-types'
+export type { ReferenceDocumentType, ReceiptReferenceDocumentType } from './catalogs/reference-types'
 export {
   SII_HOSTS,
   SOAP_ENDPOINTS,

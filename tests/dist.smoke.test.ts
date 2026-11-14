@@ -111,6 +111,7 @@ const EXPECTED_FUNCTIONS: Record<string, readonly string[]> = {
     'readPrintedSamples',
     'siiOfficeForCommune',
   ],
+  catalogs: ['businessActivity', 'isBusinessActivityCode'],
 }
 const ENTRIES = Object.keys(EXPECTED_FUNCTIONS)
 
@@ -131,12 +132,12 @@ const probeLoad = (entry: string): ProbeResult => {
   return runNode(['--input-type=module', '-e', script])
 }
 
-/** Runs `body`, in a fresh process, with every entry loaded as `root`, `node`, `portal` and `pdf`. */
+/** Runs `body`, in a fresh process, with every entry loaded as `root`, `node`, `portal`, `pdf` and `catalogs`. */
 const withEntries = (body: string): ProbeResult => {
   const script = `
 const fs = require('node:fs')
 const fixtures = ${JSON.stringify(fixtures)}
-Promise.all(${JSON.stringify(ENTRIES.map((name) => href(entryFile(name))))}.map((file) => import(file))).then(async ([root, node, portal, pdf]) => {
+Promise.all(${JSON.stringify(ENTRIES.map((name) => href(entryFile(name))))}.map((file) => import(file))).then(async ([root, node, portal, pdf, catalogs]) => {
 ${body}
 }).catch((error) => { console.error(error); process.exit(1) })`
   return runNode(['-e', script])
@@ -213,7 +214,7 @@ guarded('dist smoke (ES modules)', () => {
   })
 
   // `pdf-lib` and `bwip-js` are optional peers: only `dte-sdk/pdf` may name them.
-  test.each(['index', 'node', 'portal'])('%s reaches no optional peer, in code or in types', (name) => {
+  test.each(['index', 'node', 'portal', 'catalogs'])('%s reaches no optional peer, in code or in types', (name) => {
     const code = [...closure(entryFile(name))].map((file) => readFileSync(file, 'utf8')).join('\n')
     expect(code).not.toMatch(/"(pdf-lib|bwip-js)"/)
     const declarations = readdirSync(distRoot, { recursive: true, encoding: 'utf8' }).filter(
@@ -231,7 +232,14 @@ guarded('dist smoke (ES modules)', () => {
     expect(code('pdf')).toContain('"pdf-lib"')
   })
 
-  test('the root entry bundles for the browser with no configuration, and the portal does not', () => {
+  // The table of business activities is about 10 kB: only `dte-sdk/catalogs` may reach it.
+  test.each(['index', 'node', 'portal', 'pdf'])('%s does not reach the table of business activities', (name) => {
+    const code = (entry: string) => [...closure(entryFile(entry))].map((file) => readFileSync(file, 'utf8')).join('\n')
+    expect(code('catalogs')).toContain('"CULTIVO DE TRIGO"')
+    expect(code(name)).not.toContain('"CULTIVO DE TRIGO"')
+  })
+
+  test('the root and the catalogs bundle for the browser with no configuration, and the portal does not', () => {
     const dir = mkdtempSync(join(tmpdir(), 'dte-sdk-browser-'))
     const esbuild = join(packageRoot, 'node_modules', '.bin', 'esbuild')
     const bundle = (name: string) =>
@@ -252,6 +260,7 @@ guarded('dist smoke (ES modules)', () => {
       )
     try {
       expect(bundle('index')).toMatchObject({ status: 0, stderr: '' })
+      expect(bundle('catalogs')).toMatchObject({ status: 0, stderr: '' })
       expect(bundle('portal').stderr).toContain('node:https')
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -351,6 +360,7 @@ import { createDocument } from 'dte-sdk'
 import { createNodeHttpsTransport } from 'dte-sdk/node'
 import { createPortalClient } from 'dte-sdk/portal'
 import { parsePrintableDocuments } from 'dte-sdk/pdf'
+import { businessActivity } from 'dte-sdk/catalogs'
 
 // @ts-expect-error
 export const root: number = createDocument
@@ -360,6 +370,8 @@ export const node: number = createNodeHttpsTransport
 export const portal: number = createPortalClient
 // @ts-expect-error
 export const pdf: number = parsePrintableDocuments
+// @ts-expect-error
+export const catalogs: number = businessActivity
 `
 
 const TYPE_CONSUMERS: ReadonlyArray<readonly [string, string, Record<string, string>]> = [

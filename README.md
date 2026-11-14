@@ -63,6 +63,7 @@ every field.
 - [Entry points](#entry-points)
 - [Quick start](#quick-start)
 - [Step by step](#step-by-step)
+- [Answering a received envelope](#answering-a-received-envelope)
 - [Received documents](#received-documents)
 - [SII web services](#sii-web-services)
 - [SII books](#sii-books)
@@ -74,6 +75,7 @@ every field.
   [the exchange and the printed samples](#certification-the-exchange-and-the-printed-samples),
   [receipts](#certification-receipts)
 - [Printed samples (Node)](#printed-samples-node)
+- [Catalogs](#catalogs)
 - [Errors](#errors) and [status codes](#status-codes)
 - [Development](#development)
 
@@ -94,7 +96,11 @@ commissions, refusing before stamping what the schema of its root does not decla
 `DTE_v10.xsd`, and neither has been sent to the SII. 0.11.0 writes a receipt (39, 41) in the shape of its own schema,
 `EnvioBOLETA_v11.xsd`, refusing before stamping what that schema does not declare, and prints the transport area of a
 dispatch guide, or of an invoice that moves goods, on the printed sample; receipts are checked against that schema, and
-none has been sent to the SII. Every area this README describes ships in 0.11.0.
+none has been sent to the SII. 0.12.0 answers a received envelope document by document, with the reception answer, the
+commercial result and the receipts of goods, where nothing is accepted or receipted unless the caller decides it;
+prints a receipt on continuous paper, with the printed stamp as an option; and writes the numbers of a document with
+the decimals its schema holds and holds an upload to the cover of its file. The answers and the documents are checked
+against the SII's schemas, and none has been sent. Every area this README describes ships in 0.12.0.
 Releases before 1.0.0 come out as the work lands, without waiting for the runs against the
 real SII; those runs come before 1.0.0, the first version recommended for production.
 
@@ -164,12 +170,13 @@ npm install pdf-lib bwip-js
 
 ## Entry points
 
-| Import from      | What it holds                                                                                                                                                                                                             | Runs on                                                        |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `dte-sdk`        | Documents, stamps, signatures, envelopes, books, the verification of received documents and the SII web services client over `fetch`                                                                                      | Node, Bun, Deno; bundles for the browser with no configuration |
-| `dte-sdk/node`   | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope`  | Node                                                           |
-| `dte-sdk/portal` | SII portal, folios and CAF requests, the folio registry, purchase and sales register, MIPYME backup, activity verification, and certification: sets, runner, exchange, upload of the samples and the receipts application | Node                                                           |
-| `dte-sdk/pdf`    | Printed samples and the SII office of each commune (`SII_OFFICES`, `siiOfficeForCommune`)                                                                                                                                 | Node, with `pdf-lib` and `bwip-js` installed                   |
+| Import from        | What it holds                                                                                                                                                                                                             | Runs on                                                        |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `dte-sdk`          | Documents, stamps, signatures, envelopes, books, the verification of received documents and the SII web services client over `fetch`                                                                                      | Node, Bun, Deno; bundles for the browser with no configuration |
+| `dte-sdk/node`     | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope`  | Node                                                           |
+| `dte-sdk/portal`   | SII portal, folios and CAF requests, the folio registry, purchase and sales register, MIPYME backup, activity verification, and certification: sets, runner, exchange, upload of the samples and the receipts application | Node                                                           |
+| `dte-sdk/pdf`      | Printed samples and the SII office of each commune (`SII_OFFICES`, `siiOfficeForCommune`)                                                                                                                                 | Node, with `pdf-lib` and `bwip-js` installed                   |
+| `dte-sdk/catalogs` | The SII's large code tables: the business activities (`BUSINESS_ACTIVITIES`, `businessActivity`, `isBusinessActivityCode`)                                                                                                | Node, Bun, Deno; bundles for the browser with no configuration |
 
 `DteError` and `isDteError` come from `dte-sdk` and recognize what every entry throws.
 
@@ -1300,6 +1307,47 @@ of digits is an `INVALID_FOLIO` failure, since it would name the file. Retention
 invoices and a stamp raster above 300 DPI are not printed yet: see the
 [printed samples design](./docs/superpowers/specs/2026-11-04-phase-5a-printed-samples-design.md).
 
+## Catalogs
+
+The root entry holds the SII's code tables as typed constants: the document types (`DOCUMENT_TYPES`), the `CodRef`
+codes, the transfer and dispatch indicators, the payment terms and the books' codes, and, each with a type guard, the
+tables of Formato DTE 2.5 and of the receipts' format:
+
+| Constant | Field | Holds | Source |
+|---|---|---|---|
+| `ADDITIONAL_TAXES` | `TipoImp`, `CodImpAdic` | 40 codes of additional taxes and withholdings: name, class, rate, documents, code of total withholding | Formato DTE 2.5, section 4, pages 51 to 54 |
+| `PAYMENT_MEDIA` | `MedioPago` | `CH`, `CF`, `LT`, `EF`, `PE`, `TC`, `OT` | Formato DTE 2.5, page 15 |
+| `RECEIPT_PAYMENT_MEDIA` | `MedioPago` of a receipt | `'1'` to `'5'` | Formato Boletas Electrónicas 4.2, page 9 |
+| `REFERENCE_DOCUMENT_TYPES` | `TpoDocRef` | 42 numeric codes a reference can name, with their names | Formato DTE 2.5, pages 45 and 3 |
+| `RECEIPT_REFERENCE_DOCUMENT_TYPES` | `TpoDocRef` of a receipt | the 11 codes a receipt's reference can name | Formato Boletas Electrónicas 4.2, page 18 |
+
+```typescript
+import { ADDITIONAL_TAXES, isAdditionalTaxCode, isReferenceDocumentType } from 'dte-sdk'
+
+ADDITIONAL_TAXES[24] // { name: 'DL 825/74, ART. 42, letra b)', kind: 'additional', rate: 31.5, documents: [33, 56, 61] }
+ADDITIONAL_TAXES[30].totalWithholdingCode // 301, the code when the buyer withholds the whole VAT
+isAdditionalTaxCode(16) // false: the schema admits it, the table does not describe it
+isReferenceDocumentType(801) // true, Orden de Compra; an alphabetic TpoDocRef such as 'SET' is not checked
+```
+
+The tables are data: `createDocument` does not check a document against them. The units of measure (`UnmdItem`,
+`UnmdRef`) have no table, since Formato DTE 2.5 makes them free text of up to four characters that the SII does not
+check outside exports.
+
+The business activities (`Acteco`) are about 10 kB, so they have an entry of their own, `dte-sdk/catalogs`, and only
+who imports it pays for them. `BUSINESS_ACTIVITIES` holds the 674 codes of the SII's list
+([Códigos de Actividad Económica](https://www.sii.cl/ayudas/ayudas_por_servicios/1956-codigos-1959.html)), sorted,
+each with its name and the list's three columns as the SII writes them: `subjectToVat` ("Afecto a IVA": `SI`, `NO`
+or `G`), `taxCategory` ("Categoría Tributaria": `1`, `2` or `G`) and `availableOnline` ("Disponible Internet"). `G`
+means, in the list's own glossary, that the tax category and VAT are decided by the activity's own characteristics.
+
+```typescript
+import { businessActivity, isBusinessActivityCode } from 'dte-sdk/catalogs'
+
+businessActivity(620100) // { code: 620100, name: 'ACTIVIDADES DE PROGRAMACIÓN INFORMÁTICA', subjectToVat: 'G', taxCategory: 'G', availableOnline: true }
+isBusinessActivityCode(11101) // true: the list writes it 011101, and as a number it loses its leading zero
+```
+
 ## Errors
 
 ```typescript
@@ -1345,7 +1393,7 @@ SII_LIVE=1 SII_CERT_PFX=… SII_CERT_PASSWORD=… npx jest tests/live   # opt-in
 Releases are tag-triggered and published from CI with npm provenance — see
 [RELEASING.md](./RELEASING.md). The design of each area and the decisions behind it are under
 [docs/superpowers/specs](./docs/superpowers/specs), and [docs/decisions/entry-points.md](./docs/decisions/entry-points.md)
-explains the four entries.
+explains the entries.
 
 ## Contributing
 

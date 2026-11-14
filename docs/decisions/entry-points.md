@@ -3,18 +3,20 @@
 Status: decided by Hans on 2026-11-04, before 0.1.0. Replaces the decision of 2026-11-02 to keep one root entry (D3, D36,
 D40 and D41 of the design specs). Tracks [issue #5](https://github.com/arrowsw/dte-sdk/issues/5).
 
-**Decision: four entries, ES modules only.**
+**Decision: four entries, ES modules only.** A fifth, `dte-sdk/catalogs`, for the SII's large code tables, was decided
+by Hans on 2026-11-14.
 
 | Entry | Holds | Size | Reaches `node:` |
 |---|---|---|---|
-| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 38.16 kB | No |
+| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 39.45 kB | No |
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.37 kB | Yes, on first use |
 | `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 79.67 kB | Yes, on first use |
 | `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 13.21 kB | Yes, on first use |
+| `dte-sdk/catalogs` | The SII's large code tables: the business activities | 10.65 kB | No |
 
 Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
 it. The decision was taken at phase 5b-2, which took `dte-sdk/portal` from 39.35 kB to 55.86 kB; each limit was then the
-measure rounded up to the next 2 kB. The sizes above were measured again on 2026-11-14, for 0.11.0. `createDirectoryTokenCache` took
+measure rounded up to the next 2 kB. The sizes above were measured again on 2026-11-14, for 0.12.0. `createDirectoryTokenCache` took
 `dte-sdk/node` from 4.19 kB to 4.71 kB, and the CAF file search, which parses CAFs, took it to 6.30 kB, over its 6 kB
 limit, which went to 8 kB. The SII office table took `dte-sdk/pdf` from 8.49 kB to 10.45 kB. That table is about 1.9 kB
 of data that the renderer needs for its default office, so it fits neither the root (30.49 kB plus the table is
@@ -61,10 +63,18 @@ stamped, after 0.11.0, took `dte-sdk` from 37.27 kB to 37.62 kB, `dte-sdk/node` 
 The strict reading of a received envelope, which the answers share with the verification, and the checks on the
 decisions of the commercial result and the receipts, also after 0.11.0, took `dte-sdk` from 37.62 kB to 37.66 kB and
 `dte-sdk/portal` from 78.98 kB to 79.02 kB, both under their limits; `dte-sdk/node` and `dte-sdk/pdf` did not move.
+The SII's tables of additional taxes, payment media and reference documents, after 0.12.0, took `dte-sdk` from
+37.66 kB to 38.87 kB, over its 38 kB limit, which went to 40 kB, and `dte-sdk/portal` from 79.02 kB to 79.03 kB, under
+its limit; `dte-sdk/node` and `dte-sdk/pdf` did not move.
+The business activities, also after 0.12.0, went to an entry of their own, `dte-sdk/catalogs`, which Hans decided on
+2026-11-14: the SII's list of 674 codes, each with its name and three columns, is 10.65 kB, about 10 kB more on the
+root for every consumer, or on `dte-sdk/portal` past its 80 kB limit. In an entry of its own only who imports it pays
+for it, and the name leaves room for the next large tables, such as communes or customs. Its limit is the measure
+rounded up to the next 2 kB, 12 kB; the other entries did not move.
 The content rules `createDocument` checks before stamping, and the count of an envelope's documents, after 0.12.0,
-took `dte-sdk` from 37.66 kB to 38.16 kB, over its 38 kB limit, which went to 40 kB; they took `dte-sdk/portal` from
-79.02 kB to 79.67 kB, and the new error code took `dte-sdk/node` from 7.36 kB to 7.37 kB and `dte-sdk/pdf` from 13.2 kB
-to 13.21 kB, all three under their limits.
+took `dte-sdk` from 38.87 kB to 39.45 kB and `dte-sdk/portal` from 79.03 kB to 79.67 kB, both under their limits, and
+the new error code took `dte-sdk/node` from 7.36 kB to 7.37 kB and `dte-sdk/pdf` from 13.2 kB to 13.21 kB, also under
+their limits.
 
 ## Why
 
@@ -107,9 +117,10 @@ The last column leaves out `pdf-lib` and `bwip-js`, which load on first use and 
 ## What guards it
 
 `tests/public-api.test.ts` holds one list per entry. `tests/dist.smoke.test.ts` loads each entry, checks that loading
-evaluates no `node:` module, that the root reaches none, that only `dte-sdk/pdf` names the optional peers, that errors
-cross the entries, that the root bundles for the browser, and that consumers on nodenext, bundler and node10 resolution
-get real types. The CI imports every entry on Bun and Deno.
+evaluates no `node:` module, that the root reaches none, that only `dte-sdk/pdf` names the optional peers, that only
+`dte-sdk/catalogs` reaches the table of business activities, that errors cross the entries, that the root and
+`dte-sdk/catalogs` bundle for the browser, and that consumers on nodenext, bundler and node10 resolution get real types.
+The CI imports every entry on Bun and Deno.
 
 ## Whole bundle before this decision
 

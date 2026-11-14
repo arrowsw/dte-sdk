@@ -25,6 +25,10 @@
       "types": "./dist/pdf/index.d.ts",
       "default": "./dist/pdf.min.js"
     },
+    "./catalogs": {
+      "types": "./dist/catalogs/index.d.ts",
+      "default": "./dist/catalogs.min.js"
+    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
@@ -37,6 +41,9 @@
       ],
       "pdf": [
         "./dist/pdf/index.d.ts"
+      ],
+      "catalogs": [
+        "./dist/catalogs/index.d.ts"
       ]
     }
   },

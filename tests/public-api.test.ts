@@ -1,4 +1,5 @@
 import * as root from '../src'
+import * as catalogs from '../src/catalogs'
 import * as node from '../src/node'
 import * as pdf from '../src/pdf'
 import * as portal from '../src/portal'
@@ -9,6 +10,7 @@ import * as portal from '../src/portal'
  */
 const ROOT_EXPORTS = [
   'errorCode',
+  'ADDITIONAL_TAXES',
   'BOOK_DOCUMENT_TYPES',
   'BOOK_KINDS',
   'BOOK_OPERATIONS',
@@ -33,9 +35,13 @@ const ROOT_EXPORTS = [
   'GUIDE_TRANSFER_TYPES',
   'GUIDE_VOID_CODES',
   'NON_RECOVERABLE_VAT_CODES',
+  'PAYMENT_MEDIA',
   'PAYMENT_TERMS',
+  'RECEIPT_PAYMENT_MEDIA',
+  'RECEIPT_REFERENCE_DOCUMENT_TYPES',
   'RECEPTION_STATUS',
   'REFERENCE_CODES',
+  'REFERENCE_DOCUMENT_TYPES',
   'REST_ENDPOINTS',
   'SERVICE_INDICATORS',
   'SII_CAF_KEYS',
@@ -109,6 +115,7 @@ const ROOT_EXPORTS = [
   'getToken',
   'guideEntryFromDocument',
   'invalidateToken',
+  'isAdditionalTaxCode',
   'isBookDocumentType',
   'isCafExpired',
   'isCertificateExpired',
@@ -120,7 +127,11 @@ const ROOT_EXPORTS = [
   'isFolioInRange',
   'isIsoDate',
   'isNote',
+  'isPaymentMedium',
   'isReceipt',
+  'isReceiptPaymentMedium',
+  'isReceiptReferenceDocumentType',
+  'isReferenceDocumentType',
   'isRetryableError',
   'isRetryableStatus',
   'isSiiRut',
@@ -355,11 +366,14 @@ const PDF_EXPORTS = [
   'writePrintedSamples',
 ] as const
 
+const CATALOGS_EXPORTS = ['BUSINESS_ACTIVITIES', 'businessActivity', 'isBusinessActivityCode'] as const
+
 const ENTRIES: ReadonlyArray<readonly [string, Record<string, unknown>, readonly string[]]> = [
   ['dte-sdk', root, ROOT_EXPORTS],
   ['dte-sdk/node', node, NODE_EXPORTS],
   ['dte-sdk/portal', portal, PORTAL_EXPORTS],
   ['dte-sdk/pdf', pdf, PDF_EXPORTS],
+  ['dte-sdk/catalogs', catalogs, CATALOGS_EXPORTS],
 ]
 
 test.each(ENTRIES)('%s exports exactly the documented runtime names', (_name, entry, names) => {
