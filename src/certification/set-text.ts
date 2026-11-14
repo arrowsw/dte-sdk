@@ -15,6 +15,19 @@ export type TestCaseItem = {
   readonly unit?: string
   /** EN: Discount as written, for example `10%`. ES: Descuento tal como viene, por ejemplo `10%`. */
   readonly discount?: string
+  /** EN: The `TOTAL LINEA` column of a settlement row, sign included. ES: La columna `TOTAL LINEA` de una fila de liquidación, con su signo. */
+  readonly lineTotal?: number
+}
+
+/**
+ * EN: One row of the commissions and other charges table of a settlement case.
+ * ES: Una fila de la tabla `COMISIONES Y OTROS CARGOS` de un caso de liquidación.
+ */
+export type TestCaseCommission = {
+  /** EN: Row name, exactly as the set writes it. ES: Nombre de la fila, tal como lo escribe el set (`Glosa`). */
+  readonly name: string
+  /** EN: The `TOTAL LINEA` column, sign included. ES: La columna `TOTAL LINEA`, con su signo. */
+  readonly lineTotal: number
 }
 
 /**
@@ -50,6 +63,8 @@ export type TestCase = {
   readonly currency: string
   /** EN: The export-only lines, by their upper-case label. ES: Las líneas propias de exportación, por su rótulo en mayúsculas. */
   readonly exportFields: Readonly<Record<string, string>>
+  /** EN: The commissions and other charges of a settlement case, in order; absent on the cases of every other set. ES: Las comisiones y otros cargos de un caso de liquidación (`COMISIONES Y OTROS CARGOS`), en orden; ausente en los casos de los demás sets. */
+  readonly commissions?: readonly TestCaseCommission[]
   /** EN: Every line of the case after its header, trimmed. ES: Cada línea del caso tras su cabecera, recortada. */
   readonly raw: readonly string[]
 }
@@ -119,6 +134,8 @@ const ONE_AMOUNT = /^\s*(\d+)\s*$/
 const FACTOR_LINE = /FACTOR\s+DE\s+PROPORCIONALIDAD.+?(\d+\.?\d*)/i
 const OBSERVATION_PREFIX = /^OBS:\s*(.*)$/i
 const EXEMPT_COLUMN = /EXENTA|EXENTO|DEBITO/i
+const COMMISSIONS_HEADER = /^COMISIONES\s+Y\s+OTROS\s+CARGOS/i
+const SIGNED_INTEGER = /^-?\d+$/
 
 const EXPORT_LINES: readonly { readonly label: string; readonly pattern: RegExp }[] = [
   { label: 'FORMA DE PAGO EXPORTACION', pattern: /^FORMA\s+DE\s+PAGO\s+EXPORTACION[:\s]+(.+)$/i },
@@ -254,10 +271,55 @@ export const bookDocumentTypeOf = (documentText: string): number | null => {
   return null
 }
 
+// The documents a settlement line can settle, the specific wordings first: "LIQUIDACION FACTURA" and "NOTA DE CREDITO
+// ... FACTURA" both hold `FACTURA`. Each has an electronic and a paper code.
+const SETTLED_DOCUMENT_TYPES: readonly {
+  readonly words: string
+  readonly electronic: string
+  readonly paper: string
+}[] = [
+  { words: 'LIQUIDACION FACTURA', electronic: '43', paper: '40' },
+  { words: 'NOTA DE CREDITO', electronic: '61', paper: '60' },
+  { words: 'NOTA DE DEBITO', electronic: '56', paper: '55' },
+  { words: 'BOLETA', electronic: '39', paper: '35' },
+  { words: 'FACTURA', electronic: '33', paper: '30' },
+]
+// Formato DTE, `TpoDocLiq`: "99 en caso de anticipo u otras transacciones".
+const OTHER_TRANSACTION = '99'
+
+// Upper case without accents, only to recognise words: the set writes "ELECTRÓNICA" and "CRÉDITO" with their accents.
+const plain = (text: string): string => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase()
+
+/**
+ * EN: The type of the document a settlement line settles (`TpoDocLiq`), from the line's name read in any case and
+ * without accents: an advance (`ANTICIPO`) is 99; a settlement invoice, a credit note, a debit note, a receipt or an
+ * invoice is its electronic code when the name says it is electronic and its paper code when it does not (43 or 40, 61
+ * or 60, 56 or 55, 39 or 35, 33 or 30); any other name is 99, the code Formato DTE gives an advance or any other
+ * transaction.
+ * ES: `TpoDocLiq` — El tipo del documento que liquida una línea de liquidación, según el nombre de la línea leído sin
+ * distinguir mayúsculas y sin tildes: un anticipo (`ANTICIPO`) es 99; una liquidación factura, una nota de crédito, una
+ * nota de débito, una boleta o una factura es su código electrónico cuando el nombre dice que es electrónica y su
+ * código en papel cuando no lo dice (43 o 40, 61 o 60, 56 o 55, 39 o 35, 33 o 30); cualquier otro nombre es 99, el
+ * código que el Formato DTE da a un anticipo o a otra transacción.
+ * @param name EN: the line's name as the set writes it. ES: el nombre de la línea tal como lo escribe el set.
+ */
+export const settledDocumentTypeOf = (name: string): string => {
+  const upper = plain(name)
+  const found = SETTLED_DOCUMENT_TYPES.find(({ words }) => upper.includes(words))
+  if (found === undefined || upper.includes('ANTICIPO')) return OTHER_TRANSACTION
+  return upper.includes('ELECTRONIC') ? found.electronic : found.paper
+}
+
 const int = (value: string): number => parseInt(value, 10)
 
 // A column that is not a number, or is 0, counts as no amount.
 const amountOrNull = (value: string): number | null => int(value) || null
+
+const cells = (line: string): readonly string[] =>
+  line
+    .split(ITEM_SPLIT)
+    .map((part) => part.trim())
+    .filter((part) => part !== '')
 
 const parseItemRow = (line: string, reasonText: string): TestCaseItem | null => {
   const parts = line
@@ -349,13 +411,16 @@ const observe = (document: MutableBookDocument, observation: string): void => {
 
 /**
  * EN: Parses the text of the SII test set: sets, their cases with items and references, the supplier documents of the
- * purchase-book sets and the proportionality factor. Lines the grammar does not know are ignored and a set of unknown
- * kind is `other`, so the function never throws. The text is the portal page with its tags turned into line breaks and
- * its entities decoded, or a file holding the same.
+ * purchase-book sets and the proportionality factor. The cases of a settlement set are read by their two tables: each
+ * item with its quantity and its line total (`lineTotal`), and the commissions and other charges in `commissions`.
+ * Lines the grammar does not know are ignored and a set of unknown kind is `other`, so the function never throws. The
+ * text is the portal page with its tags turned into line breaks and its entities decoded, or a file holding the same.
  * ES: Parsea el texto del set de pruebas del SII: sets, sus casos con ítems y referencias, los documentos de proveedor
- * de los sets de libro de compras y el factor de proporcionalidad. Las líneas que la gramática no conoce se ignoran y
- * un set de tipo desconocido es `other`, así que la función nunca lanza. El texto es la página del portal con las
- * etiquetas vueltas saltos de línea y las entidades decodificadas, o un archivo con lo mismo.
+ * de los sets de libro de compras y el factor de proporcionalidad. Los casos de un set de liquidación se leen por sus
+ * dos tablas: cada ítem con su cantidad y su total de línea (`lineTotal`), y las comisiones y otros cargos en
+ * `commissions`. Las líneas que la gramática no conoce se ignoran y un set de tipo desconocido es `other`, así que la
+ * función nunca lanza. El texto es la página del portal con las etiquetas vueltas saltos de línea y las entidades
+ * decodificadas, o un archivo con lo mismo.
  * @param text EN: the set text. ES: el texto del set.
  */
 export const parseTestSetText = (text: string): readonly TestSet[] => {
@@ -367,6 +432,8 @@ export const parseTestSetText = (text: string): readonly TestSet[] => {
   // The rows of a purchase-book set are read from its header until the first case header, or, in the regular book,
   // the first separator line.
   let booksOpen = false
+  // The table the rows of a settlement case go to: the items until the commissions header.
+  let settlementTable: SettlementTable = 'items'
 
   const closeCase = (): void => {
     if (set !== null && current !== null)
@@ -409,6 +476,8 @@ export const parseTestSetText = (text: string): readonly TestSet[] => {
       closeBookDocument()
       booksOpen = false
       current = newCase(caseHeader[1], int(caseHeader[2]))
+      if (set.kind === TEST_SET_KINDS.settlement) current.commissions = []
+      settlementTable = 'items'
       continue
     }
     if (EQUALS_LINE.test(line)) continue
@@ -422,7 +491,8 @@ export const parseTestSetText = (text: string): readonly TestSet[] => {
     }
     if (current !== null) {
       current.raw.push(line)
-      parseCaseLine(current, line)
+      if (set.kind === TEST_SET_KINDS.settlement) settlementTable = parseSettlementLine(current, line, settlementTable)
+      else parseCaseLine(current, line)
       continue
     }
     if (!booksOpen && (set.kind === TEST_SET_KINDS.purchaseBook || set.kind === TEST_SET_KINDS.exemptPurchaseBook))
@@ -497,51 +567,77 @@ export const parseTestSetText = (text: string): readonly TestSet[] => {
   return sets
 }
 
-const parseCaseLine = (current: MutableCase, line: string): void => {
+// The labelled lines of a case: true when the line was one of them.
+const parseCaseField = (current: MutableCase, line: string): boolean => {
   const document = DOCUMENT_LINE.exec(line)
   if (document !== null) {
     current.documentText = document[1].trim()
-    return
+    return true
   }
   const reference = REFERENCE_LINE.exec(line)
   if (reference !== null) {
     current.referenceText = reference[1].trim()
     current.referencedCase = REFERENCED_CASE.exec(reference[1])?.[1] ?? null
-    return
+    return true
   }
   const reason = REASON_LINE.exec(line)
   if (reason !== null) {
     current.reasonText = reason[1].trim()
-    return
+    return true
   }
   const motive = MOTIVE_LINE.exec(line)
   if (motive !== null) {
     current.motive = motive[1].trim()
-    return
+    return true
   }
   const transferBy = TRANSFER_BY_LINE.exec(line)
   if (transferBy !== null) {
     current.transferBy = transferBy[1].trim()
-    return
+    return true
   }
   const discount = GLOBAL_DISCOUNT_LINE.exec(line)
   if (discount !== null) {
     current.globalDiscountPercent = int(discount[1])
-    return
+    return true
   }
   const currency = CURRENCY_LINE.exec(line)
   if (currency !== null) {
     current.currency = currency[1].trim()
-    return
+    return true
   }
   for (const { label, pattern } of EXPORT_LINES) {
     const match = pattern.exec(line)
     if (match !== null) {
       current.exportFields[label] = match[1].trim()
-      return
+      return true
     }
   }
-  if (ITEM_HEADER.test(line)) return
+  return false
+}
+
+const parseCaseLine = (current: MutableCase, line: string): void => {
+  if (parseCaseField(current, line) || ITEM_HEADER.test(line)) return
   const item = parseItemRow(line, current.reasonText)
   if (item !== null) current.items.push(item)
+}
+
+type SettlementTable = 'items' | 'commissions'
+
+// A settlement case holds two tables: its items (`ITEM  CANTIDAD  TOTAL LINEA`) and, on some cases, its commissions
+// and other charges (`COMISIONES Y OTROS CARGOS  TOTAL LINEA`). A row is its name and its numbers: the last number is
+// the line total, negative for what is taken off, and on an item the number before it is the quantity, 1 when there is
+// none. Any other line is read as a labelled line or as nothing. Returns the table the next row goes to.
+const parseSettlementLine = (current: MutableCase, line: string, table: SettlementTable): SettlementTable => {
+  if (COMMISSIONS_HEADER.test(line)) return 'commissions'
+  if (ITEM_HEADER.test(line)) return 'items'
+  const parts = cells(line)
+  const last = parts[parts.length - 1]
+  if (parts.length < 2 || !SIGNED_INTEGER.test(last)) {
+    parseCaseField(current, line)
+    return table
+  }
+  const lineTotal = int(last)
+  if (table === 'commissions') current.commissions = [...current.commissions!, { name: parts[0], lineTotal }]
+  else current.items.push({ name: parts[0], quantity: (parts.length > 2 && int(parts[1])) || 1, lineTotal })
+  return table
 }

@@ -1,9 +1,24 @@
-import type { BookKey, CertificationStage, SetKey } from '../catalogs/certification'
+import { SET_KEYS, type BookKey, type CertificationStage, type SetKey } from '../catalogs/certification'
 import { DteError } from '../errors'
 import type { BookTotals } from '../model/book'
 import type { DeclarationOutcome } from '../portal/certification'
 import type { SampleDetail } from '../portal/pages/samples'
 import type { CertificationPlan } from './set-plan'
+
+/**
+ * EN: The sets the runner sends: the four of `SetKey` and the settlement set, which only a text that holds it plans.
+ * ES: Los sets que envía el ejecutor: los cuatro de `SetKey` y el set de liquidación, que solo planifica un texto que lo
+ * trae.
+ */
+export type SentSetKey = SetKey | 'settlement'
+
+/**
+ * EN: The sets in the order they are sent, declared and waited for: the four of `SET_KEYS`, then the settlement set.
+ * Internal.
+ * ES: Los sets en el orden en que se envían, se declaran y se esperan: los cuatro de `SET_KEYS`, luego el set de
+ * liquidación. Interno.
+ */
+export const SENT_SET_KEYS: readonly SentSetKey[] = [...SET_KEYS, 'settlement']
 
 /**
  * EN: An envelope sent to the SII: its track id, the Chile date it was sent (what the declaration takes), the instant.
@@ -169,8 +184,8 @@ export type CertificationState = {
   /** EN: The `from-to` ranges the SII reported as annulled or received, by document type: the annulment does not try them again. ES: Los rangos `desde-hasta` que el SII dio por anulados o recibidos, por tipo de documento: la anulación no los vuelve a intentar. */
   readonly annulledRanges?: Readonly<Record<string, readonly string[]>>
   /** EN: The sets sent. ES: Los sets enviados. */
-  readonly sets: Readonly<Partial<Record<SetKey, SentSet>>>
-  /** EN: The four sets are approved. ES: Los cuatro sets están aprobados. */
+  readonly sets: Readonly<Partial<Record<SentSetKey, SentSet>>>
+  /** EN: The sets sent are approved. ES: Los sets enviados están aprobados. */
   readonly setsApproved: boolean
   /** EN: The books phase. ES: La fase de libros. */
   readonly books: BooksState

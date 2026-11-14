@@ -7,7 +7,14 @@ import type { SignedDocument } from '../document/sign'
 import { createEnvelope } from '../envelope/create'
 import { signEnvelope, type SignedEnvelope } from '../envelope/sign'
 import { DteError } from '../errors'
-import type { DocumentInput, IssuerInput, LineItemInput, ReceiverInput, ReferenceInput } from '../model/document'
+import type {
+  CommissionLineInput,
+  DocumentInput,
+  IssuerInput,
+  LineItemInput,
+  ReceiverInput,
+  ReferenceInput,
+} from '../model/document'
 import { sanitizeText } from '../text/sanitize'
 import { calculateLineAmount } from '../totals/calculate'
 import type { FolioSource } from './folios'
@@ -15,10 +22,13 @@ import type {
   BasicSetPlan,
   ExemptSetPlan,
   GuideSetPlan,
+  PlannedCommission,
   PlannedGuide,
   PlannedItem,
   PlannedNote,
+  PlannedSettlementLine,
   PurchaseSetPlan,
+  SettlementSetPlan,
 } from './set-plan'
 
 /**
@@ -61,7 +71,7 @@ export type IssuedCase = {
  */
 export type IssuedSet = {
   /** EN: Set kind. ES: Tipo de set. */
-  readonly kind: 'basic' | 'exempt' | 'guide' | 'purchase'
+  readonly kind: IssuableSetPlan['kind']
   /** EN: `NUMERO DE ATENCION` of the set. ES: `NUMERO DE ATENCION` del set. */
   readonly attentionNumber: string
   /** EN: The issued documents, in issue order. ES: Los documentos emitidos, en orden de emisión. */
@@ -71,7 +81,7 @@ export type IssuedSet = {
 }
 
 /** EN: The plans `issueTestSet` accepts. ES: Los planes que acepta `issueTestSet`. */
-export type IssuableSetPlan = BasicSetPlan | ExemptSetPlan | GuideSetPlan | PurchaseSetPlan
+export type IssuableSetPlan = BasicSetPlan | ExemptSetPlan | GuideSetPlan | PurchaseSetPlan | SettlementSetPlan
 
 /** EN: `SetDTE/@ID` of every certification envelope. ES: `SetDTE/@ID` de cada sobre de certificación. */
 export const TEST_SET_ENVELOPE_ID = 'DTE_SetDoc'
@@ -336,6 +346,10 @@ export type IssueDocumentSpec = {
   readonly priceDecimals?: number
   /** EN: Withhold the VAT (`ImptoReten`). ES: `ImptoReten` — Retener el IVA. */
   readonly withholdVat?: boolean
+  /** EN: Lines written as given, in place of lines from `items` (a settlement invoice). ES: `Detalle` — Líneas escritas tal como vienen, en lugar de las que salen de `items` (una liquidación factura). */
+  readonly lines?: readonly LineItemInput[]
+  /** EN: Commission and other charge lines. ES: `Comisiones` — Líneas de comisiones y otros cargos. */
+  readonly commissions?: readonly CommissionLineInput[]
   /** EN: Keep a record of the document for the notes that reference it. ES: Guardar un registro del documento para las notas que lo refieren. */
   readonly record: boolean
 }
@@ -355,7 +369,7 @@ export const issueCertificationDocument = async (
     issueDate: context.date,
     issuer: context.options.issuer,
     receiver: withActivityCut(input.receiver ?? context.options.receiver),
-    items: input.items.map((item) => line(item, input.style, input.priceDecimals)),
+    items: input.lines ?? input.items.map((item) => line(item, input.style, input.priceDecimals)),
     references: input.references,
     globalAdjustments:
       input.globalDiscountPercent === undefined
@@ -368,6 +382,7 @@ export const issueCertificationDocument = async (
               description: input.globalDiscountDescription === false ? undefined : GLOBAL_DISCOUNT_DESCRIPTION,
             }),
           ],
+    commissions: input.commissions,
     options: input.options,
     totals: input.totals,
     withholdVat: input.withholdVat,
@@ -485,6 +500,41 @@ const issueGuides = async (context: IssueContext, plan: GuideSetPlan): Promise<v
   }
 }
 
+const settlementLine = (planned: PlannedSettlementLine): LineItemInput =>
+  compact({
+    name: planned.name,
+    quantity: planned.quantity,
+    amount: planned.amount,
+    settledDocumentType: planned.settledDocumentType,
+    exempt: planned.exempt,
+  })
+
+const commissionLine = (planned: PlannedCommission): CommissionLineInput =>
+  compact({
+    kind: planned.kind,
+    description: planned.description,
+    netValue: planned.netValue,
+    exemptValue: planned.exemptValue,
+  })
+
+// A settlement invoice is issued to the run's customer, the principal it settles with: its lines carry their amount as
+// the set gives it, with no price, and its commissions are taken off its total. No note references it.
+const issueSettlements = async (context: IssueContext, plan: SettlementSetPlan): Promise<void> => {
+  if (plan.settlements.length === 0) throw new DteError('MISSING_FIELD', { field: 'settlements', kind: plan.kind })
+  for (const settlement of plan.settlements) {
+    await issueCertificationDocument(context, {
+      caseId: settlement.caseId,
+      type: 43,
+      items: [],
+      lines: settlement.lines.map(settlementLine),
+      commissions: settlement.commissions.map(commissionLine),
+      style: 'plain',
+      references: [setReference(settlement.caseId, context.date)],
+      record: false,
+    })
+  }
+}
+
 /**
  * EN: Signs the envelope of a set or of the simulation: `EnvioDTE` with the issuer, the certificate holder as sender,
  * the SII as receiver and the certification resolution. Internal: `issueTestSet` and `issueSimulation` share it.
@@ -521,19 +571,25 @@ export const signCertificationEnvelope = (
  * then debit notes, each with the SET reference (`SET`, folio 1, the issue date, `CASO <id>`) and, on notes, the
  * reference to the document of the referenced case with the code and reason of the set. Basic invoices carry
  * `TpoTranVenta` 1 and the global discount of the case; purchase documents name the issuer as receiver and carry the
- * withholding; an internal transfer names the issuer and totals 0. The set is dated and stamped on the UTC clock: the
- * issue date is the UTC day the run starts on, and `TSTED`, `TmstFirma` and `TmstFirmaEnv` are UTC instants with
- * milliseconds. Late in the Chilean evening that is already the next day.
+ * withholding; an internal transfer names the issuer and totals 0. A settlement set issues one settlement invoice (43)
+ * per case, in the set's order and in one envelope: it names the customer of the options, the principal it settles
+ * with, and carries the SET reference, its lines with their quantity, amount, settled document type and exempt mark,
+ * and its commissions, whose totals are worked out by phase 1 and taken off the total. The set is dated and stamped on
+ * the UTC clock: the issue date is the UTC day the run starts on, and `TSTED`, `TmstFirma` and `TmstFirmaEnv` are UTC
+ * instants with milliseconds. Late in the Chilean evening that is already the next day.
  * ES: Emite cada documento del plan de un set y firma su sobre. Primero las facturas (o guías), luego las notas de
  * crédito, luego las de débito, cada una con la referencia SET (`SET`, folio 1, la fecha de emisión, `CASO <id>`) y, en
  * las notas, la referencia al documento del caso referido con el código y la razón del set. Las facturas del set básico
  * llevan `TpoTranVenta` 1 y el descuento global del caso; los documentos de compra nombran al emisor como receptor y
- * llevan la retención; un traslado interno nombra al emisor y totaliza 0. El set se fecha y se marca con el reloj UTC:
- * la fecha de emisión es el día UTC en que parte la corrida, y `TSTED`, `TmstFirma` y `TmstFirmaEnv` son instantes UTC
- * con milisegundos. Tarde en la noche de Chile eso ya es el día siguiente.
+ * llevan la retención; un traslado interno nombra al emisor y totaliza 0. Un set de liquidación emite una liquidación
+ * factura (43) por caso, en el orden del set y en un solo sobre: nombra al cliente de las opciones, el mandante con
+ * quien se liquida, y lleva su referencia SET, sus líneas con su cantidad, monto, tipo de documento liquidado y marca de
+ * exenta, y sus comisiones, cuyos totales calcula la fase 1 y se restan del total. El set se fecha y se marca con el
+ * reloj UTC: la fecha de emisión es el día UTC en que parte la corrida, y `TSTED`, `TmstFirma` y `TmstFirmaEnv` son
+ * instantes UTC con milisegundos. Tarde en la noche de Chile eso ya es el día siguiente.
  * @param plan EN: a set plan of `planCertificationSets`. ES: un plan de set de `planCertificationSets`.
  * @param options EN: issuer, receiver, certificate, folios, resolution, clock. ES: emisor, receptor, certificado, folios, resolución, reloj.
- * @throws {DteError} EN: `MISSING_FIELD` (`invoices` or `guides` on an empty plan, `referencedCase` on a note whose case was not issued before it), `FOLIO_OUT_OF_RANGE` from the folio source, and the phase 1 codes. ES: `MISSING_FIELD` (`invoices` o `guides` en un plan vacío, `referencedCase` en una nota cuyo caso no se emitió antes), `FOLIO_OUT_OF_RANGE` de la fuente de folios, y los códigos de la fase 1.
+ * @throws {DteError} EN: `MISSING_FIELD` (`invoices`, `guides` or `settlements` on an empty plan, `referencedCase` on a note whose case was not issued before it), `FOLIO_OUT_OF_RANGE` from the folio source, and the phase 1 codes. ES: `MISSING_FIELD` (`invoices`, `guides` o `settlements` en un plan vacío, `referencedCase` en una nota cuyo caso no se emitió antes), `FOLIO_OUT_OF_RANGE` de la fuente de folios, y los códigos de la fase 1.
  */
 export const issueTestSet = async (plan: IssuableSetPlan, options: IssueSetOptions): Promise<IssuedSet> => {
   const clock = options.now ?? (() => new Date())
@@ -546,6 +602,7 @@ export const issueTestSet = async (plan: IssuableSetPlan, options: IssueSetOptio
     issued: [],
   }
   if (plan.kind === 'guide') await issueGuides(context, plan)
+  else if (plan.kind === 'settlement') await issueSettlements(context, plan)
   else await issueInvoicesAndNotes(context, plan)
   const sealedAt = clock()
   const envelope = signCertificationEnvelope(

@@ -19,7 +19,7 @@ import { queryFolioQuota, type FolioQuota, type ObtainedCaf } from '../portal/st
 import { folioReceived } from '../sii/status'
 import type { FolioSource } from './folios'
 import type { CertificationPlan } from './set-plan'
-import type { CertificationState } from './state'
+import { SENT_SET_KEYS, type CertificationState } from './state'
 import { runtime, saveState, type CertificationDependencies, type Runtime, type StepResult } from './runtime'
 
 /**
@@ -107,7 +107,7 @@ const addNeed = (needs: Record<number, number>, type: number, count: number): vo
  */
 export const setFolioNeeds = (plan: CertificationPlan, sent: readonly string[]): Readonly<Record<number, number>> => {
   const needs: Record<number, number> = {}
-  for (const kind of ['basic', 'guide', 'exempt', 'purchase'] as const) {
+  for (const kind of SENT_SET_KEYS) {
     const set = plan[kind]
     if (set === undefined || sent.includes(kind)) continue
     for (const [type, count] of Object.entries(set.folios)) addNeed(needs, Number(type), count)
