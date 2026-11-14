@@ -48,6 +48,8 @@ limit, which went to 12 kB; the other entries did not move.
 A receipt's own shape in the codec and what `createDocument` refuses on one, on 2026-11-14, took `dte-sdk` from 35.1 kB
 to 35.51 kB and `dte-sdk/portal` from 77.43 kB to 77.82 kB, and reading a receipt's line of business took `dte-sdk/pdf`
 from 11.45 kB to 11.47 kB, all under their limits; `dte-sdk/node` did not move.
+The printed sample on continuous paper, with the stamp as an option for receipts, took `dte-sdk/pdf` from 11.47 kB to
+13.2 kB, over its 12 kB limit, which went to 14 kB; the other entries did not move.
 
 ## Why
 

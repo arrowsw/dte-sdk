@@ -75,3 +75,39 @@ export const TRANSFER_REASON_NAMES: Readonly<Record<number, string>> = {
   8: 'Traslado para exportación (no venta)',
   9: 'Venta para exportación',
 }
+
+/**
+ * EN: Layout of the printed sample on continuous paper (the manual's "papel continuo", the format of a point of sale
+ * printer), in points. The roll is 80 mm wide (226.77 pt), above the manual's least width of 7.5 cm (212.6 pt), with
+ * the 0.5 cm blank border on both sides, which leaves 7 cm (198.43 pt) to print. The stamp takes the 7 cm, between its
+ * 5 and 9 cm bounds, instead of starting 2 cm from the left as on a sheet: the manual's own roll example prints it
+ * across the width, and the type box takes the 7 cm too. The box letters are 10 pt bold
+ * and the stamp legends are 7 pt, over the manual's minimums (10 pt and 6 pt). The page is as tall as its content.
+ * ES: Diagramación de la muestra impresa en papel continuo (formato de las impresoras de punto de venta), en puntos. El
+ * rollo mide 80 mm de ancho (226,77 pt), sobre el ancho mínimo de 7,5 cm (212,6 pt) del manual, con el borde en
+ * blanco de 0,5 cm a cada lado, lo que deja 7 cm (198,43 pt) para imprimir. El timbre ocupa los 7 cm, entre sus
+ * límites de 5 y 9 cm, en vez de partir a 2 cm del borde izquierdo como en hoja: el propio ejemplo de papel continuo
+ * del manual lo imprime a lo ancho, y el recuadro también ocupa los 7 cm. Las letras del recuadro son de
+ * 10 pt en negrita y las leyendas del timbre de 7 pt, sobre los mínimos del manual (10 pt y 6 pt). La página mide lo
+ * que su contenido.
+ */
+export const ROLL = {
+  width: 226.77,
+  margin: 14.17,
+  /** EN: Printable width (7 cm). ES: Ancho imprimible (7 cm). */
+  contentWidth: 198.43,
+  /** EN: Line height as a multiple of the font size. ES: Alto de línea como múltiplo del tamaño de letra. */
+  leading: 1.25,
+  /** EN: Type box padding and border (1 mm). ES: Relleno y filete del recuadro (1 mm). */
+  box: { pad: 5, border: 2.83 },
+  /** EN: Height of a rule and of the gap between blocks. ES: Alto de una línea divisoria y del espacio entre bloques. */
+  rule: 8,
+  gap: 6,
+  /** EN: Height of an acknowledgement field to write in. ES: Alto de un campo del acuse donde escribir. */
+  field: 18,
+  /** EN: Largest logo (4 cm by 1.5 cm). ES: Logo más grande (4 cm por 1,5 cm). */
+  logo: { width: 113.39, height: 42.52 },
+} as const
+
+/** EN: Font sizes on continuous paper. ES: Tamaños de letra en papel continuo. */
+export const ROLL_FONT = { box: 10, name: 9, body: 8, small: 7, total: 9 } as const

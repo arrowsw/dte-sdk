@@ -1100,6 +1100,10 @@ const pdf = await renderPrintedSample(doc, {
 })
 const transferableCopy = await renderPrintedSample(doc, { transferable: true }) // adds the acknowledgement box and CEDIBLE
 
+// A receipt on continuous paper: an 80 mm roll as tall as its content, with or without the printed stamp
+const ticket = await renderPrintedSample(doc, { paper: 'roll' })
+const ticketWithoutStamp = await renderPrintedSample(doc, { paper: 'roll', stamp: false }) // receipts 39 and 41 only
+
 // Every document of every envelope, in memory, classified into the test and simulation sets
 const result = await renderPrintedSamples({
   envelopes: [{ name: 'envio-set-basico.xml', xml: envelope.xml }],
@@ -1131,7 +1135,15 @@ left out, and a document without `Transporte` has no box. `parsePrintableDocumen
 otherwise the office of the issuer's commune (`CmnaOrigen`), looked up with `siiOfficeForCommune` in
 `SII_OFFICES` (355 commune names in 40
 offices, every official commune included, ignoring case, surrounding spaces and accents), and `S.I.I. - SANTIAGO CENTRO` for a commune the table lacks.
-The stamp encodes the signed bytes exactly (`renderTedBarcode` gives the PNG
+`paper: 'roll'` prints the continuous paper of the manual (the format of a point of sale printer) instead of the sheet,
+for any type: a page 80 mm wide, above the 7.5 cm the manual asks for, with the 0.5 cm border, as tall as its content
+with no cap, and the order the manual gives for it: the type box centred, the SII office, the issuer, the receiver, the
+date, references, detail, totals, the acknowledgement box of a transferable copy, the stamp and the destination mark.
+The type box letters are 10 pt bold, and the stamp is 7 cm wide with its legends in 7 pt. The default is `'sheet'`, and
+the certification samples are always the sheet. `stamp: false` leaves the electronic stamp and its legends out of a
+receipt (39 or 41), whose printed stamp is optional from 1 January 2026 (Res. Ex. SII N° 207 of 2025; the XML keeps its
+`TED`), on the sheet or on the roll; on any other type it throws `INVALID_OPTION`. Delivering the receipt virtually
+instead of printing it (Res. Ex. SII N° 53 of 2025) stays with the application. The stamp encodes the signed bytes exactly (`renderTedBarcode` gives the PNG
 alone). It needs Node and the optional peers `pdf-lib` and `bwip-js`, which are loaded on first use: without them
 the render functions throw `DEPENDENCY_UNAVAILABLE`. Failures of a batch come back as data (`failures[].code`), never as thrown errors; a folio that is not a run
 of digits is an `INVALID_FOLIO` failure, since it would name the file. Retentions, the commission block of settlement
