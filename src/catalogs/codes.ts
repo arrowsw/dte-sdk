@@ -69,6 +69,51 @@ export const PAYMENT_TERMS = { cash: 1, credit: 2, free: 3 } as const
 export type PaymentTerms = (typeof PAYMENT_TERMS)[keyof typeof PAYMENT_TERMS]
 
 /**
+ * EN: Payment media of every document but a receipt (`IdDoc/MedioPago`, Formato DTE 2.5, field 23 of the header, page
+ * 15), the values `MedioPagoType` of `SiiTypes_v10.xsd` admits.
+ * ES: `MedioPago` — Medio de pago de todo documento menos la boleta (Formato DTE 2.5, campo 23 del encabezado, página
+ * 15): CH cheque, CF cheque a fecha, LT letra, EF efectivo, PE pago a cuenta corriente, TC tarjeta de crédito, OT otro;
+ * los valores que admite `MedioPagoType` de `SiiTypes_v10.xsd`.
+ */
+export const PAYMENT_MEDIA = {
+  cheque: 'CH',
+  postdatedCheque: 'CF',
+  billOfExchange: 'LT',
+  cash: 'EF',
+  currentAccountPayment: 'PE',
+  creditCard: 'TC',
+  other: 'OT',
+} as const
+/** EN: Union of `PAYMENT_MEDIA` values. ES: Unión de los valores de `PAYMENT_MEDIA`. */
+export type PaymentMedium = (typeof PAYMENT_MEDIA)[keyof typeof PAYMENT_MEDIA]
+
+/** EN: Type guard for `PaymentMedium`. ES: Guarda de tipo para `PaymentMedium`. */
+export const isPaymentMedium = (value: unknown): value is PaymentMedium =>
+  (Object.values(PAYMENT_MEDIA) as readonly unknown[]).includes(value)
+
+/**
+ * EN: Payment media of a receipt (`IdDoc/MedioPago`, Formato Boletas Electrónicas 4.2, field 10 of the header, page 9),
+ * a number from 1 to 5 written as text, as `paymentMedium` carries it. Required, and printed, when the total is over
+ * 135 UF (Ley 21.713).
+ * ES: `MedioPago` — Medio de pago de una boleta (Formato Boletas Electrónicas 4.2, campo 10 del encabezado, página 9):
+ * 1 efectivo, 2 pago electrónico, 3 transferencia electrónica, 4 cheque, 5 otro; un número escrito como texto, como lo
+ * lleva `paymentMedium`. Obligatorio, y se imprime, cuando el monto total supera 135 UF (Ley 21.713).
+ */
+export const RECEIPT_PAYMENT_MEDIA = {
+  cash: '1',
+  electronicPayment: '2',
+  electronicTransfer: '3',
+  cheque: '4',
+  other: '5',
+} as const
+/** EN: Union of `RECEIPT_PAYMENT_MEDIA` values. ES: Unión de los valores de `RECEIPT_PAYMENT_MEDIA`. */
+export type ReceiptPaymentMedium = (typeof RECEIPT_PAYMENT_MEDIA)[keyof typeof RECEIPT_PAYMENT_MEDIA]
+
+/** EN: Type guard for `ReceiptPaymentMedium`. ES: Guarda de tipo para `ReceiptPaymentMedium`. */
+export const isReceiptPaymentMedium = (value: unknown): value is ReceiptPaymentMedium =>
+  (Object.values(RECEIPT_PAYMENT_MEDIA) as readonly unknown[]).includes(value)
+
+/**
  * EN: Line exemption indicator (`Detalle/IndExe`).
  * ES: `IndExe` — 1 no afecto o exento, 2 no facturable, 3 garantía por depósito de envases, 4 no constituye venta, 5 ítem a rebajar, 6 no facturable negativo.
  */
@@ -84,8 +129,10 @@ export const EXEMPT_INDICATORS = {
 export type ExemptIndicator = (typeof EXEMPT_INDICATORS)[keyof typeof EXEMPT_INDICATORS]
 
 /**
- * EN: Withholding tax codes used in `Totales/ImptoReten/TipoImp`.
- * ES: `TipoImp` — Códigos de impuesto de retención: 15 = IVA retenido total (factura de compra, tipo 46).
+ * EN: Withholding tax codes used in `Totales/ImptoReten/TipoImp`. The whole table of additional taxes and withholdings
+ * is `ADDITIONAL_TAXES`.
+ * ES: `TipoImp` — Códigos de impuesto de retención: 15 = IVA retenido total (factura de compra, tipo 46). La tabla
+ * completa de impuestos adicionales y retenciones es `ADDITIONAL_TAXES`.
  */
 export const WITHHOLDING_TAX_CODES = { totalVatWithholding: 15 } as const
 
