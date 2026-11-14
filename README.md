@@ -134,8 +134,20 @@ to be compared against real answers ([issue 14](https://github.com/arrowsw/dte-s
 the certification runner set aside to keep it to field behaviour, to be weighed after the first real certification
 ([issue 29](https://github.com/arrowsw/dte-sdk/issues/29)).
 
-Out of scope: export documents (110, 111 and 112), fee receipts (boletas de honorarios), the assignment of invoices
-(AEC), forms F29 and F22, the exchange e-mail and full XSD validation.
+Planned, after the first certification: export documents (110, 111 and 112) and the assignment of invoices (AEC).
+
+Planned, with no date:
+
+- **Validation against the SII's schemas at run time, as an option.** Today the tests validate what dte-sdk issues
+  against those schemas, and nothing does at run time. It will be opt-in: the validator as an optional peer dependency,
+  as the PDF's are, and the schemas shipped in the package.
+- **The purchase and sales register as a file.** Today its summary and its detail are read page by page.
+- **A received document checked against its schema and its content,** besides its signature, its stamp and its CAF.
+- **The backup's two-day range,** which today downloads only its first day when it holds more than 20 documents.
+- **A lock for the directory folio registry that holds across processes.** Today it is for a single process.
+
+Out of scope: forms F29 and F22, which are tax returns and not electronic documents, and may be offered later as a
+separate tool; fee receipts (boletas de honorarios); and the exchange e-mail.
 
 ## Installation
 
@@ -410,6 +422,9 @@ has no known key, and `valid` otherwise:
   range) and against the SII: `siiSignature` checks its `FRMA`, the SII's signature over `DA`, with the SII key its
   `IDK` names.
 
+Nothing else is checked today: neither the document against its schema nor what its fields say. Both checks are
+planned.
+
 `SII_CAF_KEYS` holds the keys 100 (certification) and 300 (production) that sign every CAF, taken from the SII's
 certificates as CryptoSys and LibreDTE publish them, the same bytes in both. Only the key of `environment` is accepted,
 `production` by default: a CAF signed with the other one is `invalid`, with the mismatch `environment` and
@@ -616,7 +631,9 @@ a free one below that point. With `{ lowestFree: true }` it hands out the lowest
 what the certification run asks for; use it only when the registry records every folio the range has spent. A service
 with its own database implements `FolioRegistry` with its own transactions, the option included if it is to back a
 certification run. `createDirectoryFolioRegistry` keeps `folios.json` for its owner only, as the token cache does: the
-ledger holds the companies' RUTs, their track ids and what you keep in `extra`.
+ledger holds the companies' RUTs, their track ids and what you keep in `extra`. It is for a single process: two
+processes on one directory can reserve the same folio, so keep one process per directory until the lock across
+processes, which is planned, is there.
 
 To pick the CAF file to issue with, `dte-sdk/node` searches a directory, and its folders down to five levels below it,
 for CAF files. `findCafFiles({ dir, type, issuerRut })` lists the usable ones newest first (by modification time):
@@ -750,6 +767,8 @@ await downloadMipymeBackup(portal, {
   of the 49 document codes, which sides of the register show it, whether it is a DTE, its sign in the totals, whether
   it is listed per document and whether the buyer withholds the VAT. `REGISTER_ACCOUNTING_STATUSES` gives the accounting
   statuses of each side: four for purchases, only `registered` for sales.
+- **The register is read, not downloaded.** The summary and the detail come page by page; asking the portal for the
+  register as a file is planned.
 - **A refused month reads as empty.** Response codes are not looked at, so `listPeriodDocuments` and
   `fetchRegisterSummary` cannot tell a month the SII refuses to show from one with no movement. `raw` holds each row as the
   SII sent it. The row names come from the SII's client code and have not been seen with real documents: an absent field is
@@ -764,6 +783,7 @@ await downloadMipymeBackup(portal, {
   comes first: a day that cannot be downloaded throws `backupDayOverLimit` or `backupDayUnknownTypes` before any download. Use
   `onChunk` for long histories, so the XML does not stay in memory.
 - **Known defect:** a two-day range with more than 20 documents downloads only its first day, while `total` counts both.
+  The fix is planned.
 - **`backupNoData` is definitive.** `backupCaptcha` and `backupIndeterminate` mean try later, never in a loop.
 
 ## Activity verification
