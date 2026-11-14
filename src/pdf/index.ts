@@ -10,6 +10,7 @@
 export { parsePrintableDocuments } from './parse'
 export type {
   PrintableAdjustment,
+  PrintableCommission,
   PrintableDocument,
   PrintableIssuer,
   PrintableItem,
@@ -17,6 +18,7 @@ export type {
   PrintableReference,
   PrintableTotals,
   PrintableTransport,
+  PrintableWithholding,
 } from './parse'
 export { renderTedBarcode } from './stamp'
 export { needsTransferableCopy, renderPrintedSample } from './render'
