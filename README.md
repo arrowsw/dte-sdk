@@ -436,6 +436,18 @@ glosses. The format defines no codes for `CodRchDsc`, the negative integer of up
 rejection or a discrepancy: a rejection writes -1 unless `rejectionCode` says otherwise. Check the envelope with
 `verifyReceivedDocuments` before answering 0.
 
+`readReceivedEnvelope`, and each function when it is given the text, reads the envelope the way
+`verifyReceivedDocuments` reads it, strictly and from the same elements, so the documents answered are the documents
+verified: an `EnvioDTE` or `EnvioBOLETA` with no DOCTYPE, one `SetDTE` with every `DTE` directly inside it, and each
+document giving its own type, folio, date, issuer, receiver and total. Nothing is taken from the cover and no number is
+converted: a document that lacks one of them, or writes a folio such as `12abc`, refuses the envelope with
+`XML_PARSE_FAILED`, and `details.field` and `details.index` name the element and the document. To answer an envelope
+that cannot be read (`EstadoRecepEnv` 1 or 91), pass a `ReceivedEnvelope` built by hand with no documents.
+
+A record names a document by its type and folio alone. For an envelope where two documents share them, a repeated
+document among them, a record is refused with `INVALID_OPTION` (`details.key` names the key): decide those with the
+function, which receives each document's position.
+
 ## Received documents
 
 ```typescript
