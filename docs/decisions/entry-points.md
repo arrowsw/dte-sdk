@@ -61,7 +61,7 @@ stamped, after 0.11.0, took `dte-sdk` from 37.27 kB to 37.62 kB, `dte-sdk/node` 
 The strict reading of a received envelope, which the answers share with the verification, and the checks on the
 decisions of the commercial result and the receipts, also after 0.11.0, took `dte-sdk` from 37.62 kB to 37.66 kB and
 `dte-sdk/portal` from 78.98 kB to 79.02 kB, both under their limits; `dte-sdk/node` and `dte-sdk/pdf` did not move.
-The content rules `createDocument` checks before stamping, and the count of an envelope's documents, also after 0.11.0,
+The content rules `createDocument` checks before stamping, and the count of an envelope's documents, after 0.12.0,
 took `dte-sdk` from 37.66 kB to 38.16 kB, over its 38 kB limit, which went to 40 kB; they took `dte-sdk/portal` from
 79.02 kB to 79.67 kB, and the new error code took `dte-sdk/node` from 7.36 kB to 7.37 kB and `dte-sdk/pdf` from 13.2 kB
 to 13.21 kB, all three under their limits.

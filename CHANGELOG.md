@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.12.0] - 2026-11-14
-
 ### Added
 
 - **`Document.warnings`: what the SII accepts with an objection.** `createDocument` builds a document the SII
@@ -21,6 +19,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it.
   - **What to change:** nothing. Read `warnings` to tell the receiver of a settlement invoice that settles nothing,
     for example.
+
+### Changed
+
+- **`createDocument` refuses before stamping what the SII rejects in a document's content.** The SII rejects these
+  documents after their folio is spent, and some of them take the whole envelope down with them. They now throw
+  before anything is stamped, each with the field in `details.field`, and each check stops at the first fault:
+  - more than 60 `items` on any type but a receipt, and more than 1,000 on a receipt, as `Detalle` admits in each root
+    of `DTE_v10.xsd` and in `EnvioBOLETA_v11.xsd`: `INVALID_OPTION` (`items`). Only a 43 was held to the 60 before;
+  - an `issuer.activityCode` missing on any type but a receipt, which every root of `DTE_v10.xsd` requires as `Acteco`
+    (Formato DTE 2.5, field 37): `MISSING_FIELD` (`issuer.activityCode`); one that is not a positive integer of at
+    most six digits: `INVALID_OPTION`. A receipt still leaves it out of its XML;
+  - an informative subtotal without its `description` on any type but a receipt, which `DTE_v10.xsd` requires as
+    `GlosaSTI`: `MISSING_FIELD` (`subtotals[i].description`). The description is now sanitized and held to its 40
+    characters (`FIELD_TOO_LONG`) on every type, as the other texts are;
+  - a line amount that is not a whole number, or that is below zero on any type but a settlement invoice (43), since
+    `MontoItem` is a whole number from zero up in `Documento` and in a receipt: `INVALID_AMOUNT` (`items[i].amount`).
+    A line discount above 100 % gave one;
+  - over the totals, worked out or given: a net amount, an exempt amount, a VAT or a total that is not a whole number,
+    or is below zero on any type but a 43 (`INVALID_AMOUNT`); an invoice (33) without VAT, which validation 55 of the
+    SII's "Nuevas validaciones a la IECV, DTE y DJ 3327 y 3328" rejects (`MISSING_FIELD`, `totals.vatAmount`); an
+    exempt invoice (34) without an exempt amount above zero, or with a net amount or a VAT other than zero, which
+    validation 57 rejects (`MISSING_FIELD` or `INVALID_AMOUNT`, `totals.exemptAmount`, `totals.netAmount` or
+    `totals.vatAmount`);
+  - a `totals.totalAmount` that is not the net amount, the exempt amount and the VAT, less the VAT withheld (code 15)
+    and the commissions and other charges with their VAT (Formato DTE 2.5, field 124), and a `totals.periodAmount`
+    that is not the total plus the non-billable amount (field 126): the new `TOTAL_MISMATCH`, with `expected` and
+    `actual`. A total whose totals carry a tax code other than 15 is not checked, because which of those codes add to
+    the total and which come off it waits for the catalog of additional taxes.
+  - **What to change:** give every issuer of an invoice, a guide or a note its `activityCode`, and every informative
+    subtotal its `description`: without them the SII's schema rejected the envelope. An invoice whose lines are all
+    exempt is an exempt invoice (34). Totals given by hand have to add up. A global amount discount on an exempt
+    invoice needs `exemptIndicator: 1`: without it the discount was taken from the affected amounts, of which the
+    invoice has none, and the total came out below the exempt amount.
+- **A receipt (39) issued without `pricesIncludeVat` carries `IndMntNeto` 2.** Its totals were worked out from net
+  lines, and without the indicator Formato de Boletas 4.2 (`IdDoc`, field 6) reads a receipt's lines as VAT included.
+  `createDocument` now sets `options.netAmountsIndicator: 2` on a 39 whose totals carry a net amount and whose prices
+  do not include VAT, as it sets `MntBruto` on an invoice whose prices do. An exempt receipt (41) gets none, since the
+  indicator does not apply to it.
+  - **What to change:** nothing. A receipt whose prices include VAT needs `pricesIncludeVat: true`, as before.
+- **`createEnvelope` refuses more documents than an envelope admits.** `SetDTE` holds at most 2,000 documents in
+  `EnvioDTE_v10.xsd` and 500 in `EnvioBOLETA_v11.xsd`; more now throw `INVALID_OPTION` with `documents` in
+  `details.field` and the kind in `details.kind`. Each kind admits as many types as its 20 and 2 `SubTotDTE`, or
+  fewer, so the count of types needs no check.
+  - **What to change:** split a larger batch into several envelopes.
+- **Size:** the content rules took `dte-sdk` from 37.66 kB to 38.16 kB, over its 38 kB limit, which went to 40 kB, and
+  `dte-sdk/portal` from 79.02 kB to 79.67 kB, under its limit; the new error code took `dte-sdk/node` from 7.36 kB to
+  7.37 kB and `dte-sdk/pdf` from 13.2 kB to 13.21 kB.
+
+
+## [0.12.0] - 2026-11-14
+
+### Added
+
 - **A receipt on continuous paper, with the printed stamp as an option.** `renderPrintedSample` takes `paper: 'roll'`
   to print the continuous paper the printed-samples manual allows (its "papel continuo", the format of a point of sale
   printer) instead of the sheet: a page 80 mm wide, above the manual's least width of 7.5 cm, with the 0.5 cm border,
@@ -170,51 +221,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **What to change:** nothing. A state saved by an earlier version has no `simulationCafs` and behaves as before.
 - **Size:** these changes took `dte-sdk` from 37.27 kB to 37.62 kB, `dte-sdk/node` from 7.09 kB to 7.36 kB and
   `dte-sdk/portal` from 78.51 kB to 78.98 kB, all under their limits.
-
-- **`createDocument` refuses before stamping what the SII rejects in a document's content.** The SII rejects these
-  documents after their folio is spent, and some of them take the whole envelope down with them. They now throw
-  before anything is stamped, each with the field in `details.field`, and each check stops at the first fault:
-  - more than 60 `items` on any type but a receipt, and more than 1,000 on a receipt, as `Detalle` admits in each root
-    of `DTE_v10.xsd` and in `EnvioBOLETA_v11.xsd`: `INVALID_OPTION` (`items`). Only a 43 was held to the 60 before;
-  - an `issuer.activityCode` missing on any type but a receipt, which every root of `DTE_v10.xsd` requires as `Acteco`
-    (Formato DTE 2.5, field 37): `MISSING_FIELD` (`issuer.activityCode`); one that is not a positive integer of at
-    most six digits: `INVALID_OPTION`. A receipt still leaves it out of its XML;
-  - an informative subtotal without its `description` on any type but a receipt, which `DTE_v10.xsd` requires as
-    `GlosaSTI`: `MISSING_FIELD` (`subtotals[i].description`). The description is now sanitized and held to its 40
-    characters (`FIELD_TOO_LONG`) on every type, as the other texts are;
-  - a line amount that is not a whole number, or that is below zero on any type but a settlement invoice (43), since
-    `MontoItem` is a whole number from zero up in `Documento` and in a receipt: `INVALID_AMOUNT` (`items[i].amount`).
-    A line discount above 100 % gave one;
-  - over the totals, worked out or given: a net amount, an exempt amount, a VAT or a total that is not a whole number,
-    or is below zero on any type but a 43 (`INVALID_AMOUNT`); an invoice (33) without VAT, which validation 55 of the
-    SII's "Nuevas validaciones a la IECV, DTE y DJ 3327 y 3328" rejects (`MISSING_FIELD`, `totals.vatAmount`); an
-    exempt invoice (34) without an exempt amount above zero, or with a net amount or a VAT other than zero, which
-    validation 57 rejects (`MISSING_FIELD` or `INVALID_AMOUNT`, `totals.exemptAmount`, `totals.netAmount` or
-    `totals.vatAmount`);
-  - a `totals.totalAmount` that is not the net amount, the exempt amount and the VAT, less the VAT withheld (code 15)
-    and the commissions and other charges with their VAT (Formato DTE 2.5, field 124), and a `totals.periodAmount`
-    that is not the total plus the non-billable amount (field 126): the new `TOTAL_MISMATCH`, with `expected` and
-    `actual`. A total whose totals carry a tax code other than 15 is not checked, because which of those codes add to
-    the total and which come off it waits for the catalog of additional taxes.
-  - **What to change:** give every issuer of an invoice, a guide or a note its `activityCode`, and every informative
-    subtotal its `description`: without them the SII's schema rejected the envelope. An invoice whose lines are all
-    exempt is an exempt invoice (34). Totals given by hand have to add up. A global amount discount on an exempt
-    invoice needs `exemptIndicator: 1`: without it the discount was taken from the affected amounts, of which the
-    invoice has none, and the total came out below the exempt amount.
-- **A receipt (39) issued without `pricesIncludeVat` carries `IndMntNeto` 2.** Its totals were worked out from net
-  lines, and without the indicator Formato de Boletas 4.2 (`IdDoc`, field 6) reads a receipt's lines as VAT included.
-  `createDocument` now sets `options.netAmountsIndicator: 2` on a 39 whose totals carry a net amount and whose prices
-  do not include VAT, as it sets `MntBruto` on an invoice whose prices do. An exempt receipt (41) gets none, since the
-  indicator does not apply to it.
-  - **What to change:** nothing. A receipt whose prices include VAT needs `pricesIncludeVat: true`, as before.
-- **`createEnvelope` refuses more documents than an envelope admits.** `SetDTE` holds at most 2,000 documents in
-  `EnvioDTE_v10.xsd` and 500 in `EnvioBOLETA_v11.xsd`; more now throw `INVALID_OPTION` with `documents` in
-  `details.field` and the kind in `details.kind`. Each kind admits as many types as its 20 and 2 `SubTotDTE`, or
-  fewer, so the count of types needs no check.
-  - **What to change:** split a larger batch into several envelopes.
-- **Size:** the content rules took `dte-sdk` from 37.66 kB to 38.16 kB, over its 38 kB limit, which went to 40 kB, and
-  `dte-sdk/portal` from 79.02 kB to 79.67 kB, under its limit; the new error code took `dte-sdk/node` from 7.36 kB to
-  7.37 kB and `dte-sdk/pdf` from 13.2 kB to 13.21 kB.
 
 ### Fixed
 
