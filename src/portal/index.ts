@@ -101,7 +101,7 @@ export {
 } from '../catalogs/certification'
 export type { TestSetKind } from '../catalogs/certification'
 export { parseTestSetText } from '../certification/set-text'
-export type { TestSet, TestCase, TestCaseItem, TestBookDocument } from '../certification/set-text'
+export type { TestSet, TestCase, TestCaseItem, TestCaseCommission, TestBookDocument } from '../certification/set-text'
 export { planCertificationSets } from '../certification/set-plan'
 export type {
   CertificationPlan,
@@ -109,11 +109,15 @@ export type {
   ExemptSetPlan,
   GuideSetPlan,
   PurchaseSetPlan,
+  SettlementSetPlan,
   PurchaseBookPlan,
   PlannedInvoice,
   PlannedNote,
   PlannedGuide,
   PlannedItem,
+  PlannedSettlement,
+  PlannedSettlementLine,
+  PlannedCommission,
   SetFolios,
 } from '../certification/set-plan'
 export { createFolioAllocator } from '../certification/folios'
@@ -193,6 +197,7 @@ export type {
   SentEnvelope,
   SentCase,
   SentSet,
+  SentSetKey,
   SentBook,
   BooksState,
   AccumulatedTotals,

@@ -3,7 +3,6 @@ import {
   BOOK_FILE_NAMES,
   BOOK_KEYS,
   MANDATORY_BOOK_KEYS,
-  SET_KEYS,
   TEST_SET_PORTAL_NAMES,
   type BookKey,
 } from '../catalogs/certification'
@@ -21,7 +20,7 @@ import {
 } from './books'
 import { fieldDiagnosis, queryFieldUploadState, type FieldUploadState } from './field-status'
 import { uploadForTrackId } from './field-upload'
-import type { BooksState, CertificationState, SentBook } from './state'
+import { SENT_SET_KEYS, type BooksState, type CertificationState, type SentBook } from './state'
 import {
   declareWithRetries,
   entryOf,
@@ -323,12 +322,12 @@ type BooksDeclaration = {
   readonly detail: string | null
 }
 
-// Declares every book that has a track id together with the four sets: the portal resets to S01 any row the
+// Declares every book that has a track id together with the sets sent: the portal resets to S01 any row the
 // declaration leaves empty. The order of the entries is the order a diagnosis asks for the ones the answer does not name.
 const declareBooks = async (rt: Runtime, state: CertificationState): Promise<BooksDeclaration> => {
   const today = rt.now()
   const entries: Record<string, { trackId: string; date: string }> = {}
-  for (const key of SET_KEYS) {
+  for (const key of SENT_SET_KEYS) {
     const set = state.sets[key]
     if (set !== undefined) entries[key] = entryOf(set.trackId, today)
   }

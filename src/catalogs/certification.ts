@@ -15,7 +15,7 @@ export const TEST_SET_KINDS = {
   purchase: 'purchase',
   /** EN: Export documents (110, 111, 112); parsed, never issued. ES: `SET DOCUMENTOS DE EXPORTACION` — Documentos de exportación; se parsea, no se emite. */
   export: 'export',
-  /** EN: Settlement invoices (43); parsed, never issued. ES: `SET LIQUIDACION FACTURA` — Liquidaciones factura; se parsea, no se emite. */
+  /** EN: Settlement invoices (43); issued when the text holds it. ES: `SET LIQUIDACION FACTURA` — Liquidaciones factura; se emite cuando el texto lo trae. */
   settlement: 'settlement',
   /** EN: The sales book set: an instruction to use the basic set's documents. ES: `SET LIBRO DE VENTAS` — Instrucción de usar los documentos del set básico. */
   salesBook: 'salesBook',

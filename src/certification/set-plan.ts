@@ -1,5 +1,5 @@
-import { dispatchTypeOf, referenceCodeOf, transferReasonOf } from './set-text'
-import type { TestBookDocument, TestCase, TestCaseItem, TestSet } from './set-text'
+import { dispatchTypeOf, referenceCodeOf, settledDocumentTypeOf, transferReasonOf } from './set-text'
+import type { TestBookDocument, TestCase, TestCaseCommission, TestCaseItem, TestSet } from './set-text'
 
 /**
  * EN: An item of a case, ready to become a phase 1 line.
@@ -67,6 +67,51 @@ export type PlannedGuide = {
   readonly items: readonly PlannedItem[]
 }
 
+/**
+ * EN: A line of a settlement case: what the settlement invoice settles, with the total the set gives it.
+ * ES: Una línea de un caso de liquidación: lo que liquida la liquidación factura, con el total que le da el set.
+ */
+export type PlannedSettlementLine = {
+  /** EN: `NmbItem` item name, as the set writes it. ES: `NmbItem` — Nombre del ítem, tal como lo escribe el set. */
+  readonly name: string
+  /** EN: `QtyItem` quantity, the `CANTIDAD` column. ES: `QtyItem` — Cantidad, la columna `CANTIDAD`. */
+  readonly quantity: number
+  /** EN: `MontoItem` line amount, the `TOTAL LINEA` column: negative for a credit note or an earlier settlement. ES: `MontoItem` — Monto de la línea, la columna `TOTAL LINEA`: negativo para una nota de crédito o una liquidación anterior. */
+  readonly amount: number
+  /** EN: `TpoDocLiq` type of the settled document, from the item name. ES: `TpoDocLiq` — Tipo del documento liquidado, según el nombre del ítem. */
+  readonly settledDocumentType: string
+  /** EN: Exempt line: the name starts with `EXENTO`. ES: `IndExe` — Línea exenta: el nombre empieza con `EXENTO`. */
+  readonly exempt?: boolean
+}
+
+/**
+ * EN: A commission or other charge of a settlement case.
+ * ES: Una comisión u otro cargo de un caso de liquidación.
+ */
+export type PlannedCommission = {
+  /** EN: `commission` when the name says `COMISION`, else `otherCharge`. ES: `TipoMovim` — `commission` (C) cuando el nombre dice `COMISION`, si no `otherCharge` (O). */
+  readonly kind: 'commission' | 'otherCharge'
+  /** EN: `Glosa` description, the row name as the set writes it. ES: `Glosa` — Glosa, el nombre de la fila tal como lo escribe el set. */
+  readonly description: string
+  /** EN: `ValComNeto` net value: the line total of a row whose name does not start with `EXENTO`. ES: `ValComNeto` — Valor neto: el total de línea de una fila cuyo nombre no empieza con `EXENTO`. */
+  readonly netValue?: number
+  /** EN: `ValComExe` exempt value: the line total of a row whose name starts with `EXENTO`. ES: `ValComExe` — Valor exento: el total de línea de una fila cuyo nombre empieza con `EXENTO`. */
+  readonly exemptValue?: number
+}
+
+/**
+ * EN: A settlement invoice case (43).
+ * ES: Un caso de liquidación factura (43).
+ */
+export type PlannedSettlement = {
+  /** EN: Id of the case, for example `4256-1`. ES: Id del caso, por ejemplo `4256-1`. */
+  readonly caseId: string
+  /** EN: The lines of the case, in order. ES: `Detalle` — Las líneas del caso, en orden. */
+  readonly lines: readonly PlannedSettlementLine[]
+  /** EN: The commissions and other charges of the case, in order; often none. ES: `Comisiones` — Las comisiones y otros cargos del caso, en orden; a menudo ninguno. */
+  readonly commissions: readonly PlannedCommission[]
+}
+
 /** EN: Folios each document type needs. ES: Folios que necesita cada tipo de documento. */
 export type SetFolios = Readonly<Record<number, number>>
 
@@ -130,6 +175,21 @@ export type PurchaseSetPlan = {
 }
 
 /**
+ * EN: The settlement set: one settlement invoice (43) per case.
+ * ES: El set de liquidación factura: una 43 por caso.
+ */
+export type SettlementSetPlan = {
+  /** EN: Set kind: `settlement`. ES: Tipo de set: `settlement`. */
+  readonly kind: 'settlement'
+  /** EN: `NUMERO DE ATENCION` of the set. ES: `NUMERO DE ATENCION` del set. */
+  readonly attentionNumber: string
+  /** EN: Settlement invoice cases (43). ES: Casos de liquidación factura (43). */
+  readonly settlements: readonly PlannedSettlement[]
+  /** EN: Folios needed per document type. ES: Folios que se necesitan por tipo de documento. */
+  readonly folios: SetFolios
+}
+
+/**
  * EN: A purchase-book set: the supplier documents and the proportionality factor (0.6 when the set gives none).
  * ES: Un set de libro de compras: los documentos de proveedor y el factor de proporcionalidad (0,6 si el set no lo trae).
  */
@@ -159,6 +219,8 @@ export type CertificationPlan = {
   readonly guide?: GuideSetPlan
   /** EN: Plan of the `purchase` set, when the text has it. ES: Plan del set `purchase`, cuando el texto lo trae. */
   readonly purchase?: PurchaseSetPlan
+  /** EN: Plan of the `settlement` set, when the text has it: it is there only when the set was asked for on download. ES: Plan del set `settlement`, cuando el texto lo trae: solo está si el set se pidió al descargar. */
+  readonly settlement?: SettlementSetPlan
   /** EN: Plan of the `purchaseBook` set, when the text has it. ES: Plan del set `purchaseBook`, cuando el texto lo trae. */
   readonly purchaseBook?: PurchaseBookPlan
   /** EN: Plan of the `exemptPurchaseBook` set, when the text has it. ES: Plan del set `exemptPurchaseBook`, cuando el texto lo trae. */
@@ -287,6 +349,37 @@ const purchasePlan = (set: TestSet): PurchaseSetPlan | undefined => {
   }
 }
 
+// The set names an exempt line or charge by its first word, `EXENTO`, and a taxed one by `NETO`.
+const EXEMPT_ROW = /^EXENTO\b/i
+const COMMISSION_ROW = /COMISI[OÓ]N/i
+
+const settlementLine = (item: TestCaseItem): PlannedSettlementLine =>
+  compact({
+    name: item.name,
+    quantity: item.quantity,
+    amount: item.lineTotal ?? 0,
+    settledDocumentType: settledDocumentTypeOf(item.name),
+    exempt: EXEMPT_ROW.test(item.name) ? true : undefined,
+  })
+
+const commission = (row: TestCaseCommission): PlannedCommission => ({
+  kind: COMMISSION_ROW.test(row.name) ? 'commission' : 'otherCharge',
+  description: row.name,
+  ...(EXEMPT_ROW.test(row.name) ? { exemptValue: row.lineTotal } : { netValue: row.lineTotal }),
+})
+
+const settlementPlan = (set: TestSet): SettlementSetPlan => {
+  // Every case of the settlement set is a settlement invoice, whatever its text was read as.
+  const settlements = set.cases.map(
+    (testCase): PlannedSettlement => ({
+      caseId: testCase.id,
+      lines: testCase.items.map(settlementLine),
+      commissions: (testCase.commissions ?? []).map(commission),
+    }),
+  )
+  return { kind: 'settlement', attentionNumber: set.attentionNumber, settlements, folios: { 43: settlements.length } }
+}
+
 const bookPlan = (set: TestSet, kind: PurchaseBookPlan['kind']): PurchaseBookPlan => ({
   kind,
   attentionNumber: set.attentionNumber,
@@ -296,12 +389,21 @@ const bookPlan = (set: TestSet, kind: PurchaseBookPlan['kind']): PurchaseBookPla
 
 /**
  * EN: The cases each set issues, with the folios every document type needs, from the parsed sets. For each kind the
- * last set of the text wins. Export and settlement sets, the sales-book and guide-book instructions and unknown sets
- * are left out: the first two are never issued, the books come from the issued sets.
+ * last set of the text wins. Each case of the settlement set is a settlement invoice (43): its items become lines with
+ * their quantity, their line total as the amount (sign included), the type of the settled document from the item name
+ * (`settledDocumentTypeOf`) and the exempt mark when the name starts with `EXENTO`; its commissions and other charges
+ * keep their name as the description, take the line total as their exempt value when the name starts with `EXENTO`
+ * and as their net value otherwise, and are commissions when the name says `COMISION` and other charges when it does
+ * not. Export sets, the sales-book and guide-book instructions and unknown sets are left out: the first are never
+ * issued, the books come from the issued sets.
  * ES: Los casos que emite cada set, con los folios que necesita cada tipo de documento, a partir de los sets parseados.
- * Por cada tipo gana el último set del texto. Los sets de exportación y liquidación, las instrucciones de libro de
- * ventas y de guías y los sets desconocidos quedan fuera: los dos primeros nunca se emiten, los libros salen de los
- * sets emitidos.
+ * Por cada tipo gana el último set del texto. Cada caso del set de liquidación es una liquidación factura (43): sus
+ * ítems pasan a ser líneas con su cantidad, su total de línea como monto (con su signo), el tipo del documento
+ * liquidado según el nombre del ítem (`settledDocumentTypeOf`) y la marca de exenta cuando el nombre empieza con
+ * `EXENTO`; sus comisiones y otros cargos conservan su nombre como glosa, toman el total de línea como valor exento
+ * cuando el nombre empieza con `EXENTO` y como valor neto si no, y son comisiones cuando el nombre dice `COMISION` y
+ * otros cargos cuando no. Los sets de exportación, las instrucciones de libro de ventas y de guías y los sets
+ * desconocidos quedan fuera: los primeros nunca se emiten, los libros salen de los sets emitidos.
  * @param sets EN: the parsed sets. ES: los sets parseados.
  */
 export const planCertificationSets = (sets: readonly TestSet[]): CertificationPlan => {
@@ -313,6 +415,7 @@ export const planCertificationSets = (sets: readonly TestSet[]): CertificationPl
     else if (set.kind === 'exempt') plan.exempt = basicPlan(set, 'exempt') as ExemptSetPlan
     else if (set.kind === 'guide') plan.guide = guidePlan(set)
     else if (set.kind === 'purchase') plan.purchase = purchasePlan(set) ?? plan.purchase
+    else if (set.kind === 'settlement') plan.settlement = settlementPlan(set)
     else if (set.kind === 'purchaseBook') plan.purchaseBook = bookPlan(set, 'purchaseBook')
     else if (set.kind === 'exemptPurchaseBook') plan.exemptPurchaseBook = bookPlan(set, 'exemptPurchaseBook')
   }

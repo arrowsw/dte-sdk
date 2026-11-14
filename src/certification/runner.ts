@@ -1,4 +1,4 @@
-import { SET_KEYS, type CertificationStage } from '../catalogs/certification'
+import type { CertificationStage } from '../catalogs/certification'
 import { errorMessage } from '../errors'
 import type { PrintedSampleFile } from '../pdf/samples'
 import { runBooks } from './books-step'
@@ -6,7 +6,7 @@ import { runExchange } from './exchange-step'
 import { prepareFolios } from './folios-step'
 import { uploadPrintedSamples } from './samples-step'
 import { runtime, saveState, type CertificationDependencies } from './runtime'
-import { createCertificationState, type CertificationState } from './state'
+import { createCertificationState, SENT_SET_KEYS, type CertificationState } from './state'
 import {
   advanceToNextStage,
   declareComplianceFinal,
@@ -132,7 +132,7 @@ export const runCertification = async (
           )
         ).state
       state = (await prepareFolios(deps, state)).state
-      for (const kind of SET_KEYS) {
+      for (const kind of SENT_SET_KEYS) {
         if (state.plan![kind] === undefined || state.sets[kind] !== undefined) continue
         state = (await sendTestSet(deps, state, { kind })).state
       }

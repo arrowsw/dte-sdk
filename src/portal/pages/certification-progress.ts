@@ -125,6 +125,7 @@ const PROGRESS_STATES: readonly { readonly key: DeclarationKey; readonly pattern
   { key: 'guide', pattern: /SET GUIA[\s\S]*?DESP[\s\S]*?<b>([^<]+)<\/b>/i },
   { key: 'exempt', pattern: /SET FACTURA EXENTA[\s\S]*?<b>([^<]+)<\/b>/i },
   { key: 'purchase', pattern: /SET CASO GENERAL FACTURA COMPRA[\s\S]*?<b>([^<]+)<\/b>/i },
+  { key: 'settlement', pattern: /SET LIQUIDACION[\s\S]*?<b>([^<]+)<\/b>/i },
   { key: 'simulation', pattern: /SET(?:\s+DE)?\s+SIMULACION[\s\S]*?<b>([^<]+)<\/b>/i },
   { key: 'salesBook', pattern: /LIBRO[\s\S]*?VENTA[\s\S]*?<b>([^<]+)<\/b>/i },
   { key: 'purchaseBook', pattern: /LIBRO DE COMPRAS(?!\s+PARA EXENTOS)[\s\S]*?<b>([^<]+)<\/b>/i },
@@ -142,6 +143,7 @@ const CONTENT_ERROR_NAMES: readonly { readonly key: DeclarationKey; readonly nam
   { key: 'guide', name: 'SET GUIA DE DESPACHO' },
   { key: 'exempt', name: 'SET FACTURA EXENTA' },
   { key: 'purchase', name: 'SET CASO GENERAL FACTURA COMPRA' },
+  { key: 'settlement', name: 'SET LIQUIDACION FACTURA' },
   { key: 'simulation', name: 'SET DE SIMULACION' },
 ]
 
