@@ -423,25 +423,41 @@ const answer = { companyRut: '76543210-3', certificate, contact: { name: 'Ana Ro
 // RespuestaDTE / RecepcionEnvio: a document addressed to another RUT is EstadoRecepDTE 3 by default
 const reception = createReceptionAnswer(envelope, { ...answer, documents: { '33:1234': { state: 4 } } })
 
-// RespuestaDTE / ResultadoDTE: accepted (0), with discrepancies (1) or rejected (2); a rejection states its reason
+// RespuestaDTE / ResultadoDTE: only the documents decided, each accepted (0), with discrepancies (1) or rejected (2)
 const result = createResultAnswer(envelope, {
   ...answer,
   documents: { '33:1234': { state: 2, gloss: 'Rechazado, Ley 19.983: la mercadería no se recibió', rejectionCode: -1 } },
 })
 COMMERCIAL_RESULT_STATES[1] // 'DTE Aceptado con Discrepancias'
 
-// EnvioRecibos: Ley 19.983, for the invoices (33, 34, 43, 46) and guides (52) addressed to the company
+// EnvioRecibos: only the documents decided; Ley 19.983 names the invoices (33, 34, 43, 46) and the guides (52)
 const receipts = createGoodsReceipts(envelope, { ...answer, documents: { '33:1234': { place: 'Bodega central' } } })
 ```
 
-Each function returns the signed XML, one line, with no declaration, ready to send to the issuer. The defaults follow
-the format of the SII (Formato Mensaje de Respuesta a DTE 1.0): the envelope is received (`EstadoRecepEnv` 0) unless its
-cover names another receiver (3), a document is received (`EstadoRecepDTE` 0) unless it is addressed to another RUT
-(3), and a document addressed to the company is accepted (`EstadoDTE` 0) and any other rejected (2). The catalogs
-`ENVELOPE_RECEPTION_STATES`, `DOCUMENT_RECEPTION_STATES` and `COMMERCIAL_RESULT_STATES` hold the codes and their
-glosses. The format defines no codes for `CodRchDsc`, the negative integer of up to 3 digits that tells the reason of a
+Each function returns the signed XML, one line, with no declaration, ready to send to the issuer. Only the reception
+answer has defaults, which follow the format of the SII (Formato Mensaje de Respuesta a DTE 1.0): the envelope is
+received (`EstadoRecepEnv` 0) unless its cover names another receiver (3), and a document is received
+(`EstadoRecepDTE` 0) unless it is addressed to another RUT (3). The commercial result and the receipts have none,
+because accepting a document and acknowledging its goods have legal effect under Ley 19.983: `documents` is required
+in both, a document without a decision is left out, and nothing is accepted, rejected or receipted unless the caller
+says so. `documents: () => ({ state: 0 })` accepts every document and `documents: () => ({})` receipts every one. The
+catalogs `ENVELOPE_RECEPTION_STATES`, `DOCUMENT_RECEPTION_STATES` and `COMMERCIAL_RESULT_STATES` hold the codes and
+their glosses. The format defines no codes for `CodRchDsc`, the negative integer of up to 3 digits that tells the reason of a
 rejection or a discrepancy: a rejection writes -1 unless `rejectionCode` says otherwise. Check the envelope with
-`verifyReceivedDocuments` before answering 0.
+`verifyReceivedDocuments` before answering 0 or accepting a document.
+
+`readReceivedEnvelope`, and each function when it is given the text, reads the envelope the way
+`verifyReceivedDocuments` reads it, strictly and from the same elements, so the documents answered are the documents
+verified: an `EnvioDTE` or `EnvioBOLETA` with no DOCTYPE, one `SetDTE` with every `DTE` directly inside it, and each
+document giving its own type, folio, date, issuer, receiver and total. Nothing is taken from the cover and no number is
+converted: a document that lacks one of them, or writes a folio such as `12abc`, refuses the envelope with
+`XML_PARSE_FAILED`, and `details.field` and `details.index` name the element and the document. To answer an envelope
+that cannot be read (`EstadoRecepEnv` 1 or 91), pass a `ReceivedEnvelope` built by hand with no documents.
+
+A record names a document by its type and folio alone, so each of its keys has to be one document of the envelope. A
+record is refused with `INVALID_OPTION` (`details.key` names the key) when one of its keys names no document, so a
+mistyped key never drops its decision, and for an envelope where two documents share a type and a folio, a repeated
+document among them: decide those with the function, which receives each document's position.
 
 ## Received documents
 

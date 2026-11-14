@@ -29,20 +29,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now a receiver in production can. `createReceptionAnswer` builds the `RespuestaDTE` with the `RecepcionEnvio` and a
   `RecepcionDTE` for each document, `createResultAnswer` the `RespuestaDTE` with the `ResultadoDTE` of the commercial
   result, and `createGoodsReceipts` the `EnvioRecibos` of Ley 19.983; each is signed, takes the envelope as received
-  (or read with the new `readReceivedEnvelope`) and works on its own. The caller decides each document through a
-  function of the document and its position, or a record keyed by `documentKey` (`'33:1234'`), choosing its state and
-  its gloss, and a `null` leaves the document out. The defaults follow the format of the SII: a document addressed to
-  another RUT than the company's is `EstadoRecepDTE` 3 ("DTE No Recibido - Error en RUT Receptor") in the reception
-  answer and is rejected (`EstadoDTE` 2, `CodRchDsc` -1) in the result, and the receipts cover the documents addressed
-  to the company of the types the law names (33, 34, 43, 46 and 52). `ENVELOPE_RECEPTION_STATES` (`EstadoRecepEnv`),
-  `DOCUMENT_RECEPTION_STATES` (`EstadoRecepDTE`) and `COMMERCIAL_RESULT_STATES` (`EstadoDTE`) hold every code of the
-  format with its gloss, and the states are typed unions (`EnvelopeReceptionState`, `DocumentReceptionState`,
-  `CommercialResultState`). A state outside them, a gloss over 256 characters and a `CodRchDsc` that is not a negative
-  integer of up to 3 digits are refused with `INVALID_OPTION` (`details.field` names it); the format defines no codes
-  for `CodRchDsc`, so the caller picks them. All of it is in the root entry. `dte-sdk` grows from 35.51 kB to
-  37.27 kB, over its 36 kB limit, which went to 38 kB; `dte-sdk/portal` grows from 77.82 kB to 78.51 kB, and its limit from 78 kB to 80 kB.
-  - **What to change:** nothing. `createExchangeAnswers` and `parseExchangeSet` of `dte-sdk/portal` are now built on
-    these functions and write the same bytes as before.
+  (or read with the new `readReceivedEnvelope`) and works on its own. The envelope is read the way
+  `verifyReceivedDocuments` reads it, strictly and from the same elements, so the documents answered are the documents
+  verified: an `EnvioDTE` or `EnvioBOLETA` with no DOCTYPE, one `SetDTE` with every `DTE` directly inside it, and each
+  document giving its own type, folio, issue date, issuer, receiver and total. Nothing is taken from the cover and no
+  number is converted: a document that lacks one of them, or whose type, folio or total is not a whole number written
+  in digits, refuses the envelope with `XML_PARSE_FAILED` (`details.field` names the element and `details.index` the
+  document). The caller decides each document through a function of the document and its position, or a record keyed
+  by `documentKey` (`'33:1234'`), choosing its state and its gloss, and a `null` leaves the document out. A record
+  names a document by its type and folio alone, so it is refused with `INVALID_OPTION` (`details.key` names the key)
+  for an envelope where two documents share them, which the function decides by their position, and when one of its
+  keys names no document of the envelope, so a mistyped key never drops its decision. Only the reception answer has
+  defaults, which follow the format of the SII: a document addressed to another RUT than the company's is
+  `EstadoRecepDTE` 3 ("DTE No Recibido - Error en RUT Receptor") and any other is received (0). The commercial result
+  and the receipts have none, because accepting a document and acknowledging its goods have legal effect under Ley
+  19.983: `documents` is required in `createResultAnswer` and in `createGoodsReceipts` (`INVALID_OPTION` without it),
+  a document without a decision is left out, and nothing is accepted, rejected or receipted unless the caller says so;
+  `documents: () => ({ state: 0 })` accepts every document and `documents: () => ({})` receipts every one. A rejection
+  without a code writes `CodRchDsc` -1. `ENVELOPE_RECEPTION_STATES` (`EstadoRecepEnv`), `DOCUMENT_RECEPTION_STATES`
+  (`EstadoRecepDTE`) and `COMMERCIAL_RESULT_STATES` (`EstadoDTE`) hold every code of the format with its gloss, and
+  the states are typed unions (`EnvelopeReceptionState`, `DocumentReceptionState`, `CommercialResultState`). A state
+  outside them, a gloss over 256 characters and a `CodRchDsc` that is not a negative integer of up to 3 digits are
+  refused with `INVALID_OPTION` (`details.field` names it); the format defines no codes for `CodRchDsc`, so the caller
+  picks them. All of it is in the root entry. `dte-sdk` grows from 35.51 kB to 37.27 kB, over its 36 kB limit, which
+  went to 38 kB; `dte-sdk/portal` grows from 77.82 kB to 78.51 kB, and its limit from 78 kB to 80 kB.
+  - **What to change:** nothing. `createExchangeAnswers` of `dte-sdk/portal` is now built on these answers and writes
+    the same bytes as before; `parseExchangeSet` keeps its loose reading, for the set the SII itself serves in the
+    certification.
+  - **For who built from `canary` since these functions entered it** (they have not been in a release):
+    - `createResultAnswer` and `createGoodsReceipts` need `documents`. Before, without decisions the result accepted
+      every document addressed to the company and rejected the rest, and the receipts covered the documents addressed
+      to the company of the types 33, 34, 43, 46 and 52; with a record, the documents it did not name took those
+      defaults too, so a record that rejected one document accepted the others. Now a document without a decision is
+      left out of both, and a call without `documents` throws `INVALID_OPTION` (`details.field` `documents`). To
+      accept or receipt a document, decide it. `createReceptionAnswer` keeps its defaults.
+    - `readReceivedEnvelope`, and the three functions when they are given the text, read strictly. Before, the reading
+      was the loose one of the certification's exchange: a document without a receiver, with an empty one or with two
+      took the receiver of the cover, so it could pass for a document addressed to the company; a folio `12abc` read
+      as 12 and `0x10` as 16; a `SetDTE` outside the root and a `DTE` nested in another were read, where the
+      verification refuses them; and a settlement invoice (`Liquidacion`) read as a document of type 0. An envelope
+      could be verified as one thing and answered as another. An envelope that cannot be read now throws where it was
+      answered with zeros and empty fields: to reject it (`EstadoRecepEnv` 1 or 91), pass a `ReceivedEnvelope` built
+      by hand with no documents. The roots `EnvioDTEB` and `EnvioDTETraslado`, the `TpoDoc`, `RutEmisor` and
+      `RutRecep` tags of a document and an `ID` child as the id of the set are read by `parseExchangeSet` alone.
+    - `documentKey` keeps its format, so no key changes. A record is now refused for an envelope where two documents
+      share a type and a folio, whether they come from one issuer or from two and whether the record names that key or
+      not; before, the two took the one decision. Decide such an envelope with the function. A record is refused too
+      when one of its keys names no document of the envelope; before, the key was ignored, so a mistyped rejection was
+      never sent. A record that held keys of other envelopes has to be cut down to the one it decides.
+    - **Size:** on top of every change in this section, the strict reading and the checks on the decisions take
+      `dte-sdk` from 37.62 kB to 37.66 kB and `dte-sdk/portal` from 78.98 kB to 79.02 kB, both under their limits.
 - **`ProgressReport.text`, and the page of a rejected test set kept.** `readProgress` hands over the readable text of
   the progress page, up to 6000 characters, in a new `text` field. When that page rejects a set,
   `waitForTestSetsApproval` still returns the labels in `detail`, and now saves the text as the artefact
