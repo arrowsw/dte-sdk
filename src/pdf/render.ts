@@ -36,7 +36,7 @@ import {
   type Field,
   type Fonts,
 } from './draw'
-import type { PrintableDocument } from './parse'
+import type { PrintableCommission, PrintableDocument, PrintableItem, PrintableReference } from './parse'
 import { buildRoll, drawRoll, rollHeight } from './roll'
 import { loadBarcodeModule, renderTedBarcodeWith, type BarcodeModule } from './stamp'
 
@@ -160,6 +160,31 @@ const measureHeader = (doc: PrintableDocument, fonts: Fonts, logo: PDFImage | nu
   return Math.max(left, right)
 }
 
+const TYPE_BOX_X = PAGE.width - MARGIN - TYPE_BOX.width
+
+const logoSize = (logo: PDFImage): { readonly width: number; readonly height: number } => {
+  const maxWidth = Math.min((TYPE_BOX_X - MARGIN - GAP.section) * 0.4, 120)
+  const scale = Math.min(maxWidth / logo.width, 25 / logo.height)
+  return { width: logo.width * scale, height: logo.height * scale }
+}
+
+// Where the header drawn from `y` ends: under the issuer's lines on the left, or under the SII office (and the page
+// number, on a document of several pages) on the right.
+const headerBottom = (
+  doc: PrintableDocument,
+  fonts: Fonts,
+  logo: PDFImage | null,
+  y: number,
+  numbered: boolean,
+): number => {
+  let left = y
+  if (logo) left += logoSize(logo).height + GAP.small
+  left += LINE.normal
+  left += LINE.small
+  left += LINE.small
+  return Math.max(left, y + measureTypeBox(doc, fonts) + GAP.small + LINE.small + (numbered ? LINE.small : 0))
+}
+
 const fieldWidth = (fonts: Fonts, [label, value]: Field): number =>
   fonts.bold.widthOfTextAtSize(label, FONT.small) + fonts.normal.widthOfTextAtSize(value, FONT.small)
 
@@ -187,19 +212,6 @@ const transportLines = (doc: PrintableDocument, fonts: Fonts): readonly (readonl
   return lines
 }
 
-const measureReferences = (doc: PrintableDocument): number =>
-  doc.references.length === 0
-    ? 0
-    : LINE.normal + GAP.small + TABLE.headerHeight + doc.references.length * TABLE.rowHeight + GAP.section
-
-const measureDetail = (doc: PrintableDocument, fonts: Fonts): number =>
-  LINE.normal +
-  GAP.small +
-  TABLE.headerHeight +
-  doc.items.reduce((sum, item) => sum + itemRow(item, fonts, MEASURED_DESCRIPTION_WIDTH).height, 0)
-
-const measureTotals = (doc: PrintableDocument): number => totalRows(doc).length * (TABLE.rowHeight + 2) + 8
-
 const measureAcknowledgement = (legendLines: number): number => {
   const fields = BOX.fieldHeight * 4 + GAP.small * 3
   return BOX.padY * 2 + fields + GAP.small + legendLines * LINE.legal + GAP.small
@@ -207,25 +219,25 @@ const measureAcknowledgement = (legendLines: number): number => {
 
 // ── Drawing pass ─────────────────────────────────────────────────────────────
 
+// The header of every page: the issuer, the type box and the SII office, and on a document of several pages the page
+// number under the office.
 const drawHeader = (
   canvas: Canvas,
   doc: PrintableDocument,
   logo: PDFImage | null,
-  y: number,
   siiOffice: string,
-): number => {
+  page: { readonly number: number; readonly of: number },
+): void => {
   const { fonts } = canvas
   const black = canvas.paint(COLOURS.black)
   const red = canvas.paint(COLOURS.red)
   const boxHeight = measureTypeBox(doc, fonts)
-  const boxX = PAGE.width - MARGIN - TYPE_BOX.width
+  const boxX = TYPE_BOX_X
   const { issuer } = doc
+  const y = MARGIN
   let ly = y
   if (logo) {
-    const maxWidth = Math.min((boxX - MARGIN - GAP.section) * 0.4, 120)
-    const scale = Math.min(maxWidth / logo.width, 25 / logo.height)
-    const width = logo.width * scale
-    const height = logo.height * scale
+    const { width, height } = logoSize(logo)
     canvas.page.drawImage(logo, { x: MARGIN, y: canvas.height - ly - height, width, height })
     ly += height + GAP.small
   }
@@ -250,7 +262,19 @@ const drawHeader = (
   ry += GAP.tiny
   drawTextCentered(canvas, `N° ${doc.folio}`, boxX, TYPE_BOX.width, ry, fonts.bold, FONT.small, red)
   drawTextCentered(canvas, siiOffice, boxX, TYPE_BOX.width, y + boxHeight + GAP.small, fonts.normal, FONT.tiny, black)
-  return Math.max(ly, y + boxHeight + GAP.small + LINE.small)
+  if (page.of > 1) {
+    const label = `Página ${page.number} de ${page.of}`
+    drawTextCentered(
+      canvas,
+      label,
+      boxX,
+      TYPE_BOX.width,
+      y + boxHeight + GAP.small + LINE.small,
+      fonts.normal,
+      FONT.tiny,
+      black,
+    )
+  }
 }
 
 const drawIssueDate = (canvas: Canvas, doc: PrintableDocument, y: number): number => {
@@ -349,36 +373,24 @@ const drawTableHeader = (
   return y + TABLE.headerHeight
 }
 
-const drawReferences = (canvas: Canvas, doc: PrintableDocument, y: number): number => {
+const drawTitle = (canvas: Canvas, title: string, y: number): void =>
+  drawText(canvas, title, MARGIN, y, canvas.fonts.bold, FONT.normal, canvas.paint(COLOURS.black))
+
+const drawReferenceRow = (canvas: Canvas, reference: PrintableReference, y: number): void => {
   const { fonts } = canvas
   const black = canvas.paint(COLOURS.black)
   const dark = canvas.paint(COLOURS.darkGrey)
-  drawText(canvas, 'Referencias a otros documentos', MARGIN, y, fonts.bold, FONT.normal, black)
-  y += LINE.normal + GAP.small
-  y = drawTableHeader(canvas, y, ['Tipo Documento', 'Folio', 'Fecha', 'Razón Referencia'], REFERENCE_COLUMNS, [
-    'left',
-    'left',
-    'left',
-    'left',
-  ])
-  for (const reference of doc.references) {
-    const values = [referenceTypeName(reference.documentType), reference.folio, reference.date, reference.reason]
-    let cx = MARGIN
-    values.forEach((value, index) => {
-      drawRect(canvas, cx, y, REFERENCE_COLUMNS[index], TABLE.rowHeight, { stroke: dark, strokeWidth: 0.5 })
-      drawText(canvas, value, cx + TABLE.padX, y + TABLE.padY, fonts.normal, FONT.tiny, black)
-      cx += REFERENCE_COLUMNS[index]
-    })
-    y += TABLE.rowHeight
-  }
-  return y
+  const values = [referenceTypeName(reference.documentType), reference.folio, reference.date, reference.reason]
+  let cx = MARGIN
+  values.forEach((value, index) => {
+    drawRect(canvas, cx, y, REFERENCE_COLUMNS[index], TABLE.rowHeight, { stroke: dark, strokeWidth: 0.5 })
+    drawText(canvas, value, cx + TABLE.padX, y + TABLE.padY, fonts.normal, FONT.tiny, black)
+    cx += REFERENCE_COLUMNS[index]
+  })
 }
 
-const drawDetail = (canvas: Canvas, doc: PrintableDocument, y: number): number => {
-  const { fonts } = canvas
-  const black = canvas.paint(COLOURS.black)
-  const dark = canvas.paint(COLOURS.darkGrey)
-  const columns = [
+const detailColumns = (doc: PrintableDocument) =>
+  [
     { key: 'num', width: DETAIL_COLUMNS.num, label: '#', align: 'center' },
     { key: 'code', width: DETAIL_COLUMNS.code, label: 'Código', align: 'left' },
     { key: 'description', width: DETAIL_COLUMNS.description, label: 'Descripción', align: 'left' },
@@ -392,88 +404,143 @@ const drawDetail = (canvas: Canvas, doc: PrintableDocument, y: number): number =
     },
     { key: 'amount', width: DETAIL_COLUMNS.amount, label: doc.grossAmounts ? 'Valor c/IVA' : 'Valor', align: 'right' },
   ] as const
-  drawText(canvas, 'Detalle', MARGIN, y, fonts.bold, FONT.normal, black)
-  y += LINE.normal + GAP.small
-  y = drawTableHeader(
-    canvas,
-    y,
-    columns.map((column) => column.label),
-    columns.map((column) => column.width),
-    columns.map((column) => column.align),
-  )
-  doc.items.forEach((item, index) => {
-    const row = itemRow(item, fonts, DETAIL_COLUMNS.description - TABLE.padX * 2)
-    const values: Readonly<Record<(typeof columns)[number]['key'], string>> = {
-      num: String(index + 1),
-      code: item.code,
-      description: '',
-      quantity: item.quantity === undefined ? '' : String(item.quantity),
-      unit: item.unit ?? 'UN',
-      unitPrice: item.unitPrice === undefined ? '' : `$${formatAmount(item.unitPrice)}`,
-      amount: item.amount === undefined ? '' : `$${formatAmount(item.amount)}`,
-    }
-    let cx = MARGIN
-    for (const column of columns) {
-      drawRect(canvas, cx, y, column.width, row.height, { stroke: dark, strokeWidth: 0.5 })
-      if (column.key === 'description') {
-        let ty = y + TABLE.padY
-        for (const line of row.lines) {
-          drawText(canvas, line, cx + TABLE.padX, ty, fonts.normal, FONT.tiny, black)
-          ty += LINE.tiny
-        }
-        if (row.hasDiscount) {
-          const discount = item.discountAmount
-            ? `Dcto: $${formatAmount(item.discountAmount)}`
-            : `Dcto: ${item.discountPercent}%`
-          drawText(canvas, discount, cx + TABLE.padX, ty, fonts.normal, FONT.legal, canvas.paint(COLOURS.darkGrey))
-        }
-      } else {
-        const value = values[column.key]
-        const valueWidth = fonts.normal.widthOfTextAtSize(value, FONT.tiny)
-        const x =
-          column.align === 'center'
-            ? cx + (column.width - valueWidth) / 2
-            : column.align === 'right'
-              ? cx + column.width - valueWidth - TABLE.padX
-              : cx + TABLE.padX
-        drawText(canvas, value, x, y + (row.height - FONT.tiny) / 2, fonts.normal, FONT.tiny, black)
-      }
-      cx += column.width
-    }
-    y += row.height
-  })
-  return y
-}
 
-const drawTotals = (canvas: Canvas, doc: PrintableDocument, y: number): number => {
+type DetailColumn = ReturnType<typeof detailColumns>[number]
+type ItemLayout = ReturnType<typeof itemRow>
+
+const drawItemRow = (
+  canvas: Canvas,
+  columns: readonly DetailColumn[],
+  item: PrintableItem,
+  index: number,
+  row: ItemLayout,
+  y: number,
+): void => {
   const { fonts } = canvas
   const black = canvas.paint(COLOURS.black)
   const dark = canvas.paint(COLOURS.darkGrey)
-  const boxWidth = Math.round(PAGE.width * 0.45)
-  const boxX = PAGE.width - MARGIN - boxWidth
-  const rowHeight = TABLE.rowHeight + 2
-  const labelWidth = Math.round(boxWidth * 0.55)
-  const valueWidth = boxWidth - labelWidth
-  const rows = totalRows(doc)
-  let ry = y + 2
-  for (const [label, value, bold] of rows) {
+  const values: Readonly<Record<DetailColumn['key'], string>> = {
+    num: String(index + 1),
+    code: item.code,
+    description: '',
+    quantity: item.quantity === undefined ? '' : String(item.quantity),
+    unit: item.unit ?? 'UN',
+    unitPrice: item.unitPrice === undefined ? '' : `$${formatAmount(item.unitPrice)}`,
+    amount: item.amount === undefined ? '' : `$${formatAmount(item.amount)}`,
+  }
+  let cx = MARGIN
+  for (const column of columns) {
+    drawRect(canvas, cx, y, column.width, row.height, { stroke: dark, strokeWidth: 0.5 })
+    if (column.key === 'description') {
+      let ty = y + TABLE.padY
+      for (const line of row.lines) {
+        drawText(canvas, line, cx + TABLE.padX, ty, fonts.normal, FONT.tiny, black)
+        ty += LINE.tiny
+      }
+      if (row.hasDiscount) {
+        const discount = item.discountAmount
+          ? `Dcto: $${formatAmount(item.discountAmount)}`
+          : `Dcto: ${item.discountPercent}%`
+        drawText(canvas, discount, cx + TABLE.padX, ty, fonts.normal, FONT.legal, canvas.paint(COLOURS.darkGrey))
+      }
+    } else {
+      const value = values[column.key]
+      const valueWidth = fonts.normal.widthOfTextAtSize(value, FONT.tiny)
+      const x =
+        column.align === 'center'
+          ? cx + (column.width - valueWidth) / 2
+          : column.align === 'right'
+            ? cx + column.width - valueWidth - TABLE.padX
+            : cx + TABLE.padX
+      drawText(canvas, value, x, y + (row.height - FONT.tiny) / 2, fonts.normal, FONT.tiny, black)
+    }
+    cx += column.width
+  }
+}
+
+const COMMISSION_COLUMNS = (() => {
+  const kind = Math.round(TABLE_WIDTH * 0.12)
+  const rate = Math.round(TABLE_WIDTH * 0.08)
+  const net = Math.round(TABLE_WIDTH * 0.14)
+  const exempt = Math.round(TABLE_WIDTH * 0.14)
+  const vat = Math.round(TABLE_WIDTH * 0.12)
+  return [kind, TABLE_WIDTH - kind - rate - net - exempt - vat, rate, net, exempt, vat] as const
+})()
+
+// A commission's row: its kind, its description wrapped in its column, its rate and its three values as written.
+const commissionRow = (commission: PrintableCommission, fonts: Fonts) => {
+  const amount = (value: number | undefined): string => (value === undefined ? '' : `$${formatAmount(value)}`)
+  const lines = wrapText(commission.description, fonts.normal, FONT.tiny, COMMISSION_COLUMNS[1] - TABLE.padX * 2)
+  return {
+    lines,
+    values: [
+      commission.kind === 'O' ? 'Otros cargos' : 'Comisión',
+      '',
+      commission.rate === undefined ? '' : `${formatAmount(commission.rate)}%`,
+      amount(commission.net),
+      amount(commission.exempt),
+      amount(commission.vat),
+    ],
+    height: Math.max(TABLE.rowHeight, lines.length * LINE.tiny + TABLE.padY * 2),
+  }
+}
+
+const drawCommissionRow = (canvas: Canvas, row: ReturnType<typeof commissionRow>, y: number): void => {
+  const { fonts } = canvas
+  const black = canvas.paint(COLOURS.black)
+  const dark = canvas.paint(COLOURS.darkGrey)
+  let cx = MARGIN
+  row.values.forEach((value, index) => {
+    const width = COMMISSION_COLUMNS[index]
+    drawRect(canvas, cx, y, width, row.height, { stroke: dark, strokeWidth: 0.5 })
+    if (index === 1)
+      row.lines.forEach((line, at) =>
+        drawText(canvas, line, cx + TABLE.padX, y + TABLE.padY + at * LINE.tiny, fonts.normal, FONT.tiny, black),
+      )
+    else {
+      const x =
+        index === 0 ? cx + TABLE.padX : cx + width - fonts.normal.widthOfTextAtSize(value, FONT.tiny) - TABLE.padX
+      drawText(canvas, value, x, y + (row.height - FONT.tiny) / 2, fonts.normal, FONT.tiny, black)
+    }
+    cx += width
+  })
+}
+
+const TOTALS_WIDTH = Math.round(PAGE.width * 0.45)
+const TOTALS_LABEL_WIDTH = Math.round(TOTALS_WIDTH * 0.55)
+
+// The rows of the totals box; a label wider than its cell, such as a tax's name, goes on over more lines.
+const totalsLayout = (doc: PrintableDocument, fonts: Fonts) =>
+  totalRows(doc).map(([label, value, bold]) => {
     const font = bold ? fonts.bold : fonts.normal
-    drawRect(canvas, boxX, ry, labelWidth, rowHeight, { stroke: dark, strokeWidth: 0.5 })
-    drawRect(canvas, boxX + labelWidth, ry, valueWidth, rowHeight, { stroke: dark, strokeWidth: 0.5 })
-    drawText(canvas, label, boxX + TABLE.padX, ry + TABLE.padY, font, FONT.normal, black)
+    const lines = wrapText(label, font, FONT.normal, TOTALS_LABEL_WIDTH - TABLE.padX * 2)
+    return { lines, value, font, height: TABLE.rowHeight + 2 + (lines.length - 1) * LINE.small }
+  })
+
+const drawTotals = (canvas: Canvas, rows: ReturnType<typeof totalsLayout>, y: number): void => {
+  const black = canvas.paint(COLOURS.black)
+  const dark = canvas.paint(COLOURS.darkGrey)
+  const boxX = PAGE.width - MARGIN - TOTALS_WIDTH
+  const valueWidth = TOTALS_WIDTH - TOTALS_LABEL_WIDTH
+  let ry = y + 2
+  for (const { lines, value, font, height } of rows) {
+    drawRect(canvas, boxX, ry, TOTALS_LABEL_WIDTH, height, { stroke: dark, strokeWidth: 0.5 })
+    drawRect(canvas, boxX + TOTALS_LABEL_WIDTH, ry, valueWidth, height, { stroke: dark, strokeWidth: 0.5 })
+    lines.forEach((line, index) =>
+      drawText(canvas, line, boxX + TABLE.padX, ry + TABLE.padY + index * LINE.small, font, FONT.normal, black),
+    )
     const width = font.widthOfTextAtSize(value, FONT.normal)
     drawText(
       canvas,
       value,
-      boxX + labelWidth + valueWidth - width - TABLE.padX,
+      boxX + TOTALS_LABEL_WIDTH + valueWidth - width - TABLE.padX,
       ry + TABLE.padY,
       font,
       FONT.normal,
       black,
     )
-    ry += rowHeight
+    ry += height
   }
-  return y + rows.length * rowHeight + 8
 }
 
 const drawAcknowledgement = (canvas: Canvas, legendLines: readonly string[], y: number): number => {
@@ -537,6 +604,227 @@ const drawTransferableMark = (canvas: Canvas, doc: PrintableDocument): void => {
   )
 }
 
+// ── Pages ────────────────────────────────────────────────────────────────────
+
+// A piece of the sheet: the height it takes, the space under it and what it draws with its top at `y`. `reserve` is the
+// height a single page measures it at when that is more than it takes (a detail row wrapped narrower), so that page is
+// never short. `keep` holds it on the page of the block after it, and `head` is the column head a page repeats above a
+// table row that opens the page.
+type Block = {
+  readonly height: number
+  readonly gap: number
+  readonly draw: (canvas: Canvas, y: number) => void
+  readonly reserve?: number
+  readonly keep?: boolean
+  readonly head?: Block
+}
+
+type Placed = { readonly block: Block; readonly y: number }
+
+type SheetInput = {
+  readonly doc: PrintableDocument
+  readonly fonts: Fonts
+  readonly stamp: PDFImage | null
+  readonly resolution: string
+  readonly transferable: boolean
+}
+
+// A table: its title and column head, kept with its first row, and one block per row. A page that opens with a row
+// repeats the column head above it.
+const tableBlocks = <T>(
+  title: string,
+  drawHead: (canvas: Canvas, y: number) => void,
+  rows: readonly T[],
+  row: (value: T, index: number) => Pick<Block, 'height' | 'draw' | 'reserve'>,
+  keepLast: boolean,
+): readonly Block[] => {
+  const head: Block = {
+    height: TABLE.headerHeight,
+    gap: rows.length === 0 ? GAP.section : 0,
+    keep: true,
+    draw: drawHead,
+  }
+  return [
+    { height: LINE.normal + GAP.small, gap: 0, keep: true, draw: (canvas, y) => drawTitle(canvas, title, y) },
+    head,
+    ...rows.map((value, index): Block => {
+      const last = index === rows.length - 1
+      return { ...row(value, index), gap: last ? GAP.section : 0, keep: last && keepLast, head }
+    }),
+  ]
+}
+
+// The sheet top to bottom, under the header: date, receiver, transfer type, transport, references, detail, and the
+// closing (totals, acknowledgement box and stamp), which keeps with the last detail row so the last page is never only
+// totals.
+const sheetBlocks = ({ doc, fonts, stamp, resolution, transferable }: SheetInput): readonly Block[] => {
+  const legendLines = transferable ? wrapText(ACKNOWLEDGEMENT_TEXT, fonts.normal, FONT.legal, BOX_INNER_WIDTH) : []
+  const transferReason = doc.type === 52 ? doc.transferReason : null
+  const transport = transportLines(doc, fonts)
+  const columns = detailColumns(doc)
+  const references =
+    doc.references.length === 0
+      ? []
+      : tableBlocks(
+          'Referencias a otros documentos',
+          (canvas, y) =>
+            drawTableHeader(canvas, y, ['Tipo Documento', 'Folio', 'Fecha', 'Razón Referencia'], REFERENCE_COLUMNS, [
+              'left',
+              'left',
+              'left',
+              'left',
+            ]),
+          doc.references,
+          (reference) => ({
+            height: TABLE.rowHeight,
+            draw: (canvas, y) => drawReferenceRow(canvas, reference, y),
+          }),
+          false,
+        )
+  const detail = tableBlocks(
+    'Detalle',
+    (canvas, y) =>
+      drawTableHeader(
+        canvas,
+        y,
+        columns.map((column) => column.label),
+        columns.map((column) => column.width),
+        columns.map((column) => column.align),
+      ),
+    doc.items,
+    (item, index) => {
+      const row = itemRow(item, fonts, DETAIL_COLUMNS.description - TABLE.padX * 2)
+      return {
+        height: row.height,
+        reserve: itemRow(item, fonts, MEASURED_DESCRIPTION_WIDTH).height,
+        draw: (canvas, y) => drawItemRow(canvas, columns, item, index, row, y),
+      }
+    },
+    true,
+  )
+  // A settlement invoice (43), and a purchase invoice or a note that corrects one, list their commissions and other
+  // charges under the detail, as Formato DTE 2.5 asks to print them (section F).
+  const commissionList = doc.commissions ?? []
+  const commissions =
+    commissionList.length === 0
+      ? []
+      : tableBlocks(
+          'Comisiones y Otros Cargos',
+          (canvas, y) =>
+            drawTableHeader(
+              canvas,
+              y,
+              ['Tipo', 'Glosa', 'Tasa', 'Valor Neto', 'Valor Exento', 'IVA'],
+              COMMISSION_COLUMNS,
+              ['left', 'left', 'right', 'right', 'right', 'right'],
+            ),
+          commissionList,
+          (commission) => {
+            const row = commissionRow(commission, fonts)
+            return { height: row.height, draw: (canvas, y) => drawCommissionRow(canvas, row, y) }
+          },
+          true,
+        )
+  const totals = totalsLayout(doc, fonts)
+  return [
+    { height: LINE.normal, gap: GAP.small, draw: (canvas, y) => drawIssueDate(canvas, doc, y) },
+    { height: RECEIVER_HEIGHT, gap: GAP.section, draw: (canvas, y) => drawReceiver(canvas, doc, y) },
+    ...(transferReason === null
+      ? []
+      : [
+          {
+            height: LINE.small,
+            gap: GAP.small,
+            draw: (canvas: Canvas, y: number) => drawTransferReason(canvas, transferReason, y),
+          },
+        ]),
+    ...(transport.length === 0
+      ? []
+      : [
+          {
+            height: boxHeight(transport.length),
+            gap: GAP.section,
+            draw: (canvas: Canvas, y: number) => drawTransport(canvas, transport, y),
+          },
+        ]),
+    ...references,
+    ...detail,
+    ...commissions,
+    {
+      height: totals.reduce((sum, row) => sum + row.height, 0) + 8,
+      gap: GAP.section,
+      keep: true,
+      draw: (canvas, y) => drawTotals(canvas, totals, y),
+    },
+    ...(transferable
+      ? [
+          {
+            height: measureAcknowledgement(legendLines.length),
+            gap: GAP.section,
+            keep: true,
+            draw: (canvas: Canvas, y: number) => drawAcknowledgement(canvas, legendLines, y),
+          },
+        ]
+      : []),
+    ...(stamp
+      ? [
+          {
+            height: GAP.section + STAMP.maxHeight + STAMP.legendGap + LINE.legal * 3,
+            gap: 0,
+            draw: (canvas: Canvas, y: number) => drawStamp(canvas, stamp, y, resolution),
+          },
+        ]
+      : []),
+  ]
+}
+
+const clampHeight = (height: number): number => Math.min(PAGE.maxHeight, Math.max(PAGE.minHeight, Math.ceil(height)))
+
+// A single page is as tall as its measured blocks between 11 and 33 cm, the header measured with the largest logo.
+const singlePageHeight = (
+  doc: PrintableDocument,
+  fonts: Fonts,
+  logo: PDFImage | null,
+  blocks: readonly Block[],
+): number =>
+  clampHeight(
+    blocks.reduce(
+      (sum, block) => sum + (block.reserve ?? block.height) + block.gap,
+      MARGIN + measureHeader(doc, fonts, logo) + GAP.section,
+    ) + MARGIN,
+  )
+
+const pageEnd = (placed: readonly Placed[]): number => {
+  const last = placed[placed.length - 1]
+  return last.y + last.block.height + last.block.gap
+}
+
+// Lays the blocks on pages of 33 cm at most, each opening under its header. A block goes to a new page when it, and
+// the blocks it keeps with, would cross the bottom margin; a page that holds nothing yet takes it anyway.
+const paginate = (headerEnd: number, blocks: readonly Block[]): readonly (readonly Placed[])[] => {
+  const need: number[] = []
+  for (let index = blocks.length - 1; index >= 0; index -= 1) {
+    const block = blocks[index]
+    need[index] = block.height + (block.keep && index < blocks.length - 1 ? block.gap + need[index + 1] : 0)
+  }
+  const top = headerEnd + GAP.section
+  const pages: Placed[][] = [[]]
+  let y = top
+  blocks.forEach((block, index) => {
+    if (pages[pages.length - 1].length > 0 && y + need[index] > PAGE.maxHeight - MARGIN) {
+      pages.push([])
+      y = top
+      if (block.head) {
+        pages[pages.length - 1].push({ block: block.head, y })
+        y += block.head.height
+      }
+    }
+    pages[pages.length - 1].push({ block, y })
+    y = y + block.height + block.gap
+  })
+  return pages
+}
+
 const embedLogo = async (document: PDFDocument, logo: PrintedLogo | undefined): Promise<PDFImage | null> => {
   if (!logo) return null
   try {
@@ -572,43 +860,30 @@ const draw = async (
     drawRoll({ page: roll, fonts, height, paint: ([r, g, b]) => pdf.rgb(r, g, b) }, rows)
     return document.save()
   }
-  const legendLines = transferable ? wrapText(ACKNOWLEDGEMENT_TEXT, fonts.normal, FONT.legal, BOX_INNER_WIDTH) : []
-  const transferReason = doc.type === 52 ? doc.transferReason : null
-  const transport = transportLines(doc, fonts)
-
-  const total =
-    MARGIN +
-    measureHeader(doc, fonts, logo) +
-    GAP.section +
-    LINE.normal +
-    GAP.small +
-    RECEIVER_HEIGHT +
-    GAP.section +
-    (transferReason === null ? 0 : LINE.small + GAP.small) +
-    (transport.length === 0 ? 0 : boxHeight(transport.length) + GAP.section) +
-    measureReferences(doc) +
-    measureDetail(doc, fonts) +
-    GAP.section +
-    measureTotals(doc) +
-    GAP.section +
-    (transferable ? measureAcknowledgement(legendLines.length) + GAP.section : 0) +
-    (stamp ? GAP.section + STAMP.maxHeight + STAMP.legendGap + LINE.legal * 3 + MARGIN : MARGIN)
-  const height = Math.min(PAGE.maxHeight, Math.max(PAGE.minHeight, Math.ceil(total)))
-
-  const page = document.addPage([PAGE.width, height])
-  const canvas: Canvas = { page, fonts, height, paint: ([r, g, b]) => pdf.rgb(r, g, b) }
-  let y = MARGIN
-  y = drawHeader(canvas, doc, logo, y, office) + GAP.section
-  y = drawIssueDate(canvas, doc, y) + GAP.small
-  y = drawReceiver(canvas, doc, y) + GAP.section
-  if (transferReason !== null) y = drawTransferReason(canvas, transferReason, y) + GAP.small
-  if (transport.length > 0) y = drawTransport(canvas, transport, y) + GAP.section
-  if (doc.references.length > 0) y = drawReferences(canvas, doc, y) + GAP.section
-  y = drawDetail(canvas, doc, y) + GAP.section
-  y = drawTotals(canvas, doc, y) + GAP.section
-  if (transferable) y = drawAcknowledgement(canvas, legendLines, y) + GAP.section
-  if (stamp) drawStamp(canvas, stamp, y, resolution)
-  if (transferable) drawTransferableMark(canvas, doc)
+  const blocks = sheetBlocks({ doc, fonts, stamp, resolution, transferable })
+  const single = paginate(headerBottom(doc, fonts, logo, MARGIN, false), blocks)
+  // A document of several pages numbers them under the SII office, so its header may be taller.
+  const pages = single.length === 1 ? single : paginate(headerBottom(doc, fonts, logo, MARGIN, true), blocks)
+  const heights = pages.map((placed, index) =>
+    pages.length === 1
+      ? singlePageHeight(doc, fonts, logo, blocks)
+      : index < pages.length - 1
+        ? PAGE.maxHeight
+        : clampHeight(pageEnd(placed) + MARGIN),
+  )
+  const canvases = pages.map((placed, index): Canvas => {
+    const height = heights[index]
+    const canvas: Canvas = {
+      page: document.addPage([PAGE.width, height]),
+      fonts,
+      height,
+      paint: ([r, g, b]) => pdf.rgb(r, g, b),
+    }
+    drawHeader(canvas, doc, logo, office, { number: index + 1, of: pages.length })
+    for (const { block, y } of placed) block.draw(canvas, y)
+    return canvas
+  })
+  if (transferable) drawTransferableMark(canvases[canvases.length - 1], doc)
   return document.save()
 }
 
@@ -623,27 +898,46 @@ const checkPaperAndStamp = (doc: PrintableDocument, { paper, stamp }: RenderPrin
 }
 
 /**
- * EN: The printed sample of one document as a single-page PDF per the SII printed-samples manual: issuer and the red
- * type box, issue date, receiver, transfer reason (guides), the transport area, references, detail, totals, the
- * acknowledgement box and the `CEDIBLE` mark on a transferable copy, and the PDF417 stamp with its legends, which a receipt may leave out with
- * `stamp: false`. The
- * transport area prints what the document's `Transporte` carries, the fields Formato DTE 2.5 marks to be printed and
- * the destination city, and leaves out what it lacks. The page is 21.5 cm wide and as tall as its content between 11
- * and 33 cm; what falls past 33 cm is not drawn. With `paper: 'roll'` it is continuous paper 80 mm wide and as tall as
- * its content, with no cap, in the order the manual gives for that format: centred type box, SII office, issuer,
- * receiver, date, references, detail, totals, acknowledgement box (transferable copy) and stamp. With `stamp: false`,
- * a receipt (39 or 41) leaves out the electronic stamp and its legends, as Res. Ex. SII N° 207 of 2025 allows. Node
- * only (D45).
- * ES: La muestra impresa de un documento como PDF de una página según el manual de muestras impresas del SII: emisor y
- * recuadro rojo del tipo, fecha de emisión, receptor, tipo de traslado (guías), el área de transporte, referencias,
- * detalle, totales, el acuse de recibo y la marca `CEDIBLE` en una copia cedible, y el timbre PDF417 con sus leyendas.
- * El área de transporte imprime lo que trae el `Transporte` del documento, los campos que el Formato DTE 2.5 marca para
- * imprimir y la ciudad de destino, y omite lo que falta. La página mide 21,5 cm de ancho y tan alto como su contenido
- * entre 11 y 33 cm; lo que cae más allá de 33 cm no se dibuja. Con `paper: 'roll'` es papel continuo de 80 mm de ancho
- * y tan alto como su contenido, sin tope, con el orden del manual para ese formato: recuadro del tipo centrado, oficina
- * del SII, emisor, receptor, fecha, referencias, detalle, totales, acuse de recibo (copia cedible) y timbre. Con
- * `stamp: false`, una boleta (39 o 41) omite el timbre electrónico y sus leyendas, como lo permite la Res. Ex. SII
- * N° 207 de 2025. Solo Node (D45).
+ * EN: The printed sample of one document as a PDF per the SII printed-samples manual: issuer and the red type box,
+ * issue date, receiver, transfer reason (guides), the transport area, references, detail, the commissions and other
+ * charges a document carries (a settlement invoice, 43, or a purchase invoice and its notes) with their description,
+ * rate and values, totals, the acknowledgement box and the `CEDIBLE` mark on a transferable copy, and the PDF417 stamp
+ * with its legends, which a receipt may leave out with `stamp: false`. The transport area prints what the document's
+ * `Transporte` carries, the fields Formato DTE 2.5 marks to be printed and the destination city, and leaves out what it
+ * lacks. The totals print the additional taxes and withholdings (`ImptoReten`) by the name Formato DTE 2.5 gives each
+ * code, with their rate, the VAT not withheld, and the totals of the commissions; what the total takes off, a VAT
+ * withholding or a commission, prints with a minus. Every amount is the one the document carries, never worked out
+ * again. The page is 21.5 cm wide and as tall as its content between 11 and 33 cm. A document taller than 33 cm goes on
+ * to further pages: each repeats the issuer, the type box and the SII office, with `Página n de m` under the office;
+ * the first alone has the date, the receiver and the transport area; a table that breaks repeats its column head on the
+ * next page; and the totals, the acknowledgement box, the stamp and the `CEDIBLE` mark go on the last page with at
+ * least the last detail line. Every page but the last is 33 cm tall, and the last as tall as its content. Formato DTE
+ * 2.5 admits in a document only the lines one sheet can print, and the upload of the certification one page per sample,
+ * so a document that needs a second page is better split; the pages keep it whole instead of cutting it. With `paper:
+ * 'roll'` it is continuous paper 80 mm wide and as tall as its content, with no cap, in the order the manual gives for
+ * that format: centred type box, SII office, issuer, receiver, date, references, detail, totals, acknowledgement box
+ * (transferable copy) and stamp. With `stamp: false`, a receipt (39 or 41) leaves out the electronic stamp and its
+ * legends, as Res. Ex. SII N° 207 of 2025 allows. Node only (D45).
+ * ES: La muestra impresa de un documento como PDF según el manual de muestras impresas del SII: emisor y recuadro rojo
+ * del tipo, fecha de emisión, receptor, tipo de traslado (guías), el área de transporte, referencias, detalle, las
+ * comisiones y otros cargos que trae el documento (una liquidación factura, 43, o una factura de compra y sus notas)
+ * con su glosa, tasa y valores, totales, el acuse de recibo y la marca `CEDIBLE` en una copia cedible, y el timbre
+ * PDF417 con sus leyendas. El área de transporte imprime lo que trae el `Transporte` del documento, los campos que el
+ * Formato DTE 2.5 marca para imprimir y la ciudad de destino, y omite lo que falta. Los totales imprimen los impuestos
+ * adicionales y retenciones (`ImptoReten`) con el nombre que el Formato DTE 2.5 da a cada código y su tasa, el IVA no
+ * retenido y los totales de las comisiones; lo que el total resta, una retención de IVA o una comisión, se imprime con
+ * signo menos. Cada monto es el que trae el documento, nunca recalculado. La página mide 21,5 cm de ancho y tan alto
+ * como su contenido entre 11 y 33 cm. Un documento más alto que 33 cm sigue en otras páginas: cada una repite el
+ * emisor, el recuadro del tipo y la oficina del SII, con `Página n de m` bajo la oficina; solo la primera lleva la
+ * fecha, el receptor y el área de transporte; una tabla que se corta repite su encabezado de columnas en la página
+ * siguiente; y los totales, el acuse de recibo, el timbre y la marca `CEDIBLE` van en la última página con al menos la
+ * última línea del detalle. Toda página menos la última mide 33 cm, y la última tanto como su contenido. El Formato DTE
+ * 2.5 admite en un documento solo los ítems que se puedan imprimir en una hoja, y el upload de la certificación una
+ * página por muestra, así que conviene dividir un documento que necesita una segunda página; las páginas lo conservan
+ * entero en vez de cortarlo. Con `paper: 'roll'` es papel continuo de 80 mm de ancho y tan alto como su contenido, sin
+ * tope, con el orden del manual para ese formato: recuadro del tipo centrado, oficina del SII, emisor, receptor, fecha,
+ * referencias, detalle, totales, acuse de recibo (copia cedible) y timbre. Con `stamp: false`, una boleta (39 o 41)
+ * omite el timbre electrónico y sus leyendas, como lo permite la Res. Ex. SII N° 207 de 2025. Solo Node (D45).
  * @param doc EN: a document of `parsePrintableDocuments`. ES: un documento de `parsePrintableDocuments`.
  * @param options EN: office, resolution, logo, clock, `transferable`, `paper` and `stamp`. ES: oficina, resolución, logo, reloj, `transferable`, `paper` y `stamp`.
  * @param load EN: loader of the two libraries, for tests. ES: cargador de las dos librerías, para tests.

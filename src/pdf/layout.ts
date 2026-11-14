@@ -77,6 +77,58 @@ export const TRANSFER_REASON_NAMES: Readonly<Record<number, string>> = {
 }
 
 /**
+ * EN: Printed names of the codes of additional taxes and withholdings, as Formato DTE 2.5 names them in its table of
+ * codes (section 4, pages 51 to 54); the printed sample translates the code into words, as the format asks of
+ * `TipoImp`. A code of total withholding (301 to 481) takes the name of its row.
+ * ES: `TipoImp` — Nombres impresos de los códigos de impuestos adicionales y retenciones, como los nombra el Formato
+ * DTE 2.5 en su tabla "Codificación tipos de impuestos y recargos" (punto 4, páginas 51 a 54); la muestra impresa
+ * traduce el código a palabras, como lo pide el formato. Un código de retención total (301 a 481) lleva el nombre de su
+ * fila.
+ */
+export const TAX_NAMES: Readonly<Record<string, string>> = {
+  14: 'IVA de margen de comercialización',
+  15: 'IVA retenido total',
+  17: 'IVA ANTICIPADO FAENAMIENTO CARNE',
+  18: 'IVA ANTICIPADO CARNE',
+  19: 'IVA ANTICIPADO HARINA',
+  23: 'IMPUESTO ADICIONAL Art 37 Letras a, b, c',
+  24: 'DL 825/74, ART. 42, letra b)',
+  25: 'DL 825/74, ART. 42, letra c)',
+  26: 'DL 825/74, ART. 42, letra c)',
+  27: 'DL 825/74, ART. 42, letra a)',
+  271: 'DL 825/74, ART. 42, letra a) Inciso Segundo',
+  28: 'Impuesto específico diésel',
+  30: 'IVA RETENIDO LEGUMBRES',
+  301: 'IVA RETENIDO LEGUMBRES',
+  31: 'IVA RETENIDO SILVESTRES',
+  32: 'IVA RETENIDO GANADO',
+  321: 'IVA RETENIDO GANADO',
+  33: 'IVA RETENIDO MADERA',
+  331: 'IVA RETENIDO MADERA',
+  34: 'IVA RETENIDO TRIGO',
+  341: 'IVA RETENIDO TRIGO',
+  35: 'Impuesto específico gasolina',
+  36: 'IVA RETENIDO ARROZ',
+  361: 'IVA RETENIDO ARROZ',
+  37: 'IVA RETENIDO HIDROBIOLOGICAS',
+  371: 'IVA RETENIDO HIDROBIOLOGICAS',
+  38: 'IVA RETENIDO CHATARRA',
+  39: 'IVA RETENIDO PPA',
+  41: 'IVA RETENIDO CONSTRUCCION',
+  44: 'IMPUESTO ADICIONAL Art 37 Letras e, h, I, l',
+  45: 'IMPUESTO ADICIONAL Art 37 Letras j',
+  46: 'IVA RETENIDO ORO',
+  47: 'IVA RETENIDO CARTONES',
+  48: 'IVA RETENIDO FRAMBUESAS',
+  481: 'IVA RETENIDO FRAMBUESAS',
+  49: 'FACTURA DE COMPRA SIN RETENCIÓN',
+  50: 'IVA de margen de comercialización de instrumentos de prepago',
+  51: 'Impuesto gas natural comprimido; 1,93 UTM/KM3, Art. 1°, Ley N° 20.052',
+  52: 'Impuesto gas licuado de petróleo; 1,40 UTM/M3, Art 1°, Ley N° 20.052',
+  53: 'Impuesto Retenido Suplementeros Art 74 N°5 Ley de la Renta',
+}
+
+/**
  * EN: Layout of the printed sample on continuous paper (the manual's "papel continuo", the format of a point of sale
  * printer), in points. The roll is 80 mm wide (226.77 pt), above the manual's least width of 7.5 cm (212.6 pt), with
  * the 0.5 cm blank border on both sides, which leaves 7 cm (198.43 pt) to print. The stamp takes the 7 cm, between its
