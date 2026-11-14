@@ -1,7 +1,7 @@
 import type { PDFFont, PDFPage, RGB } from 'pdf-lib'
 import { format } from 'rut.ts'
 import { documentTypeName, isDocumentType } from '../catalogs/document-types'
-import { FONT, LINE, TABLE } from './layout'
+import { FONT, LINE, TABLE, TAX_NAMES } from './layout'
 import type { PrintableDocument, PrintableItem, PrintableTransport } from './parse'
 
 // Drawing helpers shared by the sheet layout (render.ts) and the continuous-paper layout (roll.ts).
@@ -19,6 +19,8 @@ export type TotalRow = readonly [label: string, value: string, bold: boolean]
 export type Field = readonly [label: string, value: string]
 
 export const formatAmount = (value: number): string => value.toLocaleString('es-CL')
+// An amount the total takes off: a minus before it, and none when it is negative (a reversal adds).
+const subtracted = (value: number): string => (value < 0 ? `$${formatAmount(-value)}` : `-$${formatAmount(value)}`)
 export const dottedRut = (rut: string): string => format(rut, { dots: true, throwOnError: false }) ?? rut
 export const printedTypeName = (type: number): string =>
   isDocumentType(type) ? documentTypeName(type, 'printed') : `DTE ${type}`
@@ -135,6 +137,17 @@ export const totalRows = (doc: PrintableDocument): readonly TotalRow[] => {
   if (totals.net) rows.push(['Monto Neto', `$${formatAmount(totals.net)}`, false])
   if (totals.exempt) rows.push(['Monto Exento', `$${formatAmount(totals.exempt)}`, false])
   if (totals.vat) rows.push([`IVA (${totals.vatRate || 19}%)`, `$${formatAmount(totals.vat)}`, false])
+  // The additional taxes add to the total and the VAT withholdings take off from it (Formato DTE 2.5, `MntTotal`).
+  for (const { code, rate, amount } of doc.withholdings ?? []) {
+    if (!amount) continue
+    const name = TAX_NAMES[code] ?? `Impuesto o retención ${code}`
+    const label = rate === undefined ? name : `${name} (${formatAmount(rate)}%)`
+    rows.push([label, /^IVA retenido/i.test(name) ? subtracted(amount) : `$${formatAmount(amount)}`, false])
+  }
+  if (totals.vatNotWithheld) rows.push(['IVA No Retenido', `$${formatAmount(totals.vatNotWithheld)}`, false])
+  if (totals.commissionsNet) rows.push(['Comisiones Neto', subtracted(totals.commissionsNet), false])
+  if (totals.commissionsExempt) rows.push(['Comisiones Exento', subtracted(totals.commissionsExempt), false])
+  if (totals.commissionsVat) rows.push(['IVA Comisiones', subtracted(totals.commissionsVat), false])
   if (totals.total) rows.push(['Monto Total', `$${formatAmount(totals.total)}`, true])
   return rows
 }

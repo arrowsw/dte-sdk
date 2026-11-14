@@ -36,7 +36,7 @@ import {
   type Field,
   type Fonts,
 } from './draw'
-import type { PrintableDocument, PrintableItem, PrintableReference } from './parse'
+import type { PrintableCommission, PrintableDocument, PrintableItem, PrintableReference } from './parse'
 import { buildRoll, drawRoll, rollHeight } from './roll'
 import { loadBarcodeModule, renderTedBarcodeWith, type BarcodeModule } from './stamp'
 
@@ -458,35 +458,89 @@ const drawItemRow = (
   }
 }
 
-const drawTotals = (canvas: Canvas, doc: PrintableDocument, y: number): number => {
+const COMMISSION_COLUMNS = (() => {
+  const kind = Math.round(TABLE_WIDTH * 0.12)
+  const rate = Math.round(TABLE_WIDTH * 0.08)
+  const net = Math.round(TABLE_WIDTH * 0.14)
+  const exempt = Math.round(TABLE_WIDTH * 0.14)
+  const vat = Math.round(TABLE_WIDTH * 0.12)
+  return [kind, TABLE_WIDTH - kind - rate - net - exempt - vat, rate, net, exempt, vat] as const
+})()
+
+// A commission's row: its kind, its description wrapped in its column, its rate and its three values as written.
+const commissionRow = (commission: PrintableCommission, fonts: Fonts) => {
+  const amount = (value: number | undefined): string => (value === undefined ? '' : `$${formatAmount(value)}`)
+  const lines = wrapText(commission.description, fonts.normal, FONT.tiny, COMMISSION_COLUMNS[1] - TABLE.padX * 2)
+  return {
+    lines,
+    values: [
+      commission.kind === 'O' ? 'Otros cargos' : 'Comisión',
+      '',
+      commission.rate === undefined ? '' : `${formatAmount(commission.rate)}%`,
+      amount(commission.net),
+      amount(commission.exempt),
+      amount(commission.vat),
+    ],
+    height: Math.max(TABLE.rowHeight, lines.length * LINE.tiny + TABLE.padY * 2),
+  }
+}
+
+const drawCommissionRow = (canvas: Canvas, row: ReturnType<typeof commissionRow>, y: number): void => {
   const { fonts } = canvas
   const black = canvas.paint(COLOURS.black)
   const dark = canvas.paint(COLOURS.darkGrey)
-  const boxWidth = Math.round(PAGE.width * 0.45)
-  const boxX = PAGE.width - MARGIN - boxWidth
-  const rowHeight = TABLE.rowHeight + 2
-  const labelWidth = Math.round(boxWidth * 0.55)
-  const valueWidth = boxWidth - labelWidth
-  const rows = totalRows(doc)
-  let ry = y + 2
-  for (const [label, value, bold] of rows) {
+  let cx = MARGIN
+  row.values.forEach((value, index) => {
+    const width = COMMISSION_COLUMNS[index]
+    drawRect(canvas, cx, y, width, row.height, { stroke: dark, strokeWidth: 0.5 })
+    if (index === 1)
+      row.lines.forEach((line, at) =>
+        drawText(canvas, line, cx + TABLE.padX, y + TABLE.padY + at * LINE.tiny, fonts.normal, FONT.tiny, black),
+      )
+    else {
+      const x =
+        index === 0 ? cx + TABLE.padX : cx + width - fonts.normal.widthOfTextAtSize(value, FONT.tiny) - TABLE.padX
+      drawText(canvas, value, x, y + (row.height - FONT.tiny) / 2, fonts.normal, FONT.tiny, black)
+    }
+    cx += width
+  })
+}
+
+const TOTALS_WIDTH = Math.round(PAGE.width * 0.45)
+const TOTALS_LABEL_WIDTH = Math.round(TOTALS_WIDTH * 0.55)
+
+// The rows of the totals box; a label wider than its cell, such as a tax's name, goes on over more lines.
+const totalsLayout = (doc: PrintableDocument, fonts: Fonts) =>
+  totalRows(doc).map(([label, value, bold]) => {
     const font = bold ? fonts.bold : fonts.normal
-    drawRect(canvas, boxX, ry, labelWidth, rowHeight, { stroke: dark, strokeWidth: 0.5 })
-    drawRect(canvas, boxX + labelWidth, ry, valueWidth, rowHeight, { stroke: dark, strokeWidth: 0.5 })
-    drawText(canvas, label, boxX + TABLE.padX, ry + TABLE.padY, font, FONT.normal, black)
+    const lines = wrapText(label, font, FONT.normal, TOTALS_LABEL_WIDTH - TABLE.padX * 2)
+    return { lines, value, font, height: TABLE.rowHeight + 2 + (lines.length - 1) * LINE.small }
+  })
+
+const drawTotals = (canvas: Canvas, rows: ReturnType<typeof totalsLayout>, y: number): void => {
+  const black = canvas.paint(COLOURS.black)
+  const dark = canvas.paint(COLOURS.darkGrey)
+  const boxX = PAGE.width - MARGIN - TOTALS_WIDTH
+  const valueWidth = TOTALS_WIDTH - TOTALS_LABEL_WIDTH
+  let ry = y + 2
+  for (const { lines, value, font, height } of rows) {
+    drawRect(canvas, boxX, ry, TOTALS_LABEL_WIDTH, height, { stroke: dark, strokeWidth: 0.5 })
+    drawRect(canvas, boxX + TOTALS_LABEL_WIDTH, ry, valueWidth, height, { stroke: dark, strokeWidth: 0.5 })
+    lines.forEach((line, index) =>
+      drawText(canvas, line, boxX + TABLE.padX, ry + TABLE.padY + index * LINE.small, font, FONT.normal, black),
+    )
     const width = font.widthOfTextAtSize(value, FONT.normal)
     drawText(
       canvas,
       value,
-      boxX + labelWidth + valueWidth - width - TABLE.padX,
+      boxX + TOTALS_LABEL_WIDTH + valueWidth - width - TABLE.padX,
       ry + TABLE.padY,
       font,
       FONT.normal,
       black,
     )
-    ry += rowHeight
+    ry += height
   }
-  return y + rows.length * rowHeight + 8
 }
 
 const drawAcknowledgement = (canvas: Canvas, legendLines: readonly string[], y: number): number => {
@@ -648,6 +702,30 @@ const sheetBlocks = ({ doc, fonts, stamp, resolution, transferable }: SheetInput
     },
     true,
   )
+  // A settlement invoice (43), and a purchase invoice or a note that corrects one, list their commissions and other
+  // charges under the detail, as Formato DTE 2.5 asks to print them (section F).
+  const commissionList = doc.commissions ?? []
+  const commissions =
+    commissionList.length === 0
+      ? []
+      : tableBlocks(
+          'Comisiones y Otros Cargos',
+          (canvas, y) =>
+            drawTableHeader(
+              canvas,
+              y,
+              ['Tipo', 'Glosa', 'Tasa', 'Valor Neto', 'Valor Exento', 'IVA'],
+              COMMISSION_COLUMNS,
+              ['left', 'left', 'right', 'right', 'right', 'right'],
+            ),
+          commissionList,
+          (commission) => {
+            const row = commissionRow(commission, fonts)
+            return { height: row.height, draw: (canvas, y) => drawCommissionRow(canvas, row, y) }
+          },
+          true,
+        )
+  const totals = totalsLayout(doc, fonts)
   return [
     { height: LINE.normal, gap: GAP.small, draw: (canvas, y) => drawIssueDate(canvas, doc, y) },
     { height: RECEIVER_HEIGHT, gap: GAP.section, draw: (canvas, y) => drawReceiver(canvas, doc, y) },
@@ -671,11 +749,12 @@ const sheetBlocks = ({ doc, fonts, stamp, resolution, transferable }: SheetInput
         ]),
     ...references,
     ...detail,
+    ...commissions,
     {
-      height: totalRows(doc).length * (TABLE.rowHeight + 2) + 8,
+      height: totals.reduce((sum, row) => sum + row.height, 0) + 8,
       gap: GAP.section,
       keep: true,
-      draw: (canvas, y) => drawTotals(canvas, doc, y),
+      draw: (canvas, y) => drawTotals(canvas, totals, y),
     },
     ...(transferable
       ? [
@@ -820,37 +899,45 @@ const checkPaperAndStamp = (doc: PrintableDocument, { paper, stamp }: RenderPrin
 
 /**
  * EN: The printed sample of one document as a PDF per the SII printed-samples manual: issuer and the red type box,
- * issue date, receiver, transfer reason (guides), the transport area, references, detail, totals, the acknowledgement
- * box and the `CEDIBLE` mark on a transferable copy, and the PDF417 stamp with its legends, which a receipt may leave
- * out with `stamp: false`. The transport area prints what the document's `Transporte` carries, the fields Formato DTE
- * 2.5 marks to be printed and the destination city, and leaves out what it lacks. The page is 21.5 cm wide and as tall
- * as its content between 11 and 33 cm. A document taller than 33 cm goes on to further pages: each repeats the issuer,
- * the type box and the SII office, with `Página n de m` under the office; the first alone has the date, the receiver
- * and the transport area; a table that breaks repeats its column head on the next page; and the totals, the
- * acknowledgement box, the stamp and the `CEDIBLE` mark go on the last page with at least the last detail line. Every
- * page but the last is 33 cm tall, and the last as tall as its content. Formato DTE 2.5 admits in a document only the
- * lines one sheet can print, and the upload of the certification one page per sample, so a document that needs a second
- * page is better split; the pages keep it whole instead of cutting it. With `paper: 'roll'` it is continuous paper 80
- * mm wide and as tall as its content, with no cap, in the order the manual gives for that format: centred type box, SII
- * office, issuer, receiver, date, references, detail, totals, acknowledgement box (transferable copy) and stamp. With
- * `stamp: false`, a receipt (39 or 41) leaves out the electronic stamp and its legends, as Res. Ex. SII N° 207 of 2025
- * allows. Node only (D45).
+ * issue date, receiver, transfer reason (guides), the transport area, references, detail, the commissions and other
+ * charges a document carries (a settlement invoice, 43, or a purchase invoice and its notes) with their description,
+ * rate and values, totals, the acknowledgement box and the `CEDIBLE` mark on a transferable copy, and the PDF417 stamp
+ * with its legends, which a receipt may leave out with `stamp: false`. The transport area prints what the document's
+ * `Transporte` carries, the fields Formato DTE 2.5 marks to be printed and the destination city, and leaves out what it
+ * lacks. The totals print the additional taxes and withholdings (`ImptoReten`) by the name Formato DTE 2.5 gives each
+ * code, with their rate, the VAT not withheld, and the totals of the commissions; what the total takes off, a VAT
+ * withholding or a commission, prints with a minus. Every amount is the one the document carries, never worked out
+ * again. The page is 21.5 cm wide and as tall as its content between 11 and 33 cm. A document taller than 33 cm goes on
+ * to further pages: each repeats the issuer, the type box and the SII office, with `Página n de m` under the office;
+ * the first alone has the date, the receiver and the transport area; a table that breaks repeats its column head on the
+ * next page; and the totals, the acknowledgement box, the stamp and the `CEDIBLE` mark go on the last page with at
+ * least the last detail line. Every page but the last is 33 cm tall, and the last as tall as its content. Formato DTE
+ * 2.5 admits in a document only the lines one sheet can print, and the upload of the certification one page per sample,
+ * so a document that needs a second page is better split; the pages keep it whole instead of cutting it. With `paper:
+ * 'roll'` it is continuous paper 80 mm wide and as tall as its content, with no cap, in the order the manual gives for
+ * that format: centred type box, SII office, issuer, receiver, date, references, detail, totals, acknowledgement box
+ * (transferable copy) and stamp. With `stamp: false`, a receipt (39 or 41) leaves out the electronic stamp and its
+ * legends, as Res. Ex. SII N° 207 of 2025 allows. Node only (D45).
  * ES: La muestra impresa de un documento como PDF según el manual de muestras impresas del SII: emisor y recuadro rojo
- * del tipo, fecha de emisión, receptor, tipo de traslado (guías), el área de transporte, referencias, detalle, totales,
- * el acuse de recibo y la marca `CEDIBLE` en una copia cedible, y el timbre PDF417 con sus leyendas. El área de
- * transporte imprime lo que trae el `Transporte` del documento, los campos que el Formato DTE 2.5 marca para imprimir y
- * la ciudad de destino, y omite lo que falta. La página mide 21,5 cm de ancho y tan alto como su contenido entre 11 y
- * 33 cm. Un documento más alto que 33 cm sigue en otras páginas: cada una repite el emisor, el recuadro del tipo y la
- * oficina del SII, con `Página n de m` bajo la oficina; solo la primera lleva la fecha, el receptor y el área de
- * transporte; una tabla que se corta repite su encabezado de columnas en la página siguiente; y los totales, el acuse
- * de recibo, el timbre y la marca `CEDIBLE` van en la última página con al menos la última línea del detalle. Toda
- * página menos la última mide 33 cm, y la última tanto como su contenido. El Formato DTE 2.5 admite en un documento
- * solo los ítems que se puedan imprimir en una hoja, y el upload de la certificación una página por muestra, así que
- * conviene dividir un documento que necesita una segunda página; las páginas lo conservan entero en vez de cortarlo.
- * Con `paper: 'roll'` es papel continuo de 80 mm de ancho y tan alto como su contenido, sin tope, con el orden del
- * manual para ese formato: recuadro del tipo centrado, oficina del SII, emisor, receptor, fecha, referencias, detalle,
- * totales, acuse de recibo (copia cedible) y timbre. Con `stamp: false`, una boleta (39 o 41) omite el timbre
- * electrónico y sus leyendas, como lo permite la Res. Ex. SII N° 207 de 2025. Solo Node (D45).
+ * del tipo, fecha de emisión, receptor, tipo de traslado (guías), el área de transporte, referencias, detalle, las
+ * comisiones y otros cargos que trae el documento (una liquidación factura, 43, o una factura de compra y sus notas)
+ * con su glosa, tasa y valores, totales, el acuse de recibo y la marca `CEDIBLE` en una copia cedible, y el timbre
+ * PDF417 con sus leyendas. El área de transporte imprime lo que trae el `Transporte` del documento, los campos que el
+ * Formato DTE 2.5 marca para imprimir y la ciudad de destino, y omite lo que falta. Los totales imprimen los impuestos
+ * adicionales y retenciones (`ImptoReten`) con el nombre que el Formato DTE 2.5 da a cada código y su tasa, el IVA no
+ * retenido y los totales de las comisiones; lo que el total resta, una retención de IVA o una comisión, se imprime con
+ * signo menos. Cada monto es el que trae el documento, nunca recalculado. La página mide 21,5 cm de ancho y tan alto
+ * como su contenido entre 11 y 33 cm. Un documento más alto que 33 cm sigue en otras páginas: cada una repite el
+ * emisor, el recuadro del tipo y la oficina del SII, con `Página n de m` bajo la oficina; solo la primera lleva la
+ * fecha, el receptor y el área de transporte; una tabla que se corta repite su encabezado de columnas en la página
+ * siguiente; y los totales, el acuse de recibo, el timbre y la marca `CEDIBLE` van en la última página con al menos la
+ * última línea del detalle. Toda página menos la última mide 33 cm, y la última tanto como su contenido. El Formato DTE
+ * 2.5 admite en un documento solo los ítems que se puedan imprimir en una hoja, y el upload de la certificación una
+ * página por muestra, así que conviene dividir un documento que necesita una segunda página; las páginas lo conservan
+ * entero en vez de cortarlo. Con `paper: 'roll'` es papel continuo de 80 mm de ancho y tan alto como su contenido, sin
+ * tope, con el orden del manual para ese formato: recuadro del tipo centrado, oficina del SII, emisor, receptor, fecha,
+ * referencias, detalle, totales, acuse de recibo (copia cedible) y timbre. Con `stamp: false`, una boleta (39 o 41)
+ * omite el timbre electrónico y sus leyendas, como lo permite la Res. Ex. SII N° 207 de 2025. Solo Node (D45).
  * @param doc EN: a document of `parsePrintableDocuments`. ES: un documento de `parsePrintableDocuments`.
  * @param options EN: office, resolution, logo, clock, `transferable`, `paper` and `stamp`. ES: oficina, resolución, logo, reloj, `transferable`, `paper` y `stamp`.
  * @param load EN: loader of the two libraries, for tests. ES: cargador de las dos librerías, para tests.
