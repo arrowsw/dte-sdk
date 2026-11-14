@@ -74,6 +74,7 @@ every field.
   [the exchange and the printed samples](#certification-the-exchange-and-the-printed-samples),
   [receipts](#certification-receipts)
 - [Printed samples (Node)](#printed-samples-node)
+- [Catalogs](#catalogs)
 - [Errors](#errors) and [status codes](#status-codes)
 - [Development](#development)
 
@@ -1255,6 +1256,33 @@ the render functions throw `DEPENDENCY_UNAVAILABLE`. Failures of a batch come ba
 of digits is an `INVALID_FOLIO` failure, since it would name the file. Retentions, the commission block of settlement
 invoices and a stamp raster above 300 DPI are not printed yet: see the
 [printed samples design](./docs/superpowers/specs/2026-11-04-phase-5a-printed-samples-design.md).
+
+## Catalogs
+
+The root entry holds the SII's code tables as typed constants: the document types (`DOCUMENT_TYPES`), the `CodRef`
+codes, the transfer and dispatch indicators, the payment terms and the books' codes, and, each with a type guard, the
+tables of Formato DTE 2.5 and of the receipts' format:
+
+| Constant | Field | Holds | Source |
+|---|---|---|---|
+| `ADDITIONAL_TAXES` | `TipoImp`, `CodImpAdic` | 40 codes of additional taxes and withholdings: name, class, rate, documents, code of total withholding | Formato DTE 2.5, section 4, pages 51 to 54 |
+| `PAYMENT_MEDIA` | `MedioPago` | `CH`, `CF`, `LT`, `EF`, `PE`, `TC`, `OT` | Formato DTE 2.5, page 15 |
+| `RECEIPT_PAYMENT_MEDIA` | `MedioPago` of a receipt | `'1'` to `'5'` | Formato Boletas Electrónicas 4.2, page 9 |
+| `REFERENCE_DOCUMENT_TYPES` | `TpoDocRef` | 42 numeric codes a reference can name, with their names | Formato DTE 2.5, pages 45 and 3 |
+| `RECEIPT_REFERENCE_DOCUMENT_TYPES` | `TpoDocRef` of a receipt | the 11 codes a receipt's reference can name | Formato Boletas Electrónicas 4.2, page 18 |
+
+```typescript
+import { ADDITIONAL_TAXES, isAdditionalTaxCode, isReferenceDocumentType } from 'dte-sdk'
+
+ADDITIONAL_TAXES[24] // { name: 'DL 825/74, ART. 42, letra b)', kind: 'additional', rate: 31.5, documents: [33, 56, 61] }
+ADDITIONAL_TAXES[30].totalWithholdingCode // 301, the code when the buyer withholds the whole VAT
+isAdditionalTaxCode(16) // false: the schema admits it, the table does not describe it
+isReferenceDocumentType(801) // true, Orden de Compra; an alphabetic TpoDocRef such as 'SET' is not checked
+```
+
+The tables are data: `createDocument` does not check a document against them. The units of measure (`UnmdItem`,
+`UnmdRef`) have no table, since Formato DTE 2.5 makes them free text of up to four characters that the SII does not
+check outside exports.
 
 ## Errors
 

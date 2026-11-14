@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The SII's tables of additional taxes, payment media and reference documents.** Every issuer picks from them.
+  `ADDITIONAL_TAXES` holds, by code, the 40 codes `TipoImp` and `CodImpAdic` take (Formato DTE 2.5, section 4, pages
+  51 to 54: its 33 rows and the 7 codes of total withholding of its second column), each with its name as the SII
+  writes it, its `kind` (`additional`, `specific`, `margin`, `advance` or `withholding`, in the words of `MntTotal`),
+  the `rate` the table gives, the electronic `documents` it applies to and the `totalWithholdingCode` that takes its
+  place when the buyer withholds the whole VAT; `isAdditionalTaxCode` is its guard. The schema's `ImpAdicDTEType` also
+  admits 16, 40, 54 and 55, which the table does not describe, so they are left out. `PAYMENT_MEDIA` holds the seven
+  `MedioPago` codes (page 15) and `RECEIPT_PAYMENT_MEDIA` a receipt's, `'1'` to `'5'` as `paymentMedium` carries them
+  (Formato Boletas Electrónicas 4.2, page 9), with `isPaymentMedium` and `isReceiptPaymentMedium`.
+  `REFERENCE_DOCUMENT_TYPES` names the 42 numeric codes a `TpoDocRef` can take: the 39 of its field (page 45) and 821
+  to 823, which the change log of 2021-09-14 added (page 3); `RECEIPT_REFERENCE_DOCUMENT_TYPES` holds the 11 of a
+  receipt (page 18), and `isReferenceDocumentType` and `isReceiptReferenceDocumentType` are their guards. An
+  alphabetic `TpoDocRef`, `SET` among them, is not checked by the SII and stays free. The tables are data: no check of
+  `createDocument` changes. The units of measure get no table, since `UnmdItem` and `UnmdRef` are free text the SII
+  does not check outside exports. `dte-sdk` grows from 37.66 kB to 38.87 kB, over its 38 kB limit, which goes to
+  40 kB.
+  - **What to change:** nothing.
 - **A receipt on continuous paper, with the printed stamp as an option.** `renderPrintedSample` takes `paper: 'roll'`
   to print the continuous paper the printed-samples manual allows (its "papel continuo", the format of a point of sale
   printer) instead of the sheet: a page 80 mm wide, above the manual's least width of 7.5 cm, with the 0.5 cm border,
