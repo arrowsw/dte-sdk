@@ -148,6 +148,32 @@ export type { SignedDocument } from './document/sign'
 export { issueDocument } from './document/issue'
 export type { IssueDocumentInput } from './document/issue'
 export { verifyReceivedDocuments } from './document/verify-received'
+export { readReceivedEnvelope } from './document/received-envelope'
+export type { ReceivedEnvelope, ReceivedEnvelopeDocument } from './document/received-envelope'
+export {
+  createReceptionAnswer,
+  createResultAnswer,
+  createGoodsReceipts,
+  documentKey,
+  ENVELOPE_RECEPTION_STATES,
+  DOCUMENT_RECEPTION_STATES,
+  COMMERCIAL_RESULT_STATES,
+} from './document/answer'
+export type {
+  EnvelopeReceptionState,
+  DocumentReceptionState,
+  CommercialResultState,
+  AnswerContact,
+  AnswerInput,
+  DocumentDecisions,
+  EnvelopeReceptionDecision,
+  DocumentReceptionDecision,
+  CommercialResultDecision,
+  GoodsReceiptDecision,
+  ReceptionAnswerInput,
+  ResultAnswerInput,
+  GoodsReceiptsInput,
+} from './document/answer'
 export type {
   VerifyReceivedDocumentsOptions,
   ReceivedDocumentsVerification,
