@@ -157,6 +157,8 @@ describe('listReobtainableRanges', () => {
               row(2, { DIA: '31', MES: '02', ANO: '2026' }),
               row(3, { DIA: '07', MES: '11' }),
               row(4, { DIA: 'x7', MES: '11', ANO: '2026' }),
+              row(5, { DIA: '7x', MES: '11', ANO: '2026' }),
+              row(6, { DIA: '07', MES: '11', ANO: 'x2026' }),
             ].join('\n')}`,
           ),
         },
@@ -169,6 +171,8 @@ describe('listReobtainableRanges', () => {
       [2, null],
       [3, null],
       [4, null],
+      [5, null],
+      [6, null],
     ])
   })
 
