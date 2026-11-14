@@ -11,7 +11,7 @@ by Hans on 2026-11-14.
 | `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 38.87 kB | No |
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.36 kB | Yes, on first use |
 | `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 79.71 kB | Yes, on first use |
-| `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 13.2 kB | Yes, on first use |
+| `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 14.89 kB | Yes, on first use |
 | `dte-sdk/catalogs` | The SII's large code tables: the business activities | 10.65 kB | No |
 
 Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
@@ -71,6 +71,11 @@ The business activities, also after 0.12.0, went to an entry of their own, `dte-
 root for every consumer, or on `dte-sdk/portal` past its 80 kB limit. In an entry of its own only who imports it pays
 for it, and the name leaves room for the next large tables, such as communes or customs. Its limit is the measure
 rounded up to the next 2 kB, 12 kB; the other entries did not move.
+The printed sample of several pages took `dte-sdk/pdf` from 13.2 kB to 13.72 kB, under its 14 kB limit; the other
+entries did not move.
+The commissions and other charges of a settlement invoice, and the additional taxes and withholdings with the printed
+names of their codes, on the printed sample, took `dte-sdk/pdf` from 13.72 kB to 14.89 kB, over its 14 kB limit, which
+went to 16 kB; the other entries did not move.
 The settlement set in the certification runner, after 0.12.0, took `dte-sdk/portal` from 79.03 kB to 79.71 kB, under
 its 80 kB limit; the other entries did not move.
 

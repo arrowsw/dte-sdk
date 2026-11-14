@@ -41,6 +41,47 @@ export type PrintableTotals = {
   readonly vatRate?: number
   /** EN: Total. ES: `MntTotal` — Monto total. */
   readonly total?: number
+  /** EN: VAT not withheld, on a purchase invoice that withholds part of it. ES: `IVANoRet` — IVA no retenido. */
+  readonly vatNotWithheld?: number
+  /** EN: Net value of the commissions and other charges. ES: `Comisiones/ValComNeto` — Valor neto comisiones y otros cargos. */
+  readonly commissionsNet?: number
+  /** EN: Exempt value of the commissions and other charges. ES: `Comisiones/ValComExe` — Valor comisiones y otros cargos no afectos o exentos. */
+  readonly commissionsExempt?: number
+  /** EN: VAT of the commissions and other charges. ES: `Comisiones/ValComIVA` — IVA comisiones y otros cargos. */
+  readonly commissionsVat?: number
+}
+
+/**
+ * EN: An additional tax or a withholding of the totals.
+ * ES: `ImptoReten` — Impuesto adicional o retención de los totales.
+ */
+export type PrintableWithholding = {
+  /** EN: Code as written. ES: `TipoImp` — Código del impuesto adicional o retención, tal como viene. */
+  readonly code: string
+  /** EN: Rate in percent. ES: `TasaImp` — Tasa del impuesto o retención. */
+  readonly rate?: number
+  /** EN: Amount. ES: `MontoImp` — Monto del impuesto o retención. */
+  readonly amount?: number
+}
+
+/**
+ * EN: A commission or other charge, of a settlement invoice (43), or of a purchase invoice or a note that corrects one.
+ * ES: `Comisiones` — Comisión u otro cargo, de una liquidación factura (43), o de una factura de compra o una nota que
+ * la corrige.
+ */
+export type PrintableCommission = {
+  /** EN: `C` commission or `O` other charge. ES: `TipoMovim` — `C` comisión u `O` otros cargos. */
+  readonly kind: 'C' | 'O'
+  /** EN: Description. ES: `Glosa` — Especificación de la comisión u otro cargo. */
+  readonly description: string
+  /** EN: Rate in percent. ES: `TasaComision` — Tasa de la comisión u otro cargo. */
+  readonly rate?: number
+  /** EN: Net value. ES: `ValComNeto` — Valor comisión neto. */
+  readonly net?: number
+  /** EN: Exempt value. ES: `ValComExe` — Valor comisión exento. */
+  readonly exempt?: number
+  /** EN: VAT. ES: `ValComIVA` — Valor IVA comisión u otro cargo. */
+  readonly vat?: number
 }
 
 /**
@@ -147,8 +188,12 @@ export type PrintableDocument = {
   readonly receiver: PrintableParty
   /** EN: Transport of the goods; undefined when the document has no `Transporte`. ES: `Transporte` — Transporte de los bienes; undefined si el documento no lo trae. */
   readonly transport?: PrintableTransport
-  /** EN: The five totals that print. ES: `Totales` — Los cinco totales que se imprimen. */
+  /** EN: The totals that print. ES: `Totales` — Los totales que se imprimen. */
   readonly totals: PrintableTotals
+  /** EN: Additional taxes and withholdings of the totals; `parsePrintableDocuments` always sets it. ES: `ImptoReten` — Impuestos adicionales y retenciones de los totales; `parsePrintableDocuments` siempre lo llena. */
+  readonly withholdings?: readonly PrintableWithholding[]
+  /** EN: Commissions and other charges; `parsePrintableDocuments` always sets it. ES: `Comisiones` — Comisiones y otros cargos; `parsePrintableDocuments` siempre lo llena. */
+  readonly commissions?: readonly PrintableCommission[]
   /** EN: Global discounts and surcharges. ES: `DscRcgGlobal` — Descuentos y recargos globales. */
   readonly globalAdjustments: readonly PrintableAdjustment[]
   /** EN: Detail lines. ES: `Detalle` — Líneas de detalle. */
@@ -235,6 +280,21 @@ const adjustment = (node: ParsedXml): PrintableAdjustment => ({
   value: number(node.ValorDR),
 })
 
+const withholding = (node: ParsedXml): PrintableWithholding => ({
+  code: text(node.TipoImp),
+  rate: number(node.TasaImp),
+  amount: number(node.MontoImp),
+})
+
+const commission = (node: ParsedXml): PrintableCommission => ({
+  kind: text(node.TipoMovim) === 'O' ? 'O' : 'C',
+  description: text(node.Glosa),
+  rate: number(node.TasaComision),
+  net: number(node.ValComNeto),
+  exempt: number(node.ValComExe),
+  vat: number(node.ValComIVA),
+})
+
 const documentNodes = (parsed: ParsedXml): readonly ParsedXml[] => {
   const envelope = record(parsed.EnvioDTE ?? parsed.EnvioDTEB ?? parsed.EnvioDTETraslado ?? parsed.EnvioBOLETA)
   const set = record(envelope.SetDTE ?? parsed.SetDTE)
@@ -248,6 +308,7 @@ const printable = (dte: ParsedXml, teds: readonly string[], index: number): Prin
   const idDoc = record(header.IdDoc)
   const issuer = record(header.Emisor)
   const totals = record(header.Totales)
+  const commissionTotals = record(totals.Comisiones)
   const folio = text(idDoc.Folio)
   const type = text(idDoc.TipoDTE)
   const matching = teds.find(
@@ -281,7 +342,13 @@ const printable = (dte: ParsedXml, teds: readonly string[], index: number): Prin
       vat: number(totals.IVA),
       vatRate: number(totals.TasaIVA),
       total: number(totals.MntTotal),
+      vatNotWithheld: number(totals.IVANoRet),
+      commissionsNet: number(commissionTotals.ValComNeto),
+      commissionsExempt: number(commissionTotals.ValComExe),
+      commissionsVat: number(commissionTotals.ValComIVA),
     },
+    withholdings: toArray(totals.ImptoReten).map(record).map(withholding),
+    commissions: toArray(document.Comisiones).map(record).map(commission),
     globalAdjustments: toArray(document.DscRcgGlobal).map(record).map(adjustment),
     items: toArray(document.Detalle).map(record).map(item),
     references: toArray(document.Referencia).map(record).map(reference),

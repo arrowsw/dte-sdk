@@ -37,6 +37,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `011101`, is the number 11101. Like the root, the entry runs anywhere, names no `node:` module and bundles for the
   browser. It is 10.65 kB, under a limit of 12 kB; the other entries do not move.
   - **What to change:** nothing. Import `dte-sdk/catalogs` for the business activities.
+- **A printed sample of several pages.** A document taller than the 33 cm of the sheet lost what fell past it; now
+  `renderPrintedSample` goes on to further pages, 21.5 cm wide. Every page repeats the issuer, the type box and the SII
+  office, and is numbered under the office (`Página 1 de 2`); the date, the receiver and the transport area print on the
+  first page only; a table that breaks, the detail or the documents it refers to, repeats its column head on the next
+  page; and the totals, the acknowledgement box, the stamp and the `CEDIBLE` mark go on the last page, which takes at
+  least the last detail line with them. Every page but the last is 33 cm tall and the last is as tall as its content,
+  between 11 and 33 cm, so the stamp stays at the bottom of the document, where the printed-samples manual puts it. A
+  document that fits one page prints as before, with no page number, and `paper: 'roll'` keeps its one page with no
+  cap. Formato DTE 2.5 admits in a document only the lines one sheet can print (page 36), and the manual's upload takes
+  one page per sample, so a document that needs a second page is better split, and a certification sample must fit
+  one; the pages keep a longer document whole on paper instead of cutting it. `dte-sdk/pdf` grows from 13.2 kB to
+  13.72 kB, under its 14 kB limit.
+  - **What to change:** nothing.
+- **The commissions of a settlement invoice, and the withholdings, on the printed sample.** A document that carries
+  commissions and other charges, a settlement invoice (43) or a purchase invoice (46) and the notes that correct one,
+  now lists them under the detail, on the sheet and on the roll, each with its description, rate and net, exempt and
+  VAT values, as Formato DTE 2.5 asks to print them (section F), and its totals take off the net, exempt and VAT
+  commissions. The totals also print every additional tax or withholding of `ImptoReten`, by the name Formato DTE 2.5
+  gives its code (section 4) and with its rate, and the VAT not withheld (`IVANoRet`); a VAT withholding prints with
+  a minus, so a purchase invoice shows its withheld VAT taken off the total, as the change of subject example of the
+  printed-samples manual does. A label too long for its cell goes on over more lines. Every amount is the one the
+  document carries, never worked out again. `parsePrintableDocuments` reads them into `commissions`
+  (`PrintableCommission`), `withholdings` (`PrintableWithholding`) and four new fields of the totals, and a document
+  without them prints as before. `dte-sdk/pdf` grows from 13.72 kB to 14.89 kB, over its 14 kB limit, which goes to
+  16 kB.
+  - **What to change:** nothing.
 - **The certification runner issues the settlement set.** Res. Ex. SII N° 108 of 2005 asks an issuer of settlement
   invoices (43) for technical tests of their own, and the SII hands them out as one more set of the test set, `SET
   LIQUIDACION FACTURA`. `parseTestSetText` recognized it and `planCertificationSets` left it out, so it was never

@@ -9,16 +9,20 @@ export const pdfPage = async (bytes: Uint8Array): Promise<PdfPageInfo> => {
   return { pages: document.getPageCount(), width, height }
 }
 
+/** The width and height of every page, in order. */
+export const pdfPageSizes = async (bytes: Uint8Array): Promise<readonly { width: number; height: number }[]> =>
+  (await PDFDocument.load(bytes)).getPages().map((page) => page.getSize())
+
 const rawStream = (document: PDFDocument, object: PDFObject): PDFRawStream => {
   const stream = document.context.lookup(object)
   if (!(stream instanceof PDFRawStream)) throw new Error('expected a raw stream')
   return stream
 }
 
-/** Every string drawn on the first page, in drawing order, one per line (WinAnsi read as Latin-1). */
-export const pdfText = async (bytes: Uint8Array): Promise<string> => {
+/** Every string drawn on a page (the first by default), in drawing order, one per line (WinAnsi read as Latin-1). */
+export const pdfText = async (bytes: Uint8Array, index = 0): Promise<string> => {
   const document = await PDFDocument.load(bytes)
-  const contents = document.getPage(0).node.Contents()
+  const contents = document.getPage(index).node.Contents()
   const parts = contents instanceof PDFArray ? contents.asArray() : contents === undefined ? [] : [contents]
   const strings: string[] = []
   for (const part of parts) {
@@ -33,10 +37,10 @@ export type PdfImage = { readonly width: number; readonly height: number; readon
 
 const numberOf = (dict: PDFDict, key: string): number => Number(dict.get(PDFName.of(key))?.toString())
 
-/** The image objects of the first page; `pixels` is null for an encoding the test helper cannot decode (JPEG). */
-export const pdfImages = async (bytes: Uint8Array): Promise<readonly PdfImage[]> => {
+/** The image objects of a page (the first by default); `pixels` is null for an encoding the test helper cannot decode (JPEG). */
+export const pdfImages = async (bytes: Uint8Array, index = 0): Promise<readonly PdfImage[]> => {
   const document = await PDFDocument.load(bytes)
-  const xobjects = document.getPage(0).node.Resources()?.lookup(PDFName.of('XObject'))
+  const xobjects = document.getPage(index).node.Resources()?.lookup(PDFName.of('XObject'))
   if (!(xobjects instanceof PDFDict)) return []
   const images: PdfImage[] = []
   for (const [, value] of xobjects.entries()) {
@@ -56,9 +60,9 @@ export const pdfImages = async (bytes: Uint8Array): Promise<readonly PdfImage[]>
   return images
 }
 
-/** The TED decoded from the stamp embedded in the PDF, by an independent PDF417 reader. */
-export const decodeStampInPdf = async (bytes: Uint8Array): Promise<string> => {
-  for (const image of await pdfImages(bytes)) {
+/** The TED decoded from the stamp embedded in a page of the PDF (the first by default), by an independent PDF417 reader. */
+export const decodeStampInPdf = async (bytes: Uint8Array, index = 0): Promise<string> => {
+  for (const image of await pdfImages(bytes, index)) {
     if (image.pixels === null) continue
     try {
       return decodePdf417(image.pixels)
