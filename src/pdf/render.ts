@@ -108,9 +108,12 @@ type Canvas = {
 }
 type RectStyle = { readonly fill: RGB } | { readonly stroke: RGB; readonly strokeWidth: number }
 type TotalRow = readonly [label: string, value: string, bold: boolean]
+type Field = readonly [label: string, value: string]
 
 const TABLE_WIDTH = PAGE.width - 2 * MARGIN
-const RECEIVER_HEIGHT = BOX.padY * 2 + LINE.small * 3 + GAP.tiny * 2
+const BOX_INNER_WIDTH = TABLE_WIDTH - BOX.padX * 2
+const boxHeight = (lines: number): number => BOX.padY * 2 + LINE.small * lines + GAP.tiny * (lines - 1)
+const RECEIVER_HEIGHT = boxHeight(3)
 const DETAIL_COLUMNS = (() => {
   const num = Math.round(TABLE_WIDTH * 0.05)
   const code = Math.round(TABLE_WIDTH * 0.1)
@@ -237,6 +240,53 @@ const measureHeader = (doc: PrintableDocument, fonts: Fonts, logo: PDFImage | nu
   return Math.max(left, right)
 }
 
+const fieldWidth = (fonts: Fonts, [label, value]: Field): number =>
+  fonts.bold.widthOfTextAtSize(label, FONT.small) + fonts.normal.widthOfTextAtSize(value, FONT.small)
+
+// The transport area in the order of Formato DTE 2.5, one group per line: the plates, the carrier and the driver, the
+// destination, and the departure and arrival. A field the document lacks is left out, and so is a group left empty; a
+// group too wide for one line flows onto the next.
+const transportLines = (doc: PrintableDocument, fonts: Fonts): readonly (readonly Field[])[] => {
+  const transport = doc.transport
+  if (!transport) return []
+  const groups: readonly (readonly Field[])[] = [
+    [
+      ['Patente: ', transport.licensePlate],
+      ['Patente Carro: ', transport.trailerLicensePlate],
+    ],
+    [
+      ['RUT Transportista: ', transport.carrierRut],
+      ['Chofer: ', transport.driverName],
+      ['RUT Chofer: ', transport.driverRut],
+    ],
+    [
+      ['Dirección Destino: ', transport.destinationAddress],
+      ['Comuna Destino: ', transport.destinationCommune],
+      ['Ciudad Destino: ', transport.destinationCity],
+    ],
+    [
+      ['Fecha de Salida: ', transport.departureDate],
+      ['Hora de Salida: ', transport.departureTime],
+      ['Fecha de Llegada: ', transport.arrivalDate],
+    ],
+  ]
+  const lines: Field[][] = []
+  for (const group of groups) {
+    let width = Infinity // a group starts a line
+    for (const field of group) {
+      if (field[1] === '') continue
+      const added = BOX.fieldGap + fieldWidth(fonts, field)
+      if (width + added > BOX_INNER_WIDTH) {
+        lines.push([])
+        width = -BOX.fieldGap
+      }
+      lines[lines.length - 1].push(field)
+      width += added
+    }
+  }
+  return lines
+}
+
 const measureReferences = (doc: PrintableDocument): number =>
   doc.references.length === 0
     ? 0
@@ -347,33 +397,45 @@ const drawIssueDate = (canvas: Canvas, doc: PrintableDocument, y: number): numbe
   return y + LINE.normal
 }
 
-const drawReceiver = (canvas: Canvas, doc: PrintableDocument, y: number): number => {
+// Draws a bold label and its value, and returns where the value ends.
+const drawField = (canvas: Canvas, [label, value]: Field, x: number, y: number): number => {
   const { fonts } = canvas
-  const { receiver } = doc
   const black = canvas.paint(COLOURS.black)
-  const size = FONT.small
+  const valueX = x + fonts.bold.widthOfTextAtSize(label, FONT.small)
+  drawText(canvas, label, x, y, fonts.bold, FONT.small, black)
+  drawText(canvas, value, valueX, y, fonts.normal, FONT.small, black)
+  return valueX + fonts.normal.widthOfTextAtSize(value, FONT.small)
+}
+
+const drawBox = (canvas: Canvas, y: number, lines: number): number => {
+  const height = boxHeight(lines)
+  drawRect(canvas, MARGIN, y, TABLE_WIDTH, height, { stroke: canvas.paint(COLOURS.midGrey), strokeWidth: 0.5 })
+  return y + height
+}
+
+const lineY = (y: number, index: number): number => y + BOX.padY + index * (LINE.small + GAP.tiny)
+
+const drawReceiver = (canvas: Canvas, doc: PrintableDocument, y: number): number => {
+  const { receiver } = doc
   const left = MARGIN + BOX.padX
-  const labelled = (label: string, value: string, x: number, yy: number): void => {
-    drawText(canvas, label, x, yy, fonts.bold, size, black)
-    drawText(canvas, value, x + fonts.bold.widthOfTextAtSize(label, size), yy, fonts.normal, size, black)
+  const rightAligned = (label: string, value: string, yy: number): void => {
+    const x = PAGE.width - MARGIN - BOX.padX - canvas.fonts.normal.widthOfTextAtSize(`${label}${value}`, FONT.small)
+    drawField(canvas, [label, value], x, yy)
   }
-  const rightAligned = (label: string, value: string, yy: number): void =>
-    labelled(
-      label,
-      value,
-      PAGE.width - MARGIN - BOX.padX - fonts.normal.widthOfTextAtSize(`${label}${value}`, size),
-      yy,
-    )
-  drawRect(canvas, MARGIN, y, TABLE_WIDTH, RECEIVER_HEIGHT, { stroke: canvas.paint(COLOURS.midGrey), strokeWidth: 0.5 })
-  let py = y + BOX.padY
-  labelled('Señor(es): ', receiver.name, left, py)
-  rightAligned('RUT: ', receiver.rut, py)
-  py += LINE.small + GAP.tiny
-  labelled('Dirección: ', receiver.address, left, py)
-  rightAligned('Comuna: ', receiver.commune, py)
-  py += LINE.small + GAP.tiny
-  labelled('Giro: ', receiver.activity, left, py)
-  return y + RECEIVER_HEIGHT
+  drawField(canvas, ['Señor(es): ', receiver.name], left, lineY(y, 0))
+  rightAligned('RUT: ', receiver.rut, lineY(y, 0))
+  drawField(canvas, ['Dirección: ', receiver.address], left, lineY(y, 1))
+  rightAligned('Comuna: ', receiver.commune, lineY(y, 1))
+  drawField(canvas, ['Giro: ', receiver.activity], left, lineY(y, 2))
+  return drawBox(canvas, y, 3)
+}
+
+const drawTransport = (canvas: Canvas, lines: readonly (readonly Field[])[], y: number): number => {
+  lines.forEach((line, index) => {
+    let x = MARGIN + BOX.padX
+    for (const field of line) x = drawField(canvas, field, x, lineY(y, index)) + BOX.fieldGap
+  })
+  return drawBox(canvas, y, lines.length)
 }
 
 const drawTransferReason = (canvas: Canvas, reason: number, y: number): number => {
@@ -630,9 +692,9 @@ const draw = async (
   const stamp =
     doc.tedXml === '' ? null : await document.embedPng(await renderTedBarcodeWith(modules.barcode, doc.tedXml))
   const transferable = options.transferable === true && needsTransferableCopy(doc)
-  const legendWidth = TABLE_WIDTH - BOX.padX * 2
-  const legendLines = transferable ? wrapText(ACKNOWLEDGEMENT_TEXT, fonts.normal, FONT.legal, legendWidth) : []
+  const legendLines = transferable ? wrapText(ACKNOWLEDGEMENT_TEXT, fonts.normal, FONT.legal, BOX_INNER_WIDTH) : []
   const transferReason = doc.type === 52 ? doc.transferReason : null
+  const transport = transportLines(doc, fonts)
 
   const total =
     MARGIN +
@@ -643,6 +705,7 @@ const draw = async (
     RECEIVER_HEIGHT +
     GAP.section +
     (transferReason === null ? 0 : LINE.small + GAP.small) +
+    (transport.length === 0 ? 0 : boxHeight(transport.length) + GAP.section) +
     measureReferences(doc) +
     measureDetail(doc, fonts) +
     GAP.section +
@@ -660,6 +723,7 @@ const draw = async (
   y = drawIssueDate(canvas, doc, y) + GAP.small
   y = drawReceiver(canvas, doc, y) + GAP.section
   if (transferReason !== null) y = drawTransferReason(canvas, transferReason, y) + GAP.small
+  if (transport.length > 0) y = drawTransport(canvas, transport, y) + GAP.section
   if (doc.references.length > 0) y = drawReferences(canvas, doc, y) + GAP.section
   y = drawDetail(canvas, doc, y) + GAP.section
   y = drawTotals(canvas, doc, y) + GAP.section
@@ -674,13 +738,17 @@ const draw = async (
 
 /**
  * EN: The printed sample of one document as a single-page PDF per the SII printed-samples manual: issuer and the red
- * type box, issue date, receiver, transfer reason (guides), references, detail, totals, the acknowledgement box and
- * the `CEDIBLE` mark on a transferable copy, and the PDF417 stamp with its legends. The page is 21.5 cm wide and as
- * tall as its content between 11 and 33 cm; what falls past 33 cm is not drawn. Node only (D45).
+ * type box, issue date, receiver, transfer reason (guides), the transport area, references, detail, totals, the
+ * acknowledgement box and the `CEDIBLE` mark on a transferable copy, and the PDF417 stamp with its legends. The
+ * transport area prints what the document's `Transporte` carries, the fields Formato DTE 2.5 marks to be printed and
+ * the destination city, and leaves out what it lacks. The page is 21.5 cm wide and as tall as its content between 11
+ * and 33 cm; what falls past 33 cm is not drawn. Node only (D45).
  * ES: La muestra impresa de un documento como PDF de una página según el manual de muestras impresas del SII: emisor y
- * recuadro rojo del tipo, fecha de emisión, receptor, tipo de traslado (guías), referencias, detalle, totales, el acuse
- * de recibo y la marca `CEDIBLE` en una copia cedible, y el timbre PDF417 con sus leyendas. La página mide 21,5 cm de
- * ancho y tan alto como su contenido entre 11 y 33 cm; lo que cae más allá de 33 cm no se dibuja. Solo Node (D45).
+ * recuadro rojo del tipo, fecha de emisión, receptor, tipo de traslado (guías), el área de transporte, referencias,
+ * detalle, totales, el acuse de recibo y la marca `CEDIBLE` en una copia cedible, y el timbre PDF417 con sus leyendas.
+ * El área de transporte imprime lo que trae el `Transporte` del documento, los campos que el Formato DTE 2.5 marca para
+ * imprimir y la ciudad de destino, y omite lo que falta. La página mide 21,5 cm de ancho y tan alto como su contenido
+ * entre 11 y 33 cm; lo que cae más allá de 33 cm no se dibuja. Solo Node (D45).
  * @param doc EN: a document of `parsePrintableDocuments`. ES: un documento de `parsePrintableDocuments`.
  * @param options EN: office, resolution, logo, clock and `transferable`. ES: oficina, resolución, logo, reloj y `transferable`.
  * @param load EN: loader of the two libraries, for tests. ES: cargador de las dos librerías, para tests.

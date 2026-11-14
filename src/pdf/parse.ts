@@ -95,6 +95,36 @@ export type PrintableReference = {
 }
 
 /**
+ * EN: The transport of the goods a document moves, as written in the XML; a field it lacks is empty.
+ * ES: `Transporte` — El transporte de los bienes que ampara el documento, tal como viene en el XML; un campo que falta
+ * queda vacío.
+ */
+export type PrintableTransport = {
+  /** EN: License plate of the vehicle. ES: `Patente` — Patente del vehículo. */
+  readonly licensePlate: string
+  /** EN: License plate of the trailer or semi-trailer. ES: `PatenteCarro` — Patente del carro, sea remolque o semirremolque. */
+  readonly trailerLicensePlate: string
+  /** EN: Carrier RUT as written. ES: `RUTTrans` — RUT del transportista tal como viene. */
+  readonly carrierRut: string
+  /** EN: Driver RUT as written. ES: `Chofer/RUTChofer` — RUT del chofer tal como viene. */
+  readonly driverRut: string
+  /** EN: Driver name. ES: `Chofer/NombreChofer` — Nombre del chofer. */
+  readonly driverName: string
+  /** EN: Destination address. ES: `DirDest` — Dirección de destino. */
+  readonly destinationAddress: string
+  /** EN: Destination commune. ES: `CmnaDest` — Comuna de destino. */
+  readonly destinationCommune: string
+  /** EN: Destination city. ES: `CiudadDest` — Ciudad de destino. */
+  readonly destinationCity: string
+  /** EN: Departure date as written (YYYY-MM-DD). ES: `FchSalida` — Fecha de salida tal como viene (AAAA-MM-DD). */
+  readonly departureDate: string
+  /** EN: Departure time as written (HH:MM:SS). ES: `HraSalida` — Hora de salida tal como viene (HH:MM:SS). */
+  readonly departureTime: string
+  /** EN: Arrival date as written (YYYY-MM-DD). ES: `FchLlegada` — Fecha de llegada tal como viene (AAAA-MM-DD). */
+  readonly arrivalDate: string
+}
+
+/**
  * EN: What the printed sample needs of a document, parsed from its XML. Strings are empty and numbers undefined when the
  * tag is absent.
  * ES: Lo que la muestra impresa necesita de un documento, parseado de su XML. Los strings quedan vacíos y los números
@@ -115,6 +145,8 @@ export type PrintableDocument = {
   readonly issuer: PrintableIssuer
   /** EN: The receiver. ES: `Receptor` — El receptor. */
   readonly receiver: PrintableParty
+  /** EN: Transport of the goods; undefined when the document has no `Transporte`. ES: `Transporte` — Transporte de los bienes; undefined si el documento no lo trae. */
+  readonly transport?: PrintableTransport
   /** EN: The five totals that print. ES: `Totales` — Los cinco totales que se imprimen. */
   readonly totals: PrintableTotals
   /** EN: Global discounts and surcharges. ES: `DscRcgGlobal` — Descuentos y recargos globales. */
@@ -159,6 +191,25 @@ const RECEIVER_TAGS = {
   address: 'DirRecep',
   commune: 'CmnaRecep',
 } as const
+
+const transport = (value: unknown): PrintableTransport | undefined => {
+  if (value === undefined) return undefined
+  const node = record(value)
+  const driver = record(node.Chofer)
+  return {
+    licensePlate: text(node.Patente),
+    trailerLicensePlate: text(node.PatenteCarro),
+    carrierRut: text(node.RUTTrans),
+    driverRut: text(driver.RUTChofer),
+    driverName: text(driver.NombreChofer),
+    destinationAddress: text(node.DirDest),
+    destinationCommune: text(node.CmnaDest),
+    destinationCity: text(node.CiudadDest),
+    departureDate: text(node.FchSalida),
+    departureTime: text(node.HraSalida),
+    arrivalDate: text(node.FchLlegada),
+  }
+}
 
 const item = (node: ParsedXml): PrintableItem => ({
   code: text(record(toArray(node.CdgItem)[0]).VlrCodigo),
@@ -223,6 +274,7 @@ const printable = (dte: ParsedXml, teds: readonly string[], index: number): Prin
       branch: text(issuer.Sucursal),
     },
     receiver: party(record(header.Receptor), RECEIVER_TAGS),
+    transport: transport(header.Transporte),
     totals: {
       net: number(totals.MntNeto),
       exempt: number(totals.MntExe),

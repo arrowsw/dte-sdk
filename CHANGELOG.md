@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The printed sample prints the transport area.** `renderPrintedSample` draws a box under the receiver, and under a
+  guide's transfer type, with what the document's `Transporte` carries, in the order of Formato DTE 2.5: the plates of
+  the vehicle and of the trailer, the carrier's RUT, the driver's name and RUT, the destination's address, commune and
+  city, and the departure date and time and the arrival date, one line for each of those four groups. Formato 2.5
+  marks every field of the area to be printed (column I, pages 22 to 24) but the destination city, which the sample
+  prints when the document has it. A dispatch guide and an invoice that moves goods print the area alike; a field the
+  document lacks is left out, a group too wide for its line flows onto the next, and the page grows by the box. Before,
+  the sample printed a guide's transfer type and nothing of `Transporte`. `parsePrintableDocuments` reads the area
+  into a new `transport` field of `PrintableDocument`, a `PrintableTransport` exported from `dte-sdk/pdf` with every
+  field as written, and undefined when the document has no `Transporte`. `dte-sdk/pdf` grows from 10.98 kB to
+  11.45 kB, and its size limit from 11 kB to 12 kB.
+  - **What to change:** nothing. A sample of a document with `Transporte` now carries the area and is taller by it. A
+    `PrintableDocument` built by hand prints the area once it is given `transport`.
 - **`softwareProviderRut` on a receipt.** `DocumentInput` and `Header` gain `softwareProviderRut`, the receipt's
   `Encabezado/RUTProvSW`: the RUT of the company that provides the software the receipt is issued with, or the
   issuer's own when the software is its own (Formato de Boletas 4.2, field 30). `createDocument` checks it with

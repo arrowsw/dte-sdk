@@ -17,7 +17,8 @@ import { preProcessFile } from 'typescript'
 
 /**
  * Smoke test for the built `dist/` artefacts and their `package.json` wiring. Jest cannot `require()` an ES module, so
- * every check runs the real Node loader in a fresh process. Auto-skipped until `npm run build` has run.
+ * every check runs the real Node loader in a fresh process. Skipped, outside CI, until `npm run build` has run; on CI a
+ * missing build fails the run.
  */
 const packageRoot = join(__dirname, '..')
 const distRoot = join(packageRoot, 'dist')
@@ -163,8 +164,21 @@ const ISSUE_DOCUMENT = `
     caf, certificate, checkCafExpiry: false,
   })`
 
-const distExists = ENTRIES.every((name) => existsSync(entryFile(name)))
+const missingEntries = ENTRIES.filter((name) => !existsSync(entryFile(name)))
+const distExists = missingEntries.length === 0
 const guarded = distExists ? describe : describe.skip
+
+// The skip above is for a local run that has not built yet. A CI run that has no build is a broken pipeline, and a
+// skipped suite would let it through as green, so there the missing build fails the run by name. `CI` is what GitHub
+// Actions and most other CI systems set. `CI=false` and `CI=0` count as not set.
+const onCi = !['', '0', 'false'].includes(process.env.CI ?? '')
+const requiredOnCi = onCi ? describe : describe.skip
+
+requiredOnCi('dist smoke: the build is there', () => {
+  test('dist/ holds the minified file of every entry', () => {
+    expect(missingEntries).toEqual([])
+  })
+})
 
 guarded('dist smoke (ES modules)', () => {
   test('every target of package.json#exports exists', () => {

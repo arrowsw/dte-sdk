@@ -281,7 +281,8 @@ issuing be completed by a later guide. Before stamping, `createDocument` holds b
 real days from 2003-04-01 to 2050-12-31 (`INVALID_DATE`) and the time to `HH:MM:SS` or `HH:MM` (`INVALID_TIME`).
 `transferType` takes 1 to 9, the values the schema admits: the three types the resolution adds (a transfer of more than
 one day, as a sale or not, and an outsourced transfer) wait until the schema admits them, and `createDocument` refuses
-any other value with `INVALID_OPTION`. The printed sample does not print the transport area yet.
+any other value with `INVALID_OPTION`. The [printed sample](#printed-samples-node) prints the transport area with
+whatever of these fields the document carries.
 
 ### Settlement invoices
 
@@ -1115,10 +1116,17 @@ const samples = await readPrintedSamples('./certification/samples')
 ```
 
 The printed sample follows the SII printed-samples manual: one page 21.5 cm wide and as tall as its content between 11
-and 33 cm, the red type box with the RUT, the type name and the folio, issuer, date, receiver, references, detail,
-totals, the acknowledgement box and `CEDIBLE` mark on the transferable copy (33, 34, 43, 46 and sale guides), and the
-PDF417 stamp of the TED with its legends. The legend under the type box is `siiOffice` when given; otherwise the office
-of the issuer's commune (`CmnaOrigen`), looked up with `siiOfficeForCommune` in `SII_OFFICES` (355 commune names in 40
+and 33 cm, the red type box with the RUT, the type name and the folio, issuer, date, receiver, a guide's transfer type,
+the transport area, references, detail, totals, the acknowledgement box and `CEDIBLE` mark on the transferable copy
+(33, 34, 43, 46 and sale guides), and the PDF417 stamp of the TED with its legends. The transport area is a box under
+the receiver with what the document's `Transporte` carries, in the order of Formato DTE 2.5: both plates, the carrier's
+RUT, the driver's name and RUT, the destination's address, commune and city, and the departure date and time and the
+arrival date. Formato 2.5 marks every field of the area to be printed but the destination city, which is printed when
+the document has it. A dispatch guide and an invoice that moves goods print it alike; a field the document lacks is
+left out, and a document without `Transporte` has no box. `parsePrintableDocuments` reads the area into
+`transport` (`PrintableTransport`), every field as written. The legend under the type box is `siiOffice` when given;
+otherwise the office of the issuer's commune (`CmnaOrigen`), looked up with `siiOfficeForCommune` in
+`SII_OFFICES` (355 commune names in 40
 offices, every official commune included, ignoring case, surrounding spaces and accents), and `S.I.I. - SANTIAGO CENTRO` for a commune the table lacks.
 The stamp encodes the signed bytes exactly (`renderTedBarcode` gives the PNG
 alone). It needs Node and the optional peers `pdf-lib` and `bwip-js`, which are loaded on first use: without them
