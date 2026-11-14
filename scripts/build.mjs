@@ -14,6 +14,7 @@ const ENTRIES = {
   node: 'src/node/index.ts',
   portal: 'src/portal/index.ts',
   pdf: 'src/pdf/index.ts',
+  catalogs: 'src/catalogs/index.ts',
 }
 
 await rm('dist', { recursive: true, force: true })

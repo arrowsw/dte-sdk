@@ -32,6 +32,7 @@ const ENTRIES = {
   'dte-sdk/node': ['createNodeHttpsTransport', 'createDirectoryTokenCache', 'findCafFiles'],
   'dte-sdk/portal': ['createPortalClient', 'requestCaf', 'runCertification'],
   'dte-sdk/pdf': ['parsePrintableDocuments', 'renderPrintedSample'],
+  'dte-sdk/catalogs': ['businessActivity', 'isBusinessActivityCode'],
 }
 
 const RUNTIME = `
@@ -39,12 +40,13 @@ import * as root from 'dte-sdk'
 import * as node from 'dte-sdk/node'
 import * as portal from 'dte-sdk/portal'
 import * as pdf from 'dte-sdk/pdf'
+import * as catalogs from 'dte-sdk/catalogs'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 
 const fail = (what) => { console.error('package smoke FAILED: ' + what); process.exit(1) }
-const modules = { 'dte-sdk': root, 'dte-sdk/node': node, 'dte-sdk/portal': portal, 'dte-sdk/pdf': pdf }
+const modules = { 'dte-sdk': root, 'dte-sdk/node': node, 'dte-sdk/portal': portal, 'dte-sdk/pdf': pdf, 'dte-sdk/catalogs': catalogs }
 const require = createRequire(join(process.cwd(), 'consumer.cjs'))
 
 for (const [name, functions] of Object.entries(${JSON.stringify(ENTRIES)})) {
@@ -83,7 +85,10 @@ const [printable] = pdf.parsePrintableDocuments(signed.xml)
 const sample = await pdf.renderPrintedSample(printable, { transferable: true })
 if (Buffer.from(sample.subarray(0, 5)).toString() !== '%PDF-') fail('dte-sdk/pdf rendered no PDF')
 
-console.log('package smoke ok (runtime: four entries, import and require, issue, verify, PDF)')
+// dte-sdk/catalogs holds the business activities on its own.
+if (catalogs.businessActivity(11101)?.name !== 'CULTIVO DE TRIGO') fail('dte-sdk/catalogs has no activity 11101')
+
+console.log('package smoke ok (runtime: five entries, import and require, issue, verify, PDF, catalogs)')
 `
 
 // An `any` would let each assignment compile, and the unused `@ts-expect-error` would then be the error.
@@ -92,6 +97,7 @@ import { createDocument } from 'dte-sdk'
 import { createNodeHttpsTransport } from 'dte-sdk/node'
 import { createPortalClient } from 'dte-sdk/portal'
 import { parsePrintableDocuments } from 'dte-sdk/pdf'
+import { businessActivity } from 'dte-sdk/catalogs'
 
 // @ts-expect-error
 export const root: number = createDocument
@@ -101,6 +107,8 @@ export const node: number = createNodeHttpsTransport
 export const portal: number = createPortalClient
 // @ts-expect-error
 export const pdf: number = parsePrintableDocuments
+// @ts-expect-error
+export const catalogs: number = businessActivity
 `
 
 // The `exports` map (nodenext) and `typesVersions` (node10) each have to reach the shipped declarations.

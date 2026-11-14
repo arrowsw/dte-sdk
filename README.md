@@ -165,12 +165,13 @@ npm install pdf-lib bwip-js
 
 ## Entry points
 
-| Import from      | What it holds                                                                                                                                                                                                             | Runs on                                                        |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `dte-sdk`        | Documents, stamps, signatures, envelopes, books, the verification of received documents and the SII web services client over `fetch`                                                                                      | Node, Bun, Deno; bundles for the browser with no configuration |
-| `dte-sdk/node`   | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope`  | Node                                                           |
-| `dte-sdk/portal` | SII portal, folios and CAF requests, the folio registry, purchase and sales register, MIPYME backup, activity verification, and certification: sets, runner, exchange, upload of the samples and the receipts application | Node                                                           |
-| `dte-sdk/pdf`    | Printed samples and the SII office of each commune (`SII_OFFICES`, `siiOfficeForCommune`)                                                                                                                                 | Node, with `pdf-lib` and `bwip-js` installed                   |
+| Import from        | What it holds                                                                                                                                                                                                             | Runs on                                                        |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `dte-sdk`          | Documents, stamps, signatures, envelopes, books, the verification of received documents and the SII web services client over `fetch`                                                                                      | Node, Bun, Deno; bundles for the browser with no configuration |
+| `dte-sdk/node`     | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope`  | Node                                                           |
+| `dte-sdk/portal`   | SII portal, folios and CAF requests, the folio registry, purchase and sales register, MIPYME backup, activity verification, and certification: sets, runner, exchange, upload of the samples and the receipts application | Node                                                           |
+| `dte-sdk/pdf`      | Printed samples and the SII office of each commune (`SII_OFFICES`, `siiOfficeForCommune`)                                                                                                                                 | Node, with `pdf-lib` and `bwip-js` installed                   |
+| `dte-sdk/catalogs` | The SII's large code tables: the business activities (`BUSINESS_ACTIVITIES`, `businessActivity`, `isBusinessActivityCode`)                                                                                                | Node, Bun, Deno; bundles for the browser with no configuration |
 
 `DteError` and `isDteError` come from `dte-sdk` and recognize what every entry throws.
 
@@ -1284,6 +1285,20 @@ The tables are data: `createDocument` does not check a document against them. Th
 `UnmdRef`) have no table, since Formato DTE 2.5 makes them free text of up to four characters that the SII does not
 check outside exports.
 
+The business activities (`Acteco`) are about 10 kB, so they have an entry of their own, `dte-sdk/catalogs`, and only
+who imports it pays for them. `BUSINESS_ACTIVITIES` holds the 674 codes of the SII's list
+([Códigos de Actividad Económica](https://www.sii.cl/ayudas/ayudas_por_servicios/1956-codigos-1959.html)), sorted,
+each with its name and the list's three columns as the SII writes them: `subjectToVat` ("Afecto a IVA": `SI`, `NO`
+or `G`), `taxCategory` ("Categoría Tributaria": `1`, `2` or `G`) and `availableOnline` ("Disponible Internet"). `G`
+means, in the list's own glossary, that the tax category and VAT are decided by the activity's own characteristics.
+
+```typescript
+import { businessActivity, isBusinessActivityCode } from 'dte-sdk/catalogs'
+
+businessActivity(620100) // { code: 620100, name: 'ACTIVIDADES DE PROGRAMACIÓN INFORMÁTICA', subjectToVat: 'G', taxCategory: 'G', availableOnline: true }
+isBusinessActivityCode(11101) // true: the list writes it 011101, and as a number it loses its leading zero
+```
+
 ## Errors
 
 ```typescript
@@ -1329,7 +1344,7 @@ SII_LIVE=1 SII_CERT_PFX=… SII_CERT_PASSWORD=… npx jest tests/live   # opt-in
 Releases are tag-triggered and published from CI with npm provenance — see
 [RELEASING.md](./RELEASING.md). The design of each area and the decisions behind it are under
 [docs/superpowers/specs](./docs/superpowers/specs), and [docs/decisions/entry-points.md](./docs/decisions/entry-points.md)
-explains the four entries.
+explains the entries.
 
 ## Contributing
 

@@ -26,6 +26,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   does not check outside exports. `dte-sdk` grows from 37.66 kB to 38.87 kB, over its 38 kB limit, which goes to
   40 kB.
   - **What to change:** nothing.
+- **A new entry point, `dte-sdk/catalogs`, with the SII's business activities.** The SII's large code tables get an
+  entry of their own, so that only who imports them pays for them; the root does not grow. Its first table is the
+  list of economic activity codes an issuer writes in `Acteco`: `BUSINESS_ACTIVITIES` holds its 674 codes, sorted
+  (sii.cl, "Códigos de Actividad Económica", read on 2026-11-14), each with its `name` and the list's three columns as
+  the SII writes them: `subjectToVat` ("Afecto a IVA": `SI`, `NO` or `G`), `taxCategory` ("Categoría Tributaria": `1`,
+  `2` or `G`) and `availableOnline` ("Disponible Internet"; the two rows that write `S` read as true). `G` is, in the
+  list's glossary, a category and a VAT decided by the activity's own characteristics. `businessActivity(code)` looks
+  an activity up and `isBusinessActivityCode` is its guard; a code the list writes with a leading zero, such as
+  `011101`, is the number 11101. Like the root, the entry runs anywhere, names no `node:` module and bundles for the
+  browser. It is 10.65 kB, under a limit of 12 kB; the other entries do not move.
+  - **What to change:** nothing. Import `dte-sdk/catalogs` for the business activities.
 - **A receipt on continuous paper, with the printed stamp as an option.** `renderPrintedSample` takes `paper: 'roll'`
   to print the continuous paper the printed-samples manual allows (its "papel continuo", the format of a point of sale
   printer) instead of the sheet: a page 80 mm wide, above the manual's least width of 7.5 cm, with the 0.5 cm border,
