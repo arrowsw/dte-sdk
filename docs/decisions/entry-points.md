@@ -63,10 +63,10 @@ stamped, after 0.11.0, took `dte-sdk` from 37.27 kB to 37.62 kB, `dte-sdk/node` 
 The strict reading of a received envelope, which the answers share with the verification, and the checks on the
 decisions of the commercial result and the receipts, also after 0.11.0, took `dte-sdk` from 37.62 kB to 37.66 kB and
 `dte-sdk/portal` from 78.98 kB to 79.02 kB, both under their limits; `dte-sdk/node` and `dte-sdk/pdf` did not move.
-The SII's tables of additional taxes, payment media and reference documents, also after 0.11.0, took `dte-sdk` from
+The SII's tables of additional taxes, payment media and reference documents, after 0.12.0, took `dte-sdk` from
 37.66 kB to 38.87 kB, over its 38 kB limit, which went to 40 kB, and `dte-sdk/portal` from 79.02 kB to 79.03 kB, under
 its limit; `dte-sdk/node` and `dte-sdk/pdf` did not move.
-The business activities, also after 0.11.0, went to an entry of their own, `dte-sdk/catalogs`, which Hans decided on
+The business activities, also after 0.12.0, went to an entry of their own, `dte-sdk/catalogs`, which Hans decided on
 2026-11-14: the SII's list of 674 codes, each with its name and three columns, is 10.65 kB, about 10 kB more on the
 root for every consumer, or on `dte-sdk/portal` past its 80 kB limit. In an entry of its own only who imports it pays
 for it, and the name leaves room for the next large tables, such as communes or customs. Its limit is the measure
