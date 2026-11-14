@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The SII's tables of additional taxes, payment media and reference documents.** Every issuer picks from them.
+  `ADDITIONAL_TAXES` holds, by code, the 40 codes `TipoImp` and `CodImpAdic` take (Formato DTE 2.5, section 4, pages
+  51 to 54: its 33 rows and the 7 codes of total withholding of its second column), each with its name as the SII
+  writes it, its `kind` (`additional`, `specific`, `margin`, `advance` or `withholding`, in the words of `MntTotal`),
+  the `rate` the table gives, the electronic `documents` it applies to and the `totalWithholdingCode` that takes its
+  place when the buyer withholds the whole VAT; `isAdditionalTaxCode` is its guard. The schema's `ImpAdicDTEType` also
+  admits 16, 40, 54 and 55, which the table does not describe, so they are left out. `PAYMENT_MEDIA` holds the seven
+  `MedioPago` codes (page 15) and `RECEIPT_PAYMENT_MEDIA` a receipt's, `'1'` to `'5'` as `paymentMedium` carries them
+  (Formato Boletas Electrónicas 4.2, page 9), with `isPaymentMedium` and `isReceiptPaymentMedium`.
+  `REFERENCE_DOCUMENT_TYPES` names the 42 numeric codes a `TpoDocRef` can take: the 39 of its field (page 45) and 821
+  to 823, which the change log of 2021-09-14 added (page 3); `RECEIPT_REFERENCE_DOCUMENT_TYPES` holds the 11 of a
+  receipt (page 18), and `isReferenceDocumentType` and `isReceiptReferenceDocumentType` are their guards. An
+  alphabetic `TpoDocRef`, `SET` among them, is not checked by the SII and stays free. The tables are data: no check of
+  `createDocument` changes. The units of measure get no table, since `UnmdItem` and `UnmdRef` are free text the SII
+  does not check outside exports. `dte-sdk` grows from 37.66 kB to 38.87 kB, over its 38 kB limit, which goes to
+  40 kB.
+  - **What to change:** nothing.
+- **A new entry point, `dte-sdk/catalogs`, with the SII's business activities.** The SII's large code tables get an
+  entry of their own, so that only who imports them pays for them; the root does not grow. Its first table is the
+  list of economic activity codes an issuer writes in `Acteco`: `BUSINESS_ACTIVITIES` holds its 674 codes, sorted
+  (sii.cl, "Códigos de Actividad Económica", read on 2026-11-14), each with its `name` and the list's three columns as
+  the SII writes them: `subjectToVat` ("Afecto a IVA": `SI`, `NO` or `G`), `taxCategory` ("Categoría Tributaria": `1`,
+  `2` or `G`) and `availableOnline` ("Disponible Internet"; the two rows that write `S` read as true). `G` is, in the
+  list's glossary, a category and a VAT decided by the activity's own characteristics. `businessActivity(code)` looks
+  an activity up and `isBusinessActivityCode` is its guard; a code the list writes with a leading zero, such as
+  `011101`, is the number 11101. Like the root, the entry runs anywhere, names no `node:` module and bundles for the
+  browser. It is 10.65 kB, under a limit of 12 kB; the other entries do not move.
+  - **What to change:** nothing. Import `dte-sdk/catalogs` for the business activities.
+
 ## [0.12.0] - 2026-11-14
 
 ### Added
