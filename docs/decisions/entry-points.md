@@ -7,10 +7,10 @@ D40 and D41 of the design specs). Tracks [issue #5](https://github.com/arrowsw/d
 
 | Entry | Holds | Size | Reaches `node:` |
 |---|---|---|---|
-| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 35.51 kB | No |
+| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 37.27 kB | No |
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.09 kB | Yes, on first use |
-| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 77.82 kB | Yes, on first use |
-| `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 11.47 kB | Yes, on first use |
+| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 78.51 kB | Yes, on first use |
+| `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 13.2 kB | Yes, on first use |
 
 Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
 it. The decision was taken at phase 5b-2, which took `dte-sdk/portal` from 39.35 kB to 55.86 kB; each limit was then the
@@ -50,6 +50,10 @@ to 35.51 kB and `dte-sdk/portal` from 77.43 kB to 77.82 kB, and reading a receip
 from 11.45 kB to 11.47 kB, all under their limits; `dte-sdk/node` did not move.
 The printed sample on continuous paper, with the stamp as an option for receipts, took `dte-sdk/pdf` from 11.47 kB to
 13.2 kB, over its 12 kB limit, which went to 14 kB; the other entries did not move.
+The receiver's answers to a received envelope (the reception answer, the commercial result and the receipts, each with
+the caller's decisions and the catalogs of states), which the certification's exchange now builds on, took `dte-sdk` from
+35.51 kB to 37.27 kB, over its 36 kB limit, which went to 38 kB, and `dte-sdk/portal` from 77.82 kB to 78.51 kB, over its
+78 kB limit, which went to 80 kB; `dte-sdk/node` and `dte-sdk/pdf` did not move.
 
 ## Why
 
