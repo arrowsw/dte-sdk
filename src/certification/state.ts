@@ -162,6 +162,8 @@ export type CertificationState = {
   readonly setReadDate?: string
   /** EN: The CAF files the run holds; each holds a private key, so the store is a secret. ES: Los CAF que tiene la corrida; cada uno trae una llave privada, así que el almacén es un secreto. */
   readonly cafs: readonly string[]
+  /** EN: The CAF files obtained for the simulation that no send was tried with: the next attempt issues with them instead of asking for them again. ES: Los archivos CAF obtenidos para la simulación con los que no se intentó ningún envío: el siguiente intento emite con ellos en vez de pedirlos de nuevo. */
+  readonly simulationCafs?: readonly string[]
   /** EN: Every folio used by this run. ES: Cada folio usado por esta corrida. */
   readonly usedFolios: readonly { readonly type: number; readonly folio: number }[]
   /** EN: The `from-to` ranges the SII reported as annulled or received, by document type: the annulment does not try them again. ES: Los rangos `desde-hasta` que el SII dio por anulados o recibidos, por tipo de documento: la anulación no los vuelve a intentar. */

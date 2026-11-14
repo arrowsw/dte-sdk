@@ -436,6 +436,54 @@ test('withholdVat withholds the whole VAT on a note that affects a purchase invo
   expect(createDocument({ ...base, type: 46, withholdVat: false }).header.totals.totalAmount).toBe(11900)
 })
 
+// Formato DTE 2.5, field 117: the withheld amount is the rate by the sum of the lines that carry the code of the
+// withholding. A document that withholds the whole VAT and whose lines carry no code states a withholding over nothing.
+describe('the lines of a document that withholds the whole VAT', () => {
+  const purchase = (items: DocumentInput['items'], extra: Partial<DocumentInput> = {}) =>
+    createDocument({ type: 46, folio: 7, issueDate: '2026-11-15', issuer, receiver, items, ...extra })
+  const codes = (doc: ReturnType<typeof createDocument>) => doc.items.map((item) => item.additionalTaxCodes)
+
+  test('each VAT-affected line of a purchase invoice carries code 15, and an exempt or non-billable one does not', () => {
+    const doc = purchase([
+      { name: 'Chatarra', quantity: 2, unitPrice: 1000 },
+      { name: 'Flete', unitPrice: 500, exempt: true },
+      { name: 'Envase', unitPrice: 300, exemptIndicator: 2 },
+    ])
+    expect(codes(doc)).toEqual([[15], undefined, undefined])
+    expect(doc.header.totals.withholdings).toEqual([{ taxCode: 15, rate: 19, amount: 380 }])
+    expect(toSiiDocument(doc).Detalle.map((line) => line.CodImpAdic)).toEqual([[15], undefined, undefined])
+  })
+
+  test('a note that withholds the VAT of a purchase invoice carries the code too', () => {
+    const note = purchase([{ name: 'Chatarra', quantity: 2, unitPrice: 1000 }], {
+      type: 61,
+      withholdVat: true,
+      references: [{ documentType: 46, folio: 7, date: '2026-11-15', code: 3, reason: 'DEVOLUCION' }],
+    })
+    expect(codes(note)).toEqual([[15]])
+  })
+
+  test('a line that brings its own codes keeps them, an empty list included', () => {
+    const doc = purchase([
+      { name: 'Chatarra', unitPrice: 1000, additionalTaxCodes: [15] },
+      { name: 'Carne', unitPrice: 1000, additionalTaxCodes: [17] },
+      { name: 'Otro', unitPrice: 1000, additionalTaxCodes: [] },
+    ])
+    expect(codes(doc)).toEqual([[15], [17], []])
+  })
+
+  test('without a withholding no line gets the code', () => {
+    expect(codes(purchase([{ name: 'Chatarra', unitPrice: 1000 }], { withholdVat: false }))).toEqual([undefined])
+    expect(codes(purchase([{ name: 'Flete', unitPrice: 500, exempt: true }]))).toEqual([undefined])
+    expect(codes(purchase([{ name: 'Chatarra', unitPrice: 1000 }], { type: 33 }))).toEqual([undefined])
+  })
+
+  test('totals given by the caller leave the lines as they came', () => {
+    const totals = { netAmount: 1000, vatRate: 19, vatAmount: 190, totalAmount: 1190 }
+    expect(codes(purchase([{ name: 'Chatarra', unitPrice: 1000 }], { totals }))).toEqual([undefined])
+  })
+})
+
 describe('the decimals of a line price', () => {
   const priced = (unitPriceDecimals: number | undefined, price: { unitPrice?: number } = { unitPrice: 1200 }) =>
     createDocument({
@@ -465,6 +513,126 @@ describe('the decimals of a line price', () => {
 
   test.each([-1, 7, 1.5, Number.NaN])('%p decimals are refused', (decimals) => {
     expectError(() => priced(decimals), 'INVALID_OPTION', { field: 'items[0].unitPriceDecimals' })
+  })
+})
+
+// `DTE_v10.xsd` and `EnvioBOLETA_v11.xsd` give `QtyItem`, `PrcItem`, `QtyRef` and `PrcRef` twelve digits and six
+// decimals, and `DescuentoPct`, `RecargoPct`, `TasaComision` and `ValorDR` two decimals. A number with more decimals,
+// which plain arithmetic gives (0.1 + 0.2), fails the schema and with it the whole envelope.
+describe('the decimals the schema admits', () => {
+  const line = (item: DocumentInput['items'][number], extra: Partial<DocumentInput> = {}) =>
+    createDocument({ type: 33, folio: 7, issueDate: '2026-11-15', issuer, receiver, items: [item], ...extra })
+
+  test('a quantity and a price are rounded to six decimals, and the amount is worked out from what is written', () => {
+    const doc = line({ name: 'Granel', quantity: 1 / 3, unitPrice: 100 / 3 })
+    expect(doc.items[0]).toMatchObject({ quantity: 0.333333, unitPrice: 33.333333, amount: 11 })
+    expect(toSiiDocument(doc).Detalle[0]).toMatchObject({ QtyItem: 0.333333, PrcItem: 33.333333, MontoItem: 11 })
+    expect(line({ name: 'Granel', quantity: 0.1 + 0.2, unitPrice: 1000 }).items[0]).toMatchObject({
+      quantity: 0.3,
+      amount: 300,
+    })
+    // 1.0000004 × 3 000 000 is 3 000 001.2, but the quantity is written as 1: the amount is the one of what is
+    // written, so the SII, which multiplies `QtyItem` by `PrcItem`, finds the same number.
+    expect(line({ name: 'Granel', quantity: 1.0000004, unitPrice: 3_000_000 }).items[0]).toMatchObject({
+      quantity: 1,
+      amount: 3_000_000,
+    })
+  })
+
+  test('QtyRef and PrcRef are rounded to six decimals', () => {
+    const doc = line({ name: 'Caja', quantity: 1, unitPrice: 1000, referenceQuantity: 2 / 3, referencePrice: 1000 / 7 })
+    expect(doc.items[0]).toMatchObject({ referenceQuantity: 0.666667, referencePrice: 142.857143 })
+  })
+
+  test('a discount and a surcharge percent are rounded to two decimals, and their amounts follow', () => {
+    const discounted = line({ name: 'Lote', quantity: 3, unitPrice: 1_000_000, discountPercent: 100 / 3 })
+    expect(discounted.items[0]).toMatchObject({ discountPercent: 33.33, discountAmount: 999_900, amount: 2_000_100 })
+    const surcharged = line({ name: 'Lote', quantity: 3, unitPrice: 1_000_000, surchargePercent: 100 / 3 })
+    expect(surcharged.items[0]).toMatchObject({ surchargePercent: 33.33, surchargeAmount: 999_900, amount: 3_999_900 })
+  })
+
+  test('the value of a global adjustment and the rate of a commission are rounded to two decimals', () => {
+    const doc = line(
+      { name: 'Lote', quantity: 3, unitPrice: 1_000_000 },
+      {
+        globalAdjustments: [{ kind: 'discount', valueType: 'percent', value: 100 / 3 }],
+        commissions: [{ kind: 'commission', description: 'Comisión', rate: 10 / 3, netValue: 1000 }],
+      },
+    )
+    expect(doc.globalAdjustments[0].value).toBe(33.33)
+    expect(doc.commissions[0].rate).toBe(3.33)
+    // 3 000 000 less 33.33 %.
+    expect(doc.header.totals.netAmount).toBe(2_000_100)
+  })
+
+  test.each([
+    ['quantity', { quantity: 1e12, unitPrice: 1 }],
+    ['unitPrice', { quantity: 1, unitPrice: 1e12 }],
+    ['referenceQuantity', { quantity: 1, unitPrice: 1, referenceQuantity: 1e12 }],
+    ['referencePrice', { quantity: 1, unitPrice: 1, referencePrice: 1e12 }],
+    ['discountPercent', { quantity: 1, unitPrice: 1, discountPercent: 1000 }],
+    ['surchargePercent', { quantity: 1, unitPrice: 1, surchargePercent: 1000 }],
+  ])('a %s with more digits than its type holds is refused', (field, item) => {
+    expectError(() => line({ name: 'Lote', ...item }), 'INVALID_AMOUNT', { field: `items[0].${field}` })
+  })
+
+  test('the largest values the schema admits pass', () => {
+    const doc = line({ name: 'Lote', quantity: 999_999_999_999.999, unitPrice: 0.000001, discountPercent: 999.99 })
+    expect(doc.items[0]).toMatchObject({ quantity: 999_999_999_999.999, unitPrice: 0.000001, discountPercent: 999.99 })
+  })
+
+  test('a global adjustment value and a commission rate out of range are refused', () => {
+    const adjusted = { globalAdjustments: [{ kind: 'discount', valueType: 'amount', value: 1e16 }] } as const
+    expectError(() => line({ name: 'Lote', unitPrice: 1 }, adjusted), 'INVALID_AMOUNT', {
+      field: 'globalAdjustments[0].value',
+    })
+    const charged = { commissions: [{ kind: 'commission', description: 'Comisión', rate: 1000, netValue: 1 }] } as const
+    expectError(() => line({ name: 'Lote', unitPrice: 1 }, charged), 'INVALID_AMOUNT', {
+      field: 'commissions[0].rate',
+    })
+  })
+})
+
+// `CdgSIISucur` is a positive integer of at most nine digits in `DTE_v10.xsd` and `EnvioBOLETA_v11.xsd`.
+describe("the issuer's SII branch code", () => {
+  const branch = (siiBranchCode: number, type: DocumentInput['type'] = 33) =>
+    createDocument({ type, folio: 7, issuer: { ...issuer, siiBranchCode }, receiver, items })
+
+  test.each([0, 1.5, -3, 1_000_000_000, Number.NaN])('%p is refused', (code) => {
+    expectError(() => branch(code), 'INVALID_OPTION', { field: 'issuer.siiBranchCode' })
+    expectError(() => branch(code, 39), 'INVALID_OPTION', { field: 'issuer.siiBranchCode' })
+  })
+
+  test('1 and 999 999 999 are the bounds the schema admits', () => {
+    expect(branch(1).header.issuer.siiBranchCode).toBe(1)
+    expect(branch(999_999_999).header.issuer.siiBranchCode).toBe(999_999_999)
+  })
+})
+
+describe('the quantity of a priced line', () => {
+  const line = (item: DocumentInput['items'][number], type: DocumentInput['type'] = 33) =>
+    createDocument({ type, folio: 7, issueDate: '2026-11-15', issuer, receiver, items: [item] })
+
+  test('a line with a price and no quantity is written with the quantity it is computed with, 1', () => {
+    const doc = line({ name: 'Plan anual', unitPrice: 100000 })
+    expect(doc.items[0]).toMatchObject({ quantity: 1, unitPrice: 100000, amount: 100000 })
+    expect(toSiiDocument(doc).Detalle[0]).toMatchObject({ QtyItem: 1, PrcItem: 100000, MontoItem: 100000 })
+    expect(toSiiDocument(line({ name: 'Flete', unitPrice: 5000 }, 52)).Detalle[0].QtyItem).toBe(1)
+    expect(toSiiDocument(line({ name: 'Pan', unitPrice: 1190 }, 39)).Detalle[0].QtyItem).toBe(1)
+  })
+
+  // Formato DTE 2.5, field 15: `QtyItem` is required on a dispatch guide, priced or not.
+  test('a line of a dispatch guide with no quantity is written with 1, even without a price', () => {
+    const guide = line({ name: 'Pallet', amount: 0 }, 52)
+    expect(guide.items[0]).toMatchObject({ quantity: 1, amount: 0 })
+    expect(toSiiDocument(guide).Detalle[0].QtyItem).toBe(1)
+    expect(line({ name: 'Pallet', quantity: 3, amount: 0 }, 52).items[0].quantity).toBe(3)
+  })
+
+  test('a line without a price gets no quantity of its own', () => {
+    expect(line({ name: 'Glosa', amount: 500 }).items[0].quantity).toBeUndefined()
+    expect(line({ name: 'Glosa' }).items[0].quantity).toBeUndefined()
+    expect(line({ name: 'Pallet', quantity: 2, amount: 0 }).items[0].quantity).toBe(2)
   })
 })
 

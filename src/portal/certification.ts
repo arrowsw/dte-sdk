@@ -5,6 +5,7 @@ import { DteError, errorMessage } from '../errors'
 import type { CallOverrides } from '../sii/client'
 import { resolvePortalCompany, type PortalClient } from './client'
 import { hasSessionCookie } from './cookies'
+import { bodyText } from './html'
 import { portalMessageOf } from './pages/auth'
 import { parseCertificationSets, type CertificationSet } from './pages/certification'
 import { isHistoryUnauthorized, parseBookHistory, type BookHistoryEntry } from './pages/certification-books'
@@ -59,6 +60,8 @@ const COMPANY_CODE = '8'
 const DEFAULT_TOTAL_ROWS = 10
 const DEFAULT_STEP = 'P01'
 const SIMULATION_STAGE_WORD = 'SIMULACION'
+// How much of the progress page a report carries: the wording around the labels, not the whole page.
+const PROGRESS_TEXT_LENGTH = 6000
 const MIN_YEAR = 1990
 const MAX_YEAR = 2100
 const UPL_URL = `https://${SII_HOSTS.certification}/cgi_dte/UPL/`
@@ -213,6 +216,8 @@ export type ProgressReport = {
   readonly rows: readonly CertificationSet[]
   /** EN: The receipts row of the page, or null. ES: La fila de boletas de la página, o null. */
   readonly receipts: ReceiptsProgress | null
+  /** EN: The readable text of the page, up to 6000 characters: what the SII writes around a label is the reason of a rejection. ES: El texto legible de la página, hasta 6000 caracteres: lo que el SII escribe alrededor de una etiqueta es el motivo de un rechazo. */
+  readonly text: string
 }
 
 /**
@@ -618,6 +623,7 @@ export const readProgress = (
       simulationAwaitsConfirmation: progress.simulationAwaitsConfirmation || onForm,
       rows: parseCertificationSets(pages.form.html),
       receipts: progress.receipts,
+      text: bodyText(pages.progress.html).slice(0, PROGRESS_TEXT_LENGTH),
     }
   })
 

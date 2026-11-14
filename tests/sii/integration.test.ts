@@ -9,7 +9,7 @@ import {
   verifyEnvelopeSignature,
 } from '../../src'
 import { fixtureText, FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from '../support/fixtures'
-import { cachedSii, certificate, COMPANY_RUT, siiFixture } from '../support/sii-client'
+import { cachedSii, certificate, siiFixture } from '../support/sii-client'
 
 const SLOW = 30000
 const CGI = 'https://maullin.sii.cl/cgi_dte/UPL/DTEUpload'
@@ -63,7 +63,7 @@ describe('phase 1 output through the SII client', () => {
         { archive: memory.archive },
       )
 
-      const receipt = await uploadEnvelope(sii, { envelope, companyRut: COMPANY_RUT })
+      const receipt = await uploadEnvelope(sii, { envelope, companyRut: ISSUER_RUT })
 
       expect(receipt).toMatchObject({ kind: 'dte', channel: 'soap', fileName: 'EnvioDTE.xml', duplicate: false })
       const file = fake.requests[0].parts.find((part) => part.name === 'archivo')!
@@ -107,7 +107,7 @@ describe('phase 1 output through the SII client', () => {
         { environment: 'production' },
       )
 
-      const receipt = await uploadEnvelope(sii, { envelope, companyRut: COMPANY_RUT })
+      const receipt = await uploadEnvelope(sii, { envelope, companyRut: ISSUER_RUT })
 
       expect(receipt).toMatchObject({ kind: 'receipt', channel: 'rest', fileName: 'EnvioBOLETA.xml' })
       const file = fake.requests[0].parts.find((part) => part.name === 'archivo')!

@@ -239,6 +239,8 @@ describe('unstable_replenishFolios', () => {
       return [error.code, error.details.field]
     }
     expect(await bad({ coolDownMs: 0 })).toEqual(['INVALID_OPTION', 'coolDownMs'])
+    expect(await bad({ annulWithinDays: 0 })).toEqual(['INVALID_OPTION', 'annulWithinDays'])
+    expect(await bad({ annulWithinDays: Number.NaN })).toEqual(['INVALID_OPTION', 'annulWithinDays'])
     expect(await bad({ minimum: 0 })).toEqual(['INVALID_OPTION', 'minimum'])
     expect(await bad({ quantity: 10 })).toEqual(['INVALID_OPTION', 'quantity'])
     expect(await bad({ maxBatches: 0 })).toEqual(['INVALID_OPTION', 'maxBatches'])
@@ -436,6 +438,58 @@ describe('unstable_replenishFolios', () => {
         annulled: [{ from: 301, to: 306, count: 6 }],
       })
     })
+
+    // Annulling cannot be undone, and in production a range stamped days ago may be another system's.
+    const blockedWithOlderRanges = () =>
+      signedIn(
+        [
+          ...prod.listing([]),
+          prod.entry,
+          prod.always('of_solicita_folios_dcto', REJECTION_PAGES.stampingBlocked),
+          ...prod.annul(
+            unusedRangesPage([
+              [301, 306, '15-11-2026'],
+              [401, 410, '10-11-2026'],
+            ]),
+          ),
+        ],
+        { environment: 'production' },
+      )
+
+    test('there it reaches only the ranges stamped in the last day', async () => {
+      const harness = await blockedWithOlderRanges()
+      const report = await unstable_replenishFolios(harness.portal, { ...base, allowAnnul: true })
+      expect(report.annulled).toEqual([{ from: 301, to: 306, count: 6 }])
+      expect(harness.posted('af_anular3').map((form) => form.FOLIO_INI)).toEqual(['301'])
+    })
+
+    test('annulWithinDays sets how far back it reaches', async () => {
+      const harness = await blockedWithOlderRanges()
+      const report = await unstable_replenishFolios(harness.portal, { ...base, allowAnnul: true, annulWithinDays: 30 })
+      expect(report.annulled).toEqual([
+        { from: 301, to: 306, count: 6 },
+        { from: 401, to: 410, count: 10 },
+      ])
+    })
+  })
+
+  test('in certification annulling reaches the ranges stamped in the last 180 days, unless annulWithinDays says less', async () => {
+    const blocked = () =>
+      signedIn([
+        ...nothingToReobtain,
+        at.entry,
+        at.always('of_solicita_folios_dcto', REJECTION_PAGES.stampingBlocked),
+        ...at.annul(
+          unusedRangesPage([
+            [301, 306, '20-06-2026'],
+            [401, 410, '01-01-2026'],
+          ]),
+        ),
+      ])
+    const wide = await unstable_replenishFolios((await blocked()).portal, base)
+    expect(wide.annulled).toEqual([{ from: 301, to: 306, count: 6 }])
+    const narrow = await unstable_replenishFolios((await blocked()).portal, { ...base, annulWithinDays: 7 })
+    expect(narrow.annulled).toEqual([])
   })
 
   test('in certification a block is lifted by annulling, and then it asks again', async () => {

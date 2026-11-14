@@ -67,11 +67,11 @@ export type PortalClientOptions = {
   readonly companyRut?: string
   /** EN: HTTP transport; Node https with the client certificate and a TLS 1.2 cap by default. ES: Transporte HTTP; por defecto https de Node con el certificado cliente y tope TLS 1.2. */
   readonly transport?: HttpTransport
-  /** EN: Where the session lives; in memory by default. ES: Dónde vive la sesión; en memoria por defecto. */
+  /** EN: Where the session lives; in memory by default, a cache of this client alone. ES: Dónde vive la sesión; en memoria por defecto, una caché solo de este cliente. */
   readonly sessionCache?: TokenCache
   /** EN: Session lifetime in the cache; 90 min by default, refreshed on each use. ES: Vigencia de la sesión en la caché; 90 min por defecto, renovada en cada uso. */
   readonly sessionTtlMs?: number
-  /** EN: Who may use the session now; a mutex in the process by default. ES: Quién puede usar la sesión ahora; por defecto una exclusión mutua en el proceso. */
+  /** EN: Who may use the session now; by default a mutex of this client alone, so two clients of one certificate in a process need the same `lock` and `sessionCache`. ES: Quién puede usar la sesión ahora; por defecto una exclusión mutua solo de este cliente, así que dos clientes de un mismo certificado en un proceso necesitan el mismo `lock` y el mismo `sessionCache`. */
   readonly lock?: PortalLock
   /** EN: Retry policy overrides, or `false` to disable retries. ES: Ajustes de la política de reintentos, o `false` para desactivarlos. */
   readonly retry?: Partial<RetryPolicy> | false

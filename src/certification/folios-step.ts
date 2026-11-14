@@ -143,7 +143,7 @@ export const simulationFolioNeeds = (plan: CertificationPlan): Readonly<Record<n
 export type PrepareFoliosOptions = {
   /** EN: Folios needed per type; the sets not yet sent by default. ES: Folios necesarios por tipo; por defecto los sets aún no enviados. */
   readonly needs?: Readonly<Record<number, number>>
-  /** EN: Ignore the CAFs in hand and request new ones (the simulation never reuses the sets' CAFs). ES: Ignorar los CAF en mano y pedir nuevos (la simulación nunca reutiliza los CAF de los sets). */
+  /** EN: Leave the CAFs of the run aside (the simulation never reuses the sets' CAFs): the ones in hand are those an earlier attempt with `fresh` obtained and no send was tried with (`simulationCafs` of the state), and the rest is requested. ES: Dejar de lado los CAF de la corrida (la simulación nunca reutiliza los CAF de los sets): los que están en mano son los que un intento anterior con `fresh` obtuvo y con los que no se intentó ningún envío (`simulationCafs` del estado), y el resto se pide. */
   readonly fresh?: boolean
 }
 
@@ -152,7 +152,7 @@ export type PrepareFoliosOptions = {
  * ES: Lo que devuelve `prepareFolios`: el estado, y los CAF que cubren las necesidades.
  */
 export type PrepareFoliosResult = StepResult<'ready'> & {
-  /** EN: The CAF files to issue with: the ones in hand plus the new ones, or only the new ones with `fresh`; ranges obtained again that were kept take the place of the ones in hand of their type. ES: Los CAF con que emitir: los en mano más los nuevos, o solo los nuevos con `fresh`; los rangos reobtenidos que se conservan ocupan el lugar de los en mano de su tipo. */
+  /** EN: The CAF files to issue with: the ones in hand plus the new ones, or, with `fresh`, the ones an earlier attempt left plus the new ones; ranges obtained again that were kept take the place of the ones in hand of their type. ES: Los CAF con que emitir: los en mano más los nuevos, o, con `fresh`, los que dejó un intento anterior más los nuevos; los rangos reobtenidos que se conservan ocupan el lugar de los en mano de su tipo. */
   readonly cafs: readonly string[]
 }
 
@@ -271,7 +271,7 @@ const shortage = (type: number, required: number, available: number, result: Fol
  * included, the ones just obtained, and the ones a re-obtention brought and the run did not keep) and never the ranges
  * kept in `annulledRanges`. If any was annulled the maximum is read again and the request repeated following it; an
  * annulment that fails before the SII answers counts as none. Every CAF obtained is saved in the state at once, so a
- * step that ends short leaves them in hand for the next attempt. Still short throws `FOLIO_OUT_OF_RANGE` with the
+ * step that ends short leaves them in hand for the next attempt, with `fresh` too (`simulationCafs`). Still short throws `FOLIO_OUT_OF_RANGE` with the
  * numbers, or, when the batches stopped on a failure and not on the SII's answer, that failure's code. Downloads of a
  * re-obtaining, or an annulment, stopped by a failure end the step with that failure's code too, with the kind of
  * refusal when the SII refused, once what they brought and was kept, or what was annulled, is in the state.
@@ -289,7 +289,7 @@ const shortage = (type: number, required: number, available: number, result: Fol
  * recién obtenidos y los que trajo una reobtención y la corrida no conservó) ni los rangos de `annulledRanges`. Si se
  * anuló alguno se lee de nuevo el máximo y se repite la solicitud siguiéndolo; una anulación que falla antes de que el
  * SII responda cuenta como ninguna. Cada CAF obtenido se guarda en el estado de inmediato, así un paso que termina corto
- * los deja en mano para el siguiente intento. Si aún falta, lanza `FOLIO_OUT_OF_RANGE` con los números o, cuando las
+ * los deja en mano para el siguiente intento, también con `fresh` (`simulationCafs`). Si aún falta, lanza `FOLIO_OUT_OF_RANGE` con los números o, cuando las
  * tandas se detuvieron por una falla y no por la respuesta del SII, el código de esa falla. Las descargas de una
  * reobtención, o una anulación, detenidas por una falla terminan el paso también con el código de esa falla, con el
  * tipo de rechazo cuando el SII rechazó, una vez que lo que trajeron y se conservó, o lo anulado, está en el estado.
@@ -303,20 +303,24 @@ export const prepareFolios = async (
   const rt = runtime(deps)
   if (options.needs === undefined && state.plan === undefined) throw new DteError('MISSING_FIELD', { field: 'plan' })
   const needs = options.needs ?? setFolioNeeds(state.plan!, Object.keys(state.sets))
-  let inHand: readonly string[] = options.fresh ? [] : state.cafs
+  // With `fresh` the CAFs in hand are the ones an earlier attempt of the same step obtained and no send was tried
+  // with, never the others of the run.
+  let inHand: readonly string[] = options.fresh ? (state.simulationCafs ?? []) : state.cafs
   const obtained: string[] = []
   let usedFolios = state.usedFolios
   let annulledRanges: Readonly<Record<string, readonly string[]>> = state.annulledRanges ?? {}
   let current = state
   // A file the run already holds is counted once.
   const stateCafs = (): readonly string[] => [...new Set([...state.cafs, ...obtained])]
+  // With `fresh`, what is in hand is kept apart in the state, so an attempt that ends short leaves it for the next.
+  const pending = (): Partial<CertificationState> => (options.fresh ? { simulationCafs: inHand } : {})
   // What is obtained is kept at once, as field behaviour leaves every CAF on disk: a step that ends short further on
   // finds it in hand at the next attempt instead of asking for it again, which is what makes the SII ration.
   const add = async (cafs: readonly ObtainedCaf[]): Promise<void> => {
     if (cafs.length === 0) return
     obtained.push(...cafs.map((caf) => caf.xml))
     inHand = [...new Set([...inHand, ...cafs.map((caf) => caf.xml)])]
-    current = await saveState(rt, current, { cafs: stateCafs() })
+    current = await saveState(rt, current, { cafs: stateCafs(), ...pending() })
   }
   for (const type of Object.keys(needs)
     .map(Number)
@@ -465,6 +469,6 @@ export const prepareFolios = async (
     }
     rt.emit({ step: 'CAF_OK', type })
   }
-  const next = await saveState(rt, current, { cafs: stateCafs(), usedFolios })
+  const next = await saveState(rt, current, { cafs: stateCafs(), usedFolios, ...pending() })
   return { state: next, outcome: 'ready', cafs: inHand }
 }

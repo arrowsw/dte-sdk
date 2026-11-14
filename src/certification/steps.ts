@@ -58,6 +58,7 @@ const ADVANCE_READ_INTERVAL_MS = 10000
 const SIMULATION_APPROVAL_ATTEMPTS = 30
 const SIMULATION_APPROVAL_INTERVAL_MS = 10000
 const SIMULATION_ARTEFACT = 'simulacion/envio-simulacion.xml'
+const SETS_REJECTION_ARTEFACT = 'sets-prueba/avance-rechazo.txt'
 const SIMULATION_DIAGNOSIS_PREFIX = 'declaracion-simulacion'
 // How the simulation row of the progress page is read: by the wording, in capitals.
 const EXCHANGE_WORD = 'INTERCAMBIO'
@@ -366,11 +367,12 @@ export const declareTestSets = async (
  * EN: Waits for the sent sets to be approved: 5 attempts 10 s apart, sleeping first, reading the progress page. A read
  * that fails only uses up its attempt. Of the states the page shows for the sets sent (or of every state, when no set
  * was sent), all approved is approval, and so is a page that shows none of them; a rejected or inconsistent one stops
- * with its wording.
+ * with its wording, and the readable text of the page is kept as the artefact `sets-prueba/avance-rechazo.txt`.
  * ES: Espera la aprobación de los sets enviados: 5 intentos cada 10 s, durmiendo primero, leyendo la página de avance.
  * Una lectura que falla solo gasta su intento. De los estados que la página muestra para los sets enviados (o de todos
  * los estados, si no se envió ninguno), todos aprobados es aprobación, y también lo es una página que no muestra
- * ninguno; uno rechazado o inconsistente detiene con su texto.
+ * ninguno; uno rechazado o inconsistente detiene con su texto, y el texto legible de la página queda como el artefacto
+ * `sets-prueba/avance-rechazo.txt`.
  */
 export const waitForTestSetsApproval = async (
   deps: CertificationDependencies,
@@ -394,6 +396,8 @@ export const waitForTestSetsApproval = async (
     const rejected = relevant.filter(([, item]) => saysRejection(item.text))
     if (rejected.length > 0) {
       rt.emit({ step: 'SETS_REJECTED' })
+      // The labels say which set; what the SII wrote around them says why, and it is gone once the page is.
+      await rt.store.writeArtefact(SETS_REJECTION_ARTEFACT, report.text)
       return { state, outcome: 'rejected', detail: rejected.map(([key, item]) => `${key}: ${item.text}`).join('; ') }
     }
   }
@@ -459,12 +463,18 @@ const atLeast = (stage: CertificationStage, floor: CertificationStage): boolean 
   STAGE_ORDER.indexOf(stage) >= STAGE_ORDER.indexOf(floor)
 
 /**
- * EN: Sends the simulation: fresh CAFs for one folio per case (never the sets' CAFs), every case of the four sets
+ * EN: Sends the simulation: CAFs of its own for one folio per case (never the sets' CAFs), every case of the four sets
  * issued again in one envelope, the envelope and the documents kept as artefacts, the upload, the folios marked sent
- * whatever happened, and the track id with the Chile date of the send.
- * ES: Envía la simulación: CAF nuevos para un folio por caso (nunca los CAF de los sets), cada caso de los cuatro sets
+ * whatever happened, and the track id with the Chile date of the send. An attempt that stops before the upload leaves
+ * the CAFs it obtained in the state (`simulationCafs`), and the next one issues with them and asks only for what is
+ * missing: unused folios are what makes the SII ration. Once the upload was tried they are spent, as field behaviour
+ * has it, and a new attempt asks for new ones.
+ * ES: Envía la simulación: CAF propios para un folio por caso (nunca los CAF de los sets), cada caso de los cuatro sets
  * reemitido en un sobre, el sobre y los documentos guardados como artefactos, el envío, los folios marcados enviados
- * pase lo que pase, y el track id con la fecha de Chile del envío.
+ * pase lo que pase, y el track id con la fecha de Chile del envío. Un intento que se detiene antes del envío deja en
+ * el estado los CAF que obtuvo (`simulationCafs`), y el siguiente emite con ellos y pide solo lo que falta: los folios
+ * sin usar son lo que hace racionar al SII. Una vez intentado el envío quedan gastados, como en el comportamiento de
+ * campo, y un intento nuevo pide otros.
  * @throws {DteError} EN: `MISSING_FIELD { field: 'plan' }` without a plan; the folio, 5b-1 and upload codes. ES: `MISSING_FIELD { field: 'plan' }` sin plan; los códigos de folios, de 5b-1 y de envío.
  */
 export const sendSimulation = async (
@@ -501,13 +511,14 @@ export const sendSimulation = async (
     await markSent(rt, held, issued.cases, { trackId, sentAt })
     const next = await saveState(rt, prepared.state, {
       usedFolios,
+      simulationCafs: [],
       simulation: { trackId, date: chileDate(rt.now()), sentAt },
     })
     rt.emit({ step: 'SIM_OK', trackId })
     return { state: next, outcome: 'sent' }
   } catch (error) {
     await markSent(rt, held, issued.cases, { sentAt })
-    await saveState(rt, prepared.state, { usedFolios })
+    await saveState(rt, prepared.state, { usedFolios, simulationCafs: [] })
     throw error
   }
 }

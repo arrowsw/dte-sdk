@@ -51,8 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the states are typed unions (`EnvelopeReceptionState`, `DocumentReceptionState`, `CommercialResultState`). A state
   outside them, a gloss over 256 characters and a `CodRchDsc` that is not a negative integer of up to 3 digits are
   refused with `INVALID_OPTION` (`details.field` names it); the format defines no codes for `CodRchDsc`, so the caller
-  picks them. All of it is in the root entry. `dte-sdk` grows from 35.51 kB to 37.35 kB, over its 36 kB limit, which
-  went to 38 kB; `dte-sdk/portal` grows from 77.82 kB to 78.65 kB, and its limit from 78 kB to 80 kB.
+  picks them. All of it is in the root entry. `dte-sdk` grows from 35.51 kB to 37.27 kB, over its 36 kB limit, which
+  went to 38 kB; `dte-sdk/portal` grows from 77.82 kB to 78.51 kB, and its limit from 78 kB to 80 kB.
   - **What to change:** nothing. `createExchangeAnswers` of `dte-sdk/portal` is now built on these answers and writes
     the same bytes as before; `parseExchangeSet` keeps its loose reading, for the set the SII itself serves in the
     certification.
@@ -77,6 +77,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       not; before, the two took the one decision. Decide such an envelope with the function. A record is refused too
       when one of its keys names no document of the envelope; before, the key was ignored, so a mistyped rejection was
       never sent. A record that held keys of other envelopes has to be cut down to the one it decides.
+    - **Size:** on top of every change in this section, the strict reading and the checks on the decisions take
+      `dte-sdk` from 37.62 kB to 37.66 kB and `dte-sdk/portal` from 78.98 kB to 79.02 kB, both under their limits.
+- **`ProgressReport.text`, and the page of a rejected test set kept.** `readProgress` hands over the readable text of
+  the progress page, up to 6000 characters, in a new `text` field. When that page rejects a set,
+  `waitForTestSetsApproval` still returns the labels in `detail`, and now saves the text as the artefact
+  `sets-prueba/avance-rechazo.txt`: what the SII writes around a label is the reason of the rejection, and it was gone
+  once the page was, unless the HTTP capture was on.
+  - **What to change:** nothing. A `ProgressReport` built by hand needs `text`.
+
+### Changed
+
+- **`createDocument` writes numbers with the decimals the schema holds.** `QtyItem`, `PrcItem`, `QtyRef` and `PrcRef`
+  hold six decimals and `DescuentoPct`, `RecargoPct`, `TasaComision` and `ValorDR` two. A `quantity`, `unitPrice`,
+  `referenceQuantity` or `referencePrice` is now rounded to six, and a `discountPercent`, a `surchargePercent`, the
+  `value` of a global adjustment and the `rate` of a commission to two, before any amount is computed from them, so
+  the amount of a line is the one of the numbers written. Before, the number went out as given: `0.1 + 0.2` was
+  written `0.30000000000000004` and `100 / 3` as `33.333333333333336`, which `DTE_v10.xsd` and `EnvioBOLETA_v11.xsd`
+  reject, and with the document the whole envelope. A number with more digits than its type holds (twelve before the
+  point for a quantity or a price, three for a percentage, sixteen for an adjustment value) is refused with
+  `INVALID_AMOUNT` and the path of the field. `unitPriceDecimals` still writes the price with fixed decimals.
+  - **What to change:** nothing to issue. An amount worked out from a number with more decimals than the schema holds
+    may differ by a peso or, with a percentage on a large base, by more: `discountPercent: 100 / 3` on 3 000 000 now
+    discounts 999 900, the 33.33 % that is written, and not 1 000 000. Pass `amount`, or the exact percentage, to keep
+    a figure.
+- **A line with a price and no quantity is written with `QtyItem` 1, and so is every line of a dispatch guide.** The
+  amount of a priced line was already computed with a quantity of 1, and the line went out with `PrcItem` and no
+  `QtyItem`. It now carries the quantity it is computed with, on every type. A dispatch guide (52) gets it on a line
+  with no price too, because Formato DTE 2.5 (field 15) marks `QtyItem` as required there. On any other type a line
+  with no price gets no quantity of its own.
+  - **What to change:** nothing. The XML of a priced line, or of a guide's line, that brought no quantity gains
+    `<QtyItem>1</QtyItem>`.
+- **Each VAT-affected line of a document that withholds the whole VAT carries additional tax code 15.** A purchase
+  invoice (46), and a note with `withholdVat: true`, came out with `ImptoReten` code 15 in the totals and no
+  `CodImpAdic` on the lines, while Formato DTE 2.5 (field 117) defines the withheld amount as the rate by the sum of
+  the lines that carry the code. When `createDocument` works out totals that withhold the VAT, each line with no
+  exempt indicator and no `additionalTaxCodes` of its own now gets `[15]`. A line that brings codes, an empty list
+  included, keeps them, and so do the lines of a document whose `totals` the caller gave.
+  - **What to change:** nothing if the lines already carried the code. To keep a line without it, give it
+    `additionalTaxCodes: []`.
+- **`createDocument` refuses an `issuer.siiBranchCode` that is not an integer from 1 to 999999999, and
+  `createEnvelope` a `cover.resolutionNumber` that is not an integer from 0 to 999999.** Both throw `INVALID_OPTION`
+  with the field. They were written as given, and a 0, a 1.5 or a `NaN` failed the schema at the SII. The books
+  already checked both.
+  - **What to change:** nothing for valid values. A certification envelope keeps its resolution number 0.
+- **An upload is held to the cover of its file.** `uploadEnvelope`, `uploadBook` and `uploadFolioConsumption` send the
+  company and the sender in the form, apart from the file, and take them from the call or the client. They now read
+  the cover of the file (`RutEmisor`, or `RutEmisorLibro` in a book, and `RutEnvia`) and throw
+  `INVALID_OPTION { field: 'companyRut' }` or `{ field: 'senderRut' }` when it names another, before anything is
+  sent. A client set up for one company no longer uploads another company's file under the wrong RUT. A file with no
+  cover to read is sent as before.
+  - **What to change:** pass `companyRut` (and `senderRut`) on the call when the file is not the client's company's.
+- **`createDirectoryCapture` goes on from the last capture and never writes over a file.** Its numbers started at 1
+  with every adapter, so a run that was resumed, which is a new process, wrote over the first captures of the run
+  before it while `index.jsonl` still pointed at them. The adapter now reads the directory once and goes on from the
+  highest number its prefix already has there, and creates each file only if no file has its name: a name another
+  process took meanwhile is left alone and the next number is used. `prefix` must be made of letters, digits, `_`, `.`
+  and `-`, 40 at most, and anything else throws `INVALID_OPTION { field: 'prefix' }` when the adapter is created; it
+  went into the file name as given, so one with `../` wrote outside the directory.
+  - **What to change:** a `prefix` with other characters, a space included, needs replacing.
+- **`findCafFiles`, `findLatestCafFile` and `resolveCafFile` leave out a CAF of the other environment.** A CAF names
+  the SII key that signed it (`IDK`: 100 for certification, 300 for production). The three take an `environment`, new
+  on the first two, and with it skip a CAF signed by the other environment's key; one of a key that is neither is
+  kept. `resolveCafFile` used its `environment` for the registry scope alone, so in a folder that held the CAFs of
+  both it could resolve a production CAF for certification, under a scope labelled certification.
+  - **What to change:** nothing if each environment has its folder. `resolveCafFile` with `environment` no longer
+    returns a CAF of the other one: it returns null when the folder holds no other.
+- **`unstable_replenishFolios` annuls only ranges stamped in the last day in production.** Annulling cannot be undone,
+  and a range stamped days ago may be one another system of the company holds and did not declare in `cafs`. The
+  window stays at 180 days in certification, and the new `annulWithinDays` sets it in either. Annulling in production
+  still needs `allowAnnul: true`.
+  - **What to change:** pass `annulWithinDays` to reach further back in production.
+- **A simulation that is tried again issues with the CAFs it already obtained.** `sendSimulation` asked for the
+  folios of every type at each attempt, so an attempt that stamped some types and stopped before the upload left
+  those folios stamped and unused, which is what makes the SII ration the next request. The CAFs obtained for the
+  simulation are now kept in the state as `simulationCafs`, a new optional field, until an upload is tried with them:
+  the next attempt issues with them and asks only for what is missing. Once the upload was tried they are spent, as
+  the folios are, and a new attempt asks for new ones. The simulation still never issues with the sets' CAFs.
+  `prepareFolios` with `fresh` follows the same rule.
+  - **What to change:** nothing. A state saved by an earlier version has no `simulationCafs` and behaves as before.
+
+- **Size:** these changes took `dte-sdk` from 37.27 kB to 37.62 kB, `dte-sdk/node` from 7.09 kB to 7.36 kB and
+  `dte-sdk/portal` from 78.51 kB to 78.98 kB, all under their limits.
+
+### Fixed
+
+- **The reason of a stamping block stops at the SII's boilerplate when the page writes it with accents.**
+  `portalMessage` of a `stampingBlocked` refusal, and `FolioQuota.portalMessage`, carried "Si necesita más
+  información, comuníquese con la Mesa de Ayuda." after the reason: the cut looked for the sentence without accents,
+  and the page text has them once its entities are decoded.
 
 ## [0.11.0] - 2026-11-14
 

@@ -19,6 +19,14 @@ const normalize = (value: unknown): SiiRut | null => {
 }
 
 /**
+ * EN: A RUT in SII shape, or null when the value is not a RUT: `toSiiRut` for a value read from somewhere, where a
+ * bad one is an answer and not an error.
+ * ES: Un RUT en forma SII, o null si el valor no es un RUT: `toSiiRut` para un valor leído de alguna parte, donde uno
+ * malo es una respuesta y no un error.
+ */
+export const siiRutOrNull = (value: unknown): SiiRut | null => normalize(value)
+
+/**
  * EN: Validates a RUT with rut.ts (Modulo 11) and returns it in SII shape. Accepts dotted, hyphenated or compact input.
  * ES: Valida un RUT con rut.ts (módulo 11) y lo devuelve en forma SII. Acepta entrada con puntos, con guión o compacta.
  * @param value EN: the RUT in any shape. ES: el RUT en cualquier forma.

@@ -213,6 +213,60 @@ describe('findCafFiles', () => {
   })
 })
 
+// A CAF names the SII key that signed it (`IDK`): 100 signs for certification and 300 for production. A folder that
+// holds the CAFs of both environments must not hand the ones of one to the other.
+describe('the environment of a CAF file', () => {
+  const production = (xml: string): string => xml.replace('<IDK>100</IDK>', '<IDK>300</IDK>')
+  const otherKey = (xml: string): string => xml.replace('<IDK>100</IDK>', '<IDK>999</IDK>')
+  const both = async () => {
+    const dir = await temp.make('dte-sdk-caf-')
+    const certification = await put(dir, 'certification.xml', cafXml(33, { from: 1, to: 100 }), 1)
+    const newer = await put(dir, 'production.xml', production(cafXml(33, { from: 501, to: 600 })), 5)
+    return { dir, certification, production: newer, base: { dir, type: 33, issuerRut: ISSUER_RUT, now } as const }
+  }
+
+  test('the fixture CAF is signed by the certification key', () => {
+    expect(cafXml(33)).toContain('<IDK>100</IDK>')
+  })
+
+  test('findCafFiles with an environment leaves out the CAFs of the other one, and without it lists both', async () => {
+    const { base, certification, production: productionFile } = await both()
+    const paths = async (options: Parameters<typeof findCafFiles>[0]) =>
+      (await findCafFiles(options)).map((file) => file.path)
+    await expect(paths(base)).resolves.toEqual([productionFile, certification])
+    await expect(paths({ ...base, environment: 'certification' })).resolves.toEqual([certification])
+    await expect(paths({ ...base, environment: 'production' })).resolves.toEqual([productionFile])
+  })
+
+  test('findLatestCafFile with an environment gives the newest CAF of that environment', async () => {
+    const { base, certification } = await both()
+    await expect(findLatestCafFile({ ...base, environment: 'certification' })).resolves.toMatchObject({
+      path: certification,
+    })
+  })
+
+  test('resolveCafFile never resolves a CAF of the other environment, with a registry or without one', async () => {
+    const { base, certification, production: productionFile } = await both()
+    const resolved = await resolveCafFile({ ...base, environment: 'certification' })
+    expect(resolved).toMatchObject({ path: certification, remaining: 100 })
+    expect(resolved?.scope?.environment).toBe('certification')
+    const registry = createMemoryFolioRegistry(now)
+    await expect(resolveCafFile({ ...base, registry, environment: 'production' })).resolves.toMatchObject({
+      path: productionFile,
+      remaining: 100,
+    })
+    await expect(resolveCafFile({ ...base, registry, environment: 'certification', required: 101 })).resolves.toBeNull()
+  })
+
+  test('a CAF of a key that is neither is kept: its environment is not known', async () => {
+    const dir = await temp.make('dte-sdk-caf-')
+    const file = await put(dir, 'other.xml', otherKey(cafXml(33)), 1)
+    const base = { dir, type: 33, issuerRut: ISSUER_RUT, now } as const
+    await expect(findLatestCafFile({ ...base, environment: 'production' })).resolves.toMatchObject({ path: file })
+    await expect(findLatestCafFile({ ...base, environment: 'certification' })).resolves.toMatchObject({ path: file })
+  })
+})
+
 describe('findLatestCafFile', () => {
   test('gives the newest usable CAF, or null when there is none', async () => {
     const dir = await temp.make('dte-sdk-caf-')
@@ -263,11 +317,8 @@ describe('resolveCafFile', () => {
       resolveCafFile({ dir, type: 33, issuerRut: ISSUER_RUT, now, environment: 'certification' }),
     ).resolves.toMatchObject({ path: newer, remaining: 3, scope: scopeOf(newerXml, { from: 11, to: 13 }) })
     await expect(resolveCafFile({ ...base, required: 2 })).resolves.toMatchObject({ path: older, remaining: 10 })
-    // The same files in production have nothing used yet.
-    await expect(resolveCafFile({ ...base, required: 2, environment: 'production' })).resolves.toMatchObject({
-      path: newer,
-      remaining: 3,
-    })
+    // They are certification CAFs, so production resolves none of them.
+    await expect(resolveCafFile({ ...base, required: 2, environment: 'production' })).resolves.toBeNull()
   })
 
   test('cafFileScope builds the scope resolveCafFile reserves with, from a file or any CAF with its text', async () => {
@@ -276,8 +327,8 @@ describe('resolveCafFile', () => {
     await put(dir, 'caf.xml', xml, 1)
     const [file] = await findCafFiles({ dir, type: 33, issuerRut: ISSUER_RUT, now })
     expect(cafFileScope(file, 'certification')).toEqual(scopeOf(xml, { from: 11, to: 13 }))
-    const resolved = await resolveCafFile({ dir, type: 33, issuerRut: ISSUER_RUT, now, environment: 'production' })
-    expect(resolved?.scope).toEqual(cafFileScope(file, 'production'))
+    const resolved = await resolveCafFile({ dir, type: 33, issuerRut: ISSUER_RUT, now, environment: 'certification' })
+    expect(resolved?.scope).toEqual(cafFileScope(file, 'certification'))
     expect(cafFileScope({ xml: file.xml, caf: file.caf }, 'production').environment).toBe('production')
   })
 

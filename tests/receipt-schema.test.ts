@@ -87,6 +87,14 @@ const VARIANTS: Record<39 | 41, Record<string, Variant>> = {
       ],
       pricesIncludeVat: true,
     },
+    'a quantity, a price, a discount and a surcharge with more decimals than the schema holds': {
+      items: [
+        { name: 'Queso a granel', quantity: 1 / 3, unit: 'KG', unitPrice: 100000 / 3, discountPercent: 100 / 3 },
+        { name: 'Jamón a granel', quantity: 0.1 + 0.2, unit: 'KG', unitPrice: 11900, surchargePercent: 100 / 3 },
+      ],
+      pricesIncludeVat: true,
+      globalAdjustments: [{ kind: 'discount', valueType: 'percent', value: 100 / 3, description: 'Cliente frecuente' }],
+    },
     'an exempt line and the two non-billable lines its schema admits': {
       items: [
         coffee,
