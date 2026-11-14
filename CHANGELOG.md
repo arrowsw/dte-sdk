@@ -38,8 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   since a receipt's `IndExe` admits 1, 2 and 6. An empty list is not refused. A receipt keeps the five options,
   `serviceIndicator`, `netAmountsIndicator`, `billingPeriod`, `dueDate` and `paymentMedium`, with its global discounts
   and surcharges, its informative subtotals and its own references.
-  - **What to change:** remove those fields from a receipt. A receipt that carried one failed the schema, so no
-    receipt the SII accepted changes.
+  - **What to change:** remove those fields from a receipt. A receipt that wrote one of those elements failed the
+    schema, so none the SII accepted changes. Two inputs wrote nothing and are refused all the same: `withholdVat: true`
+    on a receipt with no VAT to withhold, and a key of `options` that is not one of its fields.
 - **A receipt is written in the shape and the order of its own schema.** The receipt's `IdDoc` has `IndMntNeto` right
   after `IndServicio` and `FchVenc` before `MedioPago`; the codec wrote the invoice's order, so a receipt with net
   amounts and a period or a due date, or with a payment medium and a due date, failed the schema. `periodAmount` is now
