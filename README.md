@@ -91,7 +91,10 @@ and keeps the CAF a request delivered when the pause after it is cut short. 0.9.
 their published advisories and publishes declarations that compile without `@types/node-forge`. 0.10.0 writes the four
 transport fields of 2026 on dispatch guides and invoices, and works out the totals of a settlement invoice (43) with its
 commissions, refusing before stamping what the schema of its root does not declare; both are checked against
-`DTE_v10.xsd`, and neither has been sent to the SII. Every area this README describes ships in 0.10.0.
+`DTE_v10.xsd`, and neither has been sent to the SII. 0.11.0 writes a receipt (39, 41) in the shape of its own schema,
+`EnvioBOLETA_v11.xsd`, refusing before stamping what that schema does not declare, and prints the transport area of a
+dispatch guide, or of an invoice that moves goods, on the printed sample; receipts are checked against that schema, and
+none has been sent to the SII. Every area this README describes ships in 0.11.0.
 Releases before 1.0.0 come out as the work lands, without waiting for the runs against the
 real SII; those runs come before 1.0.0, the first version recommended for production.
 
