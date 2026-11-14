@@ -38,6 +38,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one; the pages keep a longer document whole on paper instead of cutting it. `dte-sdk/pdf` grows from 13.2 kB to
   13.72 kB, under its 14 kB limit.
   - **What to change:** nothing.
+- **The commissions of a settlement invoice, and the withholdings, on the printed sample.** A document that carries
+  commissions and other charges, a settlement invoice (43) or a purchase invoice (46) and the notes that correct one,
+  now lists them under the detail, on the sheet and on the roll, each with its description, rate and net, exempt and
+  VAT values, as Formato DTE 2.5 asks to print them (section F), and its totals take off the net, exempt and VAT
+  commissions. The totals also print every additional tax or withholding of `ImptoReten`, by the name Formato DTE 2.5
+  gives its code (section 4) and with its rate, and the VAT not withheld (`IVANoRet`); a VAT withholding prints with
+  a minus, so a purchase invoice shows its withheld VAT taken off the total, as the change of subject example of the
+  printed-samples manual does. A label too long for its cell goes on over more lines. Every amount is the one the
+  document carries, never worked out again. `parsePrintableDocuments` reads them into `commissions`
+  (`PrintableCommission`), `withholdings` (`PrintableWithholding`) and four new fields of the totals, and a document
+  without them prints as before. `dte-sdk/pdf` grows from 13.72 kB to 14.89 kB, over its 14 kB
+  limit, which goes to 16 kB.
+  - **What to change:** nothing.
 - **Answers to a received envelope, document by document.** Every company that receives an `EnvioDTE` answers it, and
   now a receiver in production can. `createReceptionAnswer` builds the `RespuestaDTE` with the `RecepcionEnvio` and a
   `RecepcionDTE` for each document, `createResultAnswer` the `RespuestaDTE` with the `ResultadoDTE` of the commercial

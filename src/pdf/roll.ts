@@ -17,8 +17,8 @@ import { ACKNOWLEDGEMENT_TEXT, COLOURS, FONT, ROLL, ROLL_FONT, STAMP, TRANSFER_R
 import type { PrintableDocument } from './parse'
 
 // The printed sample on continuous paper: a list of rows built top to bottom in the order the manual gives for the
-// format (type box, SII office, issuer, receiver, date, references, detail, totals, acknowledgement box, stamp,
-// destination mark), measured first and drawn after, because the page is as tall as its rows.
+// format (type box, SII office, issuer, receiver, date, references, detail, commissions, totals, acknowledgement box,
+// stamp, destination mark), measured first and drawn after, because the page is as tall as its rows.
 
 type Tone = keyof typeof COLOURS
 type Row =
@@ -190,17 +190,47 @@ const detailRows = (doc: PrintableDocument, fonts: Fonts): readonly Row[] => [
   }),
 ]
 
-const totalsRows = (doc: PrintableDocument): readonly Row[] => [
+// The commissions and other charges, each its kind, description and rate, then its values as written.
+const commissionRows = (doc: PrintableDocument, fonts: Fonts): readonly Row[] => {
+  const commissions = doc.commissions ?? []
+  return commissions.length === 0
+    ? []
+    : [
+        { kind: 'rule' },
+        text('Comisiones y Otros Cargos', ROLL_FONT.body, { bold: true }),
+        ...commissions.flatMap((commission): readonly Row[] => {
+          const kind = commission.kind === 'O' ? 'Otros cargos' : 'Comisión'
+          const rate = commission.rate === undefined ? '' : ` (${formatAmount(commission.rate)}%)`
+          const values = [
+            ['Valor Neto', commission.net],
+            ['Valor Exento', commission.exempt],
+            ['IVA', commission.vat],
+          ] as const
+          return [
+            ...wrapped(fonts, `${kind}: ${commission.description}${rate}`, ROLL_FONT.body),
+            ...values.flatMap(([label, value]): readonly Row[] =>
+              value === undefined
+                ? []
+                : [{ kind: 'pair', left: label, right: `$${formatAmount(value)}`, size: ROLL_FONT.small, bold: false }],
+            ),
+            gap(ROLL.gap / 2),
+          ]
+        }),
+      ]
+}
+
+// A label too wide to share its line with the amount, such as a tax's name, goes on over the lines above it.
+const totalsRows = (doc: PrintableDocument, fonts: Fonts): readonly Row[] => [
   { kind: 'rule' },
-  ...totalRows(doc).map(
-    ([label, value, bold]): Row => ({
-      kind: 'pair',
-      left: label,
-      right: value,
-      size: bold ? ROLL_FONT.total : ROLL_FONT.body,
-      bold,
-    }),
-  ),
+  ...totalRows(doc).flatMap(([label, value, bold]): readonly Row[] => {
+    const size = bold ? ROLL_FONT.total : ROLL_FONT.body
+    const font = bold ? fonts.bold : fonts.normal
+    const lines = wrapText(label, font, size, ROLL.contentWidth - font.widthOfTextAtSize(value, size) - ROLL.gap)
+    return [
+      ...lines.slice(0, -1).map((line) => text(line, size, { bold })),
+      { kind: 'pair', left: lines[lines.length - 1], right: value, size, bold },
+    ]
+  }),
 ]
 
 const acknowledgementRows = (fonts: Fonts): readonly Row[] => [
@@ -268,7 +298,8 @@ export const buildRoll = (input: RollInput): readonly Row[] => {
     ...transportRows(doc, fonts),
     ...referenceRows(doc, fonts),
     ...detailRows(doc, fonts),
-    ...totalsRows(doc),
+    ...commissionRows(doc, fonts),
+    ...totalsRows(doc, fonts),
     ...(input.transferable ? acknowledgementRows(fonts) : []),
     ...stampRows(input),
     ...(input.transferable
