@@ -13,8 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to print the continuous paper the printed-samples manual allows (its "papel continuo", the format of a point of sale
   printer) instead of the sheet: a page 80 mm wide, above the manual's least width of 7.5 cm, with the 0.5 cm border,
   as tall as its content with no cap, in the order the manual gives for the format: the type box centred with its RUT,
-  type and folio, the SII office, the issuer, the receiver when the document has one, the date, the references, the
-  detail, the totals, the acknowledgement box and the destination mark of a transferable copy, and the stamp 7 cm wide
+  type and folio, the SII office, the issuer, the receiver when the document has one, the date, the documents it
+  refers to, the detail, the totals, the acknowledgement box and the destination mark of a transferable copy, and the stamp 7 cm wide
   with its legends, at the manual's minimum sizes (10 pt in the box, 7 pt in the legends). Every type admits it, as the
   manual does not limit the format to any. The default is `paper: 'sheet'`, the sample is unchanged, and
   `renderPrintedSamples` and `writePrintedSamples` still produce the sheet. `stamp: false` leaves the electronic stamp
