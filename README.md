@@ -380,6 +380,50 @@ const periodic = createDocument({
 - **Not checked yet.** A receipt's `paymentMedium` has to be a number from 1 to 5 and is written as given; the rules
   for receipts over 135 UF, and the fields of tickets to shows, are not there either.
 
+## Answering a received envelope
+
+Every company that receives an `EnvioDTE` answers it with up to three signed documents, and each one is built on its
+own: the reception answer, the commercial result and the receipts of Ley 19.983. The caller chooses the state and the
+gloss of each document, with a function of the document and its position or a record keyed by type and folio; a `null`
+leaves a document out.
+
+```typescript
+import { readFileSync } from 'node:fs'
+import {
+  COMMERCIAL_RESULT_STATES,
+  createGoodsReceipts,
+  createReceptionAnswer,
+  createResultAnswer,
+  decodeLatin1,
+  readReceivedEnvelope,
+} from 'dte-sdk'
+
+const envelope = readReceivedEnvelope(decodeLatin1(readFileSync('EnvioDTE.xml')))
+const answer = { companyRut: '76543210-3', certificate, contact: { name: 'Ana Rojas', mail: 'ana@example.cl' } }
+
+// RespuestaDTE / RecepcionEnvio: a document addressed to another RUT is EstadoRecepDTE 3 by default
+const reception = createReceptionAnswer(envelope, { ...answer, documents: { '33:1234': { state: 4 } } })
+
+// RespuestaDTE / ResultadoDTE: accepted (0), with discrepancies (1) or rejected (2); a rejection states its reason
+const result = createResultAnswer(envelope, {
+  ...answer,
+  documents: { '33:1234': { state: 2, gloss: 'Rechazado, Ley 19.983: la mercadería no se recibió', rejectionCode: -1 } },
+})
+COMMERCIAL_RESULT_STATES[1] // 'DTE Aceptado con Discrepancias'
+
+// EnvioRecibos: Ley 19.983, for the invoices (33, 34, 43, 46) and guides (52) addressed to the company
+const receipts = createGoodsReceipts(envelope, { ...answer, documents: { '33:1234': { place: 'Bodega central' } } })
+```
+
+Each function returns the signed XML, one line, with no declaration, ready to send to the issuer. The defaults follow
+the format of the SII (Formato Mensaje de Respuesta a DTE 1.0): the envelope is received (`EstadoRecepEnv` 0) unless its
+cover names another receiver (3), a document is received (`EstadoRecepDTE` 0) unless it is addressed to another RUT
+(3), and a document addressed to the company is accepted (`EstadoDTE` 0) and any other rejected (2). The catalogs
+`ENVELOPE_RECEPTION_STATES`, `DOCUMENT_RECEPTION_STATES` and `COMMERCIAL_RESULT_STATES` hold the codes and their
+glosses. The format defines no codes for `CodRchDsc`, the negative integer of up to 3 digits that tells the reason of a
+rejection or a discrepancy: a rejection writes -1 unless `rejectionCode` says otherwise. Check the envelope with
+`verifyReceivedDocuments` before answering 0.
+
 ## Received documents
 
 ```typescript
