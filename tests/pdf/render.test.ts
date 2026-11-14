@@ -1,6 +1,7 @@
 import fc from 'fast-check'
 import { PNG } from 'pngjs'
-import { parsePrintableDocuments, type PrintableDocument } from '../../src/pdf/parse'
+import { BOX, GAP, LINE } from '../../src/pdf/layout'
+import { parsePrintableDocuments, type PrintableDocument, type PrintableTransport } from '../../src/pdf/parse'
 import { needsTransferableCopy, renderPrintedSample } from '../../src/pdf/render'
 import { FIXED_NOW } from '../support/fixtures'
 import { decodeStampInPdf, pdfImages, pdfPage, pdfText } from '../support/pdf'
@@ -10,7 +11,9 @@ import {
   creditNote,
   exemptInvoice,
   guide,
+  guideWithTransport,
   invoice,
+  invoiceWithTransport,
   receiptsXml,
   settlementXml,
   thirdPartyXml,
@@ -70,6 +73,7 @@ describe('an invoice', () => {
     expect(text).not.toContain('Sucursal:')
     expect(text).not.toContain('Referencias')
     expect(text).not.toContain('Tipo de Traslado')
+    expect(text).not.toContain('Patente')
   })
 
   test('carries the stamp with its legends, and the stamp decodes to the signed TED', async () => {
@@ -187,6 +191,66 @@ describe('the other types', () => {
     const settlement = await pdfText(await render(first(settlementXml)))
     expect(settlement).toContain('LIQUIDACIÓN FACTURA')
     expect(settlement).toContain('Comisionista')
+  })
+})
+
+describe('the transport area', () => {
+  const guideDoc = first(guideWithTransport.xml)
+  const heightOf = async (doc: PrintableDocument): Promise<number> => (await pdfPage(await render(doc))).height
+  const boxOf = (rows: number): number => BOX.padY * 2 + LINE.small * rows + GAP.tiny * (rows - 1)
+
+  test("a guide prints every field of its transport under the transfer type, in the Formato's order", async () => {
+    const area = [
+      ['Patente: ', 'ABCD12'],
+      ['Patente Carro: ', 'JK1234'],
+      ['RUT Transportista: ', '7654321-6'],
+      ['Chofer: ', 'Juan Pérez Soto'],
+      ['RUT Chofer: ', '11111111-1'],
+      ['Dirección Destino: ', 'Camino a Melipilla 9870, Bodega 4'],
+      ['Comuna Destino: ', 'Maipú'],
+      ['Ciudad Destino: ', 'Santiago'],
+      ['Fecha de Salida: ', '2026-11-15'],
+      ['Hora de Salida: ', '08:30:00'],
+      ['Fecha de Llegada: ', '2026-11-16'],
+    ]
+    expect(await pdfText(await render(guideDoc))).toContain(
+      `Tipo de Traslado: 1 - Operación constituye venta\n${area.flat().join('\n')}\nDetalle`,
+    )
+  })
+
+  test('an invoice that moves goods prints what its transport carries and nothing else of the area', async () => {
+    const text = await pdfText(await render(first(invoiceWithTransport.xml)))
+    expect(text).toContain(
+      'Giro: \nComercio al por menor\nPatente: \nWXYZ98\nDirección Destino: \nPasaje Los Olmos 88\nFecha de Salida: \n2026-11-15\nDetalle',
+    )
+    for (const absent of ['Tipo de Traslado', 'Patente Carro', 'Transportista', 'Chofer', 'Comuna Destino', 'Llegada'])
+      expect(text).not.toContain(absent)
+  })
+
+  test('the page grows by the box of the area and its gap, one line per group', async () => {
+    const without = await heightOf({ ...guideDoc, transport: undefined })
+    expect((await heightOf(guideDoc)) - without).toBe(boxOf(4) + GAP.section)
+  })
+
+  test('a group too wide for one line flows onto the next, and the box grows with it', async () => {
+    const wide = {
+      ...guideDoc,
+      transport: {
+        ...guideDoc.transport!,
+        destinationAddress: 'AVENIDA LIBERTADOR BERNARDO OHIGGINS 12345 DEPARTAMENTO 1201 TORRE B',
+        destinationCommune: 'PEDRO AGUIRRE CERDA',
+        destinationCity: 'SANTIAGO DE CHILE',
+      },
+    }
+    expect((await heightOf(wide)) - (await heightOf(guideDoc))).toBe(boxOf(5) - boxOf(4))
+    expect(await pdfText(await render(wide))).toContain('PEDRO AGUIRRE CERDA\nCiudad Destino: \nSANTIAGO DE CHILE')
+  })
+
+  test('a transport with every field empty prints nothing', async () => {
+    const empty = Object.fromEntries(Object.keys(guideDoc.transport!).map((key) => [key, '']))
+    const doc = { ...guideDoc, transport: empty as unknown as PrintableTransport }
+    expect(await heightOf(doc)).toBe(await heightOf({ ...guideDoc, transport: undefined }))
+    expect(await pdfText(await render(doc))).not.toContain('Patente')
   })
 })
 

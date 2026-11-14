@@ -6,7 +6,9 @@ import {
   basicSetXml,
   creditNote,
   debitNote,
+  guideWithTransport,
   invoice,
+  invoiceWithTransport,
   receiptsXml,
   settlementXml,
   thirdPartyXml,
@@ -180,6 +182,46 @@ describe('third-party shapes', () => {
   test('a document with neither type nor TED is type 0', () => {
     const xml = withoutTed(thirdPartyXml).replace(/<IdDoc>[\s\S]*?<\/IdDoc>/, '<IdDoc><Folio>1</Folio></IdDoc>')
     expect(parsePrintableDocuments(xml)[0]).toMatchObject({ type: 0, folio: '1', issueDate: '' })
+  })
+})
+
+describe('transport', () => {
+  test("maps every field of a guide's Transporte as written", () => {
+    expect(parsePrintableDocuments(guideWithTransport.xml)[0].transport).toEqual({
+      licensePlate: 'ABCD12',
+      trailerLicensePlate: 'JK1234',
+      carrierRut: '7654321-6',
+      driverRut: '11111111-1',
+      driverName: 'Juan Pérez Soto',
+      destinationAddress: 'Camino a Melipilla 9870, Bodega 4',
+      destinationCommune: 'Maipú',
+      destinationCity: 'Santiago',
+      departureDate: '2026-11-15',
+      departureTime: '08:30:00',
+      arrivalDate: '2026-11-16',
+    })
+  })
+
+  test("an invoice's partial Transporte leaves what it lacks empty", () => {
+    expect(parsePrintableDocuments(invoiceWithTransport.xml)[0].transport).toEqual({
+      licensePlate: 'WXYZ98',
+      trailerLicensePlate: '',
+      carrierRut: '',
+      driverRut: '',
+      driverName: '',
+      destinationAddress: 'Pasaje Los Olmos 88',
+      destinationCommune: '',
+      destinationCity: '',
+      departureDate: '2026-11-15',
+      departureTime: '',
+      arrivalDate: '',
+    })
+  })
+
+  test('a document without Transporte has no transport, and an empty one has every field empty', () => {
+    expect(parsePrintableDocuments(invoice.xml)[0].transport).toBeUndefined()
+    const empty = thirdPartyXml.replace('</Receptor>', '</Receptor><Transporte/>')
+    expect(Object.values(parsePrintableDocuments(empty)[0].transport ?? { missing: 'x' })).toEqual(Array(11).fill(''))
   })
 })
 

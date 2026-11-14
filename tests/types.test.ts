@@ -144,7 +144,13 @@ import type {
   IssuedSet,
   IssuedSimulation,
 } from '../src/portal'
-import type { PrintableDocument, PrintedSampleFile, PrintedSamplesResult, WritePrintedSamplesResult } from '../src/pdf'
+import type {
+  PrintableDocument,
+  PrintableTransport,
+  PrintedSampleFile,
+  PrintedSamplesResult,
+  WritePrintedSamplesResult,
+} from '../src/pdf'
 import type { ReceiptReference } from '../src'
 
 // Every type the SII web services design names is exported: a missing one fails the import above, and this tuple
@@ -240,6 +246,7 @@ const _typecheck = () => {
   expectTypeOf(signFolioConsumption).returns.toEqualTypeOf<SignedFolioConsumption>()
   expectTypeOf(bookEntryFromDocument).returns.toEqualTypeOf<BookEntryInput>()
   expectTypeOf(parsePrintableDocuments).returns.toEqualTypeOf<readonly PrintableDocument[]>()
+  expectTypeOf<PrintableDocument['transport']>().toEqualTypeOf<PrintableTransport | undefined>()
   expectTypeOf(needsTransferableCopy).returns.toEqualTypeOf<boolean>()
   expectTypeOf(renderPrintedSample).returns.resolves.toEqualTypeOf<Uint8Array>()
   expectTypeOf(renderTedBarcode).returns.resolves.toEqualTypeOf<Uint8Array>()
