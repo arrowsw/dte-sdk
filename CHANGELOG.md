@@ -25,6 +25,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   11.47 kB to 13.2 kB, and its size limit from 12 kB to 14 kB.
   - **What to change:** nothing. Pass `paper: 'roll'` for the ticket and `stamp: false` for a receipt without the
     printed stamp.
+- **Answers to a received envelope, document by document.** Every company that receives an `EnvioDTE` answers it, and
+  now a receiver in production can. `createReceptionAnswer` builds the `RespuestaDTE` with the `RecepcionEnvio` and a
+  `RecepcionDTE` for each document, `createResultAnswer` the `RespuestaDTE` with the `ResultadoDTE` of the commercial
+  result, and `createGoodsReceipts` the `EnvioRecibos` of Ley 19.983; each is signed, takes the envelope as received
+  (or read with the new `readReceivedEnvelope`) and works on its own. The caller decides each document through a
+  function of the document and its position, or a record keyed by `documentKey` (`'33:1234'`), choosing its state and
+  its gloss, and a `null` leaves the document out. The defaults follow the format of the SII: a document addressed to
+  another RUT than the company's is `EstadoRecepDTE` 3 ("DTE No Recibido - Error en RUT Receptor") in the reception
+  answer and is rejected (`EstadoDTE` 2, `CodRchDsc` -1) in the result, and the receipts cover the documents addressed
+  to the company of the types the law names (33, 34, 43, 46 and 52). `ENVELOPE_RECEPTION_STATES` (`EstadoRecepEnv`),
+  `DOCUMENT_RECEPTION_STATES` (`EstadoRecepDTE`) and `COMMERCIAL_RESULT_STATES` (`EstadoDTE`) hold every code of the
+  format with its gloss, and the states are typed unions (`EnvelopeReceptionState`, `DocumentReceptionState`,
+  `CommercialResultState`). A state outside them, a gloss over 256 characters and a `CodRchDsc` that is not a negative
+  integer of up to 3 digits are refused with `INVALID_OPTION` (`details.field` names it); the format defines no codes
+  for `CodRchDsc`, so the caller picks them. All of it is in the root entry. `dte-sdk` grows from 35.51 kB to
+  37.27 kB, over its 36 kB limit, which went to 38 kB; `dte-sdk/portal` grows from 77.82 kB to 78.51 kB, and its limit from 78 kB to 80 kB.
+  - **What to change:** nothing. `createExchangeAnswers` and `parseExchangeSet` of `dte-sdk/portal` are now built on
+    these functions and write the same bytes as before.
 - **`ProgressReport.text`, and the page of a rejected test set kept.** `readProgress` hands over the readable text of
   the progress page, up to 6000 characters, in a new `text` field. When that page rejects a set,
   `waitForTestSetsApproval` still returns the labels in `detail`, and now saves the text as the artefact
@@ -103,8 +121,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `prepareFolios` with `fresh` follows the same rule.
   - **What to change:** nothing. A state saved by an earlier version has no `simulationCafs` and behaves as before.
 
-- **Size:** these changes took `dte-sdk` from 35.51 kB to 35.83 kB, `dte-sdk/node` from 7.09 kB to 7.36 kB and
-  `dte-sdk/portal` from 77.82 kB to 78.26 kB, over its 78 kB limit, which went to 80 kB.
+- **Size:** these changes took `dte-sdk` from 37.27 kB to 37.62 kB, `dte-sdk/node` from 7.09 kB to 7.36 kB and
+  `dte-sdk/portal` from 78.51 kB to 78.98 kB, all under their limits.
 
 ### Fixed
 
