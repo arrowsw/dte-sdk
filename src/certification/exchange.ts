@@ -2,7 +2,7 @@ import { EXCHANGE_ANSWER_FILES } from '../catalogs/certification'
 import type { Certificate } from '../certificate/certificate'
 import { DteError } from '../errors'
 import { toSiiRut } from '../model/rut'
-import { createGoodsReceipts, createReceptionAnswer, createResultAnswer, type AnswerContact } from '../document/answer'
+import { goodsReceiptsOf, receptionAnswerOf, resultAnswerOf, type AnswerContact } from '../document/answer'
 import type { ReceivedEnvelope, ReceivedEnvelopeDocument } from '../document/received-envelope'
 import { parseXmlLoosely } from '../xml/parse'
 
@@ -199,13 +199,13 @@ export const createExchangeAnswers = (setXml: string, input: CreateExchangeAnswe
   const company = toSiiRut(companyRut, 'companyRut')
   const isCompany = (document: ExchangeDocument): boolean => document.receiverRut === company
   const answer = { companyRut, certificate, now }
-  const reception = createReceptionAnswer(set, {
+  const reception = receptionAnswerOf(set, {
     ...answer,
     contact: responseContact,
     envelope: ENVELOPE_RECEIVED,
     documents: (document) => (isCompany(document) ? DOCUMENT_RECEIVED : DOCUMENT_WRONG_RECEIVER),
   })
-  const approval = createResultAnswer(set, {
+  const approval = resultAnswerOf(set, {
     ...answer,
     contact: responseContact,
     documents: (document, position) => ({
@@ -213,7 +213,7 @@ export const createExchangeAnswers = (setXml: string, input: CreateExchangeAnswe
       envelopeCode: position,
     }),
   })
-  const receipts = createGoodsReceipts(set, { ...answer, contact: input.contact, documents: () => ({}) })
+  const receipts = goodsReceiptsOf(set, { ...answer, contact: input.contact, documents: () => ({}) })
   return {
     reception: { fileName: EXCHANGE_ANSWER_FILES.reception, xml: reception },
     receipts: { fileName: EXCHANGE_ANSWER_FILES.receipts, xml: receipts },

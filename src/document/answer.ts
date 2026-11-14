@@ -373,27 +373,15 @@ const envelopeOf = (received: string | ReceivedEnvelope): ReceivedEnvelope =>
   typeof received === 'string' ? readReceivedEnvelope(received) : received
 
 /**
- * EN: Builds and signs the reception answer to a received envelope: a `RespuestaDTE` with one `RecepcionEnvio` that
- * states the reception of the envelope (`EstadoRecepEnv`) and, for each document, the reception of the document
- * (`EstadoRecepDTE`), the answer the SII asks every receiver to give. The caller decides the state and the gloss of the
- * envelope and of each document; by default a document addressed to another RUT than the company's is "DTE No
- * Recibido - Error en RUT Receptor" (3), any other is received (0), and the envelope is received (0) unless its cover
- * names another receiver (3). A document decided `null` is left out. One line, UTF-8, no declaration; the ids carry
- * the clock in milliseconds and every timestamp is Chile's local time.
- * ES: Arma y firma la respuesta de recepción a un sobre recibido: una `RespuestaDTE` con una `RecepcionEnvio` que dice
- * la recepción del envío (`EstadoRecepEnv`) y, por documento, la recepción del documento (`EstadoRecepDTE`), la
- * respuesta que el SII pide a todo receptor. Quien llama decide el estado y la glosa del envío y de cada documento; por
- * defecto un documento dirigido a otro RUT que el de la empresa es "DTE No Recibido - Error en RUT Receptor" (3), los
- * demás se reciben (0), y el sobre se recibe (0) salvo que su carátula nombre otro receptor (3). Un documento
- * decidido `null` queda fuera. Una línea, UTF-8, sin declaración; los ids llevan el reloj en milisegundos y cada marca
- * de tiempo es la hora local de Chile.
- * @param received EN: the envelope as received, which is read as `readReceivedEnvelope` reads it, or one already read. ES: el sobre como se recibió, que se lee como lo lee `readReceivedEnvelope`, o uno ya leído.
+ * EN: `createReceptionAnswer` for an envelope already read. The certification's exchange builds on it, so it does not
+ * carry the strict reader of the text.
+ * ES: `createReceptionAnswer` para un sobre ya leído. El intercambio de la certificación se arma sobre ella, así no
+ * carga el lector estricto del texto.
+ * @param envelope EN: the envelope read. ES: el sobre leído.
  * @param input EN: the company, the certificate, the decisions and the clock. ES: la empresa, el certificado, las decisiones y el reloj.
  * @returns EN: the signed `RespuestaDTE`. ES: la `RespuestaDTE` firmada.
- * @throws {DteError} EN: the codes of `readReceivedEnvelope`; `INVALID_RUT { field: 'companyRut' }`; `INVALID_OPTION` (`state`, `gloss`, `answerId`, `envelopeCode`, and `documents` for a record when two documents share a key). ES: los mismos códigos.
  */
-export const createReceptionAnswer = (received: string | ReceivedEnvelope, input: ReceptionAnswerInput): string => {
-  const envelope = envelopeOf(received)
+export const receptionAnswerOf = (envelope: ReceivedEnvelope, input: ReceptionAnswerInput): string => {
   const common = context(input)
   const toCompany = (document: ReceivedEnvelopeDocument): boolean => document.receiverRut === common.company
   const stateOf: EnvelopeReceptionDecision = input.envelope ?? {
@@ -433,25 +421,38 @@ export const createReceptionAnswer = (received: string | ReceivedEnvelope, input
 }
 
 /**
- * EN: Builds and signs the commercial result of the documents of a received envelope: a `RespuestaDTE` with one
- * `ResultadoDTE` for each document, stating whether it is accepted, accepted with discrepancies or rejected
- * (`EstadoDTE`) and why. The caller decides the state, the gloss and the code of each; by default a document addressed
- * to the company is accepted (0) and any other is rejected (2) with `CodRchDsc` -1, and a rejection without a code
- * writes -1. A document decided `null` is left out. One line, UTF-8, no declaration; the ids carry the clock in
- * milliseconds and every timestamp is Chile's local time.
- * ES: Arma y firma el resultado comercial de los documentos de un sobre recibido: una `RespuestaDTE` con un
- * `ResultadoDTE` por documento, que dice si se acepta, se acepta con discrepancias o se rechaza (`EstadoDTE`) y por
- * qué. Quien llama decide el estado, la glosa y el código de cada uno; por defecto un documento dirigido a la empresa
- * se acepta (0) y cualquier otro se rechaza (2) con `CodRchDsc` -1, y un rechazo sin código escribe -1. Un documento
+ * EN: Builds and signs the reception answer to a received envelope: a `RespuestaDTE` with one `RecepcionEnvio` that
+ * states the reception of the envelope (`EstadoRecepEnv`) and, for each document, the reception of the document
+ * (`EstadoRecepDTE`), the answer the SII asks every receiver to give. The caller decides the state and the gloss of the
+ * envelope and of each document; by default a document addressed to another RUT than the company's is "DTE No
+ * Recibido - Error en RUT Receptor" (3), any other is received (0), and the envelope is received (0) unless its cover
+ * names another receiver (3). A document decided `null` is left out. One line, UTF-8, no declaration; the ids carry
+ * the clock in milliseconds and every timestamp is Chile's local time.
+ * ES: Arma y firma la respuesta de recepción a un sobre recibido: una `RespuestaDTE` con una `RecepcionEnvio` que dice
+ * la recepción del envío (`EstadoRecepEnv`) y, por documento, la recepción del documento (`EstadoRecepDTE`), la
+ * respuesta que el SII pide a todo receptor. Quien llama decide el estado y la glosa del envío y de cada documento; por
+ * defecto un documento dirigido a otro RUT que el de la empresa es "DTE No Recibido - Error en RUT Receptor" (3), los
+ * demás se reciben (0), y el sobre se recibe (0) salvo que su carátula nombre otro receptor (3). Un documento
  * decidido `null` queda fuera. Una línea, UTF-8, sin declaración; los ids llevan el reloj en milisegundos y cada marca
  * de tiempo es la hora local de Chile.
  * @param received EN: the envelope as received, which is read as `readReceivedEnvelope` reads it, or one already read. ES: el sobre como se recibió, que se lee como lo lee `readReceivedEnvelope`, o uno ya leído.
  * @param input EN: the company, the certificate, the decisions and the clock. ES: la empresa, el certificado, las decisiones y el reloj.
  * @returns EN: the signed `RespuestaDTE`. ES: la `RespuestaDTE` firmada.
- * @throws {DteError} EN: the codes of `readReceivedEnvelope`; `INVALID_RUT { field: 'companyRut' }`; `INVALID_OPTION` (`state`, `gloss`, `rejectionCode`, `envelopeCode`, `answerId`, and `documents` for a record when two documents share a key); `ENVELOPE_EMPTY` when every document is left out. ES: los mismos códigos.
+ * @throws {DteError} EN: the codes of `readReceivedEnvelope`; `INVALID_RUT { field: 'companyRut' }`; `INVALID_OPTION` (`state`, `gloss`, `answerId`, `envelopeCode`, and `documents` for a record when two documents share a key). ES: los mismos códigos.
  */
-export const createResultAnswer = (received: string | ReceivedEnvelope, input: ResultAnswerInput): string => {
-  const envelope = envelopeOf(received)
+export const createReceptionAnswer = (received: string | ReceivedEnvelope, input: ReceptionAnswerInput): string =>
+  receptionAnswerOf(envelopeOf(received), input)
+
+/**
+ * EN: `createResultAnswer` for an envelope already read. The certification's exchange builds on it, so it does not
+ * carry the strict reader of the text.
+ * ES: `createResultAnswer` para un sobre ya leído. El intercambio de la certificación se arma sobre ella, así no carga
+ * el lector estricto del texto.
+ * @param envelope EN: the envelope read. ES: el sobre leído.
+ * @param input EN: the company, the certificate, the decisions and the clock. ES: la empresa, el certificado, las decisiones y el reloj.
+ * @returns EN: the signed `RespuestaDTE`. ES: la `RespuestaDTE` firmada.
+ */
+export const resultAnswerOf = (envelope: ReceivedEnvelope, input: ResultAnswerInput): string => {
   const common = context(input)
   const results = resolveDecisions<CommercialResultDecision>(envelope, input.documents, (document) =>
     document.receiverRut === common.company ? { state: 0 } : { state: 2 },
@@ -482,25 +483,36 @@ export const createResultAnswer = (received: string | ReceivedEnvelope, input: R
 }
 
 /**
- * EN: Builds and signs the receipts of Ley 19.983, the `EnvioRecibos` that acknowledges the goods or services of the
- * documents of a received envelope: one `Recibo`, signed on its own, for each document, and the set signed again.
- * By default it receipts the documents addressed to the company of the types the law names (33, 34, 43, 46 and 52);
- * the caller can decide each document (`null` leaves it out) and its place of reception. The declaration is the one the
- * format fixes. One line, UTF-8, no declaration; the ids carry the clock in milliseconds and every timestamp is Chile's
- * local time.
- * ES: Arma y firma los recibos de la Ley 19.983, el `EnvioRecibos` que acusa recibo de las mercaderías o los servicios
- * de los documentos de un sobre recibido: un `Recibo`, firmado por sí solo, por documento, y el set firmado de nuevo.
- * Por defecto recibe los documentos dirigidos a la empresa de los tipos que nombra la ley (33, 34, 43, 46 y 52); quien
- * llama puede decidir cada documento (`null` lo deja fuera) y su recinto. La declaración es la que fija el formato.
- * Una línea, UTF-8, sin declaración; los ids llevan el reloj en milisegundos y cada marca de tiempo es la hora local
- * de Chile.
+ * EN: Builds and signs the commercial result of the documents of a received envelope: a `RespuestaDTE` with one
+ * `ResultadoDTE` for each document, stating whether it is accepted, accepted with discrepancies or rejected
+ * (`EstadoDTE`) and why. The caller decides the state, the gloss and the code of each; by default a document addressed
+ * to the company is accepted (0) and any other is rejected (2) with `CodRchDsc` -1, and a rejection without a code
+ * writes -1. A document decided `null` is left out. One line, UTF-8, no declaration; the ids carry the clock in
+ * milliseconds and every timestamp is Chile's local time.
+ * ES: Arma y firma el resultado comercial de los documentos de un sobre recibido: una `RespuestaDTE` con un
+ * `ResultadoDTE` por documento, que dice si se acepta, se acepta con discrepancias o se rechaza (`EstadoDTE`) y por
+ * qué. Quien llama decide el estado, la glosa y el código de cada uno; por defecto un documento dirigido a la empresa
+ * se acepta (0) y cualquier otro se rechaza (2) con `CodRchDsc` -1, y un rechazo sin código escribe -1. Un documento
+ * decidido `null` queda fuera. Una línea, UTF-8, sin declaración; los ids llevan el reloj en milisegundos y cada marca
+ * de tiempo es la hora local de Chile.
  * @param received EN: the envelope as received, which is read as `readReceivedEnvelope` reads it, or one already read. ES: el sobre como se recibió, que se lee como lo lee `readReceivedEnvelope`, o uno ya leído.
  * @param input EN: the company, the certificate, the decisions and the clock. ES: la empresa, el certificado, las decisiones y el reloj.
- * @returns EN: the signed `EnvioRecibos`. ES: el `EnvioRecibos` firmado.
- * @throws {DteError} EN: the codes of `readReceivedEnvelope`; `INVALID_RUT` (`companyRut`, `signerRut`); `INVALID_OPTION` (`place`, and `documents` for a record when two documents share a key); `ENVELOPE_EMPTY` when no document is left to receipt. ES: los mismos códigos.
+ * @returns EN: the signed `RespuestaDTE`. ES: la `RespuestaDTE` firmada.
+ * @throws {DteError} EN: the codes of `readReceivedEnvelope`; `INVALID_RUT { field: 'companyRut' }`; `INVALID_OPTION` (`state`, `gloss`, `rejectionCode`, `envelopeCode`, `answerId`, and `documents` for a record when two documents share a key); `ENVELOPE_EMPTY` when every document is left out. ES: los mismos códigos.
  */
-export const createGoodsReceipts = (received: string | ReceivedEnvelope, input: GoodsReceiptsInput): string => {
-  const envelope = envelopeOf(received)
+export const createResultAnswer = (received: string | ReceivedEnvelope, input: ResultAnswerInput): string =>
+  resultAnswerOf(envelopeOf(received), input)
+
+/**
+ * EN: `createGoodsReceipts` for an envelope already read. The certification's exchange builds on it, so it does not
+ * carry the strict reader of the text.
+ * ES: `createGoodsReceipts` para un sobre ya leído. El intercambio de la certificación se arma sobre ella, así no
+ * carga el lector estricto del texto.
+ * @param envelope EN: the envelope read. ES: el sobre leído.
+ * @param input EN: the company, the certificate, the decisions and the clock. ES: la empresa, el certificado, las decisiones y el reloj.
+ * @returns EN: the signed `EnvioRecibos`. ES: el `EnvioRecibos` firmado.
+ */
+export const goodsReceiptsOf = (envelope: ReceivedEnvelope, input: GoodsReceiptsInput): string => {
   const common = context(input)
   const signer =
     input.signerRut === undefined ? (input.certificate.rut ?? common.company) : toSiiRut(input.signerRut, 'signerRut')
@@ -537,3 +549,24 @@ export const createGoodsReceipts = (received: string | ReceivedEnvelope, input: 
     certificate: input.certificate,
   }).xml
 }
+
+/**
+ * EN: Builds and signs the receipts of Ley 19.983, the `EnvioRecibos` that acknowledges the goods or services of the
+ * documents of a received envelope: one `Recibo`, signed on its own, for each document, and the set signed again.
+ * By default it receipts the documents addressed to the company of the types the law names (33, 34, 43, 46 and 52);
+ * the caller can decide each document (`null` leaves it out) and its place of reception. The declaration is the one the
+ * format fixes. One line, UTF-8, no declaration; the ids carry the clock in milliseconds and every timestamp is Chile's
+ * local time.
+ * ES: Arma y firma los recibos de la Ley 19.983, el `EnvioRecibos` que acusa recibo de las mercaderías o los servicios
+ * de los documentos de un sobre recibido: un `Recibo`, firmado por sí solo, por documento, y el set firmado de nuevo.
+ * Por defecto recibe los documentos dirigidos a la empresa de los tipos que nombra la ley (33, 34, 43, 46 y 52); quien
+ * llama puede decidir cada documento (`null` lo deja fuera) y su recinto. La declaración es la que fija el formato.
+ * Una línea, UTF-8, sin declaración; los ids llevan el reloj en milisegundos y cada marca de tiempo es la hora local
+ * de Chile.
+ * @param received EN: the envelope as received, which is read as `readReceivedEnvelope` reads it, or one already read. ES: el sobre como se recibió, que se lee como lo lee `readReceivedEnvelope`, o uno ya leído.
+ * @param input EN: the company, the certificate, the decisions and the clock. ES: la empresa, el certificado, las decisiones y el reloj.
+ * @returns EN: the signed `EnvioRecibos`. ES: el `EnvioRecibos` firmado.
+ * @throws {DteError} EN: the codes of `readReceivedEnvelope`; `INVALID_RUT` (`companyRut`, `signerRut`); `INVALID_OPTION` (`place`, and `documents` for a record when two documents share a key); `ENVELOPE_EMPTY` when no document is left to receipt. ES: los mismos códigos.
+ */
+export const createGoodsReceipts = (received: string | ReceivedEnvelope, input: GoodsReceiptsInput): string =>
+  goodsReceiptsOf(envelopeOf(received), input)
