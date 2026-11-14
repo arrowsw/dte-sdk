@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-14
+
 ### Added
 
 - **A receipt on continuous paper, with the printed stamp as an option.** `renderPrintedSample` takes `paper: 'roll'`
@@ -14,15 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   printer) instead of the sheet: a page 80 mm wide, above the manual's least width of 7.5 cm, with the 0.5 cm border,
   as tall as its content with no cap, in the order the manual gives for the format: the type box centred with its RUT,
   type and folio, the SII office, the issuer, the receiver when the document has one, the date, the documents it
-  refers to, the detail, the totals, the acknowledgement box and the destination mark of a transferable copy, and the stamp 7 cm wide
-  with its legends, at the manual's minimum sizes (10 pt in the box, 7 pt in the legends). Every type admits it, as the
-  manual does not limit the format to any. The default is `paper: 'sheet'`, the sample is unchanged, and
-  `renderPrintedSamples` and `writePrintedSamples` still produce the sheet. `stamp: false` leaves the electronic stamp
-  and its legends out of a receipt, 39 or 41, on the sheet or on the roll, since the printed stamp is optional from
-  1 January 2026 (Res. Ex. SII N° 207 of 2025) and the XML keeps its `TED`; on any other type, and for a value that
-  is not a boolean, it throws `INVALID_OPTION`, as does a `paper` that is neither `'sheet'` nor `'roll'`. Res. Ex. SII
-  N° 53 of 2025 allows delivering the receipt virtually, which stays with the application. `dte-sdk/pdf` grows from
-  11.47 kB to 13.2 kB, and its size limit from 12 kB to 14 kB.
+  refers to, the detail, the totals, the acknowledgement box and the destination mark of a transferable copy, and the
+  stamp 7 cm wide with its legends, at the manual's minimum sizes (10 pt in the box, 7 pt in the legends). Every type
+  admits it, as the manual does not limit the format to any. The default is `paper: 'sheet'`, the sample is unchanged,
+  and `renderPrintedSamples` and `writePrintedSamples` still produce the sheet. `stamp: false` leaves the electronic
+  stamp and its legends out of a receipt, 39 or 41, on the sheet or on the roll, since the printed stamp is optional
+  from 1 January 2026 (Res. Ex. SII N° 207 of 2025) and the XML keeps its `TED`; on any other type, and for a value
+  that is not a boolean, it throws `INVALID_OPTION`, as does a `paper` that is neither `'sheet'` nor `'roll'`. Res. Ex.
+  SII N° 53 of 2025 allows delivering the receipt virtually, which stays with the application. `dte-sdk/pdf` grows
+  from 11.47 kB to 13.2 kB, and its size limit from 12 kB to 14 kB.
   - **What to change:** nothing. Pass `paper: 'roll'` for the ticket and `stamp: false` for a receipt without the
     printed stamp.
 - **Answers to a received envelope, document by document.** Every company that receives an `EnvioDTE` answers it, and
@@ -56,7 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **What to change:** nothing. `createExchangeAnswers` of `dte-sdk/portal` is now built on these answers and writes
     the same bytes as before; `parseExchangeSet` keeps its loose reading, for the set the SII itself serves in the
     certification.
-  - **For who built from `canary` since these functions entered it** (they have not been in a release):
+  - **For who built from `canary` since these functions entered it** (they were in no release before this one):
     - `createResultAnswer` and `createGoodsReceipts` need `documents`. Before, without decisions the result accepted
       every document addressed to the company and rejected the rest, and the receipts covered the documents addressed
       to the company of the types 33, 34, 43, 46 and 52; with a record, the documents it did not name took those
@@ -156,7 +158,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the folios are, and a new attempt asks for new ones. The simulation still never issues with the sets' CAFs.
   `prepareFolios` with `fresh` follows the same rule.
   - **What to change:** nothing. A state saved by an earlier version has no `simulationCafs` and behaves as before.
-
 - **Size:** these changes took `dte-sdk` from 37.27 kB to 37.62 kB, `dte-sdk/node` from 7.09 kB to 7.36 kB and
   `dte-sdk/portal` from 78.51 kB to 78.98 kB, all under their limits.
 
@@ -1068,7 +1069,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Jest, ESLint, Prettier, size-limit, Stryker, CI and tag-triggered publish)
   and a single `hello()` export that returns `'dte-sdk is coming'`.
 
-[Unreleased]: https://github.com/arrowsw/dte-sdk/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/arrowsw/dte-sdk/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.12.0
 [0.11.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.11.0
 [0.10.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.10.0
 [0.9.1]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.9.1
