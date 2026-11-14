@@ -109,6 +109,7 @@ export type {
   Header,
   Document,
   DocumentInput,
+  DocumentWarning,
 } from './model/document'
 export type {
   SiiDocumento,

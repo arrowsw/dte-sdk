@@ -21,6 +21,7 @@ const issuer = {
   businessActivity: 'Software',
   address: 'Av. Los Aromos 1540',
   commune: 'Ñuñoa',
+  activityCode: 620200,
 }
 const receiver = {
   rut: RECEIVER_RUT,
@@ -135,6 +136,25 @@ describe('createEnvelope', () => {
       () => createEnvelope({ kind: 'dte', documents: [issue(33, 1)], cover: { ...cover, resolutionDate: 'ayer' } }),
       'INVALID_DATE',
     )
+  })
+
+  // `SetDTE` admits 2,000 documents in `EnvioDTE_v10.xsd` and 500 in `EnvioBOLETA_v11.xsd`. The envelope only reads
+  // each document's type, so one signed document stands for all of them.
+  test('an envelope holds the documents its schema admits and no more', () => {
+    const invoice = issue(33, 1)
+    const sale = receipt(1)
+    const many = <T>(document: T, count: number): readonly T[] => Array.from({ length: count }, () => document)
+    expect(createEnvelope({ kind: 'dte', documents: many(invoice, 2000), cover }).cover.subtotals).toEqual([
+      { type: 33, count: 2000 },
+    ])
+    expect(createEnvelope({ kind: 'receipt', documents: many(sale, 500), cover }).documents).toHaveLength(500)
+    for (const [kind, documents] of [
+      ['dte', many(invoice, 2001)],
+      ['receipt', many(sale, 501)],
+    ] as const)
+      expect(() => createEnvelope({ kind, documents, cover })).toThrow(
+        expect.objectContaining({ code: 'INVALID_OPTION', details: { field: 'documents', kind } }),
+      )
   })
 
   // `NroResol` is a non-negative integer of at most six digits in `EnvioDTE_v10.xsd` and `EnvioBOLETA_v11.xsd`.

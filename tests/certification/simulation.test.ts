@@ -305,17 +305,17 @@ describe('the party fields', () => {
     expect(header.receiver.businessActivity).toBe('Venta al por mayor de maquinaria y equip')
   })
 
-  test('an issuer without an activity code and a receiver without a line of business carry neither', async () => {
-    const options = issueOptions([cafFor(52)])
+  // `DTE_v10.xsd` asks every issuer for its `Acteco`, so an issuer without one stops the simulation before stamping.
+  test('an issuer without an activity code is refused, and a receiver without a line of business carries none', async () => {
+    const guide = { guide: { ...plan.guide!, guides: [plan.guide!.guides[0]] } }
     const { activityCode, ...bare } = issuer
     void activityCode
     const { businessActivity, ...nameless } = receiver
     void businessActivity
-    const simulation = await issueSimulation(
-      { guide: { ...plan.guide!, guides: [plan.guide!.guides[0]] } },
-      { ...options, issuer: bare, receiver: nameless },
-    )
-    expect(simulation.cases[0].document.header.issuer.activityCode).toBeUndefined()
+    await expect(
+      issueSimulation(guide, { ...issueOptions([cafFor(52)]), issuer: bare, receiver: nameless }),
+    ).rejects.toMatchObject({ code: 'MISSING_FIELD', details: { field: 'issuer.activityCode' } })
+    const simulation = await issueSimulation(guide, { ...issueOptions([cafFor(52)]), receiver: nameless })
     expect(simulation.cases[0].document.header.receiver.businessActivity).toBeUndefined()
   })
 })

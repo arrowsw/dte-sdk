@@ -25,6 +25,7 @@ import type {
   ReceiptReferenceInput,
   Reference,
   ReferenceInput,
+  SubtotalInfo,
   Transport,
   TransportInput,
 } from '../model/document'
@@ -32,6 +33,7 @@ import { toSiiRut } from '../model/rut'
 import { assertMaxLength, sanitizeText } from '../text/sanitize'
 import { chileDate, toIsoDate } from '../time/chile'
 import { calculateLineAmount, calculateTotals, commissionVat } from '../totals/calculate'
+import { assertTotals, totalsWarnings } from './content-rules'
 
 /**
  * EN: `xs:maxLength` of the SII schema per element; `createDocument` enforces them on sanitized text.
@@ -78,10 +80,13 @@ export const FIELD_LIMITS = {
 
 type LimitedField = keyof typeof FIELD_LIMITS
 
-// `CdgSIISucur` is a positive integer of at most nine digits.
+// `CdgSIISucur` is a positive integer of at most nine digits, and `Acteco` of at most six.
 const MAX_SII_BRANCH_CODE = 999_999_999
-// `maxOccurs` of the SII schema: the detail lines of a settlement invoice, and the commission lines of any document.
-const MAX_SETTLEMENT_LINES = 60
+const MAX_ACTIVITY_CODE = 999_999
+// `maxOccurs` of the SII schemas: the detail lines, 60 in each root of `DTE_v10.xsd` and 1,000 in
+// `EnvioBOLETA_v11.xsd`, and the commission lines of any document.
+const MAX_LINES = 60
+const MAX_RECEIPT_LINES = 1000
 const MAX_COMMISSIONS = 20
 
 // The `IdDoc` fields that `Documento` declares and `Liquidacion`, the root of a settlement invoice, does not.
@@ -189,7 +194,6 @@ const given = (value: unknown): boolean => value !== undefined && !(Array.isArra
 // `Liquidacion` declares less than `Documento`: no transport, no global or line discounts and surcharges, no `RUTOtr`
 // in a reference, no `MontoNF`. Each of these would be written under it and fail the schema.
 const assertSettlement = (input: DocumentInput): void => {
-  if (input.items.length > MAX_SETTLEMENT_LINES) refuse('items')
   if ((input.globalAdjustments ?? []).length > 0) refuse('globalAdjustments')
   if (input.transport !== undefined) refuse('transport')
   input.items.forEach((item, index) => {
@@ -228,13 +232,23 @@ const siiBranchCode = (value: number | undefined): number | undefined => {
   return value
 }
 
-const normalizeIssuer = (input: IssuerInput): Issuer => {
+// Every root of `DTE_v10.xsd` asks the issuer for one to four `Acteco` (Formato DTE 2.5, field 37). A receipt has no
+// element for it, and the codec leaves out of a receipt whatever it brings.
+const activityCode = (value: number | undefined, receipt: boolean): number | undefined => {
+  if (receipt) return value
+  if (value === undefined) throw new DteError('MISSING_FIELD', { field: 'issuer.activityCode' })
+  if (!(Number.isSafeInteger(value) && value > 0 && value <= MAX_ACTIVITY_CODE))
+    throw new DteError('INVALID_OPTION', { field: 'issuer.activityCode' })
+  return value
+}
+
+const normalizeIssuer = (input: IssuerInput, receipt: boolean): Issuer => {
   const commune = requiredText(input.commune, 'CmnaOrigen', 'issuer.commune')
   return compact({
     rut: toSiiRut(input.rut, 'issuer.rut'),
     businessName: requiredText(input.businessName, 'RznSoc', 'issuer.businessName'),
     businessActivity: requiredText(input.businessActivity, 'GiroEmis', 'issuer.businessActivity'),
-    activityCode: input.activityCode,
+    activityCode: activityCode(input.activityCode, receipt),
     phone: input.phone,
     email: input.email,
     branch: text(input.branch, 'Sucursal'),
@@ -302,6 +316,11 @@ const normalizeItem = (input: LineItemInput, index: number, type: DocumentType):
     throw new DteError('MISSING_FIELD', { field: `${path}.settledDocumentType` })
   if (type !== 43 && settledDocumentType !== undefined) refuse(`${path}.settledDocumentType`)
   const exemptIndicator = input.exemptIndicator ?? (input.exempt || isExemptType(type) ? 1 : undefined)
+  const amount = finiteNumber(input.amount, `${path}.amount`) ?? computed.amount
+  // `MontoItem` is a whole number from zero up in `Documento` and in a receipt, and of either sign only in
+  // `Liquidacion`: a line discount above 100 % leaves a line below zero.
+  if (!(Number.isInteger(amount) && (type === 43 || amount >= 0)))
+    throw new DteError('INVALID_AMOUNT', { field: `${path}.amount` })
   return compact({
     lineNumber: index + 1,
     codes: input.codes,
@@ -321,7 +340,7 @@ const normalizeItem = (input: LineItemInput, index: number, type: DocumentType):
     surchargePercent,
     surchargeAmount: computed.surchargeAmount > 0 ? computed.surchargeAmount : undefined,
     additionalTaxCodes: input.additionalTaxCodes,
-    amount: finiteNumber(input.amount, `${path}.amount`) ?? computed.amount,
+    amount,
   })
 }
 
@@ -387,6 +406,15 @@ const normalizeCommission = (input: CommissionLineInput, index: number): Commiss
   })
 }
 
+// `DTE_v10.xsd` asks every informative subtotal for its `GlosaSTI`; `EnvioBOLETA_v11.xsd` leaves it optional.
+const normalizeSubtotal = (input: SubtotalInfo, index: number, receipt: boolean): SubtotalInfo =>
+  compact({
+    ...input,
+    description: receipt
+      ? text(input.description, 'GlosaSTI')
+      : requiredText(input.description, 'GlosaSTI', `subtotals[${index}].description`),
+  })
+
 const normalizeTransport = (input: TransportInput | undefined): Transport | undefined =>
   input === undefined
     ? undefined
@@ -423,7 +451,7 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
  * their total net value unless a line states its own, and taken off the total. A settlement
  * invoice (43) is held to what its root, `Liquidacion`, declares: no transport, no global or line discounts and
  * surcharges, no `otherRut` in a reference, no non-billable amount in its totals, none of the `IdDoc` options only
- * `Documento` declares, a receiver with its business activity and at most 60 lines. A receipt (39, 41) is held to
+ * `Documento` declares and a receiver with its business activity. A receipt (39, 41) is held to
  * what its own schema, `EnvioBOLETA_v11.xsd`, declares: no transport, no commissions, no withholding, the `IdDoc`
  * options `serviceIndicator`, `netAmountsIndicator` (2), `billingPeriod`, `dueDate` and `paymentMedium` and no
  * other, totals without a rate, own or third-party VAT, withholdings or commissions, and lines without a reference
@@ -431,7 +459,17 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
  * and receiver carry that is not written on a receipt is left out, not refused: the issuer's branch name, phone,
  * e-mail, activity code and salesperson and the receiver's business activity, which a receipt has no element for,
  * and the receiver's e-mail and postal address. `softwareProviderRut` (`RUTProvSW`) and `netAmountsIndicator`
- * (`IndMntNeto`) are a receipt's alone. Pure: same input, same output.
+ * (`IndMntNeto`) are a receipt's alone, and a receipt (39) issued without `pricesIncludeVat` whose totals carry a
+ * net amount gets `IndMntNeto=2` by itself. What the SII would reject in the content is refused before anything is
+ * stamped: more than 60 lines, or 1,000 on a receipt; on every type but a receipt, an issuer without its activity code
+ * (`Acteco`) and an informative subtotal without its description (`GlosaSTI`), which the schema requires; a line
+ * amount that is not a whole number, or is below zero on any type but a 43; and, over the totals worked out or given,
+ * the amounts their types do not admit, an invoice (33) without VAT (validation 55), an
+ * exempt invoice (34) without an exempt amount above zero or with a net amount or a VAT (validation 57), and a total
+ * or a period amount that does not add up. What the SII accepts with an objection is built and listed in `warnings`:
+ * a total of zero on a 33, 34, 43 or 46 (validation 10), a net amount of zero on a 33, 43 or 46 (validation 12), and
+ * an invoice (33) whose net amount is not above zero (validation 56). Each check stops at the first fault it finds.
+ * Pure: same input, same output.
  * ES: Construye un `Document` normalizado desde la entrada: valida tipo, folio y fechas, normaliza RUT con rut.ts,
  * sanitiza textos y exige los largos del esquema (falla temprano en vez de dejar que el SII rechace el sobre entero),
  * numera líneas, calcula montos y totales, aplica los defaults de boleta (consumidor final, `IndServicio=3`) y fija
@@ -446,7 +484,7 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
  * IVA por su valor neto total salvo que una línea declare el suyo, y se restan del total. Una
  * liquidación factura (43) se atiene a lo que declara su raíz, `Liquidacion`: sin transporte, sin descuentos ni
  * recargos globales o por línea, sin `otherRut` en una referencia, sin monto no facturable en sus totales, sin las
- * opciones de `IdDoc` que solo declara `Documento`, con el giro del receptor y con 60 líneas como máximo. Una boleta
+ * opciones de `IdDoc` que solo declara `Documento` y con el giro del receptor. Una boleta
  * (39, 41) se atiene a lo que declara su propio esquema, `EnvioBOLETA_v11.xsd`: sin transporte, sin comisiones, sin
  * retención, con las opciones de `IdDoc` `serviceIndicator`, `netAmountsIndicator` (2), `billingPeriod`, `dueDate` y
  * `paymentMedium` y ninguna otra, con totales sin tasa, IVA propio o de terceros, retenciones ni comisiones, y con
@@ -454,8 +492,18 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
  * 1, 2 o 6. Lo que su emisor y su receptor traen y no se escribe en una boleta queda fuera, sin rechazo: la
  * sucursal, el teléfono, el correo, el código de actividad y el vendedor del emisor y el giro del receptor, para los
  * que la boleta no tiene elemento, y el correo y la dirección postal del receptor. `softwareProviderRut`
- * (`RUTProvSW`) y `netAmountsIndicator` (`IndMntNeto`) son solo de la boleta. Pura: misma entrada, misma salida.
- * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `MISSING_FIELD` (also a commission line with neither a net nor an exempt value, and a settlement invoice whose receiver has no `businessActivity`), `FIELD_TOO_LONG`, `INVALID_AMOUNT` (also a quantity, a price, a percentage, an adjustment value or a commission rate with more digits than its schema type holds); `INVALID_TIME` for a `transport.departureTime` that is not `HH:MM:SS` or `HH:MM`; `INVALID_OPTION` for `references` on a receipt, `receiptReferences` on any other type, an `options.transferType` outside 1 to 9, more than 20 `commissions`, a `settledDocumentType` on a type other than 43, on a 43 whatever `Liquidacion` does not declare, on a receipt whatever its schema does not declare, and an `options.netAmountsIndicator` or a `softwareProviderRut` on a type that is not a receipt, with the field in `details.field`. ES: los mismos códigos; `INVALID_AMOUNT` también por una cantidad, un precio, un porcentaje, el valor de un ajuste o la tasa de una comisión con más dígitos de los que admite su tipo del esquema; `MISSING_FIELD` también por una línea de comisión sin valor neto ni exento y por una liquidación factura cuyo receptor no trae `businessActivity`; `INVALID_TIME` por un `transport.departureTime` que no es `HH:MM:SS` ni `HH:MM`; `INVALID_OPTION` por `references` en una boleta, `receiptReferences` en cualquier otro tipo, un `options.transferType` fuera de 1 a 9, más de 20 `commissions`, un `settledDocumentType` en un tipo distinto del 43, en un 43 lo que `Liquidacion` no declara, en una boleta lo que su esquema no declara, y un `options.netAmountsIndicator` o un `softwareProviderRut` en un tipo que no es boleta, con el campo en `details.field`.
+ * (`RUTProvSW`) y `netAmountsIndicator` (`IndMntNeto`) son solo de la boleta, y una boleta (39) emitida sin
+ * `pricesIncludeVat` cuyos totales traen monto neto recibe sola `IndMntNeto=2`. Lo que el SII rechazaría en el
+ * contenido se rechaza antes de timbrar nada: más de 60 líneas, o 1.000 en una boleta; en todo tipo salvo la boleta,
+ * un emisor sin código de actividad (`Acteco`) y un subtotal informativo sin glosa (`GlosaSTI`), que el esquema exige;
+ * un monto de línea que no es entero, o que es negativo en cualquier tipo salvo el 43; y, sobre los totales calculados
+ * o entregados, los montos que sus tipos no admiten, una factura (33) sin IVA
+ * (validación 55), una factura exenta (34) sin monto exento mayor que cero o con monto neto o IVA (validación 57), y un
+ * monto total o del período que no cuadra. Lo que el SII acepta con reparo se construye y se informa en `warnings`:
+ * un monto total en cero en un 33, 34, 43 o 46 (validación 10), un monto neto en cero en un 33, 43 o 46 (validación
+ * 12), y una factura (33) cuyo monto neto no es mayor que cero (validación 56). Cada revisión se detiene en la primera
+ * falla que encuentra. Pura: misma entrada, misma salida.
+ * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `MISSING_FIELD` (also a commission line with neither a net nor an exempt value, a settlement invoice whose receiver has no `businessActivity`, an `issuer.activityCode` or a `subtotals[i].description` missing on a type that is not a receipt, and the `totals.vatAmount` of a 33 or the `totals.exemptAmount` of a 34), `FIELD_TOO_LONG`, `INVALID_AMOUNT` (also a quantity, a price, a percentage, an adjustment value or a commission rate with more digits than its schema type holds, an `items[i].amount` that is not a whole number or is negative outside a 43, and a total its schema type or validation 57 does not admit); `TOTAL_MISMATCH` for a `totals.totalAmount` or a `totals.periodAmount` that does not add up, with `expected` and `actual`; `INVALID_TIME` for a `transport.departureTime` that is not `HH:MM:SS` or `HH:MM`; `INVALID_OPTION` for `references` on a receipt, `receiptReferences` on any other type, an `options.transferType` outside 1 to 9, more than 20 `commissions`, more `items` than the type admits, an `issuer.activityCode` that is not a positive integer of at most six digits, a `settledDocumentType` on a type other than 43, on a 43 whatever `Liquidacion` does not declare, on a receipt whatever its schema does not declare, and an `options.netAmountsIndicator` or a `softwareProviderRut` on a type that is not a receipt, with the field in `details.field`. ES: los mismos códigos; `INVALID_AMOUNT` también por una cantidad, un precio, un porcentaje, el valor de un ajuste o la tasa de una comisión con más dígitos de los que admite su tipo del esquema, por un `items[i].amount` que no es entero o es negativo fuera de un 43, y por un total que su tipo del esquema o la validación 57 no admite; `MISSING_FIELD` también por una línea de comisión sin valor neto ni exento, por una liquidación factura cuyo receptor no trae `businessActivity`, por un `issuer.activityCode` o un `subtotals[i].description` ausente en un tipo que no es boleta, y por el `totals.vatAmount` de un 33 o el `totals.exemptAmount` de un 34; `TOTAL_MISMATCH` por un `totals.totalAmount` o un `totals.periodAmount` que no cuadra, con `expected` y `actual`; `INVALID_TIME` por un `transport.departureTime` que no es `HH:MM:SS` ni `HH:MM`; `INVALID_OPTION` por `references` en una boleta, `receiptReferences` en cualquier otro tipo, un `options.transferType` fuera de 1 a 9, más de 20 `commissions`, más `items` de los que admite el tipo, un `issuer.activityCode` que no es un entero positivo de hasta seis dígitos, un `settledDocumentType` en un tipo distinto del 43, en un 43 lo que `Liquidacion` no declara, en una boleta lo que su esquema no declara, y un `options.netAmountsIndicator` o un `softwareProviderRut` en un tipo que no es boleta, con el campo en `details.field`.
  */
 export const createDocument = (input: DocumentInput, options: CreateDocumentOptions = {}): Document => {
   if (!isDocumentType(input.type)) throw new DteError('INVALID_DOCUMENT_TYPE', { type: input.type })
@@ -463,9 +511,10 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
   const type = input.type
   const receipt = isReceipt(type)
   const issueDate = input.issueDate === undefined ? chileDate(options.now) : toIsoDate(input.issueDate, 'issueDate')
-  const issuer = normalizeIssuer(input.issuer)
+  const issuer = normalizeIssuer(input.issuer, receipt)
   const receiver = normalizeReceiver(input.receiver, type)
   if (input.items.length === 0) throw new DteError('MISSING_FIELD', { field: 'items' })
+  if (input.items.length > (receipt ? MAX_RECEIPT_LINES : MAX_LINES)) refuse('items')
   if (type === 43) assertSettlement(input)
   if (receipt) assertReceipt(input)
   // `IndMntNeto` and `RUTProvSW` are a receipt's: no other document declares them.
@@ -481,6 +530,7 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
     throw new DteError('INVALID_OPTION', { field: 'receiptReferences' })
   const references = (input.references ?? []).map(normalizeReference)
   const receiptReferences = (input.receiptReferences ?? []).map(normalizeReceiptReference)
+  const subtotals = (input.subtotals ?? []).map((subtotal, index) => normalizeSubtotal(subtotal, index, receipt))
   const globalAdjustments = (input.globalAdjustments ?? []).map(normalizeAdjustment)
   const commissions = (input.commissions ?? []).map(normalizeCommission)
   const transport = normalizeTransport(input.transport)
@@ -499,7 +549,10 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
       // The lines as the caller gave them, checked above: the summary's VAT depends on whether a line states its own.
       commissions: input.commissions,
     })
-  // Totals the caller gave are the caller's to match with the lines.
+  // Totals the caller gave are the caller's to match with the lines; what the SII checks over the totals themselves is
+  // checked here, on them and on the ones worked out.
+  assertTotals(type, totals)
+  const warnings = totalsWarnings(type, totals)
   const withheld = input.totals === undefined && totals.withholdings !== undefined
   const items = withheld ? withTotalWithholdingCode(lines) : lines
   const headerOptions: HeaderOptions = compact({
@@ -508,6 +561,10 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
     grossAmounts:
       input.options?.grossAmounts ??
       (input.pricesIncludeVat && !receipt && (totals.netAmount ?? 0) > 0 ? 1 : undefined),
+    // Without `IndMntNeto` Formato de Boletas 4.2 reads a receipt's lines as VAT included; an exempt receipt has none.
+    netAmountsIndicator:
+      input.options?.netAmountsIndicator ??
+      (type === 39 && !input.pricesIncludeVat && (totals.netAmount ?? 0) > 0 ? 2 : undefined),
   })
 
   return {
@@ -524,10 +581,11 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
       totals,
     }),
     items,
-    subtotals: input.subtotals ?? [],
+    subtotals,
     globalAdjustments,
     references,
     receiptReferences,
     commissions,
+    ...(warnings.length > 0 ? { warnings } : {}),
   }
 }

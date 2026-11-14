@@ -20,6 +20,7 @@ const issuer = {
   businessActivity: 'Software',
   address: 'Av. Los Aromos 1540',
   commune: 'Ñuñoa',
+  activityCode: 620200,
 }
 const receiver = {
   rut: RECEIVER_RUT,

@@ -30,10 +30,7 @@ const coffee = { name: 'Café', quantity: 2, unitPrice: 1500 }
 const VARIANTS: Record<39 | 41, Record<string, Variant>> = {
   39: {
     'prices that include VAT, for a final consumer': { items: [coffee], pricesIncludeVat: true },
-    'net amounts, with their indicator': {
-      items: [{ name: 'Plan mensual', unitPrice: 10000 }],
-      options: { netAmountsIndicator: 2 },
-    },
+    'net amounts, which carry their indicator by themselves': { items: [{ name: 'Plan mensual', unitPrice: 10000 }] },
     'the whole IdDoc its schema declares, in its order: net amounts, a period, a due date and a payment medium': {
       items: [{ name: 'Internet hogar', unitPrice: 21840 }],
       receiver: namedReceiver,

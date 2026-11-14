@@ -267,6 +267,50 @@ type is refused with `INVALID_AMOUNT`. A line with a price and no quantity is wr
 with, 1, and so is every line of a dispatch guide (52) that brings none. On a purchase invoice (46), or any document with `withholdVat: true`, each VAT-affected line carries
 additional tax code 15, the one the withholding is summed over, unless it brings codes of its own.
 
+### What the SII would reject, caught before stamping
+
+The SII rejects a document whose content breaks its rules after the folio is spent, and a schema error takes the whole
+envelope with it. `createDocument` refuses these before anything is stamped, with the field in `details.field`; each
+check stops at the first fault it finds:
+
+| Rule | Source | Error |
+|---|---|---|
+| At most 60 lines, and 1,000 on a receipt | `DTE_v10.xsd`, `EnvioBOLETA_v11.xsd` | `INVALID_OPTION` (`items`) |
+| The issuer's `activityCode`, on every type but a receipt | `Acteco`, Formato DTE 2.5 field 37 | `MISSING_FIELD`, or `INVALID_OPTION` outside 1 to 999999 |
+| An informative subtotal's `description`, on every type but a receipt | `GlosaSTI` | `MISSING_FIELD` |
+| A line amount that is a whole number, and not negative outside a 43 | `MontoItem` | `INVALID_AMOUNT` (`items[i].amount`) |
+| Net, exempt, VAT and total that are whole numbers, and not negative outside a 43 | `MntNeto`, `MntExe`, `IVA`, `MntTotal` | `INVALID_AMOUNT` |
+| An invoice (33) declares its VAT | validation 55 | `MISSING_FIELD` (`totals.vatAmount`) |
+| An exempt invoice (34) has an exempt amount above zero, and no net amount or VAT | validation 57 | `MISSING_FIELD` or `INVALID_AMOUNT` |
+| The total adds up: net + exempt + VAT, less the VAT withheld and the commissions | Formato DTE 2.5 field 124 | `TOTAL_MISMATCH`, with `expected` and `actual` |
+| The period amount is the total plus the non-billable amount | Formato DTE 2.5 field 126 | `TOTAL_MISMATCH` |
+
+The validations are those of the SII's "Nuevas validaciones a la IECV, DTE y DJ 3327 y 3328". They hold for totals
+worked out from the lines and for totals given by hand. A document the SII accepts with an objection (a "reparo") is
+built, and the validations that object to it are listed in `warnings`:
+
+```typescript
+const settlement = createDocument({
+  type: 43,
+  folio: 3,
+  issuer,
+  receiver,
+  items: [{ name: 'Venta por cuenta de terceros', unitPrice: 1000, settledDocumentType: '33' }],
+  commissions: [{ kind: 'commission', description: 'Comisión', netValue: 1000 }],
+})
+settlement.header.totals.totalAmount // 0
+settlement.warnings // [{ validation: 10, field: 'totals.totalAmount' }]: a total of zero, objected to in the book
+```
+
+Validation 10 is a total of zero on a 33, 34, 43 or 46, 12 a net amount of zero on a 33, 43 or 46, and 56 an invoice
+(33) whose net amount is not above zero. `warnings` is absent when there is nothing, is never written to the XML, and
+travels to the signed document. `createEnvelope` holds an `EnvioDTE` to 2,000 documents and an `EnvioBOLETA` to 500
+(`INVALID_OPTION`, `documents`).
+
+Not checked yet: a total whose totals carry a tax code other than 15, since which of those codes add to the total and
+which come off it waits for the catalog of additional taxes; and the generic receiver 66666666-6 on a type that is not
+a receipt.
+
 ### Transport of goods
 
 A dispatch guide (52), or an invoice that moves goods, carries its transport in `transport`, with the fields
@@ -376,7 +420,7 @@ const periodic = createDocument({
   items: [{ name: 'Internet hogar', unitPrice: 21840 }],
   options: {
     serviceIndicator: 2, // IndServicio: 1 and 2 periodic services, 3 sales and services (the default), 4 shows
-    netAmountsIndicator: 2, // IndMntNeto: the lines carry net amounts; leave it out with pricesIncludeVat
+    netAmountsIndicator: 2, // IndMntNeto: the lines carry net amounts; set by itself on a 39 without pricesIncludeVat
     billingPeriod: { from: '2026-11-01', to: '2026-11-30' }, // PeriodoDesde, PeriodoHasta
     dueDate: '2026-12-10', // FchVenc
     paymentMedium: '2', // MedioPago: on a receipt, a number from 1 to 5

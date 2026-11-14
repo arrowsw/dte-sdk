@@ -37,6 +37,10 @@ export type CreateEnvelopeInput = {
   readonly now?: Date
 }
 
+// `maxOccurs` of `DTE` in `SetDTE`: 2,000 in `EnvioDTE_v10.xsd` and 500 in `EnvioBOLETA_v11.xsd`. Their 20 and 2
+// `SubTotDTE` are as many types as each kind admits, or more, so counting the types needs no check of its own.
+const MAX_DOCUMENTS: Readonly<Record<EnvelopeKind, number>> = { dte: 2000, receipt: 500 }
+
 // Convention for SetDTE ids: prefix + Chile-local date/time + milliseconds, unique within a process.
 const SUBTOTAL_PRIORITY: readonly number[] = [33, 61, 56]
 
@@ -61,14 +65,17 @@ const rank = (type: number): number => {
 }
 
 /**
- * EN: Groups signed documents under a cover: validates the kind, normalizes RUTs and the resolution date, counts
- * documents per type (`SubTotDTE`, with 33/61/56 first on `EnvioDTE`) and generates the set id.
- * ES: Agrupa documentos firmados bajo una carátula: valida el tipo de sobre, normaliza RUT y fecha de resolución,
- * cuenta documentos por tipo (`SubTotDTE`, con 33/61/56 primero en `EnvioDTE`) y genera el id del set.
- * @throws {DteError} EN: `ENVELOPE_EMPTY`, `ENVELOPE_KIND_MISMATCH`, `INVALID_RUT`, `INVALID_DATE`, `INVALID_OPTION` (a resolution number that is not an integer from 0 to 999999). ES: los mismos códigos; `INVALID_OPTION` por un número de resolución que no es un entero de 0 a 999999.
+ * EN: Groups signed documents under a cover: validates the kind, holds the documents to the 2,000 an `EnvioDTE` admits
+ * and the 500 of an `EnvioBOLETA`, normalizes RUTs and the resolution date, counts documents per type (`SubTotDTE`,
+ * with 33/61/56 first on `EnvioDTE`) and generates the set id.
+ * ES: Agrupa documentos firmados bajo una carátula: valida el tipo de sobre, se atiene a los 2.000 documentos que admite
+ * un `EnvioDTE` y los 500 de un `EnvioBOLETA`, normaliza RUT y fecha de resolución, cuenta documentos por tipo
+ * (`SubTotDTE`, con 33/61/56 primero en `EnvioDTE`) y genera el id del set.
+ * @throws {DteError} EN: `ENVELOPE_EMPTY`, `ENVELOPE_KIND_MISMATCH`, `INVALID_RUT`, `INVALID_DATE`, `INVALID_OPTION` (a resolution number that is not an integer from 0 to 999999, and more documents than the kind admits, with `documents` in `details.field`). ES: los mismos códigos; `INVALID_OPTION` por un número de resolución que no es un entero de 0 a 999999, y por más documentos de los que admite el tipo de sobre, con `documents` en `details.field`.
  */
 export const createEnvelope = ({ kind, documents, cover, now }: CreateEnvelopeInput): Envelope => {
   if (documents.length === 0) throw new DteError('ENVELOPE_EMPTY', { kind })
+  if (documents.length > MAX_DOCUMENTS[kind]) throw new DteError('INVALID_OPTION', { field: 'documents', kind })
   for (const document of documents) {
     if (isReceipt(document.header.type) !== (kind === 'receipt'))
       throw new DteError('ENVELOPE_KIND_MISMATCH', { kind, type: document.header.type })

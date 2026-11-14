@@ -20,7 +20,7 @@ export type Issuer = {
   readonly businessName: string
   /** EN: Line of business (max 80). ES: `GiroEmis` (`GiroEmisor` en boletas) — Giro comercial, máximo 80. */
   readonly businessActivity: string
-  /** EN: SII economic activity code; left out of a receipt, which has no element for it. ES: `Acteco` — Código de actividad económica del SII; no se escribe en una boleta, que no tiene elemento para él. */
+  /** EN: SII economic activity code, a positive integer of at most six digits: required on every type but a receipt, and left out of a receipt, which has no element for it. ES: `Acteco` — Código de actividad económica del SII, entero positivo de hasta seis dígitos: obligatorio en todo tipo salvo la boleta, y no se escribe en una boleta, que no tiene elemento para él. */
   readonly activityCode?: number
   /** EN: Phone; left out of a receipt. ES: `Telefono` — Teléfono; no se escribe en una boleta. */
   readonly phone?: string
@@ -231,11 +231,11 @@ export type Totals = {
   readonly withholdings?: readonly Withholding[]
   /** EN: Totals of the commission and other charge lines; refused on a receipt. ES: `Comisiones` — Totales de las líneas de comisiones y otros cargos; se rechazan en una boleta. */
   readonly commissions?: CommissionTotals
-  /** EN: Document total: net + VAT + exempt (VAT excluded when withheld), less the commissions and other charges; zero or negative only on a settlement invoice (43). ES: `MntTotal` — Monto total: neto + IVA + exento (sin IVA si está retenido), menos las comisiones y otros cargos; cero o negativo solo en una liquidación factura (43). */
+  /** EN: Document total: net + VAT + exempt (VAT excluded when withheld), less the commissions and other charges; zero or negative only on a settlement invoice (43). `createDocument` refuses one that does not add up, unless the totals carry a tax code other than 15. ES: `MntTotal` — Monto total: neto + IVA + exento (sin IVA si está retenido), menos las comisiones y otros cargos; cero o negativo solo en una liquidación factura (43). `createDocument` rechaza uno que no cuadra, salvo que los totales traigan un código de impuesto distinto del 15. */
   readonly totalAmount: number
   /** EN: Non-billable amount (lines with `IndExe` 2-6); refused on a settlement invoice (43), whose root has no `MontoNF`. ES: `MontoNF` — Monto no facturable (líneas con `IndExe` 2 a 6); se rechaza en una liquidación factura (43), cuya raíz no tiene `MontoNF`. */
   readonly nonBillableAmount?: number
-  /** EN: Period amount, written as given; on a receipt its tag is `TotalPeriodo`, which the SII defines as the total plus the non-billable amount. ES: `MontoPeriodo` (`TotalPeriodo` en boletas) — Monto del período, escrito tal como viene; en una boleta su etiqueta es `TotalPeriodo`, que el SII define como el monto total más el monto no facturable. */
+  /** EN: Period amount, written as given: the SII defines it as the total plus the non-billable amount, and `createDocument` refuses any other; on a receipt its tag is `TotalPeriodo`. ES: `MontoPeriodo` (`TotalPeriodo` en boletas) — Monto del período, escrito tal como viene: el SII lo define como el monto total más el monto no facturable, y `createDocument` rechaza cualquier otro; en una boleta su etiqueta es `TotalPeriodo`. */
   readonly periodAmount?: number
   /** EN: Previous balance. ES: `SaldoAnterior` — Saldo anterior. */
   readonly previousBalance?: number
@@ -506,7 +506,7 @@ export type HeaderOptions = {
   readonly paymentTermsDays?: number
   /** EN: Due date. ES: `FchVenc` — Fecha de vencimiento. */
   readonly dueDate?: string
-  /** EN: Net amounts indicator of a receipt: 2 when its lines carry net amounts; refused on any other type, since only a receipt declares it. ES: `IndMntNeto` — Indicador de montos netos de una boleta: 2 cuando sus líneas traen montos netos; se rechaza en cualquier otro tipo, porque solo la boleta lo declara. */
+  /** EN: Net amounts indicator of a receipt: 2 when its lines carry net amounts; set automatically on a receipt (39) issued without `pricesIncludeVat` whose totals carry a net amount, and refused on any other type, since only a receipt declares it. ES: `IndMntNeto` — Indicador de montos netos de una boleta: 2 cuando sus líneas traen montos netos; se fija solo en una boleta (39) emitida sin `pricesIncludeVat` cuyos totales traen monto neto, y se rechaza en cualquier otro tipo, porque solo la boleta lo declara. */
   readonly netAmountsIndicator?: 2
 }
 
@@ -517,7 +517,7 @@ export type HeaderOptions = {
 export type SubtotalInfo = {
   /** EN: Subtotal number. ES: `NroSTI` — Número del subtotal. */
   readonly number: number
-  /** EN: Description (max 40). ES: `GlosaSTI` — Glosa, máximo 40. */
+  /** EN: Description (max 40): required on every type but a receipt, whose schema leaves it optional. ES: `GlosaSTI` — Glosa, máximo 40: obligatoria en todo tipo salvo la boleta, cuyo esquema la deja opcional. */
   readonly description?: string
   /** EN: Print order. ES: `OrdenSTI` — Orden de impresión. */
   readonly order?: number
@@ -558,6 +558,23 @@ export type Header = {
 }
 
 /**
+ * EN: What the SII accepts with an objection (reparo), by the number of its validation in "Nuevas validaciones a la
+ * IECV, DTE y DJ 3327 y 3328": 10, a total of zero on an invoice, an exempt invoice, a settlement invoice or a purchase
+ * invoice (33, 34, 43, 46), and 12, a net amount of zero on an invoice, a settlement invoice or a purchase invoice (33,
+ * 43, 46), both in the purchase book of the one who books it; 56, an invoice (33) whose net amount is not above zero.
+ * ES: Lo que el SII acepta con reparo, por el número de su validación en "Nuevas validaciones a la IECV, DTE y DJ 3327 y
+ * 3328": 10, un monto total en cero en una factura, una factura exenta, una liquidación factura o una factura de compra
+ * (33, 34, 43, 46), y 12, un monto neto en cero en una factura, una liquidación factura o una factura de compra (33,
+ * 43, 46), ambas en el libro de compras de quien lo registra; 56, una factura (33) cuyo monto neto no es mayor que cero.
+ */
+export type DocumentWarning = {
+  /** EN: Number of the SII validation that objects to it. ES: Número de la validación del SII que lo repara. */
+  readonly validation: 10 | 12 | 56
+  /** EN: The total it is about. ES: `MntNeto` o `MntTotal` — El total del que se trata. */
+  readonly field: 'totals.netAmount' | 'totals.totalAmount'
+}
+
+/**
  * EN: A normalized document, ready to be rendered, stamped and signed. Produced by `createDocument`.
  * ES: Documento normalizado, listo para renderizar, timbrar y firmar. Lo produce `createDocument`.
  */
@@ -573,6 +590,8 @@ export type Document = {
   readonly receiptReferences: readonly ReceiptReference[]
   /** EN: Commission lines (settlement invoices only). ES: `Comisiones` — Líneas de comisión (solo 43). */
   readonly commissions: readonly CommissionLine[]
+  /** EN: What the SII will accept with an objection, as `createDocument` found it; absent when there is nothing, and never written to the XML. ES: Lo que el SII aceptará con reparo, tal como lo encontró `createDocument`; ausente si no hay nada, y nunca se escribe en el XML. */
+  readonly warnings?: readonly DocumentWarning[]
 }
 
 /**
@@ -591,6 +610,7 @@ export type DocumentInput = {
   readonly receiver?: ReceiverInput
   /** EN: RUT of the company that provides the software a receipt (39, 41) is issued with, in any shape; the issuer's own RUT when the software is its own. Written only when given, and refused on any other type. ES: `RUTProvSW` — RUT de la empresa proveedora del sistema con que se emite una boleta (39, 41), en cualquier forma; el RUT del propio emisor si el desarrollo es propio. Se escribe solo si viene, y se rechaza en cualquier otro tipo. */
   readonly softwareProviderRut?: string
+  /** EN: Detail lines: at least one, at most 60, and at most 1,000 on a receipt. ES: `Detalle` — Líneas de detalle: al menos una, 60 como máximo, y 1.000 como máximo en una boleta. */
   readonly items: readonly LineItemInput[]
   readonly references?: readonly ReferenceInput[]
   /** EN: References of a receipt (39, 41); `references` is for every other type. ES: `Referencia` — Referencias de una boleta (39, 41); `references` es para los demás tipos. */

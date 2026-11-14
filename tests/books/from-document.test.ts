@@ -17,6 +17,7 @@ const issuer = {
   businessActivity: 'Software',
   address: 'Av. Los Aromos 1540',
   commune: 'Ñuñoa',
+  activityCode: 620200,
 }
 const receiver = {
   rut: RECEIVER_RUT,
@@ -101,7 +102,7 @@ describe('bookEntryFromDocument', () => {
         withholdings: [{ taxCode: 24, rate: 31.5, amount: 5 }],
         commissions: { netValue: 1, exemptValue: 2, vatValue: 3 },
         totalAmount: 118,
-        periodAmount: 8,
+        periodAmount: 118,
       },
     })
     expect(bookEntryFromDocument(document, sale)).toMatchObject({
@@ -109,7 +110,7 @@ describe('bookEntryFromDocument', () => {
       thirdPartyVatAmount: 10,
       otherTaxes: [{ code: 24, rate: 31.5, amount: 5 }],
       settlement: { issuerRut: ISSUER_RUT, netValue: 1, exemptValue: 2, vatValue: 3 },
-      periodAmount: 8,
+      periodAmount: 118,
     })
     // A settlement invoice has no non-billable amount in its totals, so an invoice carries this one.
     const invoice = createDocument({

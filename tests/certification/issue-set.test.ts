@@ -631,7 +631,16 @@ describe('errors and defaults', () => {
     const noQuantity = await issueTestSet(
       {
         ...exempt,
-        invoices: [{ ...exempt.invoices[0], items: [{ name: 'Arriendo', quantity: 0, unitPrice: 100, exempt: true }] }],
+        // An exempt invoice whose lines add up to nothing is rejected, so the original has a second line.
+        invoices: [
+          {
+            ...exempt.invoices[0],
+            items: [
+              { name: 'Arriendo', quantity: 0, unitPrice: 100, exempt: true },
+              { name: 'Asesoria', quantity: 1, unitPrice: 100, exempt: true },
+            ],
+          },
+        ],
         creditNotes: [
           {
             ...exempt.creditNotes[0],
