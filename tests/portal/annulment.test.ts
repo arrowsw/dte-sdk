@@ -224,6 +224,20 @@ describe('annulFolios', () => {
     expect(result.annulled).toEqual([{ from: 1, to: 2, count: 2 }])
   })
 
+  test('withinDays counts the days in Chile: late in the day, a range stamped that day is still within the last one', async () => {
+    const html = unusedRangesPage([
+      [1, 2, '15-11-2026'],
+      [3, 4, '14-11-2026'],
+    ])
+    // 22:30 of the 15th in Chile is already the 16th in UTC.
+    const harness = await signedIn(
+      [entry, twice(html), respond('af_anular3', ANNUL_FORM), respond('af_anular', ANNUL_OK)],
+      { now: () => new Date('2026-11-16T01:30:00.000Z') },
+    )
+    const result = await annulFolios(harness.portal, { type: 33, withinDays: 1 })
+    expect(result.annulled).toEqual([{ from: 1, to: 2, count: 2 }])
+  })
+
   test('exclude and knownAnnulled are left alone', async () => {
     const harness = await signedIn([
       entry,

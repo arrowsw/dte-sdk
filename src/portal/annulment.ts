@@ -2,6 +2,7 @@ import { isDocumentType, type DocumentType } from '../catalogs/document-types'
 import { cgiUrl } from '../catalogs/portal'
 import { DteError, isDteError } from '../errors'
 import { assertPositive, type CallOverrides } from '../sii/client'
+import { startedWithinDays } from '../time/chile'
 import { isRetryablePortalError, resolvePortalCompany, type PortalClient } from './client'
 import { flowFailure, type FolioFlowFailure } from './flow-failure'
 import { formAction, inputValues, namedForm } from './html'
@@ -35,7 +36,6 @@ const STEP_RETRY_PAUSE_MS = 1500
 const DEFAULT_MAX_RANGES = 50
 const MAX_REFUSALS_IN_A_ROW = 2
 const DEFAULT_REASON = 'Folios no utilizados'
-const DAY_MS = 24 * 60 * 60 * 1000
 
 /**
  * EN: The unused ranges of a document type.
@@ -72,7 +72,7 @@ export type AnnulFoliosInput = {
   readonly type: DocumentType
   /** EN: Only these folios. ES: `FOLIO_INI_A`, `FOLIO_FIN_A` — Solo estos folios. */
   readonly range?: { readonly from: number; readonly to: number }
-  /** EN: Only ranges stamped within these days; a range with no readable date is skipped. ES: Solo rangos timbrados en estos días; un rango sin fecha legible se omite. */
+  /** EN: Only ranges stamped within these days, counted in Chile from the start of the day each was stamped, so 1 is today; a range with no readable date is skipped. ES: Solo rangos timbrados en estos días, contados en Chile desde el comienzo del día en que se timbró cada uno, así que 1 es hoy; un rango sin fecha legible se omite. */
   readonly withinDays?: number
   /** EN: Every unused range, up to `maxRanges`. ES: Todos los rangos sin usar, hasta `maxRanges`. */
   readonly all?: boolean
@@ -224,9 +224,9 @@ export const listFolioRanges = (
 const overlaps = (range: UnusedFolioRange, span: { readonly from: number; readonly to: number }): boolean =>
   range.from <= span.to && range.to >= span.from
 
-const inScope = (range: UnusedFolioRange, input: AnnulFoliosInput, earliestMs: number | null): boolean => {
+const inScope = (range: UnusedFolioRange, input: AnnulFoliosInput, now: Date): boolean => {
   if (input.range !== undefined && !overlaps(range, input.range)) return false
-  if (earliestMs !== null && (range.date === null || new Date(`${range.date}T00:00:00Z`).getTime() < earliestMs))
+  if (input.withinDays !== undefined && (range.date === null || !startedWithinDays(range.date, input.withinDays, now)))
     return false
   return !(input.exclude ?? []).some((span) => overlaps(range, span))
 }
@@ -407,7 +407,6 @@ export const annulFoliosInSession = async (
   assertDocumentType(input.type)
   assertScope(input)
   const company = companyFields(resolvePortalCompany(context.portal, input.companyRut))
-  const earliestMs = input.withinDays === undefined ? null : context.portal.now().getTime() - input.withinDays * DAY_MS
   const tally: Tally = { annulled: [], rejected: [], known: new Set(input.knownAnnulled ?? []) }
   const seen = new Set<string>()
   // The limit applies to each pass, as in field behaviour: four passes can reach four times `maxRanges`.
@@ -420,7 +419,7 @@ export const annulFoliosInSession = async (
       const { ranges } = await listInSession(context, input.type, input.companyRut)
       const known = spansOf(tally.known)
       const candidates = ranges
-        .filter((range) => inScope(range, input, earliestMs))
+        .filter((range) => inScope(range, input, context.portal.now()))
         .filter((range) => !isCovered(range, known) && !seen.has(`${range.from}-${range.to}`))
         .slice(-limit)
       if (candidates.length === 0) break

@@ -103,7 +103,7 @@ describe('listReobtainableRanges', () => {
         url: `${MAULLIN}/rf_reobtencion2_folios`,
         reply: {
           body: reobtainListPage([
-            [1, 9],
+            [1, 9, '2026-11-07'],
             [20, 29],
           ]),
         },
@@ -119,14 +119,16 @@ describe('listReobtainableRanges', () => {
         from: 1,
         to: 9,
         quantity: 9,
+        date: '2026-11-07',
         annulled: false,
-        formFields: { FOLIO_INI: '1', FOLIO_FIN: '9', COD_DOCTO: '33' },
+        formFields: { DIA: '07', ANO: '2026', MES: '11', FOLIO_INI: '1', FOLIO_FIN: '9', COD_DOCTO: '33' },
         downloadFields: { FOLIO_INI: '1' },
       },
       {
         from: 20,
         to: 29,
         quantity: 10,
+        date: null,
         annulled: true,
         formFields: { FOLIO_INI: '20', FOLIO_FIN: '29', COD_DOCTO: '33' },
         downloadFields: { FOLIO_INI: '20' },
@@ -134,6 +136,39 @@ describe('listReobtainableRanges', () => {
     ])
     expect(harness.posted('rf_reobtencion2_folios')).toEqual([
       { RUT_EMP: '76543210', DV_EMP: '3', PAGINA: '1', COD_DOCTO: '33', ACEPTAR: 'Consultar' },
+    ])
+  })
+
+  test('the day a range was stamped is read from the three fields of its row, and is null when they are not a day', async () => {
+    const row = (from: number, fields: Readonly<Record<string, string>>): string =>
+      `<form name="frm${from}" action="/cvc_cgi/dte/rf_reobtencion3_folios">${Object.entries(fields)
+        .map(([name, value]) => `<input type=hidden name="${name}" value="${value}">`)
+        .join(
+          '',
+        )}<input type=hidden name="FOLIO_INI" value="${from}"><input type=hidden name="FOLIO_FIN" value="${from}"></form>`
+    const harness = await signedIn([
+      { url: `${MAULLIN}/rf_reobtencion1_folios`, reply: { body: REOBTAIN_ENTRY } },
+      {
+        url: `${MAULLIN}/rf_reobtencion2_folios`,
+        reply: {
+          body: page(
+            `<b>REOBTENCION DE FOLIOS</b>${[
+              row(1, { DIA: '7', MES: '3', ANO: '2026' }),
+              row(2, { DIA: '31', MES: '02', ANO: '2026' }),
+              row(3, { DIA: '07', MES: '11' }),
+              row(4, { DIA: 'x7', MES: '11', ANO: '2026' }),
+            ].join('\n')}`,
+          ),
+        },
+      },
+      { url: `${MAULLIN}/rf_reobtencion3_folios`, reply: { body: reobtainDetailPage(1) } },
+    ])
+    const ranges = await listReobtainableRanges(harness.portal, { type: 33 })
+    expect(ranges.map((range) => [range.from, range.date])).toEqual([
+      [1, '2026-03-07'],
+      [2, null],
+      [3, null],
+      [4, null],
     ])
   })
 
@@ -201,6 +236,7 @@ describe('reobtainCaf', () => {
     from: 1,
     to: 9,
     quantity: 9,
+    date: null,
     annulled: false,
     formFields: { FOLIO_INI: '1', FOLIO_FIN: '9' },
     downloadFields: { FOLIO_INI: '1' },

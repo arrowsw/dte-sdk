@@ -5,6 +5,7 @@ import type { PortalRejection } from '../catalogs/portal'
 import { DteError, errorMessage, isDteError, type DteErrorCode } from '../errors'
 import { assertPositive, type CallOverrides } from '../sii/client'
 import type { HttpTransport } from '../sii/transport'
+import { startedWithinDays } from '../time/chile'
 import { annulFoliosInSession, isSpan, type FolioSpan } from './annulment'
 import { resolvePortalCompany, type PortalClient } from './client'
 import { flowFailure, type FolioFlowFailure } from './flow-failure'
@@ -33,6 +34,10 @@ const DEFAULT_EXPIRY_MARGIN_MS = 24 * 60 * 60 * 1000
 // ago may be one another system of the company holds.
 const ANNUL_WINDOW_DAYS = { certification: 180, production: 1 } as const
 const ANNUL_MAX_RANGES = 10
+// Reobtaining reaches every range in certification. In production it reaches the ones stamped today, which is where a
+// grant that never arrived is: a range nobody holds that was stamped before may be one another system of the company
+// issues with, and a second copy of its CAF would repeat its folios.
+const REOBTAIN_WINDOW_DAYS = { certification: null, production: 1 } as const
 // Refusals after which the SII may hold a range it did not hand over: the listing says whether it does.
 const MAYBE_GRANTED: ReadonlySet<PortalRejection> = new Set<PortalRejection>([
   'stampingUncertain',
@@ -198,6 +203,8 @@ export type ReplenishFoliosInput = ReplenishmentPolicy & {
   readonly allowAnnul?: boolean
   /** EN: How many days back annulling reaches, by the date each range was stamped. By default 1 in production, where a range stamped days ago may be another system's, and 180 in certification, the six months unused folios weigh on the quota. ES: Cuántos días hacia atrás alcanza la anulación, por la fecha en que se timbró cada rango. Por defecto 1 en producción, donde un rango timbrado hace días puede ser de otro sistema, y 180 en certificación, los seis meses que los folios sin usar pesan en el cupo. */
   readonly annulWithinDays?: number
+  /** EN: How many days back reobtaining reaches, by the day each range was stamped, counted in Chile. By default 1 in production, which is today: a range nobody holds that was stamped before may be another system's, and issuing with it would repeat its folios, so it is left alone and reported in `outsideWindow`. No limit in certification. ES: Cuántos días hacia atrás alcanza la reobtención, según el día en que se timbró cada rango, contado en Chile. Por defecto 1 en producción, que es hoy: un rango que nadie tiene y que se timbró antes puede ser de otro sistema, y emitir con él repetiría sus folios, así que se deja y se informa en `outsideWindow`. Sin límite en certificación. */
+  readonly reobtainWithinDays?: number
   /** EN: Folios annulling never touches, such as those of documents signed and not received by the SII yet; the CAFs held and the ranges this run downloads are always left out. ES: Folios que la anulación no toca, como los de documentos firmados que el SII aún no recibe; los CAF que se tienen y los rangos que esta corrida descarga siempre quedan fuera. */
   readonly exclude?: readonly { readonly from: number; readonly to: number }[]
   /** EN: `knownAnnulled` of the last report. ES: `knownAnnulled` del último informe. */
@@ -259,6 +266,8 @@ export type ReplenishmentReport = {
   readonly reobtained: ReobtainResult['ranges']
   /** EN: Ranges reobtained whose CAF expires within the margin: they do not count. Hold each one, with nothing remaining, so it is not downloaded again. ES: Rangos reobtenidos cuyo CAF vence dentro del margen: no cuentan. Ten cada uno, sin folios restantes, para que no se vuelva a descargar. */
   readonly expired: ReobtainResult['expired']
+  /** EN: Ranges the SII lists that nobody holds and that were stamped before the days reobtaining reaches, each with its day, or null when the list gave none: they were not downloaded. Someone has to decide each one: hold its CAF if another system has it, or pass `reobtainWithinDays` to take it. ES: Rangos que el SII lista, que nadie tiene y que se timbraron antes de los días que alcanza la reobtención, cada uno con su día, o null si la lista no lo trajo: no se descargaron. Alguien tiene que decidir cada uno: tener su CAF si lo tiene otro sistema, o pasar `reobtainWithinDays` para tomarlo. */
+  readonly outsideWindow: readonly { readonly from: number; readonly to: number; readonly date: string | null }[]
   /** EN: Ranges annulled. ES: Rangos anulados. */
   readonly annulled: readonly FolioSpan[]
   /** EN: `from-to` keys that are final, to pass back. ES: Claves `desde-hasta` definitivas, para devolver. */
@@ -286,6 +295,7 @@ const startProgress = (knownAnnulled: readonly string[]): Progress => ({
   cafs: [],
   reobtained: [],
   expired: [],
+  outsideWindow: [],
   annulled: [],
   knownAnnulled,
   steps: [],
@@ -314,6 +324,7 @@ const assertOptions = (portal: PortalClient, input: ReplenishFoliosInput): void 
   assertPolicy(input)
   assertPositive(input.coolDownMs, 'coolDownMs')
   assertPositive(input.annulWithinDays, 'annulWithinDays')
+  assertPositive(input.reobtainWithinDays, 'reobtainWithinDays')
   // Zero batches would read as the SII's cap without ever asking it.
   if (input.maxBatches !== undefined) assertQuantity(input.maxBatches, 'maxBatches')
   if (input.maxChecksPerRange !== undefined) assertQuantity(input.maxChecksPerRange, 'maxChecksPerRange')
@@ -431,6 +442,11 @@ const replenishInSession = async (
     return free
   }
 
+  // A range with no day to read is beyond any reach: when unsure, it is not taken.
+  const reach = input.reobtainWithinDays ?? REOBTAIN_WINDOW_DAYS[portal.environment]
+  const isWithinReach = (range: ReobtainableRange): boolean =>
+    reach === null || (range.date !== null && startedWithinDays(range.date, reach, portal.now()))
+
   // A range the SII refuses to hand over is logged and the walk moves on; anything else ends it.
   const refusedDownload = (error: unknown): null => {
     if (!isDteError(error) || error.code !== 'SII_PORTAL_REJECTED') throw error
@@ -450,7 +466,10 @@ const replenishInSession = async (
       operation = 'reobtainCaf'
       const mine = [...own.map((holding) => holding.caf.range), ...brought(current)]
       const issued = await Promise.all(fresh.map((range) => isIssued(range, mine)))
-      const usable = fresh.filter((range, index) => !range.annulled && !issued[index]).sort((a, b) => a.from - b.from)
+      const unheld = fresh.filter((range, index) => !range.annulled && !issued[index]).sort((a, b) => a.from - b.from)
+      const usable = unheld.filter(isWithinReach)
+      const beyond = unheld.filter((range) => !isWithinReach(range)).map(({ from, to, date }) => ({ from, to, date }))
+      current = { ...current, outsideWindow: [...current.outsideWindow, ...beyond] }
       for (const range of usable) {
         if (missing(current) <= 0) break
         const freeFolios = await freeFoliosOf(range, missing(current))
@@ -558,8 +577,10 @@ const replenishInSession = async (
  * block worse: the folios in hand first, then ranges already authorized that nobody holds, downloaded again without
  * spending quota, then requests in batches within the quota, and annulling unused folios as a last resort, only in
  * certification unless allowed. Annulling never touches a CAF held nor a range this run downloaded, and reaches only
- * ranges stamped in the last 180 days in certification and in the last day in production, or in `annulWithinDays`. A
- * request the SII may have granted without handing it over is settled in the
+ * ranges stamped in the last 180 days in certification and in the last day in production, or in `annulWithinDays`.
+ * Reobtaining reaches every range in certification and, in production, the ones stamped today in Chile, or in
+ * `reobtainWithinDays`: an older range nobody holds may be another system's, so it is left alone and comes back in
+ * `outsideWindow`. A request the SII may have granted without handing it over is settled in the
  * same run, by reading the listing again. Requests go out a second apart. It stores nothing and schedules nothing: the
  * caller decides when to call it (before issuing, or on a timer), keeps the CAFs it returns and passes back `coolUntil`
  * and `knownAnnulled`. It waits for the portal lock and then reads the CAFs again, so with `cafs` as a function and
@@ -574,7 +595,9 @@ const replenishInSession = async (
  * gastar cupo, luego solicitudes en tandas dentro del cupo, y la anulación de folios sin usar como último recurso, solo
  * en certificación salvo que se permita. La anulación nunca toca un CAF que se tiene ni un rango que esta corrida
  * descargó, y alcanza solo rangos timbrados en los últimos 180 días en certificación y en el último día en producción, o
- * en `annulWithinDays`. Una solicitud que el SII pudo otorgar sin entregarla
+ * en `annulWithinDays`. La reobtención alcanza todos los rangos en certificación y, en producción, los timbrados hoy
+ * en Chile, o en `reobtainWithinDays`: un rango más antiguo que nadie tiene puede ser de otro sistema, así que se deja
+ * y vuelve en `outsideWindow`. Una solicitud que el SII pudo otorgar sin entregarla
  * se resuelve en la misma corrida, leyendo el listado otra vez. Las peticiones salen a un segundo una de otra. No guarda
  * nada ni agenda nada: quien llama decide cuándo llamarla (antes de emitir o con un temporizador), guarda los CAF que
  * devuelve y devuelve `coolUntil` y `knownAnnulled`. Espera el candado del portal y luego vuelve a leer los CAF, así que

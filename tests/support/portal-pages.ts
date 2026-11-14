@@ -122,13 +122,23 @@ export const REOBTAIN_ENTRY = page(
   '<b>REOBTENCION DE FOLIOS</b><form name="form1" action="/cvc_cgi/dte/rf_reobtencion2_folios"><input name="RUT_EMP"><select name = COD_DOCTO><OPTION value="33">FACTURA ELECTRONICA</select></form>',
 )
 
-export const reobtainListPage = (ranges: readonly (readonly [number, number])[]): string =>
+/** A range of the reobtention list: its first and last folio and, when given, the day it was stamped (YYYY-MM-DD). */
+export type ListedRange = readonly [from: number, to: number, date?: string]
+
+// The list gives the day a range was stamped in three fields, as the measured page does.
+const stampedFields = (date: string | undefined): string => {
+  if (date === undefined) return ''
+  const [year, month, day] = date.split('-')
+  return `<input type=hidden name="DIA" value="${day}"><input type=hidden name="ANO" value="${year}"><input type=hidden name="MES" value="${month}">`
+}
+
+export const reobtainListPage = (ranges: readonly ListedRange[]): string =>
   page(
     '<b>REOBTENCION DE FOLIOS</b>' +
       ranges
         .map(
-          ([from, to], index) =>
-            `<form name="frm${index}" action="/cvc_cgi/dte/rf_reobtencion3_folios"><input type=hidden name="FOLIO_INI" value="${from}"><input type=hidden name="FOLIO_FIN" value="${to}"><input type=hidden name="COD_DOCTO" value="33"></form>`,
+          ([from, to, date], index) =>
+            `<form name="frm${index}" action="/cvc_cgi/dte/rf_reobtencion3_folios">${stampedFields(date)}<input type=hidden name="FOLIO_INI" value="${from}"><input type=hidden name="FOLIO_FIN" value="${to}"><input type=hidden name="COD_DOCTO" value="33"></form>`,
         )
         .join('\n'),
   )
