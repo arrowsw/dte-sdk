@@ -296,8 +296,11 @@ describe('createReceptionAnswer', () => {
 })
 
 describe('createResultAnswer', () => {
-  test('accepts what is addressed to the company and rejects any other with CodRchDsc -1', () => {
-    const xml = createResultAnswer(ENVELOPE, base)
+  test('says of each document what the caller decided, with the catalog glosses and -1 for a rejection', () => {
+    const xml = createResultAnswer(ENVELOPE, {
+      ...base,
+      documents: (doc) => (doc.receiverRut === COMPANY ? { state: 0 } : { state: 2 }),
+    })
     expect(node(resultado(xml)['Caratula'])).toMatchObject({ IdRespuesta: 1, NroDetalles: 3 })
     expect(
       results(xml).map((r) => [r['Folio'], r['CodEnvio'], r['EstadoDTE'], r['EstadoDTEGlosa'], r['CodRchDsc']]),
@@ -307,6 +310,36 @@ describe('createResultAnswer', () => {
       [3, 1, 2, 'DTE Rechazado', -1],
     ])
     expect(verifyEnveloped(xml, { elementTag: 'Resultado', rootTag: 'RespuestaDTE' }).valid).toBe(true)
+  })
+
+  test('says nothing of a document without a decision: it accepts none and rejects none on its own', () => {
+    const byFunction = createResultAnswer(ENVELOPE, {
+      ...base,
+      documents: (doc) => (doc.folio === 1 ? { state: 0 } : undefined),
+    })
+    expect(results(byFunction).map((r) => [r['Folio'], r['EstadoDTE']])).toEqual([[1, 0]])
+    expect(node(resultado(byFunction)['Caratula'])['NroDetalles']).toBe(1)
+    // A record decides the documents it names; the one addressed to the company that it does not name is not accepted.
+    const byRecord = createResultAnswer(ENVELOPE, { ...base, documents: { '61:2': { state: 2 } } })
+    expect(results(byRecord).map((r) => [r['Folio'], r['EstadoDTE'], r['CodRchDsc']])).toEqual([[2, 2, -1]])
+    expect(thrown(() => createResultAnswer(ENVELOPE, { ...base, documents: () => undefined }))).toMatchObject({
+      code: 'ENVELOPE_EMPTY',
+      details: { field: 'ResultadoDTE' },
+    })
+    expect(thrown(() => createResultAnswer(ENVELOPE, { ...base, documents: {} })).code).toBe('ENVELOPE_EMPTY')
+  })
+
+  test('is refused without decisions: documents is required, a function or a record', () => {
+    // @ts-expect-error documents is required
+    const missing = thrown(() => createResultAnswer(ENVELOPE, base))
+    expect(missing).toMatchObject({ code: 'INVALID_OPTION', details: { field: 'documents' } })
+    for (const documents of [undefined, null, 'all', 0]) {
+      const input = { ...base, documents } as unknown as Parameters<typeof createResultAnswer>[1]
+      expect(thrown(() => createResultAnswer(ENVELOPE, input))).toMatchObject({
+        code: 'INVALID_OPTION',
+        details: { field: 'documents' },
+      })
+    }
   })
 
   test('lets the caller decide the state, the gloss, the code and the envelope code of each document', () => {
@@ -333,7 +366,7 @@ describe('createResultAnswer', () => {
   })
 
   test('leaves a document out, and refuses when none is left', () => {
-    const xml = createResultAnswer(ENVELOPE, { ...base, documents: (doc) => (doc.folio === 2 ? null : undefined) })
+    const xml = createResultAnswer(ENVELOPE, { ...base, documents: (doc) => (doc.folio === 2 ? null : { state: 0 }) })
     expect(results(xml).map((r) => r['Folio'])).toEqual([1, 3])
     expect(node(resultado(xml)['Caratula'])['NroDetalles']).toBe(2)
     expect(thrown(() => createResultAnswer(ENVELOPE, { ...base, documents: () => null }))).toMatchObject({
@@ -352,8 +385,9 @@ describe('createResultAnswer', () => {
     expect(run({ state: 0, envelopeCode: 0 }).details).toEqual({ field: 'envelopeCode' })
   })
 
-  test('validates the default answer against the official schema', async () => {
-    await expect(validateAgainstXsd(createResultAnswer(ENVELOPE, base), 'RespuestaEnvioDTE')).resolves.toEqual([])
+  test('validates an answer that accepts every document against the official schema', async () => {
+    const accepted = createResultAnswer(ENVELOPE, { ...base, documents: () => ({ state: 0 }) })
+    await expect(validateAgainstXsd(accepted, 'RespuestaEnvioDTE')).resolves.toEqual([])
   })
 
   test('validates a discrepancy and a rejection against the official schema', async () => {
@@ -369,8 +403,8 @@ describe('createGoodsReceipts', () => {
   const receipts = (xml: string): readonly Record<string, unknown>[] =>
     list(node(node(parseXml(xml)['EnvioRecibos'])['SetRecibos'])['Recibo']).map((r) => node(r['DocumentoRecibo']))
 
-  test('receipts the documents addressed to the company of the types the law names, signed by the holder', () => {
-    const xml = createGoodsReceipts(ENVELOPE, base)
+  test('receipts the documents the caller decides and no other, signed by the holder', () => {
+    const xml = createGoodsReceipts(ENVELOPE, { ...base, documents: { '33:1': {} } })
     expect(receipts(xml)).toHaveLength(1)
     expect(receipts(xml)[0]).toMatchObject({
       '@_ID': 'REC-1',
@@ -403,22 +437,52 @@ describe('createGoodsReceipts', () => {
     })
   })
 
+  test('writes no receipt of a document without a decision, whatever its type and its receiver', () => {
+    const byFunction = createGoodsReceipts(ENVELOPE, {
+      ...base,
+      documents: (doc) => (doc.type === 52 ? {} : undefined),
+    })
+    expect(receipts(byFunction).map((r) => [r['@_ID'], r['TipoDoc'], r['Folio']])).toEqual([['REC-1', 52, 3]])
+    expect(thrown(() => createGoodsReceipts(ENVELOPE, { ...base, documents: () => undefined }))).toMatchObject({
+      code: 'ENVELOPE_EMPTY',
+      details: { field: 'Recibo' },
+    })
+    expect(thrown(() => createGoodsReceipts(ENVELOPE, { ...base, documents: { '33:9': {} } })).code).toBe(
+      'ENVELOPE_EMPTY',
+    )
+  })
+
+  test('is refused without decisions: documents is required, a function or a record', () => {
+    // @ts-expect-error documents is required
+    const missing = thrown(() => createGoodsReceipts(ENVELOPE, base))
+    expect(missing).toMatchObject({ code: 'INVALID_OPTION', details: { field: 'documents' } })
+    for (const documents of [undefined, null, 'all', 0]) {
+      const input = { ...base, documents } as unknown as Parameters<typeof createGoodsReceipts>[1]
+      expect(thrown(() => createGoodsReceipts(ENVELOPE, input))).toMatchObject({
+        code: 'INVALID_OPTION',
+        details: { field: 'documents' },
+      })
+    }
+  })
+
   test('signs as the company when the certificate names no holder, and refuses what the format does not admit', () => {
-    const anonymous = { ...base, certificate: { ...certificate, rut: null } }
+    const all = { ...base, documents: () => ({}) }
+    const anonymous = { ...all, certificate: { ...certificate, rut: null } }
     expect(receipts(createGoodsReceipts(ENVELOPE, anonymous))[0]['RutFirma']).toBe(COMPANY)
-    expect(thrown(() => createGoodsReceipts(ENVELOPE, { ...base, signerRut: '1-9' })).details).toEqual({
+    expect(thrown(() => createGoodsReceipts(ENVELOPE, { ...all, signerRut: '1-9' })).details).toEqual({
       field: 'signerRut',
     })
     expect(
       thrown(() => createGoodsReceipts(ENVELOPE, { ...base, documents: () => ({ place: 'x'.repeat(81) }) })).details,
     ).toEqual({ field: 'place' })
-    expect(thrown(() => createGoodsReceipts(envelope(document(61, 2, COMPANY, 1)), base))).toMatchObject({
+    expect(thrown(() => createGoodsReceipts(ENVELOPE, { ...base, documents: () => null }))).toMatchObject({
       code: 'ENVELOPE_EMPTY',
     })
   })
 
-  test('validates the default receipts against the official schema', async () => {
-    await expect(validateAgainstXsd(createGoodsReceipts(ENVELOPE, base), 'EnvioRecibos')).resolves.toEqual([])
+  test('validates one receipt against the official schema', async () => {
+    const one = createGoodsReceipts(ENVELOPE, { ...base, documents: { '33:1': {} } })
+    await expect(validateAgainstXsd(one, 'EnvioRecibos')).resolves.toEqual([])
   })
 
   test('validates several receipts against the official schema', async () => {
