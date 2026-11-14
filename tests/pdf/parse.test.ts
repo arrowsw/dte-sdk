@@ -101,6 +101,8 @@ describe('other roots', () => {
   test('an EnvioBOLETA', () => {
     const [doc] = parsePrintableDocuments(receiptsXml)
     expect(doc).toMatchObject({ type: 39, folio: '11', grossAmounts: false, receiver: { rut: '66666666-6' } })
+    // A receipt names its issuer with `RznSocEmisor` and `GiroEmisor`.
+    expect(doc.issuer).toMatchObject({ name: 'Comercial Andina SpA', activity: 'Desarrollo de software', branch: '' })
     expect(doc.items[0]).toMatchObject({ name: 'Café', quantity: 2 })
     expect(doc.tedXml).toContain('<TD>39</TD>')
   })

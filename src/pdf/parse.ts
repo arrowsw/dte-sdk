@@ -9,7 +9,7 @@ export type PrintableParty = {
   readonly rut: string
   /** EN: Legal name. ES: `RznSoc` (o `RznSocEmisor`) / `RznSocRecep` — Razón social. */
   readonly name: string
-  /** EN: Line of business. ES: `GiroEmis` / `GiroRecep` — Giro. */
+  /** EN: Line of business. ES: `GiroEmis` (o `GiroEmisor`) / `GiroRecep` — Giro. */
   readonly activity: string
   /** EN: Street address. ES: `DirOrigen` / `DirRecep` — Dirección. */
   readonly address: string
@@ -217,7 +217,9 @@ const printable = (dte: ParsedXml, teds: readonly string[], index: number): Prin
         address: 'DirOrigen',
         commune: 'CmnaOrigen',
       }),
+      // A receipt names both with its own tags.
       name: text(issuer.RznSoc) || text(issuer.RznSocEmisor),
+      activity: text(issuer.GiroEmis) || text(issuer.GiroEmisor),
       branch: text(issuer.Sucursal),
     },
     receiver: party(record(header.Receptor), RECEIVER_TAGS),

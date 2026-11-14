@@ -303,6 +303,25 @@ describe('what the schema refuses in the transport of a guide', () => {
   })
 })
 
+// `IndMntNeto` and `RUTProvSW` are a receipt's: `EnvioBOLETA_v11.xsd` declares them and `DTE_v10.xsd` does not, so
+// `createDocument` refuses `options.netAmountsIndicator` and `softwareProviderRut` on every type but 39 and 41.
+describe('what only the schema of receipts declares', () => {
+  const ns = (element: string): string => `{http://www.sii.cl/SiiDte}${element}`
+  let signed: SignedDocument | undefined
+  const invoice = (): string =>
+    (signed ??= issue({ ...base, type: 33, folio: 94, items: [{ name: 'Plan anual', unitPrice: 100000 }] })).xml
+
+  test.each([
+    ['IndMntNeto', '<IndMntNeto>2</IndMntNeto></IdDoc>', '</IdDoc>'],
+    ['RUTProvSW', `</Receptor><RUTProvSW>${RECEIVER_RUT}</RUTProvSW>`, '</Receptor>'],
+  ])('%s on an invoice fails it', async (element, written, anchor) => {
+    expect(await validateAgainstXsd(invoice(), 'DTE')).toEqual([])
+    expect(await validateAgainstXsd(invoice().replace(anchor, written), 'DTE')).toEqual([
+      expect.stringContaining(`Element '${ns(element)}': This element is not expected.`),
+    ])
+  })
+})
+
 // A settlement invoice has a root of its own, `Liquidacion`, which declares less than `Documento` does. What follows
 // is what `createDocument` refuses, requires or completes on a 43 because the schema would reject the document, each
 // written by hand into a signed one to show the rejection. If a new `DTE_v10.xsd` admits one, its test fails and the

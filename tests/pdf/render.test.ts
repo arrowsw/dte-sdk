@@ -161,6 +161,8 @@ describe('the other types', () => {
   test('a receipt prints with the same layout', async () => {
     const receipt = await pdfText(await render(first(receiptsXml)))
     expect(receipt).toContain('BOLETA ELECTRÓNICA')
+    // A receipt names its issuer's line of business `GiroEmisor`.
+    expect(receipt).toContain('Desarrollo de software')
     expect(receipt).toContain('Café')
     expect(receipt).toContain('Monto Total')
   })

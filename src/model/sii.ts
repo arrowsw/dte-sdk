@@ -63,7 +63,7 @@ export type SiiIdDoc = {
   readonly PeriodoDesde?: string
   /** EN: Billing period end. ES: `PeriodoHasta` — Período de facturación, hasta. */
   readonly PeriodoHasta?: string
-  /** EN: Payment medium (CH cheque, LT bill, EF cash, PE account transfer, TC credit card, OT other). ES: `MedioPago` — Medio de pago. */
+  /** EN: Payment medium (CH cheque, LT bill, EF cash, PE account transfer, TC credit card, OT other); on a receipt, a number from 1 to 5 written after `FchVenc`. ES: `MedioPago` — Medio de pago; en una boleta, un número de 1 a 5 que se escribe después de `FchVenc`. */
   readonly MedioPago?: string
   /** EN: Payment account type (AHORRO, CORRIENTE, VISTA). ES: `TpoCtaPago` — Tipo de cuenta de pago. */
   readonly TpoCtaPago?: string
@@ -79,7 +79,7 @@ export type SiiIdDoc = {
   readonly TermPagoDias?: number
   /** EN: Due date YYYY-MM-DD. ES: `FchVenc` — Fecha de vencimiento. */
   readonly FchVenc?: string
-  /** EN: 2 when receipt amounts are net. ES: `IndMntNeto` — Indicador de montos netos (boletas). */
+  /** EN: 2 when a receipt's amounts are net; only a receipt declares it, right after `IndServicio`. ES: `IndMntNeto` — Indicador de montos netos; solo lo declara la boleta, a continuación de `IndServicio`. */
   readonly IndMntNeto?: number
 }
 
@@ -101,7 +101,7 @@ export type SiiEmisor = {
   readonly CorreoEmisor?: string
   /** EN: SII economic activity code. ES: `Acteco` — Código de actividad económica. */
   readonly Acteco?: number
-  /** EN: Branch name. ES: `Sucursal` — Nombre de la sucursal. */
+  /** EN: Branch name; a receipt has none. ES: `Sucursal` — Nombre de la sucursal; la boleta no lo tiene. */
   readonly Sucursal?: string
   /** EN: SII branch code. ES: `CdgSIISucur` — Código de sucursal registrado en el SII. */
   readonly CdgSIISucur?: number
@@ -211,6 +211,8 @@ export type SiiTotales = {
   readonly MontoNF?: number
   /** EN: Amount for the period. ES: `MontoPeriodo` — Monto del período. */
   readonly MontoPeriodo?: number
+  /** EN: Total for the period, on a receipt: its total plus its non-billable amount. ES: `TotalPeriodo` — Total del período, en una boleta: monto total más monto no facturable. */
+  readonly TotalPeriodo?: number
   /** EN: Previous balance. ES: `SaldoAnterior` — Saldo anterior. */
   readonly SaldoAnterior?: number
   /** EN: Amount due. ES: `VlrPagar` — Valor a pagar. */
@@ -225,6 +227,8 @@ export type SiiEncabezado = {
   readonly Emisor: SiiEmisor
   /** EN: Receiver. ES: `Receptor` — Receptor. */
   readonly Receptor: SiiReceptor
+  /** EN: RUT of the provider of the software that issues the receipt; only a receipt declares it. ES: `RUTProvSW` — RUT del proveedor del software que emite la boleta; solo lo declara la boleta. */
+  readonly RUTProvSW?: string
   /** EN: Transport data (dispatch guides). ES: `Transporte` — Datos de transporte (guías de despacho). */
   readonly Transporte?: SiiTransporte
   /** EN: Totals. ES: `Totales` — Totales. */

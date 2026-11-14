@@ -45,49 +45,62 @@ import type {
 export const compact = <T extends object>(value: T): T =>
   Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T
 
-const toSiiIdDoc = (header: Header): SiiIdDoc => {
+// A receipt's `IdDoc` is the one of the receipts schema, in its own order: `IndMntNeto` follows `IndServicio`, and
+// `FchVenc` comes before `MedioPago`. Only a receipt declares `IndMntNeto`.
+const toSiiIdDoc = (header: Header, receipt: boolean): SiiIdDoc => {
   const o = header.options
-  return compact({
-    TipoDTE: header.type,
-    Folio: header.folio,
-    FchEmis: header.issueDate,
-    IndNoRebaja: o.noDebitReduction,
-    TipoDespacho: o.dispatchType,
-    IndTraslado: o.transferType,
-    TpoImpresion: o.printFormat,
-    IndServicio: o.serviceIndicator,
-    MntBruto: o.grossAmounts,
-    TpoTranCompra: o.purchaseTransactionType,
-    TpoTranVenta: o.saleTransactionType,
-    FmaPago: o.paymentTerms,
-    FmaPagExp: o.exportPaymentTerms,
-    FchCancel: o.settlementDate,
-    MntCancel: o.settledAmount,
-    SaldoInsol: o.outstandingBalance,
-    MntPagos: o.payments?.map((payment) =>
-      compact({ FchPago: payment.date, MntPago: payment.amount, GlosaPagos: payment.note }),
-    ),
-    PeriodoDesde: o.billingPeriod?.from,
-    PeriodoHasta: o.billingPeriod?.to,
-    MedioPago: o.paymentMedium,
-    TpoCtaPago: o.paymentAccountType,
-    NumCtaPago: o.paymentAccountNumber,
-    BcoPago: o.paymentBank,
-    TermPagoCdg: o.paymentTermsCode,
-    TermPagoGlosa: o.paymentTermsNote,
-    TermPagoDias: o.paymentTermsDays,
-    FchVenc: o.dueDate,
-    IndMntNeto: o.netAmountsIndicator,
-  })
+  return receipt
+    ? compact({
+        TipoDTE: header.type,
+        Folio: header.folio,
+        FchEmis: header.issueDate,
+        IndServicio: o.serviceIndicator,
+        IndMntNeto: o.netAmountsIndicator,
+        PeriodoDesde: o.billingPeriod?.from,
+        PeriodoHasta: o.billingPeriod?.to,
+        FchVenc: o.dueDate,
+        MedioPago: o.paymentMedium,
+      })
+    : compact({
+        TipoDTE: header.type,
+        Folio: header.folio,
+        FchEmis: header.issueDate,
+        IndNoRebaja: o.noDebitReduction,
+        TipoDespacho: o.dispatchType,
+        IndTraslado: o.transferType,
+        TpoImpresion: o.printFormat,
+        IndServicio: o.serviceIndicator,
+        MntBruto: o.grossAmounts,
+        TpoTranCompra: o.purchaseTransactionType,
+        TpoTranVenta: o.saleTransactionType,
+        FmaPago: o.paymentTerms,
+        FmaPagExp: o.exportPaymentTerms,
+        FchCancel: o.settlementDate,
+        MntCancel: o.settledAmount,
+        SaldoInsol: o.outstandingBalance,
+        MntPagos: o.payments?.map((payment) =>
+          compact({ FchPago: payment.date, MntPago: payment.amount, GlosaPagos: payment.note }),
+        ),
+        PeriodoDesde: o.billingPeriod?.from,
+        PeriodoHasta: o.billingPeriod?.to,
+        MedioPago: o.paymentMedium,
+        TpoCtaPago: o.paymentAccountType,
+        NumCtaPago: o.paymentAccountNumber,
+        BcoPago: o.paymentBank,
+        TermPagoCdg: o.paymentTermsCode,
+        TermPagoGlosa: o.paymentTermsNote,
+        TermPagoDias: o.paymentTermsDays,
+        FchVenc: o.dueDate,
+      })
 }
 
+// A receipt's `Emisor` has no place for the branch name, the phone, the e-mail, the activity code or the salesperson.
 const toSiiEmisor = (issuer: Issuer, receipt: boolean): SiiEmisor =>
   receipt
     ? compact({
         RUTEmisor: issuer.rut,
         RznSocEmisor: issuer.businessName,
         GiroEmisor: issuer.businessActivity,
-        Sucursal: issuer.branch,
         CdgSIISucur: issuer.siiBranchCode,
         DirOrigen: issuer.address,
         CmnaOrigen: issuer.commune,
@@ -153,54 +166,85 @@ const toSiiTransporte = (transport: Transport | undefined): SiiTransporte | unde
         FchLlegada: transport.arrivalDate,
       })
 
-const toSiiTotales = (totals: Totals): SiiTotales =>
-  compact({
-    MntNeto: totals.netAmount,
-    MntExe: totals.exemptAmount,
-    TasaIVA: totals.vatRate,
-    IVA: totals.vatAmount,
-    IVAProp: totals.ownVatAmount,
-    IVATerc: totals.thirdPartyVatAmount,
-    ImptoReten: totals.withholdings?.map((w) => ({ TipoImp: w.taxCode, TasaImp: w.rate, MontoImp: w.amount })),
-    Comisiones:
-      totals.commissions === undefined
-        ? undefined
-        : compact({
-            ValComNeto: totals.commissions.netValue,
-            ValComExe: totals.commissions.exemptValue,
-            ValComIVA: totals.commissions.vatValue,
-          }),
-    MntTotal: totals.totalAmount,
-    MontoNF: totals.nonBillableAmount,
-    MontoPeriodo: totals.periodAmount,
-    SaldoAnterior: totals.previousBalance,
-    VlrPagar: totals.amountDue,
-  })
+// A receipt's `Totales` carry no rate, no withholdings and no commissions, and its period's total is `TotalPeriodo`.
+const toSiiTotales = (totals: Totals, receipt: boolean): SiiTotales =>
+  receipt
+    ? compact({
+        MntNeto: totals.netAmount,
+        MntExe: totals.exemptAmount,
+        IVA: totals.vatAmount,
+        MntTotal: totals.totalAmount,
+        MontoNF: totals.nonBillableAmount,
+        TotalPeriodo: totals.periodAmount,
+        SaldoAnterior: totals.previousBalance,
+        VlrPagar: totals.amountDue,
+      })
+    : compact({
+        MntNeto: totals.netAmount,
+        MntExe: totals.exemptAmount,
+        TasaIVA: totals.vatRate,
+        IVA: totals.vatAmount,
+        IVAProp: totals.ownVatAmount,
+        IVATerc: totals.thirdPartyVatAmount,
+        ImptoReten: totals.withholdings?.map((w) => ({ TipoImp: w.taxCode, TasaImp: w.rate, MontoImp: w.amount })),
+        Comisiones:
+          totals.commissions === undefined
+            ? undefined
+            : compact({
+                ValComNeto: totals.commissions.netValue,
+                ValComExe: totals.commissions.exemptValue,
+                ValComIVA: totals.commissions.vatValue,
+              }),
+        MntTotal: totals.totalAmount,
+        MontoNF: totals.nonBillableAmount,
+        MontoPeriodo: totals.periodAmount,
+        SaldoAnterior: totals.previousBalance,
+        VlrPagar: totals.amountDue,
+      })
 
-const toSiiDetalle = (item: LineItem): SiiDetalle =>
-  compact({
-    NroLinDet: item.lineNumber,
-    CdgItem: item.codes?.map((code) => ({ TpoCodigo: code.type, VlrCodigo: code.value })),
-    TpoDocLiq: item.settledDocumentType,
-    IndExe: item.exemptIndicator,
-    NmbItem: item.name,
-    DscItem: item.description,
-    QtyRef: item.referenceQuantity,
-    UnmdRef: item.referenceUnit,
-    PrcRef: item.referencePrice,
-    QtyItem: item.quantity,
-    UnmdItem: item.unit,
-    PrcItem:
-      item.unitPrice === undefined || item.unitPriceDecimals === undefined
-        ? item.unitPrice
-        : item.unitPrice.toFixed(item.unitPriceDecimals),
-    DescuentoPct: item.discountPercent,
-    DescuentoMonto: item.discountAmount,
-    RecargoPct: item.surchargePercent,
-    RecargoMonto: item.surchargeAmount,
-    CodImpAdic: item.additionalTaxCodes,
-    MontoItem: item.amount,
-  })
+const toSiiPrcItem = (item: LineItem): SiiDetalle['PrcItem'] =>
+  item.unitPrice === undefined || item.unitPriceDecimals === undefined
+    ? item.unitPrice
+    : item.unitPrice.toFixed(item.unitPriceDecimals)
+
+// A receipt's line has no settled document, no reference quantity, unit or price, and no additional tax codes.
+const toSiiDetalle = (item: LineItem, receipt: boolean): SiiDetalle =>
+  receipt
+    ? compact({
+        NroLinDet: item.lineNumber,
+        CdgItem: item.codes?.map((code) => ({ TpoCodigo: code.type, VlrCodigo: code.value })),
+        IndExe: item.exemptIndicator,
+        NmbItem: item.name,
+        DscItem: item.description,
+        QtyItem: item.quantity,
+        UnmdItem: item.unit,
+        PrcItem: toSiiPrcItem(item),
+        DescuentoPct: item.discountPercent,
+        DescuentoMonto: item.discountAmount,
+        RecargoPct: item.surchargePercent,
+        RecargoMonto: item.surchargeAmount,
+        MontoItem: item.amount,
+      })
+    : compact({
+        NroLinDet: item.lineNumber,
+        CdgItem: item.codes?.map((code) => ({ TpoCodigo: code.type, VlrCodigo: code.value })),
+        TpoDocLiq: item.settledDocumentType,
+        IndExe: item.exemptIndicator,
+        NmbItem: item.name,
+        DscItem: item.description,
+        QtyRef: item.referenceQuantity,
+        UnmdRef: item.referenceUnit,
+        PrcRef: item.referencePrice,
+        QtyItem: item.quantity,
+        UnmdItem: item.unit,
+        PrcItem: toSiiPrcItem(item),
+        DescuentoPct: item.discountPercent,
+        DescuentoMonto: item.discountAmount,
+        RecargoPct: item.surchargePercent,
+        RecargoMonto: item.surchargeAmount,
+        CodImpAdic: item.additionalTaxCodes,
+        MontoItem: item.amount,
+      })
 
 const toSiiSubTotInfo = (subtotal: SubtotalInfo): SiiSubTotInfo =>
   compact({
@@ -262,28 +306,45 @@ const nonEmpty = <T>(list: readonly T[]): readonly T[] | undefined => (list.leng
 
 /**
  * EN: Maps a domain `Document` to the SII-shaped structure (official tags, schema order). This is the only place
- * that knows the tag names; the XML is always rendered from its output.
+ * that knows the tag names; the XML is always rendered from its output. A receipt (39, 41) is written with the shape
+ * of the receipts schema and nothing else: what the document carries that this shape does not write is left out.
  * ES: Convierte un `Document` de dominio a la estructura SII (etiquetas oficiales, orden del esquema). Es el único
- * lugar que conoce los nombres de etiqueta; el XML siempre se renderiza desde su salida.
+ * lugar que conoce los nombres de etiqueta; el XML siempre se renderiza desde su salida. Una boleta (39, 41) se
+ * escribe con la forma del esquema de boletas y nada más: lo que el documento traiga y esa forma no escriba queda
+ * fuera.
  */
 export const toSiiDocument = (doc: Document): SiiDocumento => {
-  const receipt = isReceipt(doc.header.type)
-  return compact({
-    Encabezado: compact({
-      IdDoc: toSiiIdDoc(doc.header),
-      Emisor: toSiiEmisor(doc.header.issuer, receipt),
-      Receptor: toSiiReceptor(doc.header.receiver, receipt),
-      Transporte: toSiiTransporte(doc.header.transport),
-      Totales: toSiiTotales(doc.header.totals),
-    }),
-    Detalle: doc.items.map(toSiiDetalle),
+  const { header } = doc
+  const receipt = isReceipt(header.type)
+  const body = {
+    Encabezado: receipt
+      ? compact({
+          IdDoc: toSiiIdDoc(header, receipt),
+          Emisor: toSiiEmisor(header.issuer, receipt),
+          Receptor: toSiiReceptor(header.receiver, receipt),
+          RUTProvSW: header.softwareProviderRut,
+          Totales: toSiiTotales(header.totals, receipt),
+        })
+      : compact({
+          IdDoc: toSiiIdDoc(header, receipt),
+          Emisor: toSiiEmisor(header.issuer, receipt),
+          Receptor: toSiiReceptor(header.receiver, receipt),
+          Transporte: toSiiTransporte(header.transport),
+          Totales: toSiiTotales(header.totals, receipt),
+        }),
+    Detalle: doc.items.map((item) => toSiiDetalle(item, receipt)),
     SubTotInfo: nonEmpty(doc.subtotals.map(toSiiSubTotInfo)),
     DscRcgGlobal: nonEmpty(doc.globalAdjustments.map(toSiiDscRcgGlobal)),
-    Referencia: receipt
-      ? nonEmpty(doc.receiptReferences.map(toSiiReferenciaBoleta))
-      : nonEmpty(doc.references.map(toSiiReferencia)),
-    Comisiones: nonEmpty(doc.commissions.map(toSiiComisiones)),
-  })
+  }
+  return compact(
+    receipt
+      ? { ...body, Referencia: nonEmpty(doc.receiptReferences.map(toSiiReferenciaBoleta)) }
+      : {
+          ...body,
+          Referencia: nonEmpty(doc.references.map(toSiiReferencia)),
+          Comisiones: nonEmpty(doc.commissions.map(toSiiComisiones)),
+        },
+  )
 }
 
 const fromSiiIdDoc = (idDoc: SiiIdDoc): HeaderOptions =>
@@ -314,7 +375,7 @@ const fromSiiIdDoc = (idDoc: SiiIdDoc): HeaderOptions =>
     paymentTermsNote: idDoc.TermPagoGlosa,
     paymentTermsDays: idDoc.TermPagoDias,
     dueDate: idDoc.FchVenc,
-    netAmountsIndicator: idDoc.IndMntNeto,
+    netAmountsIndicator: idDoc.IndMntNeto as 2 | undefined,
   })
 
 const fromSiiEmisor = (emisor: SiiEmisor): Issuer =>
@@ -391,7 +452,7 @@ const fromSiiTotales = (totales: SiiTotales): Totals =>
           }),
     totalAmount: totales.MntTotal,
     nonBillableAmount: totales.MontoNF,
-    periodAmount: totales.MontoPeriodo,
+    periodAmount: totales.MontoPeriodo ?? totales.TotalPeriodo,
     previousBalance: totales.SaldoAnterior,
     amountDue: totales.VlrPagar,
   })
@@ -494,6 +555,8 @@ export const fromSiiDocument = (sii: SiiDocumento): Document => {
       options: fromSiiIdDoc(idDoc),
       issuer: fromSiiEmisor(sii.Encabezado.Emisor),
       receiver: fromSiiReceptor(sii.Encabezado.Receptor),
+      softwareProviderRut:
+        sii.Encabezado.RUTProvSW === undefined ? undefined : toSiiRut(sii.Encabezado.RUTProvSW, 'Encabezado.RUTProvSW'),
       transport: fromSiiTransporte(sii.Encabezado.Transporte),
       totals: fromSiiTotales(sii.Encabezado.Totales),
     }),

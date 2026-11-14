@@ -76,16 +76,23 @@ type LimitedField = keyof typeof FIELD_LIMITS
 const MAX_SETTLEMENT_LINES = 60
 const MAX_COMMISSIONS = 20
 
-// The `IdDoc` fields that `Documento` declares and `Liquidacion`, the root of a settlement invoice, does not; and
-// `IndMntNeto`, which only a receipt declares.
+// The `IdDoc` fields that `Documento` declares and `Liquidacion`, the root of a settlement invoice, does not.
 const NOT_IN_SETTLEMENT = [
   'noDebitReduction',
   'dispatchType',
   'transferType',
   'printFormat',
   'exportPaymentTerms',
-  'netAmountsIndicator',
 ] as const
+
+// `EnvioBOLETA_v11.xsd`, the schema of a receipt, declares five of the options of `IdDoc`, and not five fields of the
+// totals and four of a line that the invoice's shape has. The codec leaves out of a receipt what its schema does not
+// declare, so those are refused here instead of being dropped without a word.
+const RECEIPT_OPTIONS = ['serviceIndicator', 'netAmountsIndicator', 'billingPeriod', 'dueDate', 'paymentMedium']
+const NOT_IN_RECEIPT_TOTALS = ['vatRate', 'ownVatAmount', 'thirdPartyVatAmount', 'withholdings', 'commissions'] as const
+const NOT_IN_RECEIPT_LINE = ['referenceQuantity', 'referenceUnit', 'referencePrice', 'additionalTaxCodes'] as const
+// A receipt's `IndExe` is 1, 2 or 6, and its `IndMntNeto` is 2.
+const RECEIPT_EXEMPT_INDICATORS: readonly unknown[] = [undefined, 1, 2, 6]
 
 /**
  * EN: Options of `createDocument`.
@@ -146,6 +153,9 @@ const refuse = (field: string): never => {
   throw new DteError('INVALID_OPTION', { field })
 }
 
+// Whether the caller gave a value that would be written: an empty list writes nothing.
+const given = (value: unknown): boolean => value !== undefined && !(Array.isArray(value) && value.length === 0)
+
 // `Liquidacion` declares less than `Documento`: no transport, no global or line discounts and surcharges, no `RUTOtr`
 // in a reference, no `MontoNF`. Each of these would be written under it and fail the schema.
 const assertSettlement = (input: DocumentInput): void => {
@@ -161,6 +171,25 @@ const assertSettlement = (input: DocumentInput): void => {
   })
   for (const option of NOT_IN_SETTLEMENT) if (input.options?.[option] !== undefined) refuse(`options.${option}`)
   if (input.totals?.nonBillableAmount !== undefined) refuse('totals.nonBillableAmount')
+}
+
+// A receipt has a schema of its own, which declares no transport, no commissions, no withholding, and much less of
+// `IdDoc`, of the totals and of a line than the invoice's. Its issuer and receiver are another matter: what the codec
+// does not write of them on a receipt, as the branch name or the activity code, which a receipt has no element for,
+// is left out, so the same issuer serves an invoice and a receipt.
+const assertReceipt = (input: DocumentInput): void => {
+  if (input.transport !== undefined) refuse('transport')
+  if (given(input.commissions)) refuse('commissions')
+  if (input.withholdVat) refuse('withholdVat')
+  const { options, totals } = input
+  for (const [option, value] of Object.entries(options ?? {}))
+    if (!RECEIPT_OPTIONS.includes(option) && given(value)) refuse(`options.${option}`)
+  if (![undefined, 2].includes(options?.netAmountsIndicator)) refuse('options.netAmountsIndicator')
+  for (const total of NOT_IN_RECEIPT_TOTALS) if (given(totals?.[total])) refuse(`totals.${total}`)
+  input.items.forEach((item, index) => {
+    for (const field of NOT_IN_RECEIPT_LINE) if (given(item[field])) refuse(`items[${index}].${field}`)
+    if (!RECEIPT_EXEMPT_INDICATORS.includes(item.exemptIndicator)) refuse(`items[${index}].exemptIndicator`)
+  })
 }
 
 const normalizeIssuer = (input: IssuerInput): Issuer => {
@@ -340,7 +369,15 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
  * their total net value unless a line states its own, and taken off the total. A settlement
  * invoice (43) is held to what its root, `Liquidacion`, declares: no transport, no global or line discounts and
  * surcharges, no `otherRut` in a reference, no non-billable amount in its totals, none of the `IdDoc` options only
- * `Documento` declares, a receiver with its business activity and at most 60 lines. Pure: same input, same output.
+ * `Documento` declares, a receiver with its business activity and at most 60 lines. A receipt (39, 41) is held to
+ * what its own schema, `EnvioBOLETA_v11.xsd`, declares: no transport, no commissions, no withholding, the `IdDoc`
+ * options `serviceIndicator`, `netAmountsIndicator` (2), `billingPeriod`, `dueDate` and `paymentMedium` and no
+ * other, totals without a rate, own or third-party VAT, withholdings or commissions, and lines without a reference
+ * quantity, unit or price, without additional tax codes and with an exempt indicator of 1, 2 or 6. What its issuer
+ * and receiver carry that is not written on a receipt is left out, not refused: the issuer's branch name, phone,
+ * e-mail, activity code and salesperson and the receiver's business activity, which a receipt has no element for,
+ * and the receiver's e-mail and postal address. `softwareProviderRut` (`RUTProvSW`) and `netAmountsIndicator`
+ * (`IndMntNeto`) are a receipt's alone. Pure: same input, same output.
  * ES: Construye un `Document` normalizado desde la entrada: valida tipo, folio y fechas, normaliza RUT con rut.ts,
  * sanitiza textos y exige los largos del esquema (falla temprano en vez de dejar que el SII rechace el sobre entero),
  * numera líneas, calcula montos y totales, aplica los defaults de boleta (consumidor final, `IndServicio=3`) y fija
@@ -349,9 +386,16 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
  * IVA por su valor neto total salvo que una línea declare el suyo, y se restan del total. Una
  * liquidación factura (43) se atiene a lo que declara su raíz, `Liquidacion`: sin transporte, sin descuentos ni
  * recargos globales o por línea, sin `otherRut` en una referencia, sin monto no facturable en sus totales, sin las
- * opciones de `IdDoc` que solo declara `Documento`, con el giro del receptor y con 60 líneas como máximo. Pura: misma
- * entrada, misma salida.
- * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `MISSING_FIELD` (also a commission line with neither a net nor an exempt value, and a settlement invoice whose receiver has no `businessActivity`), `FIELD_TOO_LONG`, `INVALID_AMOUNT`; `INVALID_TIME` for a `transport.departureTime` that is not `HH:MM:SS` or `HH:MM`; `INVALID_OPTION` for `references` on a receipt, `receiptReferences` on any other type, an `options.transferType` outside 1 to 9, more than 20 `commissions`, a `settledDocumentType` on a type other than 43, and on a 43 whatever `Liquidacion` does not declare, with the field in `details.field`. ES: los mismos códigos; `MISSING_FIELD` también por una línea de comisión sin valor neto ni exento y por una liquidación factura cuyo receptor no trae `businessActivity`; `INVALID_TIME` por un `transport.departureTime` que no es `HH:MM:SS` ni `HH:MM`; `INVALID_OPTION` por `references` en una boleta, `receiptReferences` en cualquier otro tipo, un `options.transferType` fuera de 1 a 9, más de 20 `commissions`, un `settledDocumentType` en un tipo distinto del 43, y en un 43 lo que `Liquidacion` no declara, con el campo en `details.field`.
+ * opciones de `IdDoc` que solo declara `Documento`, con el giro del receptor y con 60 líneas como máximo. Una boleta
+ * (39, 41) se atiene a lo que declara su propio esquema, `EnvioBOLETA_v11.xsd`: sin transporte, sin comisiones, sin
+ * retención, con las opciones de `IdDoc` `serviceIndicator`, `netAmountsIndicator` (2), `billingPeriod`, `dueDate` y
+ * `paymentMedium` y ninguna otra, con totales sin tasa, IVA propio o de terceros, retenciones ni comisiones, y con
+ * líneas sin cantidad, unidad ni precio de referencia, sin códigos de impuesto adicional y con indicador de exención
+ * 1, 2 o 6. Lo que su emisor y su receptor traen y no se escribe en una boleta queda fuera, sin rechazo: la
+ * sucursal, el teléfono, el correo, el código de actividad y el vendedor del emisor y el giro del receptor, para los
+ * que la boleta no tiene elemento, y el correo y la dirección postal del receptor. `softwareProviderRut`
+ * (`RUTProvSW`) y `netAmountsIndicator` (`IndMntNeto`) son solo de la boleta. Pura: misma entrada, misma salida.
+ * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `MISSING_FIELD` (also a commission line with neither a net nor an exempt value, and a settlement invoice whose receiver has no `businessActivity`), `FIELD_TOO_LONG`, `INVALID_AMOUNT`; `INVALID_TIME` for a `transport.departureTime` that is not `HH:MM:SS` or `HH:MM`; `INVALID_OPTION` for `references` on a receipt, `receiptReferences` on any other type, an `options.transferType` outside 1 to 9, more than 20 `commissions`, a `settledDocumentType` on a type other than 43, on a 43 whatever `Liquidacion` does not declare, on a receipt whatever its schema does not declare, and an `options.netAmountsIndicator` or a `softwareProviderRut` on a type that is not a receipt, with the field in `details.field`. ES: los mismos códigos; `MISSING_FIELD` también por una línea de comisión sin valor neto ni exento y por una liquidación factura cuyo receptor no trae `businessActivity`; `INVALID_TIME` por un `transport.departureTime` que no es `HH:MM:SS` ni `HH:MM`; `INVALID_OPTION` por `references` en una boleta, `receiptReferences` en cualquier otro tipo, un `options.transferType` fuera de 1 a 9, más de 20 `commissions`, un `settledDocumentType` en un tipo distinto del 43, en un 43 lo que `Liquidacion` no declara, en una boleta lo que su esquema no declara, y un `options.netAmountsIndicator` o un `softwareProviderRut` en un tipo que no es boleta, con el campo en `details.field`.
  */
 export const createDocument = (input: DocumentInput, options: CreateDocumentOptions = {}): Document => {
   if (!isDocumentType(input.type)) throw new DteError('INVALID_DOCUMENT_TYPE', { type: input.type })
@@ -363,6 +407,12 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
   const receiver = normalizeReceiver(input.receiver, type)
   if (input.items.length === 0) throw new DteError('MISSING_FIELD', { field: 'items' })
   if (type === 43) assertSettlement(input)
+  if (receipt) assertReceipt(input)
+  // `IndMntNeto` and `RUTProvSW` are a receipt's: no other document declares them.
+  else if (input.options?.netAmountsIndicator !== undefined) refuse('options.netAmountsIndicator')
+  else if (input.softwareProviderRut !== undefined) refuse('softwareProviderRut')
+  const softwareProviderRut =
+    input.softwareProviderRut === undefined ? undefined : toSiiRut(input.softwareProviderRut, 'softwareProviderRut')
   if ((input.commissions ?? []).length > MAX_COMMISSIONS) refuse('commissions')
   const items = input.items.map((item, index) => normalizeItem(item, index, type))
   // A receipt's `Referencia` has no date: the invoice shape would fail the receipts schema, and the other way round.
@@ -406,6 +456,7 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
       options: headerOptions,
       issuer,
       receiver,
+      softwareProviderRut,
       transport,
       totals,
     }),

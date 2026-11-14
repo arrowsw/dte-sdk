@@ -34,23 +34,6 @@ const GAPS: Record<string, Gap> = {
     input: { ...invoice, subtotals: [{ number: 1, totalAmount: 100000 }] },
     error: notExpected('ValSubtotSTI', 'GlosaSTI'),
   },
-  // Every type. `IndMntNeto` is a receipt's field, and the codec writes `netAmountsIndicator` on any type.
-  'netAmountsIndicator writes IndMntNeto, which only a receipt declares': {
-    input: { ...invoice, options: { netAmountsIndicator: 2 } },
-    error: notExpected(
-      'IndMntNeto',
-      'IndNoRebaja',
-      'TipoDespacho',
-      'IndTraslado',
-      'TpoImpresion',
-      'IndServicio',
-      'MntBruto',
-      'TpoTranCompra',
-      'TpoTranVenta',
-      'FmaPago',
-      'FmaPagExp',
-    ),
-  },
 }
 
 describe('what DTE_v10.xsd rejects today', () => {

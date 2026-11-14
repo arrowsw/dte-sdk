@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`softwareProviderRut` on a receipt.** `DocumentInput` and `Header` gain `softwareProviderRut`, the receipt's
+  `Encabezado/RUTProvSW`: the RUT of the company that provides the software the receipt is issued with, or the
+  issuer's own when the software is its own (Formato de Boletas 4.2, field 30). `createDocument` checks it with
+  rut.ts (`INVALID_RUT { field: 'softwareProviderRut' }`), the codec writes it between `Receptor` and `Totales`, where
+  `EnvioBOLETA_v11.xsd` declares it, and `fromSiiDocument` reads it back. It is written only when given: the schema
+  leaves it optional and nothing here works it out. Only a receipt declares it, so on any other type it throws
+  `INVALID_OPTION { field: 'softwareProviderRut' }`.
+  - **What to change:** nothing for receipts already issued. To carry the field, pass `softwareProviderRut` on a 39
+    or a 41.
+
+### Changed
+
+- **`createDocument` refuses on a receipt (39, 41) what its schema does not declare.** `EnvioBOLETA_v11.xsd` gives a
+  receipt a shape of its own, much shorter than the invoice's, and the codec built a receipt from the invoice's shape:
+  whatever the input carried was written, and the SII rejected the envelope after the folio was spent. These now throw
+  `INVALID_OPTION` with the field in `details.field`: `transport` (`Transporte`), `commissions` (`Comisiones`),
+  `withholdVat: true` (`ImptoReten`); every field of `options` but the five a receipt's `IdDoc` declares, which leaves
+  out `noDebitReduction` (`IndNoRebaja`), `dispatchType` (`TipoDespacho`), `transferType` (`IndTraslado`),
+  `printFormat` (`TpoImpresion`), `grossAmounts` (`MntBruto`), `purchaseTransactionType` (`TpoTranCompra`),
+  `saleTransactionType` (`TpoTranVenta`), `paymentTerms` (`FmaPago`), `exportPaymentTerms` (`FmaPagExp`),
+  `settlementDate` (`FchCancel`), `settledAmount` (`MntCancel`), `outstandingBalance` (`SaldoInsol`), `payments`
+  (`MntPagos`), `paymentAccountType` (`TpoCtaPago`), `paymentAccountNumber` (`NumCtaPago`), `paymentBank` (`BcoPago`),
+  `paymentTermsCode` (`TermPagoCdg`), `paymentTermsNote` (`TermPagoGlosa`) and `paymentTermsDays` (`TermPagoDias`); in
+  `totals`, `vatRate` (`TasaIVA`), `ownVatAmount` (`IVAProp`), `thirdPartyVatAmount` (`IVATerc`), `withholdings`
+  (`ImptoReten`) and `commissions` (`Comisiones`); and on a line, `referenceQuantity` (`QtyRef`), `referenceUnit`
+  (`UnmdRef`), `referencePrice` (`PrcRef`), `additionalTaxCodes` (`CodImpAdic`) and an `exemptIndicator` of 3, 4 or 5,
+  since a receipt's `IndExe` admits 1, 2 and 6. An empty list is not refused. A receipt keeps the five options,
+  `serviceIndicator`, `netAmountsIndicator`, `billingPeriod`, `dueDate` and `paymentMedium`, with its global discounts
+  and surcharges, its informative subtotals and its own references.
+  - **What to change:** remove those fields from a receipt. A receipt that carried one failed the schema, so no
+    receipt the SII accepted changes.
+- **A receipt is written in the shape and the order of its own schema.** The receipt's `IdDoc` has `IndMntNeto` right
+  after `IndServicio` and `FchVenc` before `MedioPago`; the codec wrote the invoice's order, so a receipt with net
+  amounts and a period or a due date, or with a payment medium and a due date, failed the schema. `periodAmount` is now
+  written as the receipt's `TotalPeriodo` (Formato de Boletas 4.2, field 37) and read back from it, where it used to be
+  written as the invoice's `MontoPeriodo`, which a receipt does not declare. The issuer's `branch` is left out of a
+  receipt, whose `Emisor` has no `Sucursal`, as its phone, e-mail, activity code and salesperson already were: the same
+  issuer serves an invoice and a receipt. `toSiiDocument` writes nothing else under a receipt, also for a `Document`
+  put together by hand. `SiiTotales` gains `TotalPeriodo` and `SiiEncabezado` gains `RUTProvSW`.
+  - **What to change:** nothing to issue. Code that reads a receipt's XML or its `SiiDocumento` finds the period's
+    total under `TotalPeriodo`, and no `Sucursal`.
+- **`options.netAmountsIndicator` is a receipt's alone, and takes 2.** Only the schema of receipts declares
+  `IndMntNeto`, with 2 as its one value. `createDocument` refused it on a settlement invoice; it now refuses it on
+  every type but 39 and 41, and on a receipt refuses any value but 2, both with `INVALID_OPTION
+  { field: 'options.netAmountsIndicator' }`. The codec no longer writes it under any other type. In the types it is
+  `2` instead of `number`.
+  - **What to change:** remove `netAmountsIndicator` from invoices, notes and guides, where it failed `DTE_v10.xsd`.
+    On a receipt whose lines carry net amounts, pass `2`.
+
+### Fixed
+
+- **The printed sample of a receipt shows its line of business.** `parsePrintableDocuments` read the issuer's activity
+  from `GiroEmis`, the invoice's tag, and a receipt names it `GiroEmisor`, so `issuer.activity` came back empty for a
+  receipt and the sample printed no line of business. It now reads either.
+  - **What to change:** nothing.
+
 ## [0.10.0] - 2026-11-13
 
 ### Added
