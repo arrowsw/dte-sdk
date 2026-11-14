@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   public: the grammar rests on synthetic sets, and the checkbox `SET84` and the label of the row on the progress page
   are not measured. The simulation does not re-issue the settlement invoices, `readPrintedSamples` files their
   envelope with the simulation's, and the printed sample of a 43 has no commissions yet. `dte-sdk/portal` grows from
-  79.02 kB to 79.62 kB, under its limit.
+  79.02 kB to 79.64 kB, under its limit.
   - **What to change:** nothing for a run with the default sets. A run that already asked for `SET84` now issues,
     declares and awaits the settlement set where it used to download it and leave it. The new keys widen some types:
     `CertificationState.sets` and `sendTestSet` take a `SentSetKey` (the four of `SetKey` and `'settlement'`), as does

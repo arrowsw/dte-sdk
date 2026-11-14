@@ -288,7 +288,11 @@ const SETTLED_DOCUMENT_TYPES: readonly {
 const OTHER_TRANSACTION = '99'
 
 // Upper case without accents, only to recognise words: the set writes "ELECTRÓNICA" and "CRÉDITO" with their accents.
-const plain = (text: string): string => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase()
+const plain = (text: string): string =>
+  text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
 
 /**
  * EN: The type of the document a settlement line settles (`TpoDocLiq`), from the line's name read in any case and
