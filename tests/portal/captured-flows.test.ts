@@ -328,12 +328,12 @@ describe('reobtention', () => {
   test('with no session it logs in on demand and lists the ranges, instead of an empty list', async () => {
     const harness = portalWith(sessionRoutes)
     const ranges = await listReobtainableRanges(harness.portal, { type: 33 })
-    expect(ranges.map((range) => [range.from, range.to, range.annulled])).toEqual([
-      [114, 114, true],
-      [109, 113, false],
-      [101, 108, false],
-      [100, 100, false],
-      [1, 99, false],
+    expect(ranges.map((range) => [range.from, range.to, range.annulled, range.date])).toEqual([
+      [114, 114, true, '2026-11-07'],
+      [109, 113, false, '2026-09-18'],
+      [101, 108, false, '2026-03-03'],
+      [100, 100, false, '2026-03-02'],
+      [1, 99, false, '2023-06-22'],
     ])
     expect(harness.posted('CAutInicio')).toEqual([{ referencia: REOBTAIN_ENTRY }])
     expect(harness.posted('rf_reobtencion2_folios')).toEqual([

@@ -64,6 +64,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   16 kB.
   - **What to change:** nothing.
 
+### Changed
+
+- **In production, `unstable_replenishFolios` downloads again only a range stamped today.** Its first step downloads
+  again the ranges the SII already authorized and nobody holds, which spends no quota. A company holds what it
+  declares in `cafs`, so in production a range missing from them may be one another system of the company issues
+  with, and a second copy of its CAF would repeat its folios, which the SII rejects. Since 0.12.0 such a range is not
+  annulled when it was stamped before the last day; it was still downloaded and issued with. Now, in production, the
+  step reaches the ranges stamped today, counted in Chile, which is where a grant that never arrived is, and leaves
+  the others alone. They come back in a new field of the report, `outsideWindow`, each with its first and last folio
+  and the day it was stamped, or null when the list gives no day to read; a range with no day is never taken.
+  `reobtainWithinDays`, new, sets how many days back the step reaches in either environment; certification has no
+  limit, as before. A request the SII may have granted without handing it over is still settled in the same run.
+  `ReobtainableRange` gains `date`, the day the listing gives for the range.
+  - **What to change:** nothing in certification. In production, read `outsideWindow`: add to `cafs` the CAF of a
+    range another system holds, or pass `reobtainWithinDays` to take the ranges nobody else issues with. A
+    `ReplenishmentReport` built by hand needs `outsideWindow`, and a `ReobtainableRange` needs `date`.
+- **Size:** this change and the fix below took `dte-sdk` from 38.87 kB to 38.95 kB and `dte-sdk/portal` from 79.03 kB
+  to 79.27 kB, both under their limits.
+
+### Fixed
+
+- **`withinDays` of an annulment counts the days in Chile.** `annulFolios` read the day a range was stamped as a day
+  in UTC, so late in the day in Chile, when UTC is already in the next one, a range stamped that same day was more
+  than a day old: from 21:00, or 20:00 in winter, `withinDays: 1` reached no range at all, and 1 is what
+  `unstable_replenishFolios` uses in production since 0.12.0. A day now counts from its start in Chile, so 1 is today
+  at any hour. The error only left ranges out: nothing was annulled that should not have been.
+  - **What to change:** nothing.
+
 ## [0.12.0] - 2026-11-14
 
 ### Added

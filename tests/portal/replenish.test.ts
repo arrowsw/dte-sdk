@@ -25,6 +25,7 @@ import {
   STAMP_ENTRY,
   unusedRangesPage,
 } from '../support/portal-pages'
+import type { ListedRange } from '../support/portal-pages'
 
 const CAF_XML = readFileSync(fixturePath('caf-33.xml'), 'latin1')
 // The same CAF authorized on 2026-05-20: it expires on 2026-11-20, five days after the fixed clock.
@@ -61,7 +62,7 @@ const routesAt = (base: string) => ({
   }),
   always: (name: string, body: Reply) => ({ url: `${base}/${name}`, method: 'POST' as const, reply: asReply(body) }),
   // The listing of the reobtention; `lists` gives the ranges of each visit, the last one repeating.
-  listing: (...lists: readonly (readonly (readonly [number, number])[])[]) => {
+  listing: (...lists: readonly (readonly ListedRange[])[]) => {
     const visits = { count: 0 }
     return [
       { url: `${base}/rf_reobtencion1_folios`, reply: { body: REOBTAIN_ENTRY } },
@@ -196,6 +197,7 @@ describe('unstable_replenishFolios', () => {
       cafs: [],
       reobtained: [],
       expired: [],
+      outsideWindow: [],
       annulled: [],
       knownAnnulled: ['1-6'],
       steps: [],
@@ -241,6 +243,8 @@ describe('unstable_replenishFolios', () => {
     expect(await bad({ coolDownMs: 0 })).toEqual(['INVALID_OPTION', 'coolDownMs'])
     expect(await bad({ annulWithinDays: 0 })).toEqual(['INVALID_OPTION', 'annulWithinDays'])
     expect(await bad({ annulWithinDays: Number.NaN })).toEqual(['INVALID_OPTION', 'annulWithinDays'])
+    expect(await bad({ reobtainWithinDays: 0 })).toEqual(['INVALID_OPTION', 'reobtainWithinDays'])
+    expect(await bad({ reobtainWithinDays: Number.NaN })).toEqual(['INVALID_OPTION', 'reobtainWithinDays'])
     expect(await bad({ minimum: 0 })).toEqual(['INVALID_OPTION', 'minimum'])
     expect(await bad({ quantity: 10 })).toEqual(['INVALID_OPTION', 'quantity'])
     expect(await bad({ maxBatches: 0 })).toEqual(['INVALID_OPTION', 'maxBatches'])
@@ -470,6 +474,124 @@ describe('unstable_replenishFolios', () => {
         { from: 301, to: 306, count: 6 },
         { from: 401, to: 410, count: 10 },
       ])
+    })
+  })
+
+  // What a company holds is what it declares. In production a range nobody declared may be another system's, so only
+  // one stamped in the last day is taken for a grant that never arrived.
+  describe('ranges nobody holds, in production', () => {
+    const prod = routesAt(PALENA)
+    const withRanges = (ranges: readonly ListedRange[], now: Date = FIXED_NOW) =>
+      signedIn(
+        [
+          ...prod.listing(ranges),
+          ...prod.download(CAF_XML),
+          prod.entry,
+          prod.always('of_solicita_folios_dcto', REJECTION_PAGES.stampingBlocked),
+        ],
+        { environment: 'production', now: () => now },
+      )
+
+    test('one stamped today is downloaded again', async () => {
+      const harness = await withRanges([[201, 300, '2026-11-15']])
+      const report = await unstable_replenishFolios(harness.portal, base)
+      expect(report).toMatchObject({
+        status: 'replenished',
+        steps: ['reobtain'],
+        reobtained: [{ from: 201, to: 300, freeFolios: folios(201, 300) }],
+        outsideWindow: [],
+      })
+    })
+
+    test('one stamped before, or with no day to read, is left alone and comes back in the report', async () => {
+      const harness = await withRanges([
+        [201, 300, '2026-11-14'],
+        [301, 400],
+      ])
+      const report = await unstable_replenishFolios(harness.portal, base)
+      expect(report).toMatchObject({
+        status: 'blocked',
+        steps: ['reobtain', 'quota'],
+        obtained: 0,
+        reobtained: [],
+        outsideWindow: [
+          { from: 201, to: 300, date: '2026-11-14' },
+          { from: 301, to: 400, date: null },
+        ],
+      })
+      expect(touched(harness, 'rf_genera_folio')).toBe(false)
+    })
+
+    test('reobtainWithinDays sets how far back it reaches', async () => {
+      const harness = await withRanges([
+        [201, 300, '2026-11-10'],
+        [301, 400, '2026-10-01'],
+      ])
+      const report = await unstable_replenishFolios(harness.portal, { ...base, reobtainWithinDays: 7 })
+      expect(report).toMatchObject({
+        status: 'replenished',
+        reobtained: [{ from: 201, to: 300, freeFolios: folios(201, 300) }],
+        outsideWindow: [{ from: 301, to: 400, date: '2026-10-01' }],
+      })
+    })
+
+    test('only a range it would have downloaded is reported: not one issued, held or annulled', async () => {
+      const harness = await withRanges([
+        [101, 150, '2026-01-05'],
+        [151, 200, '2026-01-05'],
+        [299, 350, '2026-01-05'],
+        [401, 500, '2026-01-05'],
+      ])
+      const report = await unstable_replenishFolios(harness.portal, {
+        ...base,
+        cafs: [held(0, { range: { from: 151, to: 200 } })],
+        lastIssuedFolio: 150,
+      })
+      expect(report.outsideWindow).toEqual([{ from: 401, to: 500, date: '2026-01-05' }])
+    })
+
+    test('late in the day in Chile, a range stamped that day is still within the last day', async () => {
+      // 22:30 of the 15th in Chile is already the 16th in UTC.
+      const harness = await withRanges([[201, 300, '2026-11-15']], new Date('2026-11-16T01:30:00.000Z'))
+      const report = await unstable_replenishFolios(harness.portal, base)
+      expect(report).toMatchObject({ status: 'replenished', reobtained: [{ from: 201, to: 300 }], outsideWindow: [] })
+    })
+
+    test('a request the SII may have granted without handing it over is still settled in the same run', async () => {
+      const harness = await signedIn(
+        [
+          ...prod.listing([], [[301, 400, '2026-11-15']]),
+          ...prod.download(CAF_XML),
+          prod.entry,
+          prod.always('of_solicita_folios_dcto', quotaForm(100, 0)),
+          // The answer to the request is the request form again.
+          prod.replies('of_confirma_folio', quotaForm(100, 0)),
+        ],
+        { environment: 'production' },
+      )
+      const report = await unstable_replenishFolios(harness.portal, base)
+      expect(report).toMatchObject({
+        status: 'replenished',
+        steps: ['reobtain', 'quota', 'request', 'reobtain'],
+        reobtained: [{ from: 301, to: 400 }],
+        outsideWindow: [],
+      })
+    })
+  })
+
+  test('in certification every range nobody holds is downloaded again, unless reobtainWithinDays says less', async () => {
+    const routes = () => [...at.listing([[201, 300, '2024-01-01']]), ...at.download(CAF_XML), at.entry, blockedForGood]
+    const wide = await unstable_replenishFolios((await signedIn(routes())).portal, base)
+    expect(wide).toMatchObject({ status: 'replenished', reobtained: [{ from: 201, to: 300 }], outsideWindow: [] })
+    const narrow = await unstable_replenishFolios((await signedIn(routes())).portal, {
+      ...base,
+      reobtainWithinDays: 30,
+      allowAnnul: false,
+    })
+    expect(narrow).toMatchObject({
+      status: 'blocked',
+      reobtained: [],
+      outsideWindow: [{ from: 201, to: 300, date: '2024-01-01' }],
     })
   })
 

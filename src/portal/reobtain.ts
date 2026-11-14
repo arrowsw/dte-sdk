@@ -11,6 +11,7 @@ import {
   parseReobtainList,
   reobtainDownloadFields,
   reobtainFormFields,
+  stampedOn,
 } from './pages/reobtain'
 import { hasCaf } from './pages/stamping'
 import {
@@ -40,6 +41,8 @@ export type ReobtainableRange = {
   readonly to: number
   /** EN: Folios in the range. ES: Folios del rango. */
   readonly quantity: number
+  /** EN: The day the range was stamped, `YYYY-MM-DD`, or null when the list gives no day to read. ES: `DIA`, `MES`, `ANO` — Día en que se timbró el rango, `AAAA-MM-DD`, o null si la lista no trae un día legible. */
+  readonly date: string | null
   /** EN: The range is annulled; documents with these folios would be rejected. ES: El rango está anulado; los documentos con estos folios se rechazarían. */
   readonly annulled: boolean
   /** EN: Fields of the range in the list. ES: Campos del rango en la lista. */
@@ -110,6 +113,7 @@ export const listReobtainableInSession = async (
       from,
       to,
       quantity: to - from + 1,
+      date: stampedOn(formFields),
       annulled: isRangeAnnulled(detail.html),
       formFields,
       downloadFields: reobtainFormFields(detail.html),
