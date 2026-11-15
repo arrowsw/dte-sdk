@@ -100,7 +100,11 @@ none has been sent to the SII. 0.12.0 answers a received envelope document by do
 commercial result and the receipts of goods, where nothing is accepted or receipted unless the caller decides it;
 prints a receipt on continuous paper, with the printed stamp as an option; and writes the numbers of a document with
 the decimals its schema holds and holds an upload to the cover of its file. The answers and the documents are checked
-against the SII's schemas, and none has been sent. Every area this README describes ships in 0.12.0.
+against the SII's schemas, and none has been sent. 0.13.0 adds the SII's code tables, with the business activities in a
+new entry, `dte-sdk/catalogs`; prints a document over several pages, with a settlement invoice's commissions and the
+withholdings; issues the settlement set from the certification runner; and refuses before stamping what the SII
+rejects in a document's content, which now asks for the issuer's activity code outside a receipt. None of it has been
+sent to the SII. Every area this README describes ships in 0.13.0.
 Releases before 1.0.0 come out as the work lands, without waiting for the runs against the
 real SII; those runs come before 1.0.0, the first version recommended for production.
 
