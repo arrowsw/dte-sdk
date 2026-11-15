@@ -2,17 +2,15 @@ import type { DocumentType } from '../src/catalogs/document-types'
 import type { SignedDocument } from '../src/document/sign'
 import type { DocumentInput } from '../src/model/document'
 import { RECEIVER_RUT } from './support/fixtures'
-import { envelopeXml, issue, issuer as baseIssuer, receiver } from './support/printed-fixtures'
+import { envelopeXml, issue, issuer, receiver } from './support/printed-fixtures'
 import { validateAgainstXsd } from './support/xsd'
 
 // Every type dte-sdk sends in an `EnvioDTE`, with the variants it builds, run through the SII's own `DTE_v10.xsd` and
 // `EnvioDTE_v10.xsd`: each signed document alone, then the documents of a type together in one signed envelope.
-// What the schema rejects today is in `document-schema-gaps.test.ts`.
+// What the schema would reject for want of an `Acteco` or a `GlosaSTI`, `createDocument` refuses before stamping.
 
 jest.setTimeout(60_000)
 
-// The schema asks every issuer for at least one `Acteco`.
-const issuer = { ...baseIssuer, activityCode: 620200 }
 const base = { issueDate: '2026-11-15', issuer, receiver }
 type Variant = Omit<DocumentInput, 'type' | 'folio' | 'issueDate' | 'issuer' | 'receiver'>
 

@@ -105,11 +105,11 @@ describe('createDocument', () => {
     expect(invoice.header.options).toEqual({ grossAmounts: 1 })
     expect(invoice.header.totals).toEqual({ netAmount: 1681, vatRate: 19, vatAmount: 319, totalAmount: 2000 })
     const exemptOnly = createDocument({
-      type: 33,
+      type: 34,
       folio: 1,
       issuer,
       receiver,
-      items: [{ name: 'E', unitPrice: 500, exempt: true }],
+      items: [{ name: 'E', unitPrice: 500 }],
       pricesIncludeVat: true,
     })
     expect(exemptOnly.header.options).toEqual({})
@@ -123,7 +123,8 @@ describe('createDocument', () => {
       items: [{ name: 'X', unitPrice: 100 }],
       options: { serviceIndicator: 1, dueDate: '2026-12-01' },
     })
-    expect(doc.header.options).toEqual({ serviceIndicator: 1, dueDate: '2026-12-01' })
+    // Its lines are net, so it says so.
+    expect(doc.header.options).toEqual({ serviceIndicator: 1, dueDate: '2026-12-01', netAmountsIndicator: 2 })
   })
 
   test('references, adjustments, transport, subtotals and explicit totals', () => {
@@ -143,7 +144,7 @@ describe('createDocument', () => {
         destinationAddress: 'Bodega 1',
         destinationCommune: 'Maipú',
       },
-      subtotals: [{ number: 1, totalAmount: 1000 }],
+      subtotals: [{ number: 1, description: 'Devoluciones', totalAmount: 1000 }],
       totals: { netAmount: 1000, vatRate: 19, vatAmount: 190, totalAmount: 1190 },
     })
     expect(doc.references).toEqual([
@@ -159,7 +160,7 @@ describe('createDocument', () => {
       destinationAddress: 'Bodega 1',
       destinationCommune: 'Maipú',
     })
-    expect(doc.subtotals).toEqual([{ number: 1, totalAmount: 1000 }])
+    expect(doc.subtotals).toEqual([{ number: 1, description: 'Devoluciones', totalAmount: 1000 }])
     expect(doc.header.totals).toEqual({ netAmount: 1000, vatRate: 19, vatAmount: 190, totalAmount: 1190 })
   })
 
@@ -408,6 +409,7 @@ test('withholdVat withholds the whole VAT on a note that affects a purchase invo
       businessActivity: 'Software',
       address: 'Av. 1',
       commune: 'Santiago',
+      activityCode: 620200,
     },
     receiver: {
       rut: '76543210-3',
@@ -485,7 +487,10 @@ describe('the lines of a document that withholds the whole VAT', () => {
 })
 
 describe('the decimals of a line price', () => {
-  const priced = (unitPriceDecimals: number | undefined, price: { unitPrice?: number } = { unitPrice: 1200 }) =>
+  const priced = (
+    unitPriceDecimals: number | undefined,
+    price: { unitPrice?: number; amount?: number } = { unitPrice: 1200 },
+  ) =>
     createDocument({
       type: 33,
       folio: 7,
@@ -503,7 +508,7 @@ describe('the decimals of a line price', () => {
   })
 
   test('a line without a price keeps no decimals, and a text price reads back as a number', () => {
-    const bare = priced(6, {})
+    const bare = priced(6, { amount: 2400 })
     expect(bare.items[0].unitPriceDecimals).toBeUndefined()
     expect(toSiiDocument(bare).Detalle[0].PrcItem).toBeUndefined()
     const sii = toSiiDocument(priced(6))
@@ -576,9 +581,11 @@ describe('the decimals the schema admits', () => {
     expectError(() => line({ name: 'Lote', ...item }), 'INVALID_AMOUNT', { field: `items[0].${field}` })
   })
 
+  // A discount of 999.99 % leaves the line below zero, which `MontoItem` does not admit: the surcharge, of the same
+  // type, takes the largest percentage.
   test('the largest values the schema admits pass', () => {
-    const doc = line({ name: 'Lote', quantity: 999_999_999_999.999, unitPrice: 0.000001, discountPercent: 999.99 })
-    expect(doc.items[0]).toMatchObject({ quantity: 999_999_999_999.999, unitPrice: 0.000001, discountPercent: 999.99 })
+    const doc = line({ name: 'Lote', quantity: 999_999_999_999.999, unitPrice: 0.000001, surchargePercent: 999.99 })
+    expect(doc.items[0]).toMatchObject({ quantity: 999_999_999_999.999, unitPrice: 0.000001, surchargePercent: 999.99 })
   })
 
   test('a global adjustment value and a commission rate out of range are refused', () => {
@@ -631,8 +638,9 @@ describe('the quantity of a priced line', () => {
 
   test('a line without a price gets no quantity of its own', () => {
     expect(line({ name: 'Glosa', amount: 500 }).items[0].quantity).toBeUndefined()
-    expect(line({ name: 'Glosa' }).items[0].quantity).toBeUndefined()
-    expect(line({ name: 'Pallet', quantity: 2, amount: 0 }).items[0].quantity).toBe(2)
+    // A line of nothing on an invoice leaves it without VAT, so these are credit notes.
+    expect(line({ name: 'Glosa' }, 61).items[0].quantity).toBeUndefined()
+    expect(line({ name: 'Pallet', quantity: 2, amount: 0 }, 61).items[0].quantity).toBe(2)
   })
 })
 

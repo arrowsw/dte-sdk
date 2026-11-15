@@ -105,13 +105,14 @@ describe('codec round-trip', () => {
         fc.array(item, { minLength: 1, maxLength: 10 }),
         fc.boolean(),
         (type, folio, items, gross) => {
+          // A receipt has no element for the activity code, and an invoice needs a line subject to VAT.
           const doc = createDocument({
             type,
             folio,
             issueDate: '2026-11-15',
-            issuer,
+            issuer: type === 39 ? issuer : { ...issuer, activityCode: 620200 },
             receiver: type === 39 ? undefined : receiver,
-            items,
+            items: type === 33 ? [{ ...items[0], exempt: false }, ...items.slice(1)] : items,
             pricesIncludeVat: gross,
           })
           expect(fromSiiDocument(toSiiDocument(doc))).toEqual(doc)

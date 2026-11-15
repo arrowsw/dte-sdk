@@ -7,11 +7,14 @@ import { validateAgainstXsd } from './support/xsd'
 
 jest.setTimeout(30_000)
 
+// A receipt has no element for the activity code, so its issuer brings none and the document reads back whole.
+const { activityCode, ...receiptIssuer } = issuer
+void activityCode
 const receipt = (extra: Partial<DocumentInput> = {}): DocumentInput => ({
   type: 39,
   folio: 11,
   issueDate: '2026-11-15',
-  issuer,
+  issuer: receiptIssuer,
   items: [{ name: 'Café', quantity: 2, unitPrice: 1500 }],
   pricesIncludeVat: true,
   ...extra,

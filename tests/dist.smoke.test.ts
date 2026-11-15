@@ -158,7 +158,7 @@ const ISSUE_DOCUMENT = `
   const signed = root.issueDocument({
     document: {
       type: 33, folio: 1,
-      issuer: { rut: '76543210-3', businessName: 'Comercial Andina SpA', businessActivity: 'Software', address: 'Av. 1', commune: 'Santiago' },
+      issuer: { rut: '76543210-3', businessName: 'Comercial Andina SpA', businessActivity: 'Software', address: 'Av. 1', commune: 'Santiago', activityCode: 620200 },
       receiver: { rut: '12345678-5', businessName: 'Cliente', businessActivity: 'Comercio', address: 'Calle 2', commune: 'Providencia' },
       items: [{ name: 'Servicio', unitPrice: 1000 }],
     },
