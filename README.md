@@ -1140,8 +1140,9 @@ const result = await runCertification(deps, { optionalSets: [...DEFAULT_OPTIONAL
 - **No real set has been seen.** The SII generates the set company by company and none is public: the grammar rests
   on synthetic sets shaped like the field's, and the checkbox `SET84` and the label of its row on the progress page
   are not measured. Keep the first download as a fixture.
-- **Not yet in the later stages.** The simulation re-issues the four sets only. `readPrintedSamples` reads the
-  settlement envelope as one of the simulation's, and the printed sample of a 43 has no commissions yet.
+- **Not yet in the later stages.** The simulation re-issues the four sets only, and `readPrintedSamples` reads the
+  settlement envelope as one of the simulation's. The printed sample of a 43 prints its commissions and other charges
+  (see the printed samples).
 
 ## Certification: the exchange and the printed samples
 
