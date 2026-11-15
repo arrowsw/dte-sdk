@@ -70,7 +70,7 @@ describe('a receipt on continuous paper', () => {
     expect(text).toContain('Casa Matriz: Av. Los Aromos 1540, Ñuñoa')
     expect(text).toContain('Señor(es): ')
     expect(text).toContain('Fecha Emisión: ')
-    expect(text).toContain('2026-11-15')
+    expect(text).toContain('15 de noviembre de 2026')
     expect(text).toContain('Detalle')
     expect(text).toContain('Monto Total')
     expect(text).toContain('$3.000')

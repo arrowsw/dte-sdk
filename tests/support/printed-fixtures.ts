@@ -160,6 +160,29 @@ export const debitNote = issue({
   references: [{ documentType: 33, folio: 7, date: '2026-11-15', code: 3, reason: 'Corrige monto' }],
 })
 
+/**
+ * An invoice on credit that carries what the plain one lacks and the format asks to print: payment terms, due date,
+ * dispatch type, the cities, an item with an additional description and a fractional quantity, and a purchase order.
+ */
+export const creditInvoice = issue({
+  type: 33,
+  folio: 40,
+  issueDate: '2026-11-05',
+  issuer: { ...issuer, city: 'Santiago' },
+  receiver: { ...receiver, city: 'Viña del Mar' },
+  items: [
+    {
+      name: 'Harina de trigo',
+      description: 'Saco de 25 kg, sin polvos de hornear.\nEntrega en bodega',
+      quantity: 1051.5,
+      unit: 'KG',
+      unitPrice: 10412.125,
+    },
+  ],
+  options: { paymentTerms: 2, dueDate: '2026-12-15', dispatchType: 2 },
+  references: [{ documentType: 801, folio: '4500012345', date: '2026-11-01' }],
+})
+
 export const basicSetXml = envelopeXml([invoice, creditNote, debitNote])
 export const receiptsXml = envelopeXml([receipt], 'receipt')
 
@@ -186,3 +209,9 @@ export const settlementXml = `<DTE version="1.0"><Liquidacion ID="F9T43"><Encabe
 <Receptor><RUTRecep>${RECEIVER_RUT}</RUTRecep><RznSocRecep>Mandante Ltda</RznSocRecep></Receptor>
 <Totales><MntNeto>1000</MntNeto><IVA>190</IVA><MntTotal>1190</MntTotal></Totales></Encabezado>
 <Detalle><NroLinDet>1</NroLinDet><NmbItem>Venta por cuenta de terceros</NmbItem><MontoItem>1000</MontoItem></Detalle></Liquidacion></DTE>`
+
+/** The third-party invoice with the credit of construction companies, which the total takes off. */
+export const constructionXml = thirdPartyXml.replace(
+  '<MntTotal>11900</MntTotal>',
+  '<CredEC>1235</CredEC><MntTotal>10665</MntTotal>',
+)

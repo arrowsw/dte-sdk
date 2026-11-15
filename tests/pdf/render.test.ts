@@ -57,9 +57,9 @@ describe('an invoice', () => {
     expect(text).toContain('S.I.I. - ÑUÑOA')
     expect(text).toContain('Comercial Andina SpA')
     expect(text).toContain('Casa Matriz: Av. Los Aromos 1540, Ñuñoa')
-    expect(text).toContain('Fecha Emisión: 2026-11-15')
+    expect(text).toContain('Fecha Emisión: 15 de noviembre de 2026')
     expect(text).toContain('Comercializadora Rapel Ltda')
-    expect(text).toContain('12345678-5')
+    expect(text).toContain('12.345.678-5')
     expect(text).toContain('Detalle')
     expect(text).toContain('LIC-01')
     expect(text).toContain('Dcto: $20.000')
@@ -180,7 +180,7 @@ describe('the other types', () => {
     expect(third).toContain('Recargo Global')
     expect(third).toContain('$100')
     expect(third).toContain('Dcto: $100')
-    expect(third).toContain('Tipo 801')
+    expect(third).toContain('Orden de Compra')
     expect(third).toContain('PAR')
     expect(third).toContain('Óptica Muñoz Ltda')
   })
@@ -216,7 +216,7 @@ describe('the transport area', () => {
       ['Fecha de Llegada: ', '2026-11-16'],
     ]
     expect(await pdfText(await render(guideDoc))).toContain(
-      `Tipo de Traslado: 1 - Operación constituye venta\n${area.flat().join('\n')}\nDetalle`,
+      `Tipo de Traslado: 1 - Operación constituye venta\nTipo de Despacho: 2 - Por cuenta del emisor a instalaciones del cliente\n${area.flat().join('\n')}\nDetalle`,
     )
   })
 
@@ -264,8 +264,9 @@ describe('page height', () => {
   })
 
   test('a tiny document gets the minimum height', async () => {
-    const tiny = { ...invoiceDoc, tedXml: '', items: [], references: [], globalAdjustments: [], totals: {} }
-    expect((await pdfPage(await render(tiny))).height).toBeCloseTo(311.81)
+    // A receipt printed without its stamp: any other document without one carries the notice in its place.
+    const tiny = { ...invoiceDoc, type: 39, tedXml: '', items: [], references: [], globalAdjustments: [], totals: {} }
+    expect((await pdfPage(await render(tiny, { stamp: false }))).height).toBeCloseTo(311.81)
   })
 
   test('a long detail stops at the maximum height', async () => {
@@ -401,7 +402,7 @@ describe('sparse data', () => {
     const sparse: PrintableDocument = {
       ...invoiceDoc,
       tedXml: '',
-      issuer: { ...invoiceDoc.issuer, commune: '' },
+      issuer: { ...invoiceDoc.issuer, commune: '', city: undefined },
       items: [
         { code: '', name: '' },
         { code: 'A', name: 'Con descuento', discountPercent: 15 },

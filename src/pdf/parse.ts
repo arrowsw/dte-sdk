@@ -1,4 +1,6 @@
+import { decodeLatin1 } from '../text/latin1'
 import { extractTagContent, parseXml, type ParsedXml } from '../xml/parse'
+import { signedTed } from './signed-ted'
 
 /**
  * EN: A party of the printed document, as written in the XML.
@@ -15,6 +17,8 @@ export type PrintableParty = {
   readonly address: string
   /** EN: Commune. ES: `CmnaOrigen` / `CmnaRecep` — Comuna. */
   readonly commune: string
+  /** EN: City; undefined when absent. ES: `CiudadOrigen` / `CiudadRecep` — Ciudad; undefined si falta. */
+  readonly city?: string
 }
 
 /**
@@ -41,6 +45,8 @@ export type PrintableTotals = {
   readonly vatRate?: number
   /** EN: Total. ES: `MntTotal` — Monto total. */
   readonly total?: number
+  /** EN: Special credit of construction companies, which the total takes off. ES: `CredEC` — Crédito especial 65 % de empresas constructoras, que el total resta. */
+  readonly constructionCredit?: number
   /** EN: VAT not withheld, on a purchase invoice that withholds part of it. ES: `IVANoRet` — IVA no retenido. */
   readonly vatNotWithheld?: number
   /** EN: Net value of the commissions and other charges. ES: `Comisiones/ValComNeto` — Valor neto comisiones y otros cargos. */
@@ -106,6 +112,8 @@ export type PrintableItem = {
   readonly code: string
   /** EN: Item name. ES: `NmbItem` — Nombre del ítem. */
   readonly name: string
+  /** EN: Additional description; undefined when absent. ES: `DscItem` — Descripción adicional del ítem; undefined si falta. */
+  readonly description?: string
   /** EN: Quantity. ES: `QtyItem` — Cantidad. */
   readonly quantity?: number
   /** EN: Unit of measure. ES: `UnmdItem` — Unidad de medida. */
@@ -131,6 +139,8 @@ export type PrintableReference = {
   readonly folio: string
   /** EN: Referenced date. ES: `FchRef` — Fecha referenciada. */
   readonly date: string
+  /** EN: What the document does to the referenced one: 1 cancels it, 2 corrects its text, 3 corrects its amounts; undefined when absent. ES: `CodRef` — Lo que el documento le hace al referenciado: 1 lo anula, 2 corrige su texto, 3 corrige sus montos; undefined si falta. */
+  readonly code?: number
   /** EN: Reason. ES: `RazonRef` — Razón de la referencia. */
   readonly reason: string
 }
@@ -180,6 +190,12 @@ export type PrintableDocument = {
   readonly issueDate: string
   /** EN: Transfer reason of a dispatch guide, null when absent. ES: `IndTraslado` — Tipo de traslado de una guía, null si falta. */
   readonly transferReason: number | null
+  /** EN: Who dispatches the goods, 1 to 3; undefined when absent. ES: `TipoDespacho` — Quién despacha los bienes, 1 a 3; undefined si falta. */
+  readonly dispatchType?: number
+  /** EN: Payment terms: 1 cash, 2 credit, 3 free of charge; undefined when absent. ES: `FmaPago` — Forma de pago: 1 contado, 2 crédito, 3 sin costo; undefined si falta. */
+  readonly paymentTerms?: number
+  /** EN: Due date as written (YYYY-MM-DD); undefined when absent. ES: `FchVenc` — Fecha de vencimiento tal como viene (AAAA-MM-DD); undefined si falta. */
+  readonly dueDate?: string
   /** EN: Line amounts include VAT. ES: `MntBruto` — Montos de las líneas con IVA incluido (1). */
   readonly grossAmounts: boolean
   /** EN: The issuer, with its branch. ES: `Emisor` — El emisor, con su sucursal. */
@@ -200,11 +216,24 @@ export type PrintableDocument = {
   readonly items: readonly PrintableItem[]
   /** EN: References to other documents. ES: `Referencia` — Referencias a otros documentos. */
   readonly references: readonly PrintableReference[]
-  /** EN: The `<TED>…</TED>` substring of the input, verbatim; empty when none. ES: `TED` — El trozo `<TED>…</TED>` del XML de entrada, textual; vacío si no hay. */
+  /** EN: The `<TED>…</TED>` of the input as it was signed: verbatim when its `FRMT` verifies over it as written, otherwise the form of it the `FRMT` verifies (a file indented after it was signed), and verbatim when none does; empty when the document has none. ES: `TED` — El `<TED>…</TED>` del XML de entrada tal como se firmó: textual cuando su `FRMT` verifica sobre él tal como viene, si no la forma de él que la `FRMT` verifica (un archivo indentado después de firmarse), y textual cuando ninguna verifica; vacío si el documento no lo trae. */
   readonly tedXml: string
 }
 
 const TED_PATTERN = /<TED[^>]*>[\s\S]*?<\/TED>/g
+
+// The text of an XML given as bytes: UTF-8 when the bytes are UTF-8, with its byte order mark dropped, and ISO-8859-1
+// otherwise. The declaration is not what decides: the SII's documents declare ISO-8859-1, and a file may hold them in
+// either encoding (the certification store writes its envelopes in UTF-8), while bytes of ISO-8859-1 with a character
+// above ASCII are not valid UTF-8.
+const decoded = (xml: string | Uint8Array): string => {
+  if (typeof xml === 'string') return xml
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(xml)
+  } catch {
+    return decodeLatin1(xml)
+  }
+}
 
 const toArray = (value: unknown): readonly unknown[] =>
   Array.isArray(value) ? value : value === undefined || value === null ? [] : [value]
@@ -221,12 +250,15 @@ const number = (value: unknown): number | undefined => {
   return Number.isFinite(parsed) ? parsed : undefined
 }
 
+const optionalText = (value: unknown): string | undefined => text(value) || undefined
+
 const party = (node: ParsedXml, tags: Readonly<Record<keyof PrintableParty, string>>): PrintableParty => ({
   rut: text(node[tags.rut]),
   name: text(node[tags.name]),
   activity: text(node[tags.activity]),
   address: text(node[tags.address]),
   commune: text(node[tags.commune]),
+  city: optionalText(node[tags.city]),
 })
 
 const RECEIVER_TAGS = {
@@ -235,6 +267,7 @@ const RECEIVER_TAGS = {
   activity: 'GiroRecep',
   address: 'DirRecep',
   commune: 'CmnaRecep',
+  city: 'CiudadRecep',
 } as const
 
 const transport = (value: unknown): PrintableTransport | undefined => {
@@ -259,8 +292,9 @@ const transport = (value: unknown): PrintableTransport | undefined => {
 const item = (node: ParsedXml): PrintableItem => ({
   code: text(record(toArray(node.CdgItem)[0]).VlrCodigo),
   name: text(node.NmbItem),
+  description: optionalText(node.DscItem),
   quantity: number(node.QtyItem),
-  unit: text(node.UnmdItem) || undefined,
+  unit: optionalText(node.UnmdItem),
   unitPrice: number(node.PrcItem),
   amount: number(node.MontoItem),
   discountAmount: number(node.DescuentoMonto),
@@ -271,6 +305,7 @@ const reference = (node: ParsedXml): PrintableReference => ({
   documentType: text(node.TpoDocRef),
   folio: text(node.FolioRef),
   date: text(node.FchRef),
+  code: number(node.CodRef),
   reason: text(node.RazonRef),
 })
 
@@ -320,6 +355,9 @@ const printable = (dte: ParsedXml, teds: readonly string[], index: number): Prin
     folio: folio || text(extractTagContent(tedXml, 'F')),
     issueDate: text(idDoc.FchEmis) || text(extractTagContent(tedXml, 'FE')),
     transferReason: number(idDoc.IndTraslado) ?? null,
+    dispatchType: number(idDoc.TipoDespacho),
+    paymentTerms: number(idDoc.FmaPago),
+    dueDate: optionalText(idDoc.FchVenc),
     grossAmounts: number(idDoc.MntBruto) === 1,
     issuer: {
       ...party(issuer, {
@@ -328,6 +366,7 @@ const printable = (dte: ParsedXml, teds: readonly string[], index: number): Prin
         activity: 'GiroEmis',
         address: 'DirOrigen',
         commune: 'CmnaOrigen',
+        city: 'CiudadOrigen',
       }),
       // A receipt names both with its own tags.
       name: text(issuer.RznSoc) || text(issuer.RznSocEmisor),
@@ -342,6 +381,7 @@ const printable = (dte: ParsedXml, teds: readonly string[], index: number): Prin
       vat: number(totals.IVA),
       vatRate: number(totals.TasaIVA),
       total: number(totals.MntTotal),
+      constructionCredit: number(totals.CredEC),
       vatNotWithheld: number(totals.IVANoRet),
       commissionsNet: number(commissionTotals.ValComNeto),
       commissionsExempt: number(commissionTotals.ValComExe),
@@ -359,17 +399,28 @@ const printable = (dte: ParsedXml, teds: readonly string[], index: number): Prin
 /**
  * EN: The printable documents of an XML: an `EnvioDTE`, `EnvioDTEB`, `EnvioDTETraslado` or `EnvioBOLETA` envelope, a
  * bare `SetDTE`, or a bare `DTE` (what `SignedDocument.xml` holds). Any other root yields an empty list. Each `<TED>` is
- * copied verbatim from the input text and matched to its document by folio and type, or by position when nothing
- * matches, so the stamp carries the bytes that were signed. Numbers are coerced as the schema defines them.
+ * cut from the input text and matched to its document by folio and type, or by position when nothing matches, so the
+ * stamp carries the bytes that were signed: the cut as written when its `FRMT` verifies over its `DD`, with the key of
+ * the CAF it carries, as in a file kept as it was signed; and otherwise the form of it the `FRMT` does verify, without
+ * the whitespace between its tags or with its `DD` written again from its element, as in a file some tool indented or
+ * wrote again afterwards. A stamp no form of which verifies stays as written. Numbers are coerced as the schema
+ * defines them. The XML may be given as the bytes of its file: they are read as UTF-8 when they are UTF-8, with a byte
+ * order mark dropped, and as ISO-8859-1 otherwise, whatever the declaration says.
  * ES: Los documentos imprimibles de un XML: un sobre `EnvioDTE`, `EnvioDTEB`, `EnvioDTETraslado` o `EnvioBOLETA`, un
  * `SetDTE` suelto o un `DTE` suelto (lo que trae `SignedDocument.xml`). Cualquier otra raíz devuelve lista vacía. Cada
- * `<TED>` se copia textual del texto de entrada y se asigna a su documento por folio y tipo, o por posición si nada
- * coincide, para que el timbre lleve los bytes que se firmaron. Los números se convierten como define el esquema.
- * @param xml EN: the XML text. ES: el texto XML.
+ * `<TED>` se corta del texto de entrada y se asigna a su documento por folio y tipo, o por posición si nada coincide,
+ * para que el timbre lleve los bytes que se firmaron: el corte tal como viene cuando su `FRMT` verifica sobre su `DD`,
+ * con la llave del CAF que trae, como en un archivo guardado tal como se firmó; y si no, la forma de él que la `FRMT`
+ * sí verifica, sin los espacios entre sus etiquetas o con su `DD` escrito de nuevo desde su elemento, como en un archivo
+ * que alguna herramienta indentó o reescribió después. Un timbre del que ninguna forma verifica queda tal como viene.
+ * Los números se convierten como define el esquema. El XML puede darse como los bytes de su archivo: se leen como
+ * UTF-8 cuando lo son, sin la marca de orden de bytes, y como ISO-8859-1 si no, diga lo que diga la declaración.
+ * @param xml EN: the XML, as text or as the bytes of its file. ES: el XML, como texto o como los bytes de su archivo.
  * @throws {DteError} EN: `XML_PARSE_FAILED` when the XML is not well-formed. ES: `XML_PARSE_FAILED` si el XML no está bien formado.
  */
-export const parsePrintableDocuments = (xml: string): readonly PrintableDocument[] => {
-  const parsed = parseXml(xml)
-  const teds = xml.match(TED_PATTERN) ?? []
+export const parsePrintableDocuments = (xml: string | Uint8Array): readonly PrintableDocument[] => {
+  const text = decoded(xml)
+  const parsed = parseXml(text)
+  const teds = (text.match(TED_PATTERN) ?? []).map(signedTed)
   return documentNodes(parsed).map((dte, index) => printable(dte, teds, index))
 }

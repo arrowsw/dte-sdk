@@ -143,11 +143,14 @@ export const samplePath = (path: NodeFsModules['path'], directory: string, name:
 
 /**
  * EN: Renders the samples of every file into `{outDir}/SET-PRUEBAS` and `{outDir}/SET-SIMULACION`, one PDF per sample
- * under its sample name. A file that cannot be read, parsed or rendered, or a sample whose name would leave the folder
- * of its set, is a failure entry and the rest goes on.
+ * under its sample name. Each file is read as bytes, in UTF-8 or in ISO-8859-1 (see `parsePrintableDocuments`), so a
+ * document received from a third party prints as one the certification store wrote. A file that cannot be read, parsed
+ * or rendered, or a sample whose name would leave the folder of its set, is a failure entry and the rest goes on.
  * ES: Genera las muestras de cada archivo en `{outDir}/SET-PRUEBAS` y `{outDir}/SET-SIMULACION`, un PDF por muestra
- * con su nombre de muestra. Un archivo que no se puede leer, parsear o dibujar, o una muestra cuyo nombre saldría de la
- * carpeta de su conjunto, es una entrada de falla y el resto sigue.
+ * con su nombre de muestra. Cada archivo se lee como bytes, en UTF-8 o en ISO-8859-1 (ver `parsePrintableDocuments`),
+ * así un documento recibido de un tercero se imprime igual que uno que escribió el almacén de certificación. Un archivo
+ * que no se puede leer, parsear o dibujar, o una muestra cuyo nombre saldría de la carpeta de su conjunto, es una
+ * entrada de falla y el resto sigue.
  * @param input EN: files, output directory, options, logo path and `transferable`. ES: archivos, directorio de salida, opciones, ruta del logo y `transferable`.
  * @param load EN: loader of `node:fs`, for tests. ES: cargador de `node:fs`, para tests.
  * @throws {DteError} EN: `TRANSPORT_UNAVAILABLE` when `node:fs` cannot be loaded. ES: `TRANSPORT_UNAVAILABLE` si `node:fs` no se puede cargar.
@@ -171,9 +174,10 @@ export const writePrintedSamples = async (
   let documents = 0
   for (const file of input.xmlFiles) {
     const source = path.basename(file)
-    let xml: string
+    // The bytes, not a text: `parsePrintableDocuments` reads a file written in UTF-8 or in ISO-8859-1.
+    let xml: Uint8Array
     try {
-      xml = await fs.readFile(file, 'utf8')
+      xml = new Uint8Array(await fs.readFile(file))
     } catch (error) {
       failures.push({ source, code: errorCode(error), reason: errorMessage(error) })
       continue

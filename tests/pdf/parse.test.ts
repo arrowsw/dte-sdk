@@ -4,6 +4,8 @@ import { ISSUER_RUT, RECEIVER_RUT } from '../support/fixtures'
 import {
   bareSetDte,
   basicSetXml,
+  constructionXml,
+  creditInvoice,
   creditNote,
   debitNote,
   guideWithTransport,
@@ -92,7 +94,7 @@ describe('an envelope the SDK signed', () => {
     ])
     expect(first.references).toEqual([])
     expect(second.references).toEqual([
-      { documentType: '33', folio: '7', date: '2026-11-15', reason: 'Anula factura' },
+      { documentType: '33', folio: '7', date: '2026-11-15', code: 1, reason: 'Anula factura' },
       { documentType: 'SET', folio: 'CASO-1', date: '2026-11-15', reason: 'Set de pruebas' },
     ])
     expect(third.globalAdjustments).toEqual([{ kind: 'R', valueType: '$', value: 2500 }])
@@ -238,5 +240,40 @@ describe('coercion and document elements', () => {
       .replace(/Liquidacion/g, 'Exportaciones')
       .replace('<TipoDTE>43</TipoDTE>', '<TipoDTE>110</TipoDTE>')
     expect(parsePrintableDocuments(xml)[0]).toMatchObject({ type: 110, folio: '9' })
+  })
+})
+
+describe('the fields the format asks to print', () => {
+  const [doc] = parsePrintableDocuments(creditInvoice.xml)
+  const [plain, note] = parsePrintableDocuments(basicSetXml)
+
+  test('maps the payment terms, the due date and the dispatch type of the header', () => {
+    expect(doc).toMatchObject({ paymentTerms: 2, dueDate: '2026-12-15', dispatchType: 2 })
+    expect(plain.paymentTerms).toBeUndefined()
+    expect(plain.dueDate).toBeUndefined()
+    expect(plain.dispatchType).toBeUndefined()
+  })
+
+  test('maps the city of the issuer and of the receiver', () => {
+    expect(doc.issuer.city).toBe('Santiago')
+    expect(doc.receiver.city).toBe('Viña del Mar')
+    // The SDK writes the issuer's commune as its city when none is given.
+    expect(plain.issuer.city).toBe('Ñuñoa')
+    expect(plain.receiver.city).toBeUndefined()
+  })
+
+  test("maps an item's additional description", () => {
+    expect(doc.items[0].description).toBe('Saco de 25 kg, sin polvos de hornear.\nEntrega en bodega')
+    expect(plain.items[0].description).toBeUndefined()
+  })
+
+  test("maps a reference's code, undefined on one that has none", () => {
+    expect(note.references.map((reference) => reference.code)).toEqual([1, undefined])
+    expect(doc.references).toEqual([{ documentType: '801', folio: '4500012345', date: '2026-11-01', reason: '' }])
+  })
+
+  test('maps the credit of construction companies', () => {
+    expect(parsePrintableDocuments(constructionXml)[0].totals).toMatchObject({ constructionCredit: 1235, total: 10665 })
+    expect(plain.totals.constructionCredit).toBeUndefined()
   })
 })
