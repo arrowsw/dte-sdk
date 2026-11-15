@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-14
+
 ### Added
 
 - **The SII's tables of additional taxes, payment media and reference documents.** Every issuer picks from them.
@@ -92,34 +94,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `CertificationState.sets` and `sendTestSet` take a `SentSetKey` (the four of `SetKey` and `'settlement'`), as does
     the `set` of the `SET_START`, `SET_OK` and `SET_ERROR` events, and `IssuableSetPlan` and `IssuedSet.kind` take the
     settlement plan; an exhaustive `switch` over any of them needs the `settlement` case.
-
-### Changed
-
-- **In production, `unstable_replenishFolios` downloads again only a range stamped today.** Its first step downloads
-  again the ranges the SII already authorized and nobody holds, which spends no quota. A company holds what it
-  declares in `cafs`, so in production a range missing from them may be one another system of the company issues
-  with, and a second copy of its CAF would repeat its folios, which the SII rejects. Since 0.12.0 such a range is not
-  annulled when it was stamped before the last day; it was still downloaded and issued with. Now, in production, the
-  step reaches the ranges stamped today, counted in Chile, which is where a grant that never arrived is, and leaves
-  the others alone. They come back in a new field of the report, `outsideWindow`, each with its first and last folio
-  and the day it was stamped, or null when the list gives no day to read; a range with no day is never taken.
-  `reobtainWithinDays`, new, sets how many days back the step reaches in either environment; certification has no
-  limit, as before. A request the SII may have granted without handing it over is still settled in the same run.
-  `ReobtainableRange` gains `date`, the day the listing gives for the range.
-  - **What to change:** nothing in certification. In production, read `outsideWindow`: add to `cafs` the CAF of a
-    range another system holds, or pass `reobtainWithinDays` to take the ranges nobody else issues with. A
-    `ReplenishmentReport` built by hand needs `outsideWindow`, and a `ReobtainableRange` needs `date`.
-- **Size:** this change and the fix below took `dte-sdk` from 38.87 kB to 38.95 kB and `dte-sdk/portal` from 79.03 kB
-  to 79.27 kB, both under their limits.
-
-### Fixed
-
-- **`withinDays` of an annulment counts the days in Chile.** `annulFolios` read the day a range was stamped as a day
-  in UTC, so late in the day in Chile, when UTC is already in the next one, a range stamped that same day was more
-  than a day old: from 21:00, or 20:00 in winter, `withinDays: 1` reached no range at all, and 1 is what
-  `unstable_replenishFolios` uses in production since 0.12.0. A day now counts from its start in Chile, so 1 is today
-  at any hour. The error only left ranges out: nothing was annulled that should not have been.
-  - **What to change:** nothing.
 - **`Document.warnings`: what the SII accepts with an objection.** `createDocument` builds a document the SII
   accepts with an objection (a "reparo") and lists, in the new optional `warnings`, the validations of the SII's
   "Nuevas validaciones a la IECV, DTE y DJ 3327 y 3328" that object to it: 10, a total of zero on an invoice, an exempt
@@ -182,6 +156,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Size:** the content rules took `dte-sdk` from 38.95 kB to 39.47 kB, under its limit, and `dte-sdk/portal` from
   79.83 kB to 80.36 kB, over its 80 kB limit, which goes to 82 kB; the new error code took `dte-sdk/node` from 7.36 kB
   to 7.37 kB.
+- **In production, `unstable_replenishFolios` downloads again only a range stamped today.** Its first step downloads
+  again the ranges the SII already authorized and nobody holds, which spends no quota. A company holds what it
+  declares in `cafs`, so in production a range missing from them may be one another system of the company issues
+  with, and a second copy of its CAF would repeat its folios, which the SII rejects. Since 0.12.0 such a range is not
+  annulled when it was stamped before the last day; it was still downloaded and issued with. Now, in production, the
+  step reaches the ranges stamped today, counted in Chile, which is where a grant that never arrived is, and leaves
+  the others alone. They come back in a new field of the report, `outsideWindow`, each with its first and last folio
+  and the day it was stamped, or null when the list gives no day to read; a range with no day is never taken.
+  `reobtainWithinDays`, new, sets how many days back the step reaches in either environment; certification has no
+  limit, as before. A request the SII may have granted without handing it over is still settled in the same run.
+  `ReobtainableRange` gains `date`, the day the listing gives for the range.
+  - **What to change:** nothing in certification. In production, read `outsideWindow`: add to `cafs` the CAF of a
+    range another system holds, or pass `reobtainWithinDays` to take the ranges nobody else issues with. A
+    `ReplenishmentReport` built by hand needs `outsideWindow`, and a `ReobtainableRange` needs `date`.
+- **Size:** this change and the fix below took `dte-sdk` from 38.87 kB to 38.95 kB and `dte-sdk/portal` from 79.03 kB
+  to 79.27 kB, both under their limits.
+
+### Fixed
+
+- **`withinDays` of an annulment counts the days in Chile.** `annulFolios` read the day a range was stamped as a day
+  in UTC, so late in the day in Chile, when UTC is already in the next one, a range stamped that same day was more
+  than a day old: from 21:00, or 20:00 in winter, `withinDays: 1` reached no range at all, and 1 is what
+  `unstable_replenishFolios` uses in production since 0.12.0. A day now counts from its start in Chile, so 1 is today
+  at any hour. The error only left ranges out: nothing was annulled that should not have been.
+  - **What to change:** nothing.
 
 
 ## [0.12.0] - 2026-11-14
@@ -1246,7 +1245,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Jest, ESLint, Prettier, size-limit, Stryker, CI and tag-triggered publish)
   and a single `hello()` export that returns `'dte-sdk is coming'`.
 
-[Unreleased]: https://github.com/arrowsw/dte-sdk/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/arrowsw/dte-sdk/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.13.0
 [0.12.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.12.0
 [0.11.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.11.0
 [0.10.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.10.0
