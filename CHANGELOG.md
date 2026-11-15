@@ -42,7 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one the issuer's signature verifies, checked with the key of the CAF the stamp carries: the `TED` as written; then
   without the whitespace between its tags; then with its `DD` written again from its element, for a file written
   again with other escapes. A stamp signed with whitespace between its tags therefore stays as it is, and one no form
-  of which verifies stays as written. `tedXml` of a document the SDK issued is the same as before.
+  of which verifies stays as written. Only the stamp of each document is checked, and one whose key is larger than any
+  CAF key (a modulus over 4096 bits or an exponent over 32 bits) is left as written without its signature being
+  tried, so a file from anyone cannot make the check costly. `tedXml` of a document the SDK issued is the same as
+  before.
   - **What to change:** nothing.
 - **A document without a `TED` says so on its print.** It printed like any other, only without the stamp, and could
   pass for a stamped one. Now a box where the stamp goes reads `SIN TIMBRE ELECTRÓNICO`, with the legend `Documento
@@ -70,7 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declares, failed with `ENCODING_UNSUPPORTED_CHAR` or `PDF_RENDER_FAILED` at its first accented letter. It now hands
   the bytes to `parsePrintableDocuments`, which reads both.
 
-`dte-sdk/pdf` grows from 14.89 kB to 17.62 kB, over its 16 kB limit, which goes to 18 kB: it now holds the words of
+`dte-sdk/pdf` grows from 14.89 kB to 17.68 kB, over its 16 kB limit, which goes to 18 kB: it now holds the words of
 an amount and the names of the documents a reference can name, and reaches the helpers that check a stamp's
 signature.
 

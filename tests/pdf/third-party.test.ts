@@ -55,6 +55,41 @@ describe('the stamp of a file changed after it was signed', () => {
     expect(parsePrintableDocuments(invoice.xml.replace(invoice.ted.xml, ted))[0].tedXml).toBe(ted)
   })
 
+  // The stamp is input from anyone and the cost of checking a signature grows with the key it names, so a key larger
+  // than any CAF key is not tried. Each case writes the fixture's own key with leading zero bytes, the same number, and
+  // signs the stamp with it: the signature would verify if it were tried.
+  describe.each([
+    ['modulus', 'M', 512],
+    ['exponent', 'E', 4],
+  ])('a stamp whose key has a long %s', (_, tag, limit) => {
+    const withKeyOf = (bytes: number): { readonly ted: string; readonly xml: string } => {
+      const dd = signedDd.replace(new RegExp(`<${tag}>([^<]*)</${tag}>`), (_match, value: string) => {
+        const raw = Buffer.from(value, 'base64')
+        return `<${tag}>${Buffer.concat([Buffer.alloc(bytes - raw.length), raw]).toString('base64')}</${tag}>`
+      })
+      const ted = stamped(dd)
+      return { ted, xml: indented(invoice.xml.replace(invoice.ted.xml, ted)) }
+    }
+
+    test('at the bound, its signature is tried and the stamp is taken as it was signed', () => {
+      const { ted, xml } = withKeyOf(limit)
+      expect(parsePrintableDocuments(xml)[0].tedXml).toBe(ted)
+    })
+
+    test('over the bound, its signature is not tried and the stamp is left as written', () => {
+      const { xml } = withKeyOf(limit + 1)
+      expect(parsePrintableDocuments(xml)[0].tedXml).toBe(tedOf(xml))
+    })
+  })
+
+  test('a second TED in the text, of a folio no document has, is not taken', () => {
+    const stray = invoice.ted.xml.replace('<F>7</F>', '<F>999</F>')
+    const xml = invoice.xml.replace('</Documento>', `</Documento><Otro>${stray}</Otro>`)
+    const documents = parsePrintableDocuments(xml)
+    expect(documents).toHaveLength(1)
+    expect(documents[0].tedXml).toBe(invoice.ted.xml)
+  })
+
   test('a stamp whose signature verifies over no form is left as written', () => {
     const xml = indented(thirdPartyXml)
     expect(parsePrintableDocuments(xml)[0].tedXml).toBe(tedOf(xml))

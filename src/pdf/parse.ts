@@ -349,7 +349,9 @@ const printable = (dte: ParsedXml, teds: readonly string[], index: number): Prin
   const matching = teds.find(
     (candidate) => extractTagContent(candidate, 'F') === folio && extractTagContent(candidate, 'TD') === type,
   )
-  const tedXml = matching ?? (index < teds.length ? teds[index] : '')
+  // Only the stamp that is this document's is taken as it was signed: no other cut of the text has its signature tried.
+  const written = matching ?? (index < teds.length ? teds[index] : '')
+  const tedXml = written === '' ? '' : signedTed(written)
   return {
     type: number(idDoc.TipoDTE) ?? number(extractTagContent(tedXml, 'TD')) ?? 0,
     folio: folio || text(extractTagContent(tedXml, 'F')),
@@ -421,6 +423,6 @@ const printable = (dte: ParsedXml, teds: readonly string[], index: number): Prin
 export const parsePrintableDocuments = (xml: string | Uint8Array): readonly PrintableDocument[] => {
   const text = decoded(xml)
   const parsed = parseXml(text)
-  const teds = (text.match(TED_PATTERN) ?? []).map(signedTed)
+  const teds = text.match(TED_PATTERN) ?? []
   return documentNodes(parsed).map((dte, index) => printable(dte, teds, index))
 }
