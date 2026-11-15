@@ -63,6 +63,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without them prints as before. `dte-sdk/pdf` grows from 13.72 kB to 14.89 kB, over its 14 kB limit, which goes to
   16 kB.
   - **What to change:** nothing.
+- **The certification runner issues the settlement set.** Res. Ex. SII N° 108 of 2005 asks an issuer of settlement
+  invoices (43) for technical tests of their own, and the SII hands them out as one more set of the test set, `SET
+  LIQUIDACION FACTURA`. `parseTestSetText` recognized it and `planCertificationSets` left it out, so it was never
+  issued or declared. Now a settlement set is read by its two tables: each item of `ITEM  CANTIDAD  TOTAL LINEA` with
+  its quantity and its line total, sign included (`TestCaseItem.lineTotal`), and each row of `COMISIONES Y OTROS
+  CARGOS` in the new `TestCase.commissions`; the cases of every other set read as before, without either field.
+  `planCertificationSets` plans it in `settlement` (`SettlementSetPlan`): one settlement invoice per case, each item a
+  line with its quantity and its total as the amount, the type of the settled document (`TpoDocLiq`) from the item
+  name read without accents (`ANTICIPO` is 99; an invoice, a credit or debit note, a receipt or an earlier settlement
+  is its electronic code when the name says electronic and its paper code when it does not; any other name is 99, the
+  code Formato DTE gives to "otras transacciones"), exempt when the name starts with `EXENTO`, and each charge a
+  commission (`COMISION` in its name) or another charge, with its total as the exempt value when its name starts with
+  `EXENTO` and as the net value otherwise. `issueTestSet` issues every case of the set in one envelope, each with the
+  `SET` reference, to the run's receiver, with its commissions taken off the total and their VAT rounded
+  once over their net total, as the SII's validation 38 asks. The runner sends it after the other four, as
+  `sets-prueba/envio-set-liquidacion.xml`, asks for its folios of type 43 with theirs, declares its track id with the
+  sets and again with the books, and waits for its approval: `readProgress` reads the state of its row in
+  `states.settlement`, and a declaration answer names its objections as `settlement`. The set is planned only when the
+  text holds it, and it holds it only when it was asked for on download (`optionalSets: [...DEFAULT_OPTIONAL_SETS,
+  'SET84']`), so a run with the default sets is unchanged. The SII hands the set out company by company and none is
+  public: the grammar rests on synthetic sets, and the checkbox `SET84` and the label of the row on the progress page
+  are not measured. The simulation does not re-issue the settlement invoices, `readPrintedSamples` files their
+  envelope with the simulation's, and the printed sample of a 43 has no commissions yet. `dte-sdk/portal` grows from
+  79.02 kB to 79.64 kB, under its limit.
+  - **What to change:** nothing for a run with the default sets. A run that already asked for `SET84` now issues,
+    declares and awaits the settlement set where it used to download it and leave it. The new keys widen some types:
+    `CertificationState.sets` and `sendTestSet` take a `SentSetKey` (the four of `SetKey` and `'settlement'`), as does
+    the `set` of the `SET_START`, `SET_OK` and `SET_ERROR` events, and `IssuableSetPlan` and `IssuedSet.kind` take the
+    settlement plan; an exhaustive `switch` over any of them needs the `settlement` case.
+
+### Changed
+
+- **In production, `unstable_replenishFolios` downloads again only a range stamped today.** Its first step downloads
+  again the ranges the SII already authorized and nobody holds, which spends no quota. A company holds what it
+  declares in `cafs`, so in production a range missing from them may be one another system of the company issues
+  with, and a second copy of its CAF would repeat its folios, which the SII rejects. Since 0.12.0 such a range is not
+  annulled when it was stamped before the last day; it was still downloaded and issued with. Now, in production, the
+  step reaches the ranges stamped today, counted in Chile, which is where a grant that never arrived is, and leaves
+  the others alone. They come back in a new field of the report, `outsideWindow`, each with its first and last folio
+  and the day it was stamped, or null when the list gives no day to read; a range with no day is never taken.
+  `reobtainWithinDays`, new, sets how many days back the step reaches in either environment; certification has no
+  limit, as before. A request the SII may have granted without handing it over is still settled in the same run.
+  `ReobtainableRange` gains `date`, the day the listing gives for the range.
+  - **What to change:** nothing in certification. In production, read `outsideWindow`: add to `cafs` the CAF of a
+    range another system holds, or pass `reobtainWithinDays` to take the ranges nobody else issues with. A
+    `ReplenishmentReport` built by hand needs `outsideWindow`, and a `ReobtainableRange` needs `date`.
+- **Size:** this change and the fix below took `dte-sdk` from 38.87 kB to 38.95 kB and `dte-sdk/portal` from 79.03 kB
+  to 79.27 kB, both under their limits.
+
+### Fixed
+
+- **`withinDays` of an annulment counts the days in Chile.** `annulFolios` read the day a range was stamped as a day
+  in UTC, so late in the day in Chile, when UTC is already in the next one, a range stamped that same day was more
+  than a day old: from 21:00, or 20:00 in winter, `withinDays: 1` reached no range at all, and 1 is what
+  `unstable_replenishFolios` uses in production since 0.12.0. A day now counts from its start in Chile, so 1 is today
+  at any hour. The error only left ranges out: nothing was annulled that should not have been.
+  - **What to change:** nothing.
 - **`Document.warnings`: what the SII accepts with an objection.** `createDocument` builds a document the SII
   accepts with an objection (a "reparo") and lists, in the new optional `warnings`, the validations of the SII's
   "Nuevas validaciones a la IECV, DTE y DJ 3327 y 3328" that object to it: 10, a total of zero on an invoice, an exempt
@@ -122,9 +179,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `details.field` and the kind in `details.kind`. Each kind admits as many types as its 20 and 2 `SubTotDTE`, or
   fewer, so the count of types needs no check.
   - **What to change:** split a larger batch into several envelopes.
-- **Size:** the content rules took `dte-sdk` from 38.87 kB to 39.45 kB and `dte-sdk/portal` from 79.03 kB to 79.67 kB,
-  both under their limits; the new error code took `dte-sdk/node` from 7.36 kB to 7.37 kB and `dte-sdk/pdf` from
-  13.2 kB to 13.21 kB.
+- **Size:** the content rules took `dte-sdk` from 38.95 kB to 39.47 kB, under its limit, and `dte-sdk/portal` from
+  79.83 kB to 80.36 kB, over its 80 kB limit, which goes to 82 kB; the new error code took `dte-sdk/node` from 7.36 kB
+  to 7.37 kB.
 
 
 ## [0.12.0] - 2026-11-14

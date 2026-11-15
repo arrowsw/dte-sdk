@@ -1,11 +1,11 @@
-import type { BookKey, SetKey } from '../catalogs/certification'
+import type { BookKey } from '../catalogs/certification'
 import type { Certificate } from '../certificate/certificate'
 import type { FolioRegistry } from '../folios/registry'
 import type { IssuerInput, ReceiverInput } from '../model/document'
 import type { PortalClient } from '../portal/client'
 import type { SiiClient } from '../sii/client'
 import type { ExchangeContact } from './exchange'
-import type { CertificationState, CertificationStore } from './state'
+import type { CertificationState, CertificationStore, SentSetKey } from './state'
 
 /**
  * EN: What every step needs: the clients, the store, the registry, the company and the clock.
@@ -84,9 +84,9 @@ export type CertificationProgressEvent =
   | { readonly step: 'SETS_REGENERATED' }
   | { readonly step: 'CAF_REQUESTING'; readonly type: number }
   | { readonly step: 'CAF_OK'; readonly type: number }
-  | { readonly step: 'SET_START'; readonly set: SetKey }
-  | { readonly step: 'SET_OK'; readonly set: SetKey; readonly trackId: string }
-  | { readonly step: 'SET_ERROR'; readonly set: SetKey; readonly error: string }
+  | { readonly step: 'SET_START'; readonly set: SentSetKey }
+  | { readonly step: 'SET_OK'; readonly set: SentSetKey; readonly trackId: string }
+  | { readonly step: 'SET_ERROR'; readonly set: SentSetKey; readonly error: string }
   | { readonly step: 'SETS_DECLARING' }
   | { readonly step: 'SETS_DECLARED' }
   | { readonly step: 'POLLING'; readonly attempt: number; readonly max: number; readonly label: PollingLabel }

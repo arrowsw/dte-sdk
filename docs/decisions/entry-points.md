@@ -8,9 +8,9 @@ by Hans on 2026-11-14.
 
 | Entry | Holds | Size | Reaches `node:` |
 |---|---|---|---|
-| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 38.87 kB | No |
-| `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.36 kB | Yes, on first use |
-| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 79.03 kB | Yes, on first use |
+| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 39.47 kB | No |
+| `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.37 kB | Yes, on first use |
+| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 80.36 kB | Yes, on first use |
 | `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 14.89 kB | Yes, on first use |
 | `dte-sdk/catalogs` | The SII's large code tables: the business activities | 10.65 kB | No |
 
@@ -76,10 +76,15 @@ entries did not move.
 The commissions and other charges of a settlement invoice, and the additional taxes and withholdings with the printed
 names of their codes, on the printed sample, took `dte-sdk/pdf` from 13.72 kB to 14.89 kB, over its 14 kB limit, which
 went to 16 kB; the other entries did not move.
+The days reobtaining reaches in production, with the ranges left outside them in the report, and the days of an
+annulment counted in Chile, also after 0.12.0, took `dte-sdk` from 38.87 kB to 38.95 kB and `dte-sdk/portal` from
+79.03 kB to 79.27 kB, both under their limits; the other entries did not move.
+The settlement set in the certification runner, after 0.12.0, took `dte-sdk/portal` from 79.27 kB to 79.83 kB, under
+its 80 kB limit; the other entries did not move.
 The content rules `createDocument` checks before stamping, and the count of an envelope's documents, after 0.12.0,
-took `dte-sdk` from 38.87 kB to 39.45 kB and `dte-sdk/portal` from 79.03 kB to 79.67 kB, both under their limits, and
-the new error code took `dte-sdk/node` from 7.36 kB to 7.37 kB and `dte-sdk/pdf` from 13.2 kB to 13.21 kB, also under
-their limits.
+took `dte-sdk` from 38.95 kB to 39.47 kB, under its limit, and `dte-sdk/portal` from 79.83 kB to 80.36 kB, over its
+80 kB limit, which went to 82 kB; the new error code took `dte-sdk/node` from 7.36 kB to 7.37 kB, under its
+limit; `dte-sdk/pdf` did not move.
 
 ## Why
 

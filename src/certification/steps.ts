@@ -1,4 +1,4 @@
-import { SET_KEYS, type CertificationStage, type DeclarationKey, type SetKey } from '../catalogs/certification'
+import type { CertificationStage, DeclarationKey } from '../catalogs/certification'
 import { DteError, errorMessage, isDteError } from '../errors'
 import {
   advanceStage,
@@ -37,7 +37,14 @@ import {
   type Runtime,
   type StepResult,
 } from './runtime'
-import { createCertificationState, type CertificationState, type EnvelopeDiagnosis, type SentCase } from './state'
+import {
+  createCertificationState,
+  SENT_SET_KEYS,
+  type CertificationState,
+  type EnvelopeDiagnosis,
+  type SentCase,
+  type SentSetKey,
+} from './state'
 
 export type {
   CertificationDependencies,
@@ -171,7 +178,7 @@ export const markSent = async (
 export const sendTestSet = async (
   deps: CertificationDependencies,
   state: CertificationState,
-  options: { readonly kind: SetKey },
+  options: { readonly kind: SentSetKey },
 ): Promise<StepResult<'sent'>> => {
   const rt = runtime(deps)
   const plan = state.plan?.[options.kind] as IssuableSetPlan | undefined
@@ -212,11 +219,12 @@ export const sendTestSet = async (
   }
 }
 
-const SET_FILE_NAMES: Readonly<Record<SetKey, string>> = {
+const SET_FILE_NAMES: Readonly<Record<SentSetKey, string>> = {
   basic: 'basico',
   guide: 'guia',
   exempt: 'exenta',
   purchase: 'compra',
+  settlement: 'liquidacion',
 }
 
 /**
@@ -342,7 +350,9 @@ export const declareTestSets = async (
   const rt = runtime(deps)
   const today = rt.now()
   const entries: DeclarationEntries = Object.fromEntries(
-    SET_KEYS.flatMap((key) => (state.sets[key] === undefined ? [] : [[key, entryOf(state.sets[key]!.trackId, today)]])),
+    SENT_SET_KEYS.flatMap((key) =>
+      state.sets[key] === undefined ? [] : [[key, entryOf(state.sets[key]!.trackId, today)]],
+    ),
   )
   if (Object.keys(entries).length === 0) throw new DteError('MISSING_FIELD', { field: 'sets' })
   rt.emit({ step: 'SETS_DECLARING' })
@@ -379,7 +389,7 @@ export const waitForTestSetsApproval = async (
   state: CertificationState,
 ): Promise<StepResult<'approved' | 'rejected' | 'timedOut'>> => {
   const rt = runtime(deps)
-  const wanted: readonly string[] = SET_KEYS.filter((key) => state.sets[key] !== undefined)
+  const wanted: readonly string[] = SENT_SET_KEYS.filter((key) => state.sets[key] !== undefined)
   for (let attempt = 1; attempt <= SETS_APPROVAL_ATTEMPTS; attempt += 1) {
     await rt.sleep(SETS_APPROVAL_INTERVAL_MS)
     rt.emit({ step: 'POLLING', attempt, max: SETS_APPROVAL_ATTEMPTS, label: 'sets' })

@@ -1,4 +1,12 @@
-import { chileDate, chileTimestamp, chileDateTimeParts, toIsoDate, isIsoDate, isPeriod } from '../src/time/chile'
+import {
+  chileDate,
+  chileTimestamp,
+  chileDateTimeParts,
+  toIsoDate,
+  isIsoDate,
+  isPeriod,
+  startedWithinDays,
+} from '../src/time/chile'
 import { DteError } from '../src/errors'
 
 describe('Chile time', () => {
@@ -31,6 +39,26 @@ describe('Chile time', () => {
     expect(Object.keys(chileDateTimeParts())).toEqual(['year', 'month', 'day', 'hour', 'minute', 'second'])
     expect(chileDate()).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     expect(chileTimestamp()).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/)
+  })
+})
+
+describe('startedWithinDays', () => {
+  // 15:30 of the 15th in Chile.
+  const afternoon = new Date('2026-11-15T18:30:00.000Z')
+  // 22:30 of the 15th in Chile, already the 16th in UTC.
+  const lateEvening = new Date('2026-11-16T01:30:00.000Z')
+
+  test('a day counts while it started, in Chile, no more than that many days ago', () => {
+    expect(startedWithinDays('2026-11-15', 1, afternoon)).toBe(true)
+    expect(startedWithinDays('2026-11-14', 1, afternoon)).toBe(false)
+    expect(startedWithinDays('2026-11-14', 2, afternoon)).toBe(true)
+    expect(startedWithinDays('2026-05-19', 180, afternoon)).toBe(false)
+    expect(startedWithinDays('2026-05-20', 180, afternoon)).toBe(true)
+  })
+
+  test('the day is the one in Chile, not the one in UTC', () => {
+    expect(startedWithinDays('2026-11-15', 1, lateEvening)).toBe(true)
+    expect(startedWithinDays('2026-11-14', 1, lateEvening)).toBe(false)
   })
 })
 

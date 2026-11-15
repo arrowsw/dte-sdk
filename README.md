@@ -410,8 +410,8 @@ optional, as the schema declares them, up to 20 lines. A non-billable line (`exe
 totals, because a 43 has no `MontoNF`.
 
 The same sums apply to the commission lines of a purchase invoice (46) and of the notes that correct one. The printed
-sample prints the commissions and takes them off in its totals, and the certification runner does not issue the
-settlement set.
+sample prints the commissions and takes them off in its totals. The certification runner issues the settlement set:
+see [The settlement set](#the-settlement-set).
 
 ### Receipts
 
@@ -805,8 +805,8 @@ been seen yet: see the [portal and folios design](./docs/superpowers/specs/2026-
 
 `unstable_replenishFolios` is one call that keeps a document type stocked. It asks the SII only when the usable folios
 fall below `minimum`, and then in the order that does not make a block worse: ranges already authorized that nobody
-holds are downloaded again, which spends no quota; what is still missing is requested in batches, within the quota;
-and unused folios are annulled as a last resort.
+holds are downloaded again, which spends no quota (in production, only the ones stamped today); what is still missing
+is requested in batches, within the quota; and unused folios are annulled as a last resort.
 
 ```typescript
 import { unstable_replenishFolios } from 'dte-sdk/portal'
@@ -838,11 +838,18 @@ await store.saveState({ coolUntil: report.coolUntil, knownAnnulled: report.known
   range held is never downloaded again and never annulled. `lastIssuedFolio` is the highest folio the company has
   issued, on any system: a folio up to it is never taken as free. Without `isFolioFree`, every folio after it in a
   range nobody holds is free; with it, the SII is asked about each one, up to `maxChecksPerRange` per range.
+- **In production it downloads again only a range stamped today.** What you hold is what you declare in `cafs`, so a
+  range missing from them that was stamped before today may be one another system of the company issues with, and a
+  second copy of its CAF would repeat its folios. It is left alone and comes back in `outsideWindow`, with the day it
+  was stamped, for someone to decide: add its CAF to `cafs` if another system holds it, or pass `reobtainWithinDays`
+  to take it. Today, counted in Chile, is where a grant that never arrived is; a range with no day to read is never
+  taken. In certification every range is reached, unless `reobtainWithinDays` says less.
 - **Annulling is off in production** unless you pass `allowAnnul: true`, and on in certification. It runs only for a
   refusal that unused folios cause, and only when the SII counts more of them (`FOLIOS_DISP`) than the ones in hand. It
   never touches a CAF held, a range the run downloaded or `exclude`, and it reaches only ranges stamped in the last
-  day in production, where an older range may be another system's, and in the last 180 days in certification
-  (`annulWithinDays` sets it), ten per pass. Put in `exclude` the folios of documents signed and not received by the SII yet.
+  day in production, which is today in Chile and where an older range may be another system's, and in the last 180
+  days in certification (`annulWithinDays` sets it), ten per pass. Put in `exclude` the folios of documents signed and
+  not received by the SII yet.
 - **A run that ends short cools down.** With no failure, `coolUntil` is 15 minutes ahead (`coolDownMs`); after a
   session limit or a firewall block, an hour. Until then the call answers `coolDown` and nothing goes out. Any other
   failure sets none, and a report with enough folios hands back a cool-down still running.
@@ -978,10 +985,10 @@ const simulation = await issueSimulation(plan, { ...options, folios: createFolio
 ```
 
 The SII test set is parsed line by line into cases; `planCertificationSets` turns them into what each set issues and the
-folios each type needs; `issueTestSet` issues the basic, exempt, guide and purchase sets through `issueDocument`
-with the `SET` reference (`CASO <id>`) and the rules the SII review expects (returned goods at the original price,
-cancellations taking the cancelled document's items, the issuer as receiver of purchase invoices and internal
-transfers); `issueSimulation` re-issues every case in one envelope; the three `createCertification*Book` functions
+folios each type needs; `issueTestSet` issues the basic, exempt, guide, purchase and settlement sets through
+`issueDocument` with the `SET` reference (`CASO <id>`) and the rules the SII review expects (returned goods at the
+original price, cancellations taking the cancelled document's items, the issuer as receiver of purchase invoices and
+internal transfers); `issueSimulation` re-issues every case in one envelope; the three `createCertification*Book` functions
 build and sign the sales, purchase and guide books, as total submissions or as adjustments of a period the SII already
 holds. Everything is data: sending, waiting for the status and declaring
 belong to the certification runner. No real test-set text was available while writing this: the grammar follows the
@@ -1100,6 +1107,41 @@ and the runner makes it only with `declareCompliance: true`.
   simulation, 10 declaration attempts 5 s apart after 10 s. Inject `sleep` and `now` to test without waiting.
 - **Nothing here has been run against the portal yet.** Every page shape comes from field behaviour; the first
   enrolled run should keep the artefacts the store writes (every portal answer is there) as fixtures.
+
+### The settlement set
+
+Res. Ex. SII N° 108 of 2005 asks an issuer of settlement invoices (43) for technical tests of their own. The SII hands
+them out as one more set of the test set, `SET LIQUIDACION FACTURA`, which is not ticked by default: ask for it when
+the test set is downloaded, and the runner issues it with the other sets.
+
+```typescript
+import { DEFAULT_OPTIONAL_SETS, runCertification } from 'dte-sdk/portal'
+
+const result = await runCertification(deps, { optionalSets: [...DEFAULT_OPTIONAL_SETS, 'SET84'] })
+// result.state.plan.settlement holds the cases, result.state.sets.settlement the envelope sent
+```
+
+- **One settlement invoice per case, in one envelope.** The set's cases are read by their two tables: each item of
+  `ITEM  CANTIDAD  TOTAL LINEA` becomes a line with its quantity and its total as the amount, negative for a credit
+  note or an earlier settlement, and each row of `COMISIONES Y OTROS CARGOS` a commission line. Names keep their
+  accents, as the SII's instructions ask.
+- **What the set does not say is read from the names.** The type of the settled document (`TpoDocLiq`) comes from the
+  item name, read without accents: `ANTICIPO` is 99, and an invoice, a credit or debit note, a receipt or an earlier
+  settlement is its electronic code when the name says electronic and its paper code when it does not (33 or 30, 61
+  or 60, 56 or 55, 39 or 35, 43 or 40); any other name is 99, which Formato DTE gives to "otras transacciones". A line
+  or a charge whose name starts with `EXENTO` is exempt, any other is net; a charge is a commission when its name
+  says `COMISION` and another charge when it does not.
+- **The totals are phase 1's.** The commissions are taken off the total and their VAT is the VAT rate by their net
+  total, rounded once, as the SII's validation 38 asks; the receiver is the run's, the principal the settlement is
+  issued to, with its line of business.
+- **It is sent, declared and awaited with the others.** It goes after the four sets as
+  `sets-prueba/envio-set-liquidacion.xml`, its folios of type 43 are asked for with theirs, and its track id is
+  declared on its row with the sets and again with the books, so the portal keeps it.
+- **No real set has been seen.** The SII generates the set company by company and none is public: the grammar rests
+  on synthetic sets shaped like the field's, and the checkbox `SET84` and the label of its row on the progress page
+  are not measured. Keep the first download as a fixture.
+- **Not yet in the later stages.** The simulation re-issues the four sets only. `readPrintedSamples` reads the
+  settlement envelope as one of the simulation's, and the printed sample of a 43 has no commissions yet.
 
 ## Certification: the exchange and the printed samples
 
