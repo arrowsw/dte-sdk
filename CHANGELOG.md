@@ -73,7 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declares, failed with `ENCODING_UNSUPPORTED_CHAR` or `PDF_RENDER_FAILED` at its first accented letter. It now hands
   the bytes to `parsePrintableDocuments`, which reads both.
 
-`dte-sdk/pdf` grows from 14.89 kB to 17.68 kB, over its 16 kB limit, which goes to 18 kB: it now holds the words of
+`dte-sdk/pdf` grows from 14.89 kB to 17.7 kB, over its 16 kB limit, which goes to 18 kB: it now holds the words of
 an amount and the names of the documents a reference can name, and reaches the helpers that check a stamp's
 signature.
 

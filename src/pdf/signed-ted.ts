@@ -1,4 +1,4 @@
-import { rsaSha1VerifyBase64 } from '../crypto/rsa'
+import { rsaPublicKeyBytes, rsaSha1VerifyBase64 } from '../crypto/rsa'
 import { child, signedForms } from '../xml/elements'
 import { parseXmlDom } from '../xml/parse'
 
@@ -10,17 +10,18 @@ const textOf = (ted: string, tag: string): string =>
 
 // A stamp is input from anyone, and the cost of checking a signature grows with the key it names. A CAF key is 512 to
 // 1024 bits with a small exponent (3 or 65537), so a modulus over 4096 bits or an exponent over 32 bits is no CAF key
-// and its signature is not tried.
+// and its signature is not tried. The size is that of the bytes the verification itself decodes, so no way of writing
+// the base64 gets a larger key past the bound.
 const MAX_KEY_BYTES = { modulus: 512, exponent: 4 } as const
-const byteLength = (base64: string): number => Math.floor((base64.replace(/[^A-Za-z0-9+/]/g, '').length * 3) / 4)
 
 // True when the signature of the stamp (`FRMT`) covers its `DD` as this text writes it. The key is the one of the CAF
 // the stamp itself carries, so nothing else is needed; anything missing, malformed or out of bounds is false.
 const verifies = (ted: string): boolean => {
   const key = { modulus: textOf(ted, 'M'), exponent: textOf(ted, 'E') }
+  const size = rsaPublicKeyBytes(key)
   return (
-    byteLength(key.modulus) <= MAX_KEY_BYTES.modulus &&
-    byteLength(key.exponent) <= MAX_KEY_BYTES.exponent &&
+    size.modulus <= MAX_KEY_BYTES.modulus &&
+    size.exponent <= MAX_KEY_BYTES.exponent &&
     rsaSha1VerifyBase64(key, DD_PATTERN.exec(ted)?.[0] ?? '', 'latin1', textOf(ted, 'FRMT'))
   )
 }
