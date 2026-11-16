@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-16
+
 ### Added
 
 - **The printed sample prints four fields Formato DTE 2.5 asks for.** The format's print column (section 2.2, column
@@ -88,6 +90,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reference's name and its reason wrap inside their columns, and its row grows with them, where a long one ran over
   the next column.
   - **What to change:** nothing, unless you compare the text of a sample: those three read differently.
+- **Size:** `dte-sdk/pdf` grows from 14.89 kB to 17.7 kB, over its 16 kB limit, which goes to 18 kB: it now holds the
+  words of an amount and the names of the documents a reference can name, and reaches the helpers that check a stamp's
+  signature. The rest of the print column takes it on to 19.03 kB, over that 18 kB limit, which goes to 20 kB: it
+  holds the names of the payment media, the kinds of account, the special invoices, the documents of a tourist and the
+  issuers of a guide for export. The bound on the key, shared by every check in place of the one the printed stamp
+  carried, then takes `dte-sdk` from 39.46 kB to 39.52 kB, `dte-sdk/node` from 7.4 kB to 7.38 kB, `dte-sdk/portal` from
+  80.33 kB to 80.32 kB and `dte-sdk/pdf` from 19.03 kB to 19.07 kB, all under their limits. Reading a code's name among
+  a table's own entries then takes `dte-sdk/pdf` to 19.04 kB.
 
 ### Fixed
 
@@ -118,15 +128,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with exponent 3 or 65537 and a certificate key at most 4096 bits, so no real key reaches the bound; a document that
   names a larger one fails that check (`signatureValid: false`), in a few milliseconds.
   - **What to change:** nothing.
-
-`dte-sdk/pdf` grows from 14.89 kB to 17.7 kB, over its 16 kB limit, which goes to 18 kB: it now holds the words of an
-amount and the names of the documents a reference can name, and reaches the helpers that check a stamp's signature.
-The rest of the print column takes it on to 19.03 kB, over that 18 kB limit, which goes to 20 kB: it holds the names
-of the payment media, the kinds of account, the special invoices, the documents of a tourist and the issuers of a
-guide for export. The bound on the key, shared by every check in place of the one the printed stamp carried, then
-takes `dte-sdk` from 39.46 kB to 39.52 kB, `dte-sdk/node` from 7.4 kB to 7.38 kB, `dte-sdk/portal` from 80.33 kB to
-80.32 kB and `dte-sdk/pdf` from 19.03 kB to 19.07 kB, all under their limits. Reading a code's name among a table's
-own entries then takes `dte-sdk/pdf` to 19.04 kB.
 
 ## [0.13.0] - 2026-11-14
 
@@ -1366,7 +1367,8 @@ own entries then takes `dte-sdk/pdf` to 19.04 kB.
   Jest, ESLint, Prettier, size-limit, Stryker, CI and tag-triggered publish)
   and a single `hello()` export that returns `'dte-sdk is coming'`.
 
-[Unreleased]: https://github.com/arrowsw/dte-sdk/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/arrowsw/dte-sdk/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.14.0
 [0.13.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.13.0
 [0.12.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.12.0
 [0.11.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.11.0
