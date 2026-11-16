@@ -104,7 +104,10 @@ against the SII's schemas, and none has been sent. 0.13.0 adds the SII's code ta
 new entry, `dte-sdk/catalogs`; prints a document over several pages, with a settlement invoice's commissions and the
 withholdings; issues the settlement set from the certification runner; and refuses before stamping what the SII
 rejects in a document's content, which now asks for the issuer's activity code outside a receipt. None of it has been
-sent to the SII. Every area this README describes ships in 0.13.0.
+sent to the SII. 0.14.0 prints on the printed sample the fields Formato DTE 2.5 marks to be printed, and writes more of
+the document in words; it reads a document received from a third party from the bytes of its file and prints its stamp
+as it was signed, and it bounds the key a received document names before a signature is checked with it. None of it has
+been sent to the SII. Every area this README describes ships in 0.14.0.
 Releases before 1.0.0 come out as the work lands, without waiting for the runs against the
 real SII; those runs come before 1.0.0, the first version recommended for production.
 
