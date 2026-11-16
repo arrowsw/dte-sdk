@@ -11,7 +11,7 @@ by Hans on 2026-11-14.
 | `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 39.46 kB | No |
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.4 kB | Yes, on first use |
 | `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 80.33 kB | Yes, on first use |
-| `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 19.03 kB | Yes, on first use |
+| `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 19.09 kB | Yes, on first use |
 | `dte-sdk/catalogs` | The SII's large code tables: the business activities | 10.65 kB | No |
 
 Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
@@ -95,6 +95,8 @@ The rest of the fields Formato DTE 2.5 marks to be printed (the payment, the spe
 export, the principal and the requester, the document of a foreign receiver, the bases, the deposit guarantee, the
 totals in another currency, and what prints under an item) took `dte-sdk/pdf` from 17.7 kB to 19.03 kB, over its
 18 kB limit, which went to 20 kB; the other entries did not move.
+Reading a code's name among the own entries of its table, so that a received document whose code is `constructor`
+prints, took `dte-sdk/pdf` from 19.03 kB to 19.09 kB, under its limit; the other entries did not move.
 
 ## Why
 

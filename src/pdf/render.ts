@@ -32,6 +32,7 @@ import {
   formatAmount,
   headerNotes,
   issuerAddress,
+  nameOf,
   itemRow,
   paymentGroups,
   printedQuantity,
@@ -368,7 +369,7 @@ const drawLine = (canvas: Canvas, text: string, y: number): void =>
   drawText(canvas, text, MARGIN, y, canvas.fonts.normal, FONT.small, canvas.paint(COLOURS.black))
 
 const transferReasonText = (reason: number): string =>
-  `Tipo de Traslado: ${reason} - ${TRANSFER_REASON_NAMES[reason] ?? ''}`
+  `Tipo de Traslado: ${reason} - ${nameOf(TRANSFER_REASON_NAMES, reason) ?? ''}`
 
 const drawTableHeader = (
   canvas: Canvas,

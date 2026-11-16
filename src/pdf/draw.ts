@@ -62,9 +62,14 @@ export const referenceTypeName = (code: string): string => {
   if (isDocumentType(type)) return documentTypeName(type, 'printed')
   return isReferenceDocumentType(type) ? REFERENCE_DOCUMENT_TYPES[type] : `Tipo ${code}`
 }
+// The name a table gives a code, read among the table's own entries only. A code comes from a document, which may be
+// anyone's, and every object has properties that are no entry of it (`constructor`, `toString`): a code that names one
+// is a code the table does not name.
+export const nameOf = (names: Readonly<Record<string, string>>, code: string | number): string | undefined =>
+  Object.prototype.hasOwnProperty.call(names, code) ? names[code] : undefined
 // What the document does to the referenced one, in words, and then the reason it gives.
 export const referenceReason = ({ code, reason }: PrintableReference): string =>
-  [code === undefined ? undefined : REFERENCE_CODE_NAMES[code], reason].filter(Boolean).join('. ')
+  [code === undefined ? undefined : nameOf(REFERENCE_CODE_NAMES, code), reason].filter(Boolean).join('. ')
 // A quantity as it prints, and a unit price: both admit six decimals.
 export const printedQuantity = (value: number | undefined): string => (value === undefined ? '' : formatQuantity(value))
 export const printedUnitPrice = (value: number | undefined): string =>
@@ -78,10 +83,10 @@ export const issuerAddress = (issuer: PrintableIssuer): string =>
   `Casa Matriz: ${issuer.address}${[issuer.commune, cityOf(issuer)].map((part) => (part ? `, ${part}` : '')).join('')}`
 // A code and its name, as `2 - Por cuenta del receptor`; the code alone when it has no name, and empty when absent.
 const codeText = (code: number | undefined, names: Readonly<Record<number, string>>): string =>
-  code === undefined ? '' : [String(code), names[code]].filter(Boolean).join(' - ')
+  code === undefined ? '' : [String(code), nameOf(names, code)].filter(Boolean).join(' - ')
 // A value the format asks to print in words, by its name, or as written when it has none; empty when absent.
 const named = (value: string | number | undefined, names: Readonly<Record<string, string>>): string =>
-  value === undefined ? '' : (names[value] ?? String(value))
+  value === undefined ? '' : (nameOf(names, value) ?? String(value))
 const amountText = (value: number | undefined): string => (value === undefined ? '' : money(value))
 const dateText = (date: string | undefined): string => (date ? longDate(date) : '')
 // The payment in the order of Formato DTE 2.5, one group per line, every field of it the format marks to print: the
@@ -272,7 +277,7 @@ const withholdingRows = (
 ): readonly TotalRow[] =>
   withholdings.flatMap(({ code, rate, amount }): readonly TotalRow[] => {
     if (!amount) return []
-    const name = TAX_NAMES[code] ?? `Impuesto o retención ${code}`
+    const name = nameOf(TAX_NAMES, code) ?? `Impuesto o retención ${code}`
     const label = rate === undefined ? name : `${name} (${formatAmount(rate)}%)`
     return [[label, /^IVA retenido/i.test(name) ? minus(written)(amount) : written(amount), false]]
   })

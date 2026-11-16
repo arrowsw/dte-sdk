@@ -12,6 +12,7 @@ import {
   headerNotes,
   issuerAddress,
   itemNotes,
+  nameOf,
   paymentGroups,
   printedQuantity,
   printedTypeName,
@@ -326,7 +327,7 @@ export const buildRoll = (input: RollInput): readonly Row[] => {
       : field(
           fonts,
           'Tipo de Traslado: ',
-          [transferReason, TRANSFER_REASON_NAMES[transferReason]].filter(Boolean).join(' - '),
+          [transferReason, nameOf(TRANSFER_REASON_NAMES, transferReason)].filter(Boolean).join(' - '),
         )),
     ...field(fonts, 'Tipo de Despacho: ', dispatchText(doc)),
     ...headerNotes(doc).flatMap(([label, value]) => field(fonts, label, value)),
