@@ -7,9 +7,12 @@ import {
   drawRect,
   drawRule,
   drawText,
+  foreignIdText,
   formatAmount,
+  headerNotes,
   issuerAddress,
-  paymentFields,
+  itemNotes,
+  paymentGroups,
   printedQuantity,
   printedTypeName,
   printedUnitPrice,
@@ -152,6 +155,7 @@ const receiverRows = (doc: PrintableDocument, fonts: Fonts): readonly Row[] => {
   return [
     ...field(fonts, 'Señor(es): ', receiver.name),
     ...field(fonts, 'RUT: ', receiver.rut === '' ? '' : dottedRut(receiver.rut)),
+    ...field(fonts, 'Identificación: ', foreignIdText(doc)),
     ...field(fonts, 'Giro: ', receiver.activity),
     ...field(fonts, 'Dirección: ', address),
   ]
@@ -185,18 +189,13 @@ const detailRows = (doc: PrintableDocument, fonts: Fonts): readonly Row[] => [
         ? ''
         : `${printedQuantity(item.quantity)} ${item.unit ?? 'UN'}${item.unitPrice === undefined ? '' : ` x ${printedUnitPrice(item.unitPrice)}`}`
     const amount = item.amount === undefined ? '' : `$${formatAmount(item.amount)}`
-    const discount = item.discountAmount
-      ? `Dcto: $${formatAmount(item.discountAmount)}`
-      : item.discountPercent
-        ? `Dcto: ${item.discountPercent}%`
-        : ''
     return [
       ...wrapped(fonts, `${index + 1}. ${item.code ? `${item.code} ` : ''}${item.name}`, ROLL_FONT.body),
       ...descriptionLines(item).flatMap((line) => wrapped(fonts, line, ROLL_FONT.small)),
       ...(quantity === '' && amount === ''
         ? []
         : [{ kind: 'pair', left: quantity, right: amount, size: ROLL_FONT.small, bold: false } as const]),
-      ...(discount === '' ? [] : [text(discount, ROLL_FONT.small, { tone: 'darkGrey' })]),
+      ...itemNotes(item).map((note) => text(note, ROLL_FONT.small, { tone: 'darkGrey' })),
       gap(ROLL.gap / 2),
     ]
   }),
@@ -321,7 +320,7 @@ export const buildRoll = (input: RollInput): readonly Row[] => {
     ...issuerRows(doc, fonts),
     ...(receiver.length === 0 ? [] : [{ kind: 'rule' } as const, ...receiver]),
     ...field(fonts, 'Fecha Emisión: ', longDate(doc.issueDate)),
-    ...paymentFields(doc).flatMap(([label, value]) => field(fonts, label, value)),
+    ...paymentGroups(doc).flatMap((group) => group.flatMap(([label, value]) => field(fonts, label, value))),
     ...(transferReason === null
       ? []
       : field(
@@ -330,6 +329,7 @@ export const buildRoll = (input: RollInput): readonly Row[] => {
           [transferReason, TRANSFER_REASON_NAMES[transferReason]].filter(Boolean).join(' - '),
         )),
     ...field(fonts, 'Tipo de Despacho: ', dispatchText(doc)),
+    ...headerNotes(doc).flatMap(([label, value]) => field(fonts, label, value)),
     ...transportRows(doc, fonts),
     ...referenceRows(doc, fonts),
     ...detailRows(doc, fonts),

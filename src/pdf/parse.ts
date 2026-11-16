@@ -22,6 +22,17 @@ export type PrintableParty = {
 }
 
 /**
+ * EN: The receiver of the printed document; a foreign one without a RUT is named by the document that identifies them.
+ * ES: El receptor del documento impreso; uno extranjero sin RUT se identifica por su documento de identidad.
+ */
+export type PrintableReceiver = PrintableParty & {
+  /** EN: Identifier of a foreign receiver; undefined when absent. ES: `Extranjero/NumId` — Número identificador del receptor extranjero; undefined si falta. */
+  readonly foreignId?: string
+  /** EN: Kind of document of a tourist: 1 passport, 2 national identity card; undefined when absent. ES: `Extranjero/TipoDocID` — Tipo de documento del turista: 1 pasaporte, 2 DNI; undefined si falta. */
+  readonly foreignIdType?: number
+}
+
+/**
  * EN: The issuer of the printed document.
  * ES: El emisor del documento impreso.
  */
@@ -55,6 +66,50 @@ export type PrintableTotals = {
   readonly commissionsExempt?: number
   /** EN: VAT of the commissions and other charges. ES: `Comisiones/ValComIVA` — IVA comisiones y otros cargos. */
   readonly commissionsVat?: number
+  /** EN: Base of the slaughter of meat. ES: `MntBase` — Monto base faenamiento carne. */
+  readonly slaughterBase?: number
+  /** EN: Base of the margins of trade. ES: `MntMargenCom` — Monto base de márgenes de comercialización. */
+  readonly marginBase?: number
+  /** EN: Guarantee for the deposit of containers or packaging. ES: `GrntDep` — Garantía por depósito de envases o embalajes. */
+  readonly depositGuarantee?: number
+}
+
+/**
+ * EN: The totals of the document in another currency, as written.
+ * ES: `OtraMoneda` — Los totales del documento en otra moneda, tal como vienen.
+ */
+export type PrintableOtherCurrency = {
+  /** EN: The currency, by the name of the customs table of currencies. ES: `TpoMoneda` — La moneda, con el nombre de la tabla de monedas de Aduanas. */
+  readonly currency: string
+  /** EN: Net amount. ES: `MntNetoOtrMnda` — Monto neto en otra moneda. */
+  readonly net?: number
+  /** EN: Exempt amount. ES: `MntExeOtrMnda` — Monto exento en otra moneda. */
+  readonly exempt?: number
+  /** EN: Base of the slaughter of meat. ES: `MntFaeCarneOtrMnda` — Monto base faenamiento carne en otra moneda. */
+  readonly slaughterBase?: number
+  /** EN: Base of the margins of trade. ES: `MntMargComOtrMnda` — Monto base de márgenes de comercialización en otra moneda. */
+  readonly marginBase?: number
+  /** EN: VAT. ES: `IVAOtrMnda` — IVA en otra moneda. */
+  readonly vat?: number
+  /** EN: Additional taxes and withholdings. ES: `ImpRetOtrMnda` — Impuestos adicionales y retenciones en otra moneda. */
+  readonly withholdings: readonly PrintableWithholding[]
+  /** EN: VAT not withheld. ES: `IVANoRetOtrMnda` — IVA no retenido en otra moneda. */
+  readonly vatNotWithheld?: number
+  /** EN: Total. ES: `MntTotOtrMnda` — Monto total en otra moneda. */
+  readonly total?: number
+}
+
+/**
+ * EN: A payment the document schedules.
+ * ES: `MntPagos` — Un pago que programa el documento.
+ */
+export type PrintablePayment = {
+  /** EN: Date as written (YYYY-MM-DD). ES: `FchPago` — Fecha del pago tal como viene (AAAA-MM-DD). */
+  readonly date: string
+  /** EN: Amount. ES: `MntPago` — Monto del pago. */
+  readonly amount?: number
+  /** EN: Description, empty when absent. ES: `GlosaPagos` — Glosa del pago, vacía si falta. */
+  readonly note: string
 }
 
 /**
@@ -101,6 +156,10 @@ export type PrintableAdjustment = {
   readonly valueType: '%' | '$'
   /** EN: Value in that unit. ES: `ValorDR` — Valor en esa unidad. */
   readonly value?: number
+  /** EN: Description; undefined when absent. ES: `GlosaDR` — Especificación del descuento o recargo; undefined si falta. */
+  readonly description?: string
+  /** EN: Value in another currency. ES: `ValorDROtrMnda` — Valor en otra moneda. */
+  readonly otherCurrencyValue?: number
 }
 
 /**
@@ -126,6 +185,20 @@ export type PrintableItem = {
   readonly discountAmount?: number
   /** EN: Line discount percent. ES: `DescuentoPct` — Porcentaje de descuento de la línea. */
   readonly discountPercent?: number
+  /** EN: Line surcharge amount. ES: `RecargoMonto` — Monto del recargo de la línea. */
+  readonly surchargeAmount?: number
+  /** EN: Line surcharge percent. ES: `RecargoPct` — Porcentaje de recargo de la línea. */
+  readonly surchargePercent?: number
+  /** EN: Base of the slaughter of meat, of a withholding agent. ES: `Retenedor/MntBaseFaena` — Monto base faenamiento, de un agente retenedor. */
+  readonly slaughterBase?: number
+  /** EN: Base of the margins of trade, of a withholding agent. ES: `Retenedor/MntMargComer` — Monto base márgenes de comercialización, de un agente retenedor. */
+  readonly marginBase?: number
+  /** EN: Net unit price to the final consumer, of a withholding agent. ES: `Retenedor/PrcConsFinal` — Precio unitario neto al consumidor final, de un agente retenedor. */
+  readonly finalConsumerPrice?: number
+  /** EN: Currency of the line's value in another currency, as written; undefined when absent. ES: `OtrMnda/Moneda` — Código de la otra moneda del valor de la línea, tal como viene; undefined si falta. */
+  readonly otherCurrency?: string
+  /** EN: Value of the line in that currency. ES: `OtrMnda/MontoItemOtrMnda` — Valor de la línea en otra moneda. */
+  readonly otherCurrencyAmount?: number
 }
 
 /**
@@ -196,16 +269,46 @@ export type PrintableDocument = {
   readonly paymentTerms?: number
   /** EN: Due date as written (YYYY-MM-DD); undefined when absent. ES: `FchVenc` — Fecha de vencimiento tal como viene (AAAA-MM-DD); undefined si falta. */
   readonly dueDate?: string
+  /** EN: Amount paid when the document was issued. ES: `MntCancel` — Monto cancelado al emitirse el documento. */
+  readonly settledAmount?: number
+  /** EN: Balance owed when the document was issued. ES: `SaldoInsol` — Saldo insoluto al emitirse el documento. */
+  readonly outstandingBalance?: number
+  /** EN: Scheduled payments; `parsePrintableDocuments` always sets it. ES: `MntPagos` — Pagos programados; `parsePrintableDocuments` siempre lo llena. */
+  readonly payments?: readonly PrintablePayment[]
+  /** EN: Payment medium as written (`CH`, `TC`… or, on a receipt, `1` to `5`); undefined when absent. ES: `MedioPago` — Medio de pago tal como viene (`CH`, `TC`… o, en una boleta, `1` a `5`); undefined si falta. */
+  readonly paymentMedium?: string
+  /** EN: Kind of the payment account as written (`CORRIENTE`, `AHORRO`, `VISTA`); undefined when absent. ES: `TpoCtaPago` — Tipo de la cuenta del pago tal como viene (`CORRIENTE`, `AHORRO`, `VISTA`); undefined si falta. */
+  readonly paymentAccountType?: string
+  /** EN: Number of the payment account; undefined when absent. ES: `NumCtaPago` — Número de la cuenta del pago; undefined si falta. */
+  readonly paymentAccountNumber?: string
+  /** EN: Bank of the payment account; undefined when absent. ES: `BcoPago` — Banco de la cuenta del pago; undefined si falta. */
+  readonly paymentBank?: string
+  /** EN: Description of the terms of payment; undefined when absent. ES: `TermPagoGlosa` — Glosa de los términos del pago; undefined si falta. */
+  readonly paymentTermsNote?: string
+  /** EN: Kind of special invoice: 1 tourist invoice; undefined when absent. ES: `TipoFactEsp` — Tipo de factura especial: 1 factura turista; undefined si falta. */
+  readonly specialInvoiceType?: number
+  /** EN: Who issues a guide for export, 1 to 4; undefined when absent. ES: `GuiaExport/CdgTraslado` — Código emisor traslado excepcional de una guía de exportación, 1 a 4; undefined si falta. */
+  readonly exceptionalTransferCode?: number
+  /** EN: Number of the SII resolution that authorises the issuer of a guide for export; undefined when absent. ES: `GuiaExport/FolioAut` — Folio de autorización, N° de la resolución del SII; undefined si falta. */
+  readonly authorizationFolio?: string
+  /** EN: Date of that resolution as written (YYYY-MM-DD); undefined when absent. ES: `GuiaExport/FchAut` — Fecha de la resolución de autorización tal como viene (AAAA-MM-DD); undefined si falta. */
+  readonly authorizationDate?: string
+  /** EN: RUT of the principal on whose behalf the document is issued, as written; undefined when absent. ES: `RUTMandante` — RUT del mandante, a cuenta de quien se emite el documento, tal como viene; undefined si falta. */
+  readonly principalRut?: string
+  /** EN: RUT of whoever asked for the document in a sale to the public, as written; undefined when absent. ES: `RUTSolicita` — RUT del solicitante de la factura en una venta al público, tal como viene; undefined si falta. */
+  readonly requesterRut?: string
   /** EN: Line amounts include VAT. ES: `MntBruto` — Montos de las líneas con IVA incluido (1). */
   readonly grossAmounts: boolean
   /** EN: The issuer, with its branch. ES: `Emisor` — El emisor, con su sucursal. */
   readonly issuer: PrintableIssuer
   /** EN: The receiver. ES: `Receptor` — El receptor. */
-  readonly receiver: PrintableParty
+  readonly receiver: PrintableReceiver
   /** EN: Transport of the goods; undefined when the document has no `Transporte`. ES: `Transporte` — Transporte de los bienes; undefined si el documento no lo trae. */
   readonly transport?: PrintableTransport
   /** EN: The totals that print. ES: `Totales` — Los totales que se imprimen. */
   readonly totals: PrintableTotals
+  /** EN: The totals in another currency; undefined when the document has no `OtraMoneda`. ES: `OtraMoneda` — Los totales en otra moneda; undefined si el documento no lo trae. */
+  readonly otherCurrency?: PrintableOtherCurrency
   /** EN: Additional taxes and withholdings of the totals; `parsePrintableDocuments` always sets it. ES: `ImptoReten` — Impuestos adicionales y retenciones de los totales; `parsePrintableDocuments` siempre lo llena. */
   readonly withholdings?: readonly PrintableWithholding[]
   /** EN: Commissions and other charges; `parsePrintableDocuments` always sets it. ES: `Comisiones` — Comisiones y otros cargos; `parsePrintableDocuments` siempre lo llena. */
@@ -289,17 +392,28 @@ const transport = (value: unknown): PrintableTransport | undefined => {
   }
 }
 
-const item = (node: ParsedXml): PrintableItem => ({
-  code: text(record(toArray(node.CdgItem)[0]).VlrCodigo),
-  name: text(node.NmbItem),
-  description: optionalText(node.DscItem),
-  quantity: number(node.QtyItem),
-  unit: optionalText(node.UnmdItem),
-  unitPrice: number(node.PrcItem),
-  amount: number(node.MontoItem),
-  discountAmount: number(node.DescuentoMonto),
-  discountPercent: number(node.DescuentoPct),
-})
+const item = (node: ParsedXml): PrintableItem => {
+  const retainer = record(node.Retenedor)
+  const otherCurrency = record(node.OtrMnda)
+  return {
+    code: text(record(toArray(node.CdgItem)[0]).VlrCodigo),
+    name: text(node.NmbItem),
+    description: optionalText(node.DscItem),
+    quantity: number(node.QtyItem),
+    unit: optionalText(node.UnmdItem),
+    unitPrice: number(node.PrcItem),
+    amount: number(node.MontoItem),
+    discountAmount: number(node.DescuentoMonto),
+    discountPercent: number(node.DescuentoPct),
+    surchargeAmount: number(node.RecargoMonto),
+    surchargePercent: number(node.RecargoPct),
+    slaughterBase: number(retainer.MntBaseFaena),
+    marginBase: number(retainer.MntMargComer),
+    finalConsumerPrice: number(retainer.PrcConsFinal),
+    otherCurrency: node.OtrMnda === undefined ? undefined : text(otherCurrency.Moneda),
+    otherCurrencyAmount: number(otherCurrency.MontoItemOtrMnda),
+  }
+}
 
 const reference = (node: ParsedXml): PrintableReference => ({
   documentType: text(node.TpoDocRef),
@@ -313,6 +427,8 @@ const adjustment = (node: ParsedXml): PrintableAdjustment => ({
   kind: text(node.TpoMov) === 'D' ? 'D' : 'R',
   valueType: text(node.TpoValor) === '%' ? '%' : '$',
   value: number(node.ValorDR),
+  description: optionalText(node.GlosaDR),
+  otherCurrencyValue: number(node.ValorDROtrMnda),
 })
 
 const withholding = (node: ParsedXml): PrintableWithholding => ({
@@ -320,6 +436,34 @@ const withholding = (node: ParsedXml): PrintableWithholding => ({
   rate: number(node.TasaImp),
   amount: number(node.MontoImp),
 })
+
+const payment = (node: ParsedXml): PrintablePayment => ({
+  date: text(node.FchPago),
+  amount: number(node.MntPago),
+  note: text(node.GlosaPagos),
+})
+
+const otherCurrency = (value: unknown): PrintableOtherCurrency | undefined => {
+  if (value === undefined) return undefined
+  const node = record(value)
+  return {
+    currency: text(node.TpoMoneda),
+    net: number(node.MntNetoOtrMnda),
+    exempt: number(node.MntExeOtrMnda),
+    slaughterBase: number(node.MntFaeCarneOtrMnda),
+    marginBase: number(node.MntMargComOtrMnda),
+    vat: number(node.IVAOtrMnda),
+    withholdings: toArray(node.ImpRetOtrMnda)
+      .map(record)
+      .map((tax) => ({
+        code: text(tax.TipoImpOtrMnda),
+        rate: number(tax.TasaImpOtrMnda),
+        amount: number(tax.VlrImpOtrMnda),
+      })),
+    vatNotWithheld: number(node.IVANoRetOtrMnda),
+    total: number(node.MntTotOtrMnda),
+  }
+}
 
 const commission = (node: ParsedXml): PrintableCommission => ({
   kind: text(node.TipoMovim) === 'O' ? 'O' : 'C',
@@ -342,6 +486,9 @@ const printable = (dte: ParsedXml, teds: readonly string[], index: number): Prin
   const header = record(document.Encabezado)
   const idDoc = record(header.IdDoc)
   const issuer = record(header.Emisor)
+  const exportGuide = record(issuer.GuiaExport)
+  const receiver = record(header.Receptor)
+  const foreign = record(receiver.Extranjero)
   const totals = record(header.Totales)
   const commissionTotals = record(totals.Comisiones)
   const folio = text(idDoc.Folio)
@@ -360,6 +507,20 @@ const printable = (dte: ParsedXml, teds: readonly string[], index: number): Prin
     dispatchType: number(idDoc.TipoDespacho),
     paymentTerms: number(idDoc.FmaPago),
     dueDate: optionalText(idDoc.FchVenc),
+    settledAmount: number(idDoc.MntCancel),
+    outstandingBalance: number(idDoc.SaldoInsol),
+    payments: toArray(idDoc.MntPagos).map(record).map(payment),
+    paymentMedium: optionalText(idDoc.MedioPago),
+    paymentAccountType: optionalText(idDoc.TpoCtaPago),
+    paymentAccountNumber: optionalText(idDoc.NumCtaPago),
+    paymentBank: optionalText(idDoc.BcoPago),
+    paymentTermsNote: optionalText(idDoc.TermPagoGlosa),
+    specialInvoiceType: number(idDoc.TipoFactEsp),
+    exceptionalTransferCode: number(exportGuide.CdgTraslado),
+    authorizationFolio: optionalText(exportGuide.FolioAut),
+    authorizationDate: optionalText(exportGuide.FchAut),
+    principalRut: optionalText(header.RUTMandante),
+    requesterRut: optionalText(header.RUTSolicita),
     grossAmounts: number(idDoc.MntBruto) === 1,
     issuer: {
       ...party(issuer, {
@@ -375,7 +536,11 @@ const printable = (dte: ParsedXml, teds: readonly string[], index: number): Prin
       activity: text(issuer.GiroEmis) || text(issuer.GiroEmisor),
       branch: text(issuer.Sucursal),
     },
-    receiver: party(record(header.Receptor), RECEIVER_TAGS),
+    receiver: {
+      ...party(receiver, RECEIVER_TAGS),
+      foreignId: optionalText(foreign.NumId),
+      foreignIdType: number(foreign.TipoDocID),
+    },
     transport: transport(header.Transporte),
     totals: {
       net: number(totals.MntNeto),
@@ -388,7 +553,11 @@ const printable = (dte: ParsedXml, teds: readonly string[], index: number): Prin
       commissionsNet: number(commissionTotals.ValComNeto),
       commissionsExempt: number(commissionTotals.ValComExe),
       commissionsVat: number(commissionTotals.ValComIVA),
+      slaughterBase: number(totals.MntBase),
+      marginBase: number(totals.MntMargenCom),
+      depositGuarantee: number(totals.GrntDep),
     },
+    otherCurrency: otherCurrency(header.OtraMoneda),
     withholdings: toArray(totals.ImptoReten).map(record).map(withholding),
     commissions: toArray(document.Comisiones).map(record).map(commission),
     globalAdjustments: toArray(document.DscRcgGlobal).map(record).map(adjustment),

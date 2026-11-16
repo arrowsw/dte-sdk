@@ -8,12 +8,18 @@ import {
   creditInvoice,
   creditNote,
   debitNote,
+  exemptDepositXml,
+  exportGuideXml,
   guideWithTransport,
   invoice,
   invoiceWithTransport,
+  meatXml,
+  otherCurrencyXml,
+  paidInvoice,
   receiptsXml,
   settlementXml,
   thirdPartyXml,
+  touristXml,
   withoutTed,
 } from '../support/printed-fixtures'
 
@@ -275,5 +281,104 @@ describe('the fields the format asks to print', () => {
   test('maps the credit of construction companies', () => {
     expect(parsePrintableDocuments(constructionXml)[0].totals).toMatchObject({ constructionCredit: 1235, total: 10665 })
     expect(plain.totals.constructionCredit).toBeUndefined()
+  })
+})
+
+describe('the rest of the print column', () => {
+  const [plain] = parsePrintableDocuments(basicSetXml)
+  const [paid] = parsePrintableDocuments(paidInvoice.xml)
+  const [tourist] = parsePrintableDocuments(touristXml)
+  const [meat] = parsePrintableDocuments(meatXml)
+  const [foreign] = parsePrintableDocuments(otherCurrencyXml)
+  const [guide] = parsePrintableDocuments(exportGuideXml)
+
+  test('maps the payment of the header as written', () => {
+    expect(paid).toMatchObject({
+      settledAmount: 50000,
+      outstandingBalance: 188000,
+      payments: [
+        { date: '2026-12-05', amount: 94000, note: 'Cuota 1' },
+        { date: '2027-01-05', amount: 94000, note: '' },
+      ],
+      paymentMedium: 'CF',
+      paymentAccountType: 'CORRIENTE',
+      paymentAccountNumber: '000123456789',
+      paymentBank: 'Banco del Ejemplo',
+      paymentTermsNote: 'Fecha de recepción de la factura',
+    })
+  })
+
+  test('leaves the payment of a document without it undefined, and its payments empty', () => {
+    expect(plain.payments).toEqual([])
+    for (const key of [
+      'settledAmount',
+      'outstandingBalance',
+      'paymentMedium',
+      'paymentAccountType',
+      'paymentAccountNumber',
+      'paymentBank',
+      'paymentTermsNote',
+      'specialInvoiceType',
+      'exceptionalTransferCode',
+      'authorizationFolio',
+      'authorizationDate',
+      'principalRut',
+      'requesterRut',
+      'otherCurrency',
+    ] as const)
+      expect(plain[key]).toBeUndefined()
+  })
+
+  test("maps a tourist invoice and its receiver's document", () => {
+    expect(tourist.specialInvoiceType).toBe(1)
+    expect(tourist.receiver).toMatchObject({ rut: '55555555-5', foreignId: 'X1234567', foreignIdType: 1 })
+    expect(plain.receiver.foreignId).toBeUndefined()
+    expect(plain.receiver.foreignIdType).toBeUndefined()
+  })
+
+  test('maps the principal, the requester, the bases and the deposit guarantee', () => {
+    expect(meat).toMatchObject({
+      principalRut: '18264950-3',
+      requesterRut: '14625621-K',
+      totals: { slaughterBase: 40000, marginBase: 30000, depositGuarantee: 2500, total: 123500 },
+      items: [{ slaughterBase: 40000, marginBase: 30000, finalConsumerPrice: 1500 }],
+    })
+    expect(parsePrintableDocuments(exemptDepositXml)[0].totals.depositGuarantee).toBe(1500)
+    expect(plain.totals).not.toHaveProperty('depositGuarantee', expect.anything())
+    expect(plain.items[0].slaughterBase).toBeUndefined()
+  })
+
+  test('maps the amounts in another currency', () => {
+    expect(foreign.otherCurrency).toEqual({
+      currency: 'DOLAR USA',
+      net: 104.2105,
+      exempt: 5.2632,
+      slaughterBase: 42.1,
+      marginBase: 31.58,
+      vat: 19.8,
+      withholdings: [{ code: '17', rate: 5, amount: 2.1 }],
+      vatNotWithheld: 1.5,
+      total: 129.27,
+    })
+    expect(foreign.items[0]).toMatchObject({ otherCurrency: 'USD', otherCurrencyAmount: 105.2632 })
+    expect(foreign.items[1].otherCurrency).toBeUndefined()
+    expect(foreign.globalAdjustments).toEqual([
+      { kind: 'D', valueType: '$', value: 1000, description: 'Cliente frecuente', otherCurrencyValue: 1.0526 },
+    ])
+  })
+
+  test("maps an item's surcharge and a global adjustment's description", () => {
+    expect(paid.items[0]).toMatchObject({ surchargePercent: 5, surchargeAmount: 10000 })
+    expect(paid.globalAdjustments[0].description).toBe('Pronto pago')
+    expect(plain.items[0].surchargeAmount).toBeUndefined()
+    expect(plain.globalAdjustments[0].description).toBeUndefined()
+  })
+
+  test('maps who issues a guide for export and the resolution that authorises it', () => {
+    expect(guide).toMatchObject({
+      exceptionalTransferCode: 4,
+      authorizationFolio: '1234',
+      authorizationDate: '2026-01-02',
+    })
   })
 })

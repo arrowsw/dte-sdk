@@ -1,15 +1,31 @@
 import type { PDFFont, PDFPage, RGB } from 'pdf-lib'
 import { format } from 'rut.ts'
-import { documentTypeName, isDocumentType } from '../catalogs/document-types'
+import { documentTypeName, isDocumentType, isReceipt } from '../catalogs/document-types'
 import { REFERENCE_DOCUMENT_TYPES, isReferenceDocumentType } from '../catalogs/reference-types'
-import { DISPATCH_TYPE_NAMES, FONT, LINE, PAYMENT_TERMS_NAMES, REFERENCE_CODE_NAMES, TABLE, TAX_NAMES } from './layout'
+import {
+  DISPATCH_TYPE_NAMES,
+  EXCEPTIONAL_TRANSFER_NAMES,
+  FONT,
+  FOREIGN_ID_NAMES,
+  LINE,
+  PAYMENT_ACCOUNT_NAMES,
+  PAYMENT_MEDIUM_NAMES,
+  PAYMENT_TERMS_NAMES,
+  RECEIPT_PAYMENT_MEDIUM_NAMES,
+  REFERENCE_CODE_NAMES,
+  SPECIAL_INVOICE_NAMES,
+  TABLE,
+  TAX_NAMES,
+} from './layout'
 import type {
+  PrintableAdjustment,
   PrintableDocument,
   PrintableIssuer,
   PrintableItem,
   PrintableParty,
   PrintableReference,
   PrintableTransport,
+  PrintableWithholding,
 } from './parse'
 import { amountInWords, formatQuantity, longDate } from './words'
 
@@ -28,8 +44,13 @@ export type TotalRow = readonly [label: string, value: string, bold: boolean]
 export type Field = readonly [label: string, value: string]
 
 export const formatAmount = (value: number): string => value.toLocaleString('es-CL')
+const money = (value: number): string => `$${formatAmount(value)}`
 // An amount the total takes off: a minus before it, and none when it is negative (a reversal adds).
-const subtracted = (value: number): string => (value < 0 ? `$${formatAmount(-value)}` : `-$${formatAmount(value)}`)
+const minus =
+  (written: (value: number) => string) =>
+  (value: number): string =>
+    value < 0 ? written(-value) : `-${written(value)}`
+const subtracted = minus(money)
 export const dottedRut = (rut: string): string => format(rut, { dots: true, throwOnError: false }) ?? rut
 export const printedTypeName = (type: number): string =>
   isDocumentType(type) ? documentTypeName(type, 'printed') : `DTE ${type}`
@@ -55,18 +76,66 @@ export const cityOf = ({ city, commune }: PrintableParty): string => {
 }
 export const issuerAddress = (issuer: PrintableIssuer): string =>
   `Casa Matriz: ${issuer.address}${[issuer.commune, cityOf(issuer)].map((part) => (part ? `, ${part}` : '')).join('')}`
-// The payment terms in words and the due date, each when the document has it (Formato DTE 2.5 marks both to print).
-export const paymentFields = (doc: PrintableDocument): readonly Field[] => [
-  ...(doc.paymentTerms === undefined
-    ? []
-    : [['Forma de Pago: ', PAYMENT_TERMS_NAMES[doc.paymentTerms] ?? String(doc.paymentTerms)] as const]),
-  ...(doc.dueDate ? [['Fecha Vencimiento: ', longDate(doc.dueDate)] as const] : []),
+// A code and its name, as `2 - Por cuenta del receptor`; the code alone when it has no name, and empty when absent.
+const codeText = (code: number | undefined, names: Readonly<Record<number, string>>): string =>
+  code === undefined ? '' : [String(code), names[code]].filter(Boolean).join(' - ')
+// A value the format asks to print in words, by its name, or as written when it has none; empty when absent.
+const named = (value: string | number | undefined, names: Readonly<Record<string, string>>): string =>
+  value === undefined ? '' : (names[value] ?? String(value))
+const amountText = (value: number | undefined): string => (value === undefined ? '' : money(value))
+const dateText = (date: string | undefined): string => (date ? longDate(date) : '')
+// The payment in the order of Formato DTE 2.5, one group per line, every field of it the format marks to print: the
+// payment terms in words and the due date; the payment medium and the kind of account in words, the account and the
+// bank; the description of the terms; the amount paid and the balance owed; and each scheduled payment. A receipt
+// names its own payment media. A group may hold empty fields; the layouts leave those out.
+export const paymentGroups = (doc: PrintableDocument): readonly (readonly Field[])[] => [
+  [
+    ['Forma de Pago: ', named(doc.paymentTerms, PAYMENT_TERMS_NAMES)],
+    ['Fecha Vencimiento: ', dateText(doc.dueDate)],
+  ],
+  [
+    [
+      'Medio de Pago: ',
+      named(
+        doc.paymentMedium,
+        isDocumentType(doc.type) && isReceipt(doc.type) ? RECEIPT_PAYMENT_MEDIUM_NAMES : PAYMENT_MEDIUM_NAMES,
+      ),
+    ],
+    ['Tipo de Cuenta: ', named(doc.paymentAccountType, PAYMENT_ACCOUNT_NAMES)],
+    ['N° de Cuenta: ', doc.paymentAccountNumber ?? ''],
+    ['Banco: ', doc.paymentBank ?? ''],
+  ],
+  [['Términos de Pago: ', doc.paymentTermsNote ?? '']],
+  [
+    ['Monto Cancelado: ', amountText(doc.settledAmount)],
+    ['Saldo Insoluto: ', amountText(doc.outstandingBalance)],
+  ],
+  ...(doc.payments ?? []).map((payment): readonly Field[] => [
+    ['Pago: ', [dateText(payment.date), amountText(payment.amount), payment.note].filter(Boolean).join(' - ')],
+  ]),
 ]
 // Who dispatches the goods, the code and its name; empty when the document does not say.
-export const dispatchText = ({ dispatchType }: PrintableDocument): string =>
-  dispatchType === undefined
-    ? ''
-    : [String(dispatchType), DISPATCH_TYPE_NAMES[dispatchType]].filter(Boolean).join(' - ')
+export const dispatchText = ({ dispatchType }: PrintableDocument): string => codeText(dispatchType, DISPATCH_TYPE_NAMES)
+// The lines under the receiver after the transfer reason and the dispatch, each that the document has: the kind of
+// special invoice, who issues a guide for export and the resolution that authorises them, the principal on whose
+// behalf the document is issued, and whoever asked for it.
+export const headerNotes = (doc: PrintableDocument): readonly Field[] =>
+  (
+    [
+      ['Tipo de Factura Especial: ', codeText(doc.specialInvoiceType, SPECIAL_INVOICE_NAMES)],
+      ['Emisor Traslado Excepcional: ', codeText(doc.exceptionalTransferCode, EXCEPTIONAL_TRANSFER_NAMES)],
+      ['Folio Autorización: ', doc.authorizationFolio ?? ''],
+      ['Fecha Autorización: ', dateText(doc.authorizationDate)],
+      ['RUT Mandante: ', doc.principalRut ? dottedRut(doc.principalRut) : ''],
+      ['RUT Solicitante: ', doc.requesterRut ? dottedRut(doc.requesterRut) : ''],
+    ] as const
+  ).filter(([, value]) => value !== '')
+// The document of a foreign receiver, its kind in words and its number, as `Pasaporte N° X1234567`; empty when none.
+export const foreignIdText = ({ receiver }: PrintableDocument): string => {
+  const kind = named(receiver.foreignIdType, FOREIGN_ID_NAMES)
+  const id = receiver.foreignId ?? ''
+  return kind && id ? `${kind} N° ${id}` : kind || id
+}
 // The additional description of an item, one entry per line it was written in.
 export const descriptionLines = (item: PrintableItem): readonly string[] =>
   (item.description ?? '')
@@ -159,51 +228,109 @@ export const drawRule = (canvas: Canvas, x1: number, x2: number, yFromTop: numbe
   })
 }
 
+// What prints under an item's description, each on its line: its discount and its surcharge, the bases and the price to
+// the final consumer of a withholding agent, and its value in another currency.
+export const itemNotes = (item: PrintableItem): readonly string[] => {
+  const adjustment = (label: string, amount?: number, percent?: number): string =>
+    amount ? `${label}: ${money(amount)}` : percent ? `${label}: ${percent}%` : ''
+  const labelled = (label: string, value: number | undefined): string =>
+    value === undefined ? '' : `${label}: ${money(value)}`
+  return [
+    adjustment('Dcto', item.discountAmount, item.discountPercent),
+    adjustment('Recargo', item.surchargeAmount, item.surchargePercent),
+    labelled('Base Faenamiento', item.slaughterBase),
+    labelled('Base Márgenes', item.marginBase),
+    labelled('Precio Consumidor Final', item.finalConsumerPrice),
+    item.otherCurrencyAmount === undefined
+      ? ''
+      : `Valor en ${item.otherCurrency || 'otra moneda'}: ${formatQuantity(item.otherCurrencyAmount)}`,
+  ].filter(Boolean)
+}
+
 export const itemRow = (item: PrintableItem, fonts: Fonts, descriptionWidth: number) => {
   const lines = [item.name, ...descriptionLines(item)].flatMap((line) =>
     wrapText(line, fonts.normal, FONT.tiny, descriptionWidth),
   )
-  const hasDiscount = Boolean(item.discountAmount || item.discountPercent)
-  const height = Math.max(TABLE.rowHeight, lines.length * LINE.tiny + TABLE.padY * 2 + (hasDiscount ? LINE.tiny : 0))
-  return { lines, hasDiscount, height }
+  const notes = itemNotes(item)
+  const height = Math.max(TABLE.rowHeight, (lines.length + notes.length) * LINE.tiny + TABLE.padY * 2)
+  return { lines, notes, height }
+}
+
+const SLAUGHTER_BASE = 'Monto Base Faenamiento Carne'
+const MARGIN_BASE = 'Monto Base Márgenes de Comercialización'
+const DEPOSIT_GUARANTEE = 'Garantía por Depósito de Envases o Embalajes'
+
+// A global discount or surcharge, with its description when it has one.
+const adjustmentLabel = ({ kind, description }: PrintableAdjustment): string =>
+  `${kind === 'D' ? 'Descuento Global' : 'Recargo Global'}${description ? `: ${description}` : ''}`
+
+// The additional taxes add to the total and the VAT withholdings take off from it (Formato DTE 2.5, `MntTotal`); each
+// prints by the name of its code, with its rate.
+const withholdingRows = (
+  withholdings: readonly PrintableWithholding[],
+  written: (value: number) => string,
+): readonly TotalRow[] =>
+  withholdings.flatMap(({ code, rate, amount }): readonly TotalRow[] => {
+    if (!amount) return []
+    const name = TAX_NAMES[code] ?? `Impuesto o retención ${code}`
+    const label = rate === undefined ? name : `${name} (${formatAmount(rate)}%)`
+    return [[label, /^IVA retenido/i.test(name) ? minus(written)(amount) : written(amount), false]]
+  })
+
+// The totals in another currency, under the total in pesos and under the name of the currency, each as written.
+const otherCurrencyRows = ({ otherCurrency, globalAdjustments }: PrintableDocument): readonly TotalRow[] => {
+  if (!otherCurrency) return []
+  const rows: TotalRow[] = [[`Otra Moneda: ${otherCurrency.currency}`, '', true]]
+  const add = (label: string, value: number | undefined): void => {
+    if (value) rows.push([label, formatQuantity(value), false])
+  }
+  for (const adjustment of globalAdjustments) add(adjustmentLabel(adjustment), adjustment.otherCurrencyValue)
+  add('Monto Neto', otherCurrency.net)
+  add('Monto Exento', otherCurrency.exempt)
+  add(SLAUGHTER_BASE, otherCurrency.slaughterBase)
+  add(MARGIN_BASE, otherCurrency.marginBase)
+  add('IVA', otherCurrency.vat)
+  rows.push(...withholdingRows(otherCurrency.withholdings, formatQuantity))
+  add('IVA No Retenido', otherCurrency.vatNotWithheld)
+  add('Monto Total', otherCurrency.total)
+  return rows
 }
 
 export const totalRows = (doc: PrintableDocument): readonly TotalRow[] => {
   const { totals } = doc
   const rows: TotalRow[] = []
+  const add = (label: string, value: number | undefined, written = money, bold = false): void => {
+    if (value) rows.push([label, written(value), bold])
+  }
+  // An exempt invoice prints its exempt amount and its deposit guarantee alone before the total.
   if (doc.type === 34) {
-    if (totals.exempt) rows.push(['Monto Exento', `$${formatAmount(totals.exempt)}`, false])
-    if (totals.total) rows.push(['Monto Total', `$${formatAmount(totals.total)}`, true])
-    return rows
+    add('Monto Exento', totals.exempt)
+    add(DEPOSIT_GUARANTEE, totals.depositGuarantee)
+  } else {
+    for (const adjustment of doc.globalAdjustments) {
+      const value = !adjustment.value
+        ? ''
+        : adjustment.valueType === '%'
+          ? `${adjustment.value}%`
+          : money(adjustment.value)
+      rows.push([adjustmentLabel(adjustment), value, false])
+    }
+    add('Monto Neto', totals.net)
+    add('Monto Exento', totals.exempt)
+    add(SLAUGHTER_BASE, totals.slaughterBase)
+    add(MARGIN_BASE, totals.marginBase)
+    add(`IVA (${totals.vatRate || 19}%)`, totals.vat)
+    // The credit of construction companies is taken off the VAT, and so off the total (Formato DTE 2.5, `CredEC`).
+    add('Crédito especial 65% empresas constructoras', totals.constructionCredit, subtracted)
+    rows.push(...withholdingRows(doc.withholdings ?? [], money))
+    add('IVA No Retenido', totals.vatNotWithheld)
+    add(DEPOSIT_GUARANTEE, totals.depositGuarantee)
+    add('Comisiones Neto', totals.commissionsNet, subtracted)
+    add('Comisiones Exento', totals.commissionsExempt, subtracted)
+    add('IVA Comisiones', totals.commissionsVat, subtracted)
   }
-  for (const adjustment of doc.globalAdjustments) {
-    const label = adjustment.kind === 'D' ? 'Descuento Global' : 'Recargo Global'
-    const value = !adjustment.value
-      ? ''
-      : adjustment.valueType === '%'
-        ? `${adjustment.value}%`
-        : `$${formatAmount(adjustment.value)}`
-    rows.push([label, value, false])
-  }
-  if (totals.net) rows.push(['Monto Neto', `$${formatAmount(totals.net)}`, false])
-  if (totals.exempt) rows.push(['Monto Exento', `$${formatAmount(totals.exempt)}`, false])
-  if (totals.vat) rows.push([`IVA (${totals.vatRate || 19}%)`, `$${formatAmount(totals.vat)}`, false])
-  // The credit of construction companies is taken off the VAT, and so off the total (Formato DTE 2.5, `CredEC`).
-  if (totals.constructionCredit)
-    rows.push(['Crédito especial 65% empresas constructoras', subtracted(totals.constructionCredit), false])
-  // The additional taxes add to the total and the VAT withholdings take off from it (Formato DTE 2.5, `MntTotal`).
-  for (const { code, rate, amount } of doc.withholdings ?? []) {
-    if (!amount) continue
-    const name = TAX_NAMES[code] ?? `Impuesto o retención ${code}`
-    const label = rate === undefined ? name : `${name} (${formatAmount(rate)}%)`
-    rows.push([label, /^IVA retenido/i.test(name) ? subtracted(amount) : `$${formatAmount(amount)}`, false])
-  }
-  if (totals.vatNotWithheld) rows.push(['IVA No Retenido', `$${formatAmount(totals.vatNotWithheld)}`, false])
-  if (totals.commissionsNet) rows.push(['Comisiones Neto', subtracted(totals.commissionsNet), false])
-  if (totals.commissionsExempt) rows.push(['Comisiones Exento', subtracted(totals.commissionsExempt), false])
-  if (totals.commissionsVat) rows.push(['IVA Comisiones', subtracted(totals.commissionsVat), false])
-  if (totals.total) rows.push(['Monto Total', `$${formatAmount(totals.total)}`, true])
-  return rows
+  add('Monto Total', totals.total, money, true)
+  return [...rows, ...otherCurrencyRows(doc)]
 }
 
 // The transport area in the order of Formato DTE 2.5, one group per line: the plates, the carrier and the driver, the
