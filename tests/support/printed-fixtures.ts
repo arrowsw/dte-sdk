@@ -310,3 +310,15 @@ export const exemptDepositXml = thirdParty(34, 54, {
   totals: '<MntExe>20000</MntExe><GrntDep>1500</GrntDep><MntTotal>21500</MntTotal>',
   body: '<Detalle><NroLinDet>1</NroLinDet><IndExe>1</IndExe><NmbItem>Agua envasada</NmbItem><MontoItem>20000</MontoItem></Detalle>',
 })
+
+/**
+ * A third party's document whose coded fields all carry `code`: a tax of its totals and of its totals in another
+ * currency, its payment medium and the kind of its account. For codes no table names.
+ */
+export const codedXml = (code: string, type = 33): string =>
+  thirdParty(type, 55, {
+    idDoc: `<MedioPago>${code}</MedioPago><TpoCtaPago>${code}</TpoCtaPago>`,
+    totals: `<MntNeto>10000</MntNeto><IVA>1900</IVA><ImptoReten><TipoImp>${code}</TipoImp><MontoImp>100</MontoImp></ImptoReten><MntTotal>12000</MntTotal>`,
+    otherCurrency: `<OtraMoneda><TpoMoneda>DOLAR USA</TpoMoneda><ImpRetOtrMnda><TipoImpOtrMnda>${code}</TipoImpOtrMnda><VlrImpOtrMnda>0.11</VlrImpOtrMnda></ImpRetOtrMnda><MntTotOtrMnda>12.63</MntTotOtrMnda></OtraMoneda>`,
+    body: '<Detalle><NroLinDet>1</NroLinDet><NmbItem>Servicio</NmbItem><MontoItem>10000</MontoItem></Detalle>',
+  })

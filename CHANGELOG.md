@@ -99,6 +99,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   certification store writes its envelopes, so a document received from a third party, written in the ISO-8859-1 it
   declares, failed with `ENCODING_UNSUPPORTED_CHAR` or `PDF_RENDER_FAILED` at its first accented letter. It now hands
   the bytes to `parsePrintableDocuments`, which reads both.
+- **A document whose code is the name of a property every object has prints.** The printed sample looks a code up in
+  a table of names, and a table is an object: a received document whose `TipoImp`, `MedioPago` or `TpoCtaPago` was
+  `constructor`, `toString` or the like took that property for the code's name, and `renderPrintedSample` failed with
+  `PDF_RENDER_FAILED`. No valid document carries such a code, but a received one may. A name is now read among a
+  table's own entries only, so such a code prints as any code no table names: `Impuesto o retención constructor`,
+  `Medio de Pago: constructor`. A tax's code failed so since 0.13.0; the payment medium and the kind of account,
+  since they first printed, which no release carries.
 
 ### Security
 
@@ -118,7 +125,8 @@ The rest of the print column takes it on to 19.03 kB, over that 18 kB limit, whi
 of the payment media, the kinds of account, the special invoices, the documents of a tourist and the issuers of a
 guide for export. The bound on the key, shared by every check in place of the one the printed stamp carried, then
 takes `dte-sdk` from 39.46 kB to 39.52 kB, `dte-sdk/node` from 7.4 kB to 7.38 kB, `dte-sdk/portal` from 80.33 kB to
-80.32 kB and `dte-sdk/pdf` from 19.03 kB to 19.07 kB, all under their limits.
+80.32 kB and `dte-sdk/pdf` from 19.03 kB to 19.07 kB, all under their limits. Reading a code's name among a table's
+own entries then takes `dte-sdk/pdf` to 19.04 kB.
 
 ## [0.13.0] - 2026-11-14
 
