@@ -1305,6 +1305,9 @@ const pdf = await renderPrintedSample(doc, {
 })
 const transferableCopy = await renderPrintedSample(doc, { transferable: true }) // adds the acknowledgement box and CEDIBLE
 
+// A document received from a third party, straight from the bytes of its file (UTF-8 or ISO-8859-1)
+const [received] = parsePrintableDocuments(readFileSync('./received/invoice.xml'))
+
 // A receipt on continuous paper: an 80 mm roll as tall as its content, with or without the printed stamp
 const ticket = await renderPrintedSample(doc, { paper: 'roll' })
 const ticketWithoutStamp = await renderPrintedSample(doc, { paper: 'roll', stamp: false }) // receipts 39 and 41 only
@@ -1349,6 +1352,23 @@ of subject example does. Every amount is the one the document carries; `parsePri
 `commissions` (`PrintableCommission`), `withholdings` (`PrintableWithholding`) and the totals. Formato DTE 2.5 admits in a document only the lines one sheet can print, and the upload of the
 certification takes one page per sample, so a document that needs a second page is better split, and a sample must fit
 one; the pages keep a longer document whole instead of cutting it.
+The sample also prints what Formato DTE 2.5 marks to be printed (section 2.2, column I) when the document has it: the
+payment terms in words (`Forma de Pago: Crédito`) and the due date on a line under the issue date, the additional
+description of an item under its name, and the special credit of construction companies among the totals, with a
+minus. And it writes for the reader: the issue and due dates with the month in words (`15 de noviembre de 2026`), who
+dispatches the goods in words under the receiver, the city of each party when it is not the commune again, the
+receiver's RUT with dots, a referenced document that is not a DTE by the name the SII gives its code (`Orden de
+Compra`), what the document does to the referenced one before its reason (`Anula documento de referencia`), quantities
+and unit prices with a point between the thousands and a comma before up to six decimals, and the total in words under
+the totals (`Son: …`). `parsePrintableDocuments` reads these into `paymentTerms`, `dueDate`, `dispatchType`, the `city`
+of each party, an item's `description`, a reference's `code` and `totals.constructionCredit`.
+A document with no `TED` prints `SIN TIMBRE ELECTRÓNICO` in a box where the stamp goes, with the legend `Documento sin
+validez tributaria`, so its print never passes for that of a stamped one.
+`parsePrintableDocuments` takes the XML as text or as the bytes of its file, read as UTF-8 when they are UTF-8 and as
+ISO-8859-1 otherwise, and takes each `TED` as it was signed: as written when its `FRMT` verifies over its `DD` with the
+key of the CAF it carries, and otherwise the form the `FRMT` does verify, without the whitespace between its tags or
+with its `DD` written again from its element. So a file some tool indented after it was signed still prints a stamp
+that verifies; a stamp no form of which verifies prints as written.
 `parsePrintableDocuments` reads the area into `transport` (`PrintableTransport`), every field as written. The legend under the type box is `siiOffice` when given;
 otherwise the office of the issuer's commune (`CmnaOrigen`), looked up with `siiOfficeForCommune` in
 `SII_OFFICES` (355 commune names in 40

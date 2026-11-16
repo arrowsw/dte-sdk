@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The printed sample prints four fields Formato DTE 2.5 asks for.** The format's print column (section 2.2, column
+  I) marks them to be printed and the sample left them out: the payment terms, in words (`FmaPago`, page 14), the due
+  date (`FchVenc`, page 16), the additional description of an item (`DscItem`, page 37) and the special credit of
+  construction companies (`CredEC`, page 31). `createDocument` already wrote the first three, from `paymentTerms`,
+  `dueDate` and an item's `description`, and they never reached the paper. Now `Forma de Pago` and `Fecha Vencimiento`
+  print on a line under the issue date, the description under the item's name, wrapped in its column, and the credit
+  among the totals with a minus, since the total takes it off; on the sheet and on the roll. `parsePrintableDocuments`
+  reads them into `paymentTerms`, `dueDate`, an item's `description` and `totals.constructionCredit`. A document
+  without them prints as before.
+  - **What to change:** nothing.
+- **The printed sample says more, in words.** Who dispatches the goods prints under the receiver (`TipoDespacho`, as
+  `Tipo de Despacho: 2 - Por cuenta del emisor a instalaciones del cliente`), the city of the issuer and of the
+  receiver print when they are not the commune again (`CiudadOrigen`, `CiudadRecep`), a reference says what the
+  document does to the referenced one before its reason (`CodRef`: `Anula documento de referencia`, `Corrige texto
+  documento de referencia`, `Corrige montos`), and the total is written out under the totals (`Son: setenta y seis
+  mil setecientos sesenta y cinco pesos`). `parsePrintableDocuments` reads `dispatchType`, the `city` of each party
+  and a reference's `code`.
+  - **What to change:** nothing.
+- **`parsePrintableDocuments` takes the bytes of a file.** Besides a text it now takes a `Uint8Array`, and so does the
+  `xml` of an envelope of `renderPrintedSamples`. The bytes are read as UTF-8 when they are UTF-8, with a byte order
+  mark dropped, and as ISO-8859-1 otherwise, whatever the declaration says: the SII's documents declare ISO-8859-1 and
+  a file may hold them in either encoding. A document received from a third party can be printed straight from its
+  file.
+  - **What to change:** nothing; `parsePrintableDocuments(await readFile(path))` now works without decoding first.
+
+### Changed
+
+- **The stamp of a file changed after it was signed is printed as it was signed.** The PDF417 must carry the `DD` its
+  `FRMT` covers. `parsePrintableDocuments` copied each `TED` from the text as written, so a file some tool had indented
+  after signing printed a stamp with the indentation inside, which the signature does not cover. Now the form is the
+  one the issuer's signature verifies, checked with the key of the CAF the stamp carries: the `TED` as written; then
+  without the whitespace between its tags; then with its `DD` written again from its element, for a file written
+  again with other escapes. A stamp signed with whitespace between its tags therefore stays as it is, and one no form
+  of which verifies stays as written. Only the stamp of each document is checked, and one whose key is larger than any
+  CAF key (a modulus over 4096 bits or an exponent over 32 bits) is left as written without its signature being
+  tried, so a file from anyone cannot make the check costly. `tedXml` of a document the SDK issued is the same as
+  before.
+  - **What to change:** nothing.
+- **A document without a `TED` says so on its print.** It printed like any other, only without the stamp, and could
+  pass for a stamped one. Now a box where the stamp goes reads `SIN TIMBRE ELECTRÓNICO`, with the legend `Documento
+  sin validez tributaria`, on the sheet and on the roll. A receipt printed with `stamp: false` carries no such
+  notice: it has its `TED` and leaves the printed stamp out, as Res. Ex. SII N° 207 of 2025 allows.
+  - **What to change:** nothing.
+- **Dates, the receiver's RUT and referenced documents print to be read.** The issue date prints with its month in
+  words (`Fecha Emisión: 15 de noviembre de 2026`, where it read `2026-11-15`), as Formato DTE 2.5 suggests for a
+  printed date (section 2.2), and so does the due date; a date not written `YYYY-MM-DD` prints as written. The
+  receiver's RUT prints with dots on the sheet (`12.345.678-5`), as the roll and the issuer's already did. A
+  referenced document that is not a DTE prints by the name the SII gives its code (`Orden de Compra`, `Factura`,
+  from `REFERENCE_DOCUMENT_TYPES`) where it read `Tipo 801`; a code with no name still prints `Tipo` and the code. A
+  reference's name and its reason wrap inside their columns, and its row grows with them, where a long one ran over
+  the next column.
+  - **What to change:** nothing, unless you compare the text of a sample: those three read differently.
+
+### Fixed
+
+- **Quantities and unit prices print the Chilean way, with every decimal.** A quantity printed as JavaScript writes
+  it (`1051.5`) beside amounts with a point between the thousands, and a unit price lost its decimals past the third.
+  Both now print with a point between the thousands, a comma before the decimals and up to the six decimals the
+  format admits (`1.051,5`, `$10.412,125`).
+- **`writePrintedSamples` reads a file written in ISO-8859-1.** It read every file as UTF-8, which is how the
+  certification store writes its envelopes, so a document received from a third party, written in the ISO-8859-1 it
+  declares, failed with `ENCODING_UNSUPPORTED_CHAR` or `PDF_RENDER_FAILED` at its first accented letter. It now hands
+  the bytes to `parsePrintableDocuments`, which reads both.
+
+`dte-sdk/pdf` grows from 14.89 kB to 17.7 kB, over its 16 kB limit, which goes to 18 kB: it now holds the words of
+an amount and the names of the documents a reference can name, and reaches the helpers that check a stamp's
+signature.
+
 ## [0.13.0] - 2026-11-14
 
 ### Added

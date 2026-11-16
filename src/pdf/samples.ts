@@ -9,8 +9,8 @@ import { needsTransferableCopy, renderPrintedSample, type PrintedSampleOptions }
 export type PrintedEnvelope = {
   /** EN: Name; it decides the set (3.5 of the phase 5a spec). ES: Nombre; decide el conjunto. */
   readonly name: string
-  /** EN: The envelope XML. ES: El XML del envío. */
-  readonly xml: string
+  /** EN: The envelope XML, as text or as the bytes of its file. ES: El XML del envío, como texto o como los bytes de su archivo. */
+  readonly xml: string | Uint8Array
 }
 
 /**

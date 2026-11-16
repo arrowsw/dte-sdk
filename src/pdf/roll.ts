@@ -1,20 +1,30 @@
 import type { PDFImage } from 'pdf-lib'
 import {
+  cityOf,
+  descriptionLines,
+  dispatchText,
   dottedRut,
   drawRect,
   drawRule,
   drawText,
   formatAmount,
+  issuerAddress,
+  paymentFields,
+  printedQuantity,
   printedTypeName,
+  printedUnitPrice,
+  referenceReason,
   referenceTypeName,
+  totalInWords,
   totalRows,
   transportGroups,
   wrapText,
   type Canvas,
   type Fonts,
 } from './draw'
-import { ACKNOWLEDGEMENT_TEXT, COLOURS, FONT, ROLL, ROLL_FONT, STAMP, TRANSFER_REASON_NAMES } from './layout'
+import { ACKNOWLEDGEMENT_TEXT, COLOURS, FONT, ROLL, ROLL_FONT, STAMP, TRANSFER_REASON_NAMES, UNSTAMPED } from './layout'
 import type { PrintableDocument } from './parse'
+import { longDate } from './words'
 
 // The printed sample on continuous paper: a list of rows built top to bottom in the order the manual gives for the
 // format (type box, SII office, issuer, receiver, date, references, detail, commissions, totals, acknowledgement box,
@@ -63,6 +73,8 @@ export type RollInput = {
   readonly logo: PDFImage | null
   /** EN: Stamp, null when it is not printed. ES: Timbre, null cuando no se imprime. */
   readonly stamp: PDFImage | null
+  /** EN: The document has no stamp: print the notice where it goes. ES: El documento no trae timbre: imprimir el aviso donde va. */
+  readonly unstamped: boolean
   /** EN: Print the acknowledgement box and the destination mark. ES: Imprimir el acuse de recibo y la marca de destino. */
   readonly transferable: boolean
 }
@@ -125,11 +137,10 @@ const typeBox = (doc: PrintableDocument, fonts: Fonts): Row => ({
 
 const issuerRows = (doc: PrintableDocument, fonts: Fonts): readonly Row[] => {
   const { issuer } = doc
-  const address = `Casa Matriz: ${issuer.address}${issuer.commune ? `, ${issuer.commune}` : ''}`
   return [
     ...wrapped(fonts, issuer.name, ROLL_FONT.name, { bold: true }),
     ...wrapped(fonts, issuer.activity, ROLL_FONT.small),
-    ...wrapped(fonts, address, ROLL_FONT.small),
+    ...wrapped(fonts, issuerAddress(issuer), ROLL_FONT.small),
     ...(issuer.branch ? wrapped(fonts, `Sucursal: ${issuer.branch}`, ROLL_FONT.small) : []),
   ]
 }
@@ -137,7 +148,7 @@ const issuerRows = (doc: PrintableDocument, fonts: Fonts): readonly Row[] => {
 // The receiver is optional on a receipt: its fields print when the document has them.
 const receiverRows = (doc: PrintableDocument, fonts: Fonts): readonly Row[] => {
   const { receiver } = doc
-  const address = [receiver.address, receiver.commune].filter(Boolean).join(', ')
+  const address = [receiver.address, receiver.commune, cityOf(receiver)].filter(Boolean).join(', ')
   return [
     ...field(fonts, 'Señor(es): ', receiver.name),
     ...field(fonts, 'RUT: ', receiver.rut === '' ? '' : dottedRut(receiver.rut)),
@@ -160,7 +171,7 @@ const referenceRows = (doc: PrintableDocument, fonts: Fonts): readonly Row[] =>
         ...doc.references.flatMap((reference): readonly Row[] => [
           ...field(fonts, 'Documento: ', `${referenceTypeName(reference.documentType)} N° ${reference.folio}`),
           ...field(fonts, 'Fecha: ', reference.date),
-          ...field(fonts, 'Razón: ', reference.reason),
+          ...field(fonts, 'Razón: ', referenceReason(reference)),
         ]),
       ]
 
@@ -172,7 +183,7 @@ const detailRows = (doc: PrintableDocument, fonts: Fonts): readonly Row[] => [
     const quantity =
       item.quantity === undefined
         ? ''
-        : `${item.quantity} ${item.unit ?? 'UN'}${item.unitPrice === undefined ? '' : ` x $${formatAmount(item.unitPrice)}`}`
+        : `${printedQuantity(item.quantity)} ${item.unit ?? 'UN'}${item.unitPrice === undefined ? '' : ` x ${printedUnitPrice(item.unitPrice)}`}`
     const amount = item.amount === undefined ? '' : `$${formatAmount(item.amount)}`
     const discount = item.discountAmount
       ? `Dcto: $${formatAmount(item.discountAmount)}`
@@ -181,6 +192,7 @@ const detailRows = (doc: PrintableDocument, fonts: Fonts): readonly Row[] => [
         : ''
     return [
       ...wrapped(fonts, `${index + 1}. ${item.code ? `${item.code} ` : ''}${item.name}`, ROLL_FONT.body),
+      ...descriptionLines(item).flatMap((line) => wrapped(fonts, line, ROLL_FONT.small)),
       ...(quantity === '' && amount === ''
         ? []
         : [{ kind: 'pair', left: quantity, right: amount, size: ROLL_FONT.small, bold: false } as const]),
@@ -219,6 +231,12 @@ const commissionRows = (doc: PrintableDocument, fonts: Fonts): readonly Row[] =>
       ]
 }
 
+// The total written out, under the totals it says.
+const wordsRows = (doc: PrintableDocument, fonts: Fonts): readonly Row[] => {
+  const words = totalInWords(doc)
+  return words === '' ? [] : [gap(ROLL.gap / 2), ...wrapped(fonts, words, ROLL_FONT.small)]
+}
+
 // A label too wide to share its line with the amount, such as a tax's name, goes on over the lines above it.
 const totalsRows = (doc: PrintableDocument, fonts: Fonts): readonly Row[] => [
   { kind: 'rule' },
@@ -231,6 +249,7 @@ const totalsRows = (doc: PrintableDocument, fonts: Fonts): readonly Row[] => [
       { kind: 'pair', left: lines[lines.length - 1], right: value, size, bold },
     ]
   }),
+  ...wordsRows(doc, fonts),
 ]
 
 const acknowledgementRows = (fonts: Fonts): readonly Row[] => [
@@ -248,8 +267,22 @@ const acknowledgementRows = (fonts: Fonts): readonly Row[] => [
   },
 ]
 
+// Where the stamp goes, on a document that has none: a frame that says so, and its legend.
+const unstampedRows = (): readonly Row[] => [
+  gap(ROLL.gap),
+  {
+    kind: 'frame',
+    tone: 'midGrey',
+    border: 0.5,
+    rows: [text(UNSTAMPED.title, ROLL_FONT.body, { bold: true, align: 'center' })],
+  },
+  gap(STAMP.legendGap),
+  text(UNSTAMPED.legend, ROLL_FONT.small, { bold: true, align: 'center' }),
+]
+
 const stampRows = (input: RollInput): readonly Row[] => {
   const { stamp, fonts } = input
+  if (input.unstamped) return unstampedRows()
   if (stamp === null) return []
   const natural = stamp.scale(1)
   const height = Math.max(
@@ -287,7 +320,8 @@ export const buildRoll = (input: RollInput): readonly Row[] => {
     gap(ROLL.gap),
     ...issuerRows(doc, fonts),
     ...(receiver.length === 0 ? [] : [{ kind: 'rule' } as const, ...receiver]),
-    ...field(fonts, 'Fecha Emisión: ', doc.issueDate),
+    ...field(fonts, 'Fecha Emisión: ', longDate(doc.issueDate)),
+    ...paymentFields(doc).flatMap(([label, value]) => field(fonts, label, value)),
     ...(transferReason === null
       ? []
       : field(
@@ -295,6 +329,7 @@ export const buildRoll = (input: RollInput): readonly Row[] => {
           'Tipo de Traslado: ',
           [transferReason, TRANSFER_REASON_NAMES[transferReason]].filter(Boolean).join(' - '),
         )),
+    ...field(fonts, 'Tipo de Despacho: ', dispatchText(doc)),
     ...transportRows(doc, fonts),
     ...referenceRows(doc, fonts),
     ...detailRows(doc, fonts),

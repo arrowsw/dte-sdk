@@ -3,6 +3,7 @@ import { sha1Base64, toBinaryString } from '../src/crypto/digest'
 import {
   rsaSha1SignBase64,
   rsaSha1VerifyBase64,
+  rsaPublicKeyBytes,
   rsaPublicKeyParts,
   rsaPublicKeyPartsFromCertificatePem,
 } from '../src/crypto/rsa'
@@ -45,6 +46,18 @@ describe('rsa', () => {
 
   test('modulus has no sign byte and is 256 bytes for a 2048-bit key', () => {
     expect(forge.util.decode64(rsaPublicKeyParts(keyPem).modulus).length).toBe(256)
+  })
+
+  test('the size of a key is the bytes the verifier decodes, however its base64 is written', () => {
+    expect(rsaPublicKeyBytes(rsaPublicKeyParts(keyPem))).toEqual({ modulus: 256, exponent: 3 })
+    // Whitespace counts for nothing, and leading zero bytes count: the size bounds the work, not the number.
+    expect(rsaPublicKeyBytes({ modulus: ' AAAA\nAQAB ', exponent: 'AAAAAA==' })).toEqual({ modulus: 6, exponent: 4 })
+    // Padding in the middle makes one byte of each group: counting characters would call these 600 bytes 450.
+    expect(rsaPublicKeyBytes({ modulus: 'A==='.repeat(600), exponent: 'A==='.repeat(6) })).toEqual({
+      modulus: 600,
+      exponent: 6,
+    })
+    expect(rsaPublicKeyBytes({ modulus: '', exponent: '' })).toEqual({ modulus: 0, exponent: 0 })
   })
 })
 

@@ -46,6 +46,22 @@ export const isRsaKeyPair = (privateKey: forge.pki.rsa.PrivateKey, publicKey: Rs
   privateKey.n.equals(base64ToBigInt(publicKey.modulus)) && privateKey.e.equals(base64ToBigInt(publicKey.exponent))
 
 /**
+ * EN: The size in bytes of the modulus and of the exponent of a public key, decoded as `rsaSha1VerifyBase64` decodes
+ * them, so a bound checked on these sizes is a bound on the key the verification builds, however its base64 is
+ * written. Leading zero bytes count: the size bounds the work, not the number.
+ * ES: El tamaño en bytes del módulo y del exponente de una clave pública, decodificados como los decodifica
+ * `rsaSha1VerifyBase64`, así una cota sobre estos tamaños es una cota sobre la llave que arma la verificación, se
+ * escriba como se escriba su base64. Los bytes cero al inicio cuentan: el tamaño acota el trabajo, no el número.
+ * @internal
+ */
+export const rsaPublicKeyBytes = (
+  publicKey: RsaPublicKeyParts,
+): { readonly modulus: number; readonly exponent: number } => ({
+  modulus: forge.util.decode64(publicKey.modulus).length,
+  exponent: forge.util.decode64(publicKey.exponent).length,
+})
+
+/**
  * EN: Public modulus and exponent of a PEM certificate.
  * ES: Módulo y exponente públicos de un certificado PEM.
  */

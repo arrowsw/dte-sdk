@@ -1,8 +1,17 @@
 import type { PDFFont, PDFPage, RGB } from 'pdf-lib'
 import { format } from 'rut.ts'
 import { documentTypeName, isDocumentType } from '../catalogs/document-types'
-import { FONT, LINE, TABLE, TAX_NAMES } from './layout'
-import type { PrintableDocument, PrintableItem, PrintableTransport } from './parse'
+import { REFERENCE_DOCUMENT_TYPES, isReferenceDocumentType } from '../catalogs/reference-types'
+import { DISPATCH_TYPE_NAMES, FONT, LINE, PAYMENT_TERMS_NAMES, REFERENCE_CODE_NAMES, TABLE, TAX_NAMES } from './layout'
+import type {
+  PrintableDocument,
+  PrintableIssuer,
+  PrintableItem,
+  PrintableParty,
+  PrintableReference,
+  PrintableTransport,
+} from './parse'
+import { amountInWords, formatQuantity, longDate } from './words'
 
 // Drawing helpers shared by the sheet layout (render.ts) and the continuous-paper layout (roll.ts).
 
@@ -24,10 +33,50 @@ const subtracted = (value: number): string => (value < 0 ? `$${formatAmount(-val
 export const dottedRut = (rut: string): string => format(rut, { dots: true, throwOnError: false }) ?? rut
 export const printedTypeName = (type: number): string =>
   isDocumentType(type) ? documentTypeName(type, 'printed') : `DTE ${type}`
+// A DTE by its printed name, any other document a reference can name (a paper one, a purchase order) by the name the
+// SII gives its code, and a code with no name as written.
 export const referenceTypeName = (code: string): string => {
   if (code === '') return ''
   const type = Number(code)
-  return isDocumentType(type) ? documentTypeName(type, 'printed') : `Tipo ${code}`
+  if (isDocumentType(type)) return documentTypeName(type, 'printed')
+  return isReferenceDocumentType(type) ? REFERENCE_DOCUMENT_TYPES[type] : `Tipo ${code}`
+}
+// What the document does to the referenced one, in words, and then the reason it gives.
+export const referenceReason = ({ code, reason }: PrintableReference): string =>
+  [code === undefined ? undefined : REFERENCE_CODE_NAMES[code], reason].filter(Boolean).join('. ')
+// A quantity as it prints, and a unit price: both admit six decimals.
+export const printedQuantity = (value: number | undefined): string => (value === undefined ? '' : formatQuantity(value))
+export const printedUnitPrice = (value: number | undefined): string =>
+  value === undefined ? '' : `$${formatQuantity(value)}`
+// The city prints when it says more than the commune: the SDK writes the commune as the city when none is given.
+export const cityOf = ({ city, commune }: PrintableParty): string => {
+  const trimmed = (city ?? '').trim()
+  return trimmed.toLowerCase() === commune.trim().toLowerCase() ? '' : trimmed
+}
+export const issuerAddress = (issuer: PrintableIssuer): string =>
+  `Casa Matriz: ${issuer.address}${[issuer.commune, cityOf(issuer)].map((part) => (part ? `, ${part}` : '')).join('')}`
+// The payment terms in words and the due date, each when the document has it (Formato DTE 2.5 marks both to print).
+export const paymentFields = (doc: PrintableDocument): readonly Field[] => [
+  ...(doc.paymentTerms === undefined
+    ? []
+    : [['Forma de Pago: ', PAYMENT_TERMS_NAMES[doc.paymentTerms] ?? String(doc.paymentTerms)] as const]),
+  ...(doc.dueDate ? [['Fecha Vencimiento: ', longDate(doc.dueDate)] as const] : []),
+]
+// Who dispatches the goods, the code and its name; empty when the document does not say.
+export const dispatchText = ({ dispatchType }: PrintableDocument): string =>
+  dispatchType === undefined
+    ? ''
+    : [String(dispatchType), DISPATCH_TYPE_NAMES[dispatchType]].filter(Boolean).join(' - ')
+// The additional description of an item, one entry per line it was written in.
+export const descriptionLines = (item: PrintableItem): readonly string[] =>
+  (item.description ?? '')
+    .split(/[\r\n]+/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+// The total written out, empty when the document has none or the words cannot say it exactly.
+export const totalInWords = ({ totals }: PrintableDocument): string => {
+  const words = totals.total === undefined ? '' : amountInWords(totals.total)
+  return words === '' ? '' : `Son: ${words}`
 }
 
 export const wrapText = (text: string, font: PDFFont, size: number, maxWidth: number): readonly string[] => {
@@ -111,7 +160,9 @@ export const drawRule = (canvas: Canvas, x1: number, x2: number, yFromTop: numbe
 }
 
 export const itemRow = (item: PrintableItem, fonts: Fonts, descriptionWidth: number) => {
-  const lines = wrapText(item.name, fonts.normal, FONT.tiny, descriptionWidth)
+  const lines = [item.name, ...descriptionLines(item)].flatMap((line) =>
+    wrapText(line, fonts.normal, FONT.tiny, descriptionWidth),
+  )
   const hasDiscount = Boolean(item.discountAmount || item.discountPercent)
   const height = Math.max(TABLE.rowHeight, lines.length * LINE.tiny + TABLE.padY * 2 + (hasDiscount ? LINE.tiny : 0))
   return { lines, hasDiscount, height }
@@ -137,6 +188,9 @@ export const totalRows = (doc: PrintableDocument): readonly TotalRow[] => {
   if (totals.net) rows.push(['Monto Neto', `$${formatAmount(totals.net)}`, false])
   if (totals.exempt) rows.push(['Monto Exento', `$${formatAmount(totals.exempt)}`, false])
   if (totals.vat) rows.push([`IVA (${totals.vatRate || 19}%)`, `$${formatAmount(totals.vat)}`, false])
+  // The credit of construction companies is taken off the VAT, and so off the total (Formato DTE 2.5, `CredEC`).
+  if (totals.constructionCredit)
+    rows.push(['Crédito especial 65% empresas constructoras', subtracted(totals.constructionCredit), false])
   // The additional taxes add to the total and the VAT withholdings take off from it (Formato DTE 2.5, `MntTotal`).
   for (const { code, rate, amount } of doc.withholdings ?? []) {
     if (!amount) continue

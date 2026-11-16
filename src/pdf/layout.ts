@@ -76,6 +76,30 @@ export const TRANSFER_REASON_NAMES: Readonly<Record<number, string>> = {
   9: 'Venta para exportación',
 }
 
+/** EN: Printed names of the payment terms, as Formato DTE 2.5 words them (field 13 of the header, page 14). ES: `FmaPago` — Nombres impresos de las formas de pago, como las nombra el Formato DTE 2.5 (campo 13 del encabezado, página 14). */
+export const PAYMENT_TERMS_NAMES: Readonly<Record<number, string>> = {
+  1: 'Contado',
+  2: 'Crédito',
+  3: 'Sin costo (entrega gratuita)',
+}
+
+/** EN: Printed names of who dispatches the goods (Formato DTE 2.5, field 6 of the header, page 12). ES: `TipoDespacho` — Nombres impresos de quién despacha los bienes (Formato DTE 2.5, campo 6 del encabezado, página 12). */
+export const DISPATCH_TYPE_NAMES: Readonly<Record<number, string>> = {
+  1: 'Por cuenta del receptor',
+  2: 'Por cuenta del emisor a instalaciones del cliente',
+  3: 'Por cuenta del emisor a otras instalaciones',
+}
+
+/** EN: What a document does to the one it references, in words (Formato DTE 2.5, field 8 of the references, page 46). ES: `CodRef` — Lo que un documento le hace al que referencia, en palabras (Formato DTE 2.5, campo 8 de las referencias, página 46). */
+export const REFERENCE_CODE_NAMES: Readonly<Record<number, string>> = {
+  1: 'Anula documento de referencia',
+  2: 'Corrige texto documento de referencia',
+  3: 'Corrige montos',
+}
+
+/** EN: The notice printed where the stamp goes on a document that has none, and its legend. ES: El aviso que se imprime donde va el timbre en un documento que no lo trae, y su leyenda. */
+export const UNSTAMPED = { title: 'SIN TIMBRE ELECTRÓNICO', legend: 'Documento sin validez tributaria' } as const
+
 /**
  * EN: Printed names of the codes of additional taxes and withholdings, as Formato DTE 2.5 names them in its table of
  * codes (section 4, pages 51 to 54); the printed sample translates the code into words, as the format asks of
