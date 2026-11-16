@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **The key a received document names is bounded before a signature is checked with it.** `verifyReceivedDocuments`
+  checks the stamp of each document with the key of the CAF the stamp carries, and its signature with the key of the
+  certificate it carries, and the cost of that check grows with the key: a document whose stamp named a modulus and an
+  exponent of 16 384 bits took 45 seconds to verify, against 4 ms for a real one. `rsaSha1VerifyBase64`, which every
+  check goes through, now returns `false` without trying the signature for a modulus over 512 bytes (4096 bits) or an
+  exponent over 4 bytes (32 bits), the bytes counted as decoded, leading zeros included. A CAF key is 512 to 1024 bits
+  with exponent 3 or 65537 and a certificate key at most 4096 bits, so no real key reaches the bound; a document that
+  names a larger one fails that check (`signatureValid: false`), in a few milliseconds.
+  - **What to change:** nothing.
+
 ## [0.13.0] - 2026-11-14
 
 ### Added

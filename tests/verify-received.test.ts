@@ -20,6 +20,7 @@ import {
   SII_NS,
   signedCaf,
   signedElsewhere,
+  signerWithExponent,
   stampedWith,
   TEST_SII_KEYS,
   XSI_NS,
@@ -298,6 +299,51 @@ describe('verifyReceivedDocuments: each check on its own', () => {
       valid: false,
     })
     expect(result.status).toBe('invalid')
+  })
+})
+
+// A received document names the keys its stamp and its signature are checked with, and the cost of a check grows with
+// the key, so a key larger than any CAF or certificate key is refused before its signature is tried.
+describe('verifyReceivedDocuments: the size of a key the document names', () => {
+  // Each case writes the CAF's own key with leading zero bytes, the same number, and the CAF key signs the stamp, so it
+  // verifies whenever it is tried. The SII's signature over that CAF no longer verifies; that check is not the point.
+  describe.each([
+    ['modulus', 'M', 512],
+    ['exponent', 'E', 4],
+  ] as const)('a stamp whose CAF writes the %s of its key long', (_part, tag, limit) => {
+    const stampWithKeyIn = (bytes: number): ReceivedDocument => {
+      const caf = signedCaf()
+      const cafXml = caf.xml.replace(new RegExp(`<${tag}>([^<]*)</${tag}>`), (_match, value: string) => {
+        const raw = Buffer.from(value, 'base64')
+        return `<${tag}>${Buffer.concat([Buffer.alloc(bytes - raw.length), raw]).toString('base64')}</${tag}>`
+      })
+      return only(stampedWith(1, caf, { fields: { caf: cafXml } }).xml)
+    }
+
+    test('at the bound, the stamp is checked and verifies', () => {
+      expect(stampWithKeyIn(limit).ted).toEqual(VALID_TED)
+    })
+
+    test('one byte over, the stamp is not checked', () => {
+      expect(stampWithKeyIn(limit + 1).ted).toEqual({ ...VALID_TED, signatureValid: false, valid: false })
+    })
+  })
+
+  // A certificate writes its key with no leading zero, so the cases are a key whose exponent takes 4 bytes and one
+  // whose exponent takes 5, each the certificate's own key, which signs the document.
+  test.each([
+    ['of 32 bits is checked and verifies', 4294967291n, true],
+    ['of 33 bits is not checked', 4294967311n, false],
+  ])('a signature whose certificate has an exponent %s', (_label, exponent, valid) => {
+    const signer = signerWithExponent(exponent)
+    const xml = signedElsewhere(issued(1), ` xmlns="${SII_NS}" xmlns:xsi="${XSI_NS}"`, undefined, undefined, signer)
+    expect(only(xml).signature).toEqual({
+      found: true,
+      referenceId: 'DTE_T33F1',
+      digestValid: true,
+      signatureValid: valid,
+      valid,
+    })
   })
 })
 
