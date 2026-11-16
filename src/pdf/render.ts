@@ -17,18 +17,27 @@ import {
   TABLE,
   TRANSFER_REASON_NAMES,
   TYPE_BOX,
+  UNSTAMPED,
   defaultResolution,
 } from './layout'
 import {
+  cityOf,
+  dispatchText,
   dottedRut,
   drawRect,
   drawRule,
   drawText,
   drawTextCentered,
   formatAmount,
+  issuerAddress,
   itemRow,
+  paymentFields,
+  printedQuantity,
   printedTypeName,
+  printedUnitPrice,
+  referenceReason,
   referenceTypeName,
+  totalInWords,
   totalRows,
   transportGroups,
   wrapText,
@@ -36,6 +45,7 @@ import {
   type Field,
   type Fonts,
 } from './draw'
+import { longDate } from './words'
 import type { PrintableCommission, PrintableDocument, PrintableItem, PrintableReference } from './parse'
 import { buildRoll, drawRoll, rollHeight } from './roll'
 import { loadBarcodeModule, renderTedBarcodeWith, type BarcodeModule } from './stamp'
@@ -245,8 +255,7 @@ const drawHeader = (
   ly += LINE.normal
   drawText(canvas, issuer.activity, MARGIN, ly, fonts.normal, FONT.small, black)
   ly += LINE.small
-  const address = `Casa Matriz: ${issuer.address}${issuer.commune ? `, ${issuer.commune}` : ''}`
-  drawText(canvas, address, MARGIN, ly, fonts.normal, FONT.small, black)
+  drawText(canvas, issuerAddress(issuer), MARGIN, ly, fonts.normal, FONT.small, black)
   ly += LINE.small
   if (issuer.branch) drawText(canvas, `Sucursal: ${issuer.branch}`, MARGIN, ly, fonts.normal, FONT.small, black)
 
@@ -280,7 +289,7 @@ const drawHeader = (
 const drawIssueDate = (canvas: Canvas, doc: PrintableDocument, y: number): number => {
   drawText(
     canvas,
-    `Fecha Emisión: ${doc.issueDate}`,
+    `Fecha Emisión: ${longDate(doc.issueDate)}`,
     MARGIN,
     y,
     canvas.fonts.bold,
@@ -300,6 +309,12 @@ const drawField = (canvas: Canvas, [label, value]: Field, x: number, y: number):
   return valueX + fonts.normal.widthOfTextAtSize(value, FONT.small)
 }
 
+// The payment terms and the due date on one line, under the issue date.
+const drawPayment = (canvas: Canvas, fields: readonly Field[], y: number): void => {
+  let x = MARGIN
+  for (const field of fields) x = drawField(canvas, field, x, y) + BOX.fieldGap * 2
+}
+
 const drawBox = (canvas: Canvas, y: number, lines: number): number => {
   const height = boxHeight(lines)
   drawRect(canvas, MARGIN, y, TABLE_WIDTH, height, { stroke: canvas.paint(COLOURS.midGrey), strokeWidth: 0.5 })
@@ -316,10 +331,12 @@ const drawReceiver = (canvas: Canvas, doc: PrintableDocument, y: number): number
     drawField(canvas, [label, value], x, yy)
   }
   drawField(canvas, ['Señor(es): ', receiver.name], left, lineY(y, 0))
-  rightAligned('RUT: ', receiver.rut, lineY(y, 0))
+  rightAligned('RUT: ', dottedRut(receiver.rut), lineY(y, 0))
   drawField(canvas, ['Dirección: ', receiver.address], left, lineY(y, 1))
   rightAligned('Comuna: ', receiver.commune, lineY(y, 1))
   drawField(canvas, ['Giro: ', receiver.activity], left, lineY(y, 2))
+  const city = cityOf(receiver)
+  if (city) rightAligned('Ciudad: ', city, lineY(y, 2))
   return drawBox(canvas, y, 3)
 }
 
@@ -331,19 +348,12 @@ const drawTransport = (canvas: Canvas, lines: readonly (readonly Field[])[], y: 
   return drawBox(canvas, y, lines.length)
 }
 
-const drawTransferReason = (canvas: Canvas, reason: number, y: number): number => {
-  const name = TRANSFER_REASON_NAMES[reason] ?? ''
-  drawText(
-    canvas,
-    `Tipo de Traslado: ${reason} - ${name}`,
-    MARGIN,
-    y,
-    canvas.fonts.normal,
-    FONT.small,
-    canvas.paint(COLOURS.black),
-  )
-  return y + LINE.small
-}
+// A line of its own under the receiver: the transfer reason of a guide, or who dispatches the goods.
+const drawLine = (canvas: Canvas, text: string, y: number): void =>
+  drawText(canvas, text, MARGIN, y, canvas.fonts.normal, FONT.small, canvas.paint(COLOURS.black))
+
+const transferReasonText = (reason: number): string =>
+  `Tipo de Traslado: ${reason} - ${TRANSFER_REASON_NAMES[reason] ?? ''}`
 
 const drawTableHeader = (
   canvas: Canvas,
@@ -376,15 +386,32 @@ const drawTableHeader = (
 const drawTitle = (canvas: Canvas, title: string, y: number): void =>
   drawText(canvas, title, MARGIN, y, canvas.fonts.bold, FONT.normal, canvas.paint(COLOURS.black))
 
-const drawReferenceRow = (canvas: Canvas, reference: PrintableReference, y: number): void => {
+// A reference's row: the name of the referenced document, its folio, its date, and what the document does to it with
+// the reason it gives, each wrapped in its column; the row is as tall as its longest cell.
+const referenceRow = (reference: PrintableReference, fonts: Fonts) => {
+  const values = [
+    referenceTypeName(reference.documentType),
+    reference.folio,
+    reference.date,
+    referenceReason(reference),
+  ]
+  const cells = values.map((value, index) =>
+    wrapText(value, fonts.normal, FONT.tiny, REFERENCE_COLUMNS[index] - TABLE.padX * 2),
+  )
+  const lines = Math.max(...cells.map((cell) => cell.length))
+  return { cells, height: TABLE.rowHeight + (lines - 1) * LINE.tiny }
+}
+
+const drawReferenceRow = (canvas: Canvas, row: ReturnType<typeof referenceRow>, y: number): void => {
   const { fonts } = canvas
   const black = canvas.paint(COLOURS.black)
   const dark = canvas.paint(COLOURS.darkGrey)
-  const values = [referenceTypeName(reference.documentType), reference.folio, reference.date, reference.reason]
   let cx = MARGIN
-  values.forEach((value, index) => {
-    drawRect(canvas, cx, y, REFERENCE_COLUMNS[index], TABLE.rowHeight, { stroke: dark, strokeWidth: 0.5 })
-    drawText(canvas, value, cx + TABLE.padX, y + TABLE.padY, fonts.normal, FONT.tiny, black)
+  row.cells.forEach((cell, index) => {
+    drawRect(canvas, cx, y, REFERENCE_COLUMNS[index], row.height, { stroke: dark, strokeWidth: 0.5 })
+    cell.forEach((line, at) =>
+      drawText(canvas, line, cx + TABLE.padX, y + TABLE.padY + at * LINE.tiny, fonts.normal, FONT.tiny, black),
+    )
     cx += REFERENCE_COLUMNS[index]
   })
 }
@@ -423,9 +450,9 @@ const drawItemRow = (
     num: String(index + 1),
     code: item.code,
     description: '',
-    quantity: item.quantity === undefined ? '' : String(item.quantity),
+    quantity: printedQuantity(item.quantity),
     unit: item.unit ?? 'UN',
-    unitPrice: item.unitPrice === undefined ? '' : `$${formatAmount(item.unitPrice)}`,
+    unitPrice: printedUnitPrice(item.unitPrice),
     amount: item.amount === undefined ? '' : `$${formatAmount(item.amount)}`,
   }
   let cx = MARGIN
@@ -590,6 +617,28 @@ const drawStamp = (canvas: Canvas, image: PDFImage, y: number, resolution: strin
   return yy + LINE.legal
 }
 
+// Where the stamp goes, on a document that has none: a box the least size of a stamp that says so, and its legend, so
+// the print never passes for that of a stamped document.
+const UNSTAMPED_HEIGHT = GAP.section + STAMP.minHeight + STAMP.legendGap + LINE.legal
+
+const drawUnstamped = (canvas: Canvas, y: number): void => {
+  const black = canvas.paint(COLOURS.black)
+  const x = MARGIN + STAMP.marginLeft
+  const top = y + GAP.section
+  drawRect(canvas, x, top, STAMP.minWidth, STAMP.minHeight, { stroke: canvas.paint(COLOURS.midGrey), strokeWidth: 0.5 })
+  drawTextCentered(
+    canvas,
+    UNSTAMPED.title,
+    x,
+    STAMP.minWidth,
+    top + (STAMP.minHeight - FONT.small) / 2,
+    canvas.fonts.bold,
+    FONT.small,
+    black,
+  )
+  drawText(canvas, UNSTAMPED.legend, x, top + STAMP.minHeight + STAMP.legendGap, canvas.fonts.bold, FONT.legend, black)
+}
+
 const drawTransferableMark = (canvas: Canvas, doc: PrintableDocument): void => {
   const text = doc.type === 52 ? 'CEDIBLE CON SU FACTURA' : 'CEDIBLE'
   const width = canvas.fonts.bold.widthOfTextAtSize(text, FONT.name)
@@ -625,6 +674,7 @@ type SheetInput = {
   readonly doc: PrintableDocument
   readonly fonts: Fonts
   readonly stamp: PDFImage | null
+  readonly unstamped: boolean
   readonly resolution: string
   readonly transferable: boolean
 }
@@ -657,9 +707,18 @@ const tableBlocks = <T>(
 // The sheet top to bottom, under the header: date, receiver, transfer type, transport, references, detail, and the
 // closing (totals, acknowledgement box and stamp), which keeps with the last detail row so the last page is never only
 // totals.
-const sheetBlocks = ({ doc, fonts, stamp, resolution, transferable }: SheetInput): readonly Block[] => {
+const sheetBlocks = ({ doc, fonts, stamp, unstamped, resolution, transferable }: SheetInput): readonly Block[] => {
   const legendLines = transferable ? wrapText(ACKNOWLEDGEMENT_TEXT, fonts.normal, FONT.legal, BOX_INNER_WIDTH) : []
   const transferReason = doc.type === 52 ? doc.transferReason : null
+  const payment = paymentFields(doc)
+  // Under the receiver, each on its line: the transfer reason of a guide and who dispatches the goods.
+  const dispatch = dispatchText(doc)
+  const notes = [
+    transferReason === null ? '' : transferReasonText(transferReason),
+    dispatch === '' ? '' : `Tipo de Despacho: ${dispatch}`,
+  ].filter(Boolean)
+  const words = totalInWords(doc)
+  const wordLines = words === '' ? [] : wrapText(words, fonts.normal, FONT.small, TABLE_WIDTH)
   const transport = transportLines(doc, fonts)
   const columns = detailColumns(doc)
   const references =
@@ -675,10 +734,10 @@ const sheetBlocks = ({ doc, fonts, stamp, resolution, transferable }: SheetInput
               'left',
             ]),
           doc.references,
-          (reference) => ({
-            height: TABLE.rowHeight,
-            draw: (canvas, y) => drawReferenceRow(canvas, reference, y),
-          }),
+          (reference) => {
+            const row = referenceRow(reference, fonts)
+            return { height: row.height, draw: (canvas, y) => drawReferenceRow(canvas, row, y) }
+          },
           false,
         )
   const detail = tableBlocks(
@@ -728,16 +787,23 @@ const sheetBlocks = ({ doc, fonts, stamp, resolution, transferable }: SheetInput
   const totals = totalsLayout(doc, fonts)
   return [
     { height: LINE.normal, gap: GAP.small, draw: (canvas, y) => drawIssueDate(canvas, doc, y) },
-    { height: RECEIVER_HEIGHT, gap: GAP.section, draw: (canvas, y) => drawReceiver(canvas, doc, y) },
-    ...(transferReason === null
+    ...(payment.length === 0
       ? []
       : [
           {
             height: LINE.small,
             gap: GAP.small,
-            draw: (canvas: Canvas, y: number) => drawTransferReason(canvas, transferReason, y),
+            draw: (canvas: Canvas, y: number) => drawPayment(canvas, payment, y),
           },
         ]),
+    { height: RECEIVER_HEIGHT, gap: GAP.section, draw: (canvas, y) => drawReceiver(canvas, doc, y) },
+    ...notes.map(
+      (text, index): Block => ({
+        height: LINE.small,
+        gap: index === notes.length - 1 ? GAP.small : 0,
+        draw: (canvas, y) => drawLine(canvas, text, y),
+      }),
+    ),
     ...(transport.length === 0
       ? []
       : [
@@ -756,6 +822,18 @@ const sheetBlocks = ({ doc, fonts, stamp, resolution, transferable }: SheetInput
       keep: true,
       draw: (canvas, y) => drawTotals(canvas, totals, y),
     },
+    // The total written out, kept with the totals it says.
+    ...(wordLines.length === 0
+      ? []
+      : [
+          {
+            height: wordLines.length * LINE.small,
+            gap: GAP.section,
+            keep: true,
+            draw: (canvas: Canvas, y: number) =>
+              wordLines.forEach((line, index) => drawLine(canvas, line, y + index * LINE.small)),
+          },
+        ]),
     ...(transferable
       ? [
           {
@@ -775,6 +853,7 @@ const sheetBlocks = ({ doc, fonts, stamp, resolution, transferable }: SheetInput
           },
         ]
       : []),
+    ...(unstamped ? [{ height: UNSTAMPED_HEIGHT, gap: 0, draw: drawUnstamped }] : []),
   ]
 }
 
@@ -850,17 +929,19 @@ const draw = async (
     doc.tedXml === '' || options.stamp === false
       ? null
       : await document.embedPng(await renderTedBarcodeWith(modules.barcode, doc.tedXml))
+  // A document with no TED says so where the stamp goes; a receipt printed without its stamp on purpose does not.
+  const unstamped = doc.tedXml === '' && options.stamp !== false
   const transferable = options.transferable === true && needsTransferableCopy(doc)
   const office = options.siiOffice ?? siiOfficeForCommune(doc.issuer.commune) ?? DEFAULT_SII_OFFICE
   const resolution = options.resolution ?? defaultResolution((options.now ?? (() => new Date()))().getFullYear())
   if (options.paper === 'roll') {
-    const rows = buildRoll({ doc, fonts, office, resolution, logo, stamp, transferable })
+    const rows = buildRoll({ doc, fonts, office, resolution, logo, stamp, unstamped, transferable })
     const height = rollHeight(rows, fonts)
     const roll = document.addPage([ROLL.width, height])
     drawRoll({ page: roll, fonts, height, paint: ([r, g, b]) => pdf.rgb(r, g, b) }, rows)
     return document.save()
   }
-  const blocks = sheetBlocks({ doc, fonts, stamp, resolution, transferable })
+  const blocks = sheetBlocks({ doc, fonts, stamp, unstamped, resolution, transferable })
   const single = paginate(headerBottom(doc, fonts, logo, MARGIN, false), blocks)
   // A document of several pages numbers them under the SII office, so its header may be taller.
   const pages = single.length === 1 ? single : paginate(headerBottom(doc, fonts, logo, MARGIN, true), blocks)
@@ -907,7 +988,17 @@ const checkPaperAndStamp = (doc: PrintableDocument, { paper, stamp }: RenderPrin
  * lacks. The totals print the additional taxes and withholdings (`ImptoReten`) by the name Formato DTE 2.5 gives each
  * code, with their rate, the VAT not withheld, and the totals of the commissions; what the total takes off, a VAT
  * withholding or a commission, prints with a minus. Every amount is the one the document carries, never worked out
- * again. The page is 21.5 cm wide and as tall as its content between 11 and 33 cm. A document taller than 33 cm goes on
+ * again. It also prints what Formato DTE 2.5 marks to be printed when the document has it: the payment terms in words
+ * (`FmaPago`) and the due date (`FchVenc`) on a line under the issue date, the additional description of an item
+ * (`DscItem`) under its name, and the special credit of construction companies (`CredEC`) among the totals, with a
+ * minus. And what eases the reading: the issue and due dates with the month in words; who dispatches the goods
+ * (`TipoDespacho`) in words, under the receiver; the city of the issuer and of the receiver when it is not the commune
+ * again; the receiver's RUT with dots; a referenced document that is not a DTE by its name (`Orden de Compra`), and
+ * what the document does to the referenced one (`CodRef`) in words before its reason, both wrapped in their columns;
+ * quantities and unit prices the Chilean way with up to six decimals; and the total in words under the totals (`Son:
+ * …`). A document with no `TED` prints, where the stamp goes, a box that reads `SIN TIMBRE ELECTRÓNICO` with the
+ * legend `Documento sin validez tributaria`, so it never passes for a stamped one; a receipt printed with `stamp:
+ * false` does not. The page is 21.5 cm wide and as tall as its content between 11 and 33 cm. A document taller than 33 cm goes on
  * to further pages: each repeats the issuer, the type box and the SII office, with `Página n de m` under the office;
  * the first alone has the date, the receiver and the transport area; a table that breaks repeats its column head on the
  * next page; and the totals, the acknowledgement box, the stamp and the `CEDIBLE` mark go on the last page with at
@@ -926,7 +1017,18 @@ const checkPaperAndStamp = (doc: PrintableDocument, { paper, stamp }: RenderPrin
  * Formato DTE 2.5 marca para imprimir y la ciudad de destino, y omite lo que falta. Los totales imprimen los impuestos
  * adicionales y retenciones (`ImptoReten`) con el nombre que el Formato DTE 2.5 da a cada código y su tasa, el IVA no
  * retenido y los totales de las comisiones; lo que el total resta, una retención de IVA o una comisión, se imprime con
- * signo menos. Cada monto es el que trae el documento, nunca recalculado. La página mide 21,5 cm de ancho y tan alto
+ * signo menos. Cada monto es el que trae el documento, nunca recalculado. También imprime lo que el Formato DTE 2.5
+ * marca para imprimir cuando el documento lo trae: la forma de pago en palabras (`FmaPago`) y la fecha de vencimiento
+ * (`FchVenc`) en una línea bajo la fecha de emisión, la descripción adicional de un ítem (`DscItem`) bajo su nombre, y
+ * el crédito especial de empresas constructoras (`CredEC`) entre los totales, con signo menos. Y lo que facilita la
+ * lectura: las fechas de emisión y de vencimiento con el mes en palabras; quién despacha los bienes (`TipoDespacho`)
+ * en palabras, bajo el receptor; la ciudad del emisor y la del receptor cuando no repiten la comuna; el RUT del
+ * receptor con puntos; un documento referenciado que no es DTE por su nombre (`Orden de Compra`), y lo que el
+ * documento le hace al referenciado (`CodRef`) en palabras antes de su razón, ambos cortados dentro de sus columnas;
+ * cantidades y precios unitarios a la chilena con hasta seis decimales; y el total en palabras bajo los totales (`Son:
+ * …`). Un documento sin `TED` imprime, donde va el timbre, un recuadro que dice `SIN TIMBRE ELECTRÓNICO` con la leyenda
+ * `Documento sin validez tributaria`, así nunca pasa por uno timbrado; una boleta impresa con `stamp: false` no lo
+ * lleva. La página mide 21,5 cm de ancho y tan alto
  * como su contenido entre 11 y 33 cm. Un documento más alto que 33 cm sigue en otras páginas: cada una repite el
  * emisor, el recuadro del tipo y la oficina del SII, con `Página n de m` bajo la oficina; solo la primera lleva la
  * fecha, el receptor y el área de transporte; una tabla que se corta repite su encabezado de columnas en la página

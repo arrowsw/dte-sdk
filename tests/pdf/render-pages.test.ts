@@ -64,7 +64,7 @@ describe('a document that needs more than one page', () => {
   })
 
   test('prints the date and the receiver on the first page only', () => {
-    expect(pages[0]).toContain('Fecha Emisión: 2026-11-15')
+    expect(pages[0]).toContain('Fecha Emisión: 15 de noviembre de 2026')
     expect(pages[0]).toContain('Señor(es): ')
     expect(pages[1]).not.toContain('Fecha Emisión')
     expect(pages[1]).not.toContain('Señor(es)')

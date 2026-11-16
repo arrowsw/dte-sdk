@@ -61,16 +61,23 @@ describe('rsa', () => {
       const raw = Buffer.from(parts[part], 'base64')
       return { ...parts, [part]: Buffer.concat([Buffer.alloc(bytes - raw.length), raw]).toString('base64') }
     }
+    // Each leading zero byte as a group of its own, `AA==`: the bytes decoded are the same, the characters many more.
+    const inGroups = (bytes: number): RsaPublicKeyParts => {
+      const raw = Buffer.from(parts[part], 'base64')
+      return { ...parts, [part]: `${'AA=='.repeat(bytes - raw.length)}${parts[part]}` }
+    }
 
-    test('at the bound, its signature is tried and verifies, however its base64 is wrapped', () => {
+    test('at the bound, its signature is tried and verifies, however its base64 is written', () => {
       const key = writtenIn(limit)
       expect(rsaSha1VerifyBase64(key, '<DD>ñ</DD>', 'latin1', signature)).toBe(true)
       const wrapped = { ...key, [part]: key[part].replace(/.{1,64}/g, '$&\n') }
       expect(rsaSha1VerifyBase64(wrapped, '<DD>ñ</DD>', 'latin1', signature)).toBe(true)
+      expect(rsaSha1VerifyBase64(inGroups(limit), '<DD>ñ</DD>', 'latin1', signature)).toBe(true)
     })
 
     test('one byte over, its signature is not tried', () => {
       expect(rsaSha1VerifyBase64(writtenIn(limit + 1), '<DD>ñ</DD>', 'latin1', signature)).toBe(false)
+      expect(rsaSha1VerifyBase64(inGroups(limit + 1), '<DD>ñ</DD>', 'latin1', signature)).toBe(false)
     })
   })
 })
