@@ -28,10 +28,12 @@ import {
   drawRule,
   drawText,
   drawTextCentered,
+  foreignIdText,
   formatAmount,
+  headerNotes,
   issuerAddress,
   itemRow,
-  paymentFields,
+  paymentGroups,
   printedQuantity,
   printedTypeName,
   printedUnitPrice,
@@ -133,7 +135,6 @@ export const needsTransferableCopy = (doc: PrintableDocument): boolean =>
 const TABLE_WIDTH = PAGE.width - 2 * MARGIN
 const BOX_INNER_WIDTH = TABLE_WIDTH - BOX.padX * 2
 const boxHeight = (lines: number): number => BOX.padY * 2 + LINE.small * lines + GAP.tiny * (lines - 1)
-const RECEIVER_HEIGHT = boxHeight(3)
 const DETAIL_COLUMNS = (() => {
   const num = Math.round(TABLE_WIDTH * 0.05)
   const code = Math.round(TABLE_WIDTH * 0.1)
@@ -198,29 +199,37 @@ const headerBottom = (
 const fieldWidth = (fonts: Fonts, [label, value]: Field): number =>
   fonts.bold.widthOfTextAtSize(label, FONT.small) + fonts.normal.widthOfTextAtSize(value, FONT.small)
 
-// The transport area in the order of Formato DTE 2.5, one group per line: the plates, the carrier and the driver, the
-// destination, and the departure and arrival. A field the document lacks is left out, and so is a group left empty; a
-// group too wide for one line flows onto the next.
-const transportLines = (doc: PrintableDocument, fonts: Fonts): readonly (readonly Field[])[] => {
-  const transport = doc.transport
-  if (!transport) return []
-  const groups = transportGroups(transport)
+// Groups of fields laid on lines `width` wide, `gap` apart: each group starts a line, a field the document lacks is
+// left out, and so is a group left empty; a group too wide for one line flows onto the next.
+const flowLines = (
+  groups: readonly (readonly Field[])[],
+  fonts: Fonts,
+  width: number,
+  gap: number,
+): readonly (readonly Field[])[] => {
   const lines: Field[][] = []
   for (const group of groups) {
-    let width = Infinity // a group starts a line
+    let used = Infinity // a group starts a line
     for (const field of group) {
       if (field[1] === '') continue
-      const added = BOX.fieldGap + fieldWidth(fonts, field)
-      if (width + added > BOX_INNER_WIDTH) {
+      const added = gap + fieldWidth(fonts, field)
+      if (used + added > width) {
         lines.push([])
-        width = -BOX.fieldGap
+        used = -gap
       }
       lines[lines.length - 1].push(field)
-      width += added
+      used += added
     }
   }
   return lines
 }
+
+// The transport area in the order of Formato DTE 2.5, one group per line: the plates, the carrier and the driver, the
+// destination, and the departure and arrival.
+const transportLines = (doc: PrintableDocument, fonts: Fonts): readonly (readonly Field[])[] =>
+  doc.transport ? flowLines(transportGroups(doc.transport), fonts, BOX_INNER_WIDTH, BOX.fieldGap) : []
+
+const PAYMENT_GAP = BOX.fieldGap * 2
 
 const measureAcknowledgement = (legendLines: number): number => {
   const fields = BOX.fieldHeight * 4 + GAP.small * 3
@@ -309,11 +318,12 @@ const drawField = (canvas: Canvas, [label, value]: Field, x: number, y: number):
   return valueX + fonts.normal.widthOfTextAtSize(value, FONT.small)
 }
 
-// The payment terms and the due date on one line, under the issue date.
-const drawPayment = (canvas: Canvas, fields: readonly Field[], y: number): void => {
-  let x = MARGIN
-  for (const field of fields) x = drawField(canvas, field, x, y) + BOX.fieldGap * 2
-}
+// The payment under the issue date, its fields flowed on lines across the sheet.
+const drawPayment = (canvas: Canvas, lines: readonly (readonly Field[])[], y: number): void =>
+  lines.forEach((line, index) => {
+    let x = MARGIN
+    for (const field of line) x = drawField(canvas, field, x, y + index * LINE.small) + PAYMENT_GAP
+  })
 
 const drawBox = (canvas: Canvas, y: number, lines: number): number => {
   const height = boxHeight(lines)
@@ -322,6 +332,9 @@ const drawBox = (canvas: Canvas, y: number, lines: number): number => {
 }
 
 const lineY = (y: number, index: number): number => y + BOX.padY + index * (LINE.small + GAP.tiny)
+
+// The receiver's box: three lines, and a fourth with the document of a foreign receiver when it has one.
+const receiverLines = (doc: PrintableDocument): number => (foreignIdText(doc) ? 4 : 3)
 
 const drawReceiver = (canvas: Canvas, doc: PrintableDocument, y: number): number => {
   const { receiver } = doc
@@ -337,7 +350,9 @@ const drawReceiver = (canvas: Canvas, doc: PrintableDocument, y: number): number
   drawField(canvas, ['Giro: ', receiver.activity], left, lineY(y, 2))
   const city = cityOf(receiver)
   if (city) rightAligned('Ciudad: ', city, lineY(y, 2))
-  return drawBox(canvas, y, 3)
+  const foreignId = foreignIdText(doc)
+  if (foreignId) drawField(canvas, ['Identificación: ', foreignId], left, lineY(y, 3))
+  return drawBox(canvas, y, receiverLines(doc))
 }
 
 const drawTransport = (canvas: Canvas, lines: readonly (readonly Field[])[], y: number): number => {
@@ -464,11 +479,9 @@ const drawItemRow = (
         drawText(canvas, line, cx + TABLE.padX, ty, fonts.normal, FONT.tiny, black)
         ty += LINE.tiny
       }
-      if (row.hasDiscount) {
-        const discount = item.discountAmount
-          ? `Dcto: $${formatAmount(item.discountAmount)}`
-          : `Dcto: ${item.discountPercent}%`
-        drawText(canvas, discount, cx + TABLE.padX, ty, fonts.normal, FONT.legal, canvas.paint(COLOURS.darkGrey))
+      for (const note of row.notes) {
+        drawText(canvas, note, cx + TABLE.padX, ty, fonts.normal, FONT.legal, canvas.paint(COLOURS.darkGrey))
+        ty += LINE.tiny
       }
     } else {
       const value = values[column.key]
@@ -710,12 +723,14 @@ const tableBlocks = <T>(
 const sheetBlocks = ({ doc, fonts, stamp, unstamped, resolution, transferable }: SheetInput): readonly Block[] => {
   const legendLines = transferable ? wrapText(ACKNOWLEDGEMENT_TEXT, fonts.normal, FONT.legal, BOX_INNER_WIDTH) : []
   const transferReason = doc.type === 52 ? doc.transferReason : null
-  const payment = paymentFields(doc)
-  // Under the receiver, each on its line: the transfer reason of a guide and who dispatches the goods.
+  const payment = flowLines(paymentGroups(doc), fonts, TABLE_WIDTH, PAYMENT_GAP)
+  // Under the receiver, each on its line: the transfer reason of a guide, who dispatches the goods, and the rest of the
+  // header the document has.
   const dispatch = dispatchText(doc)
   const notes = [
     transferReason === null ? '' : transferReasonText(transferReason),
     dispatch === '' ? '' : `Tipo de Despacho: ${dispatch}`,
+    ...headerNotes(doc).map(([label, value]) => `${label}${value}`),
   ].filter(Boolean)
   const words = totalInWords(doc)
   const wordLines = words === '' ? [] : wrapText(words, fonts.normal, FONT.small, TABLE_WIDTH)
@@ -791,12 +806,12 @@ const sheetBlocks = ({ doc, fonts, stamp, unstamped, resolution, transferable }:
       ? []
       : [
           {
-            height: LINE.small,
+            height: LINE.small * payment.length,
             gap: GAP.small,
             draw: (canvas: Canvas, y: number) => drawPayment(canvas, payment, y),
           },
         ]),
-    { height: RECEIVER_HEIGHT, gap: GAP.section, draw: (canvas, y) => drawReceiver(canvas, doc, y) },
+    { height: boxHeight(receiverLines(doc)), gap: GAP.section, draw: (canvas, y) => drawReceiver(canvas, doc, y) },
     ...notes.map(
       (text, index): Block => ({
         height: LINE.small,
@@ -991,7 +1006,19 @@ const checkPaperAndStamp = (doc: PrintableDocument, { paper, stamp }: RenderPrin
  * again. It also prints what Formato DTE 2.5 marks to be printed when the document has it: the payment terms in words
  * (`FmaPago`) and the due date (`FchVenc`) on a line under the issue date, the additional description of an item
  * (`DscItem`) under its name, and the special credit of construction companies (`CredEC`) among the totals, with a
- * minus. And what eases the reading: the issue and due dates with the month in words; who dispatches the goods
+ * minus; under the issue date, flowed on as many lines as they need, the payment medium (`MedioPago`, by the names of
+ * a receipt's own format on a receipt) and the kind of account (`TpoCtaPago`) in words, the account number
+ * (`NumCtaPago`), the bank (`BcoPago`), the description of the terms of payment (`TermPagoGlosa`), the amount paid
+ * (`MntCancel`), the balance owed (`SaldoInsol`) and each scheduled payment (`MntPagos`); under the receiver, the kind
+ * of special invoice (`TipoFactEsp`) and who issues a guide for export (`CdgTraslado`), both in words, the resolution
+ * that authorises them (`FolioAut`, `FchAut`), and the RUT of the principal (`RUTMandante`) and of whoever asked for
+ * the invoice (`RUTSolicita`) with dots; in the receiver's box, the document of a foreign receiver (`TipoDocID` in
+ * words and `NumId`); among the totals, the bases of the slaughter of meat and of the margins of trade (`MntBase`,
+ * `MntMargenCom`) and the deposit guarantee (`GrntDep`), and under them the totals in another currency
+ * (`OtraMoneda`), each tax by the name of its code; under an item, its surcharge (`RecargoMonto`), the bases and the
+ * price to the final consumer of a withholding agent (`Retenedor`) and its value in another currency
+ * (`MontoItemOtrMnda`); and a global discount or surcharge with its description (`GlosaDR`). The customs area
+ * (`Aduana`) and the fields of export documents are not printed. And what eases the reading: the issue and due dates with the month in words; who dispatches the goods
  * (`TipoDespacho`) in words, under the receiver; the city of the issuer and of the receiver when it is not the commune
  * again; the receiver's RUT with dots; a referenced document that is not a DTE by its name (`Orden de Compra`), and
  * what the document does to the referenced one (`CodRef`) in words before its reason, both wrapped in their columns;
@@ -1020,8 +1047,20 @@ const checkPaperAndStamp = (doc: PrintableDocument, { paper, stamp }: RenderPrin
  * signo menos. Cada monto es el que trae el documento, nunca recalculado. También imprime lo que el Formato DTE 2.5
  * marca para imprimir cuando el documento lo trae: la forma de pago en palabras (`FmaPago`) y la fecha de vencimiento
  * (`FchVenc`) en una línea bajo la fecha de emisión, la descripción adicional de un ítem (`DscItem`) bajo su nombre, y
- * el crédito especial de empresas constructoras (`CredEC`) entre los totales, con signo menos. Y lo que facilita la
- * lectura: las fechas de emisión y de vencimiento con el mes en palabras; quién despacha los bienes (`TipoDespacho`)
+ * el crédito especial de empresas constructoras (`CredEC`) entre los totales, con signo menos; bajo la fecha de
+ * emisión, en tantas líneas como necesiten, el medio de pago (`MedioPago`, con los nombres del formato de boletas en
+ * una boleta) y el tipo de cuenta (`TpoCtaPago`) en palabras, el número de cuenta (`NumCtaPago`), el banco
+ * (`BcoPago`), la glosa de los términos del pago (`TermPagoGlosa`), el monto cancelado (`MntCancel`), el saldo
+ * insoluto (`SaldoInsol`) y cada pago programado (`MntPagos`); bajo el receptor, el tipo de factura especial
+ * (`TipoFactEsp`) y el código emisor traslado excepcional de una guía de exportación (`CdgTraslado`), ambos en
+ * palabras, la resolución que lo autoriza (`FolioAut`, `FchAut`), y el RUT del mandante (`RUTMandante`) y el del
+ * solicitante de la factura (`RUTSolicita`) con puntos; en el recuadro del receptor, el documento de un receptor
+ * extranjero (`TipoDocID` en palabras y `NumId`); entre los totales, el monto base faenamiento carne y el de márgenes
+ * de comercialización (`MntBase`, `MntMargenCom`) y la garantía por depósito de envases (`GrntDep`), y bajo ellos los
+ * totales en otra moneda (`OtraMoneda`), cada impuesto con el nombre de su código; bajo un ítem, su recargo
+ * (`RecargoMonto`), los montos base y el precio al consumidor final de un agente retenedor (`Retenedor`) y su valor en
+ * otra moneda (`MontoItemOtrMnda`); y un descuento o recargo global con su glosa (`GlosaDR`). El área de Aduana y los
+ * campos de los documentos de exportación no se imprimen. Y lo que facilita la lectura: las fechas de emisión y de vencimiento con el mes en palabras; quién despacha los bienes (`TipoDespacho`)
  * en palabras, bajo el receptor; la ciudad del emisor y la del receptor cuando no repiten la comuna; el RUT del
  * receptor con puntos; un documento referenciado que no es DTE por su nombre (`Orden de Compra`), y lo que el
  * documento le hace al referenciado (`CodRef`) en palabras antes de su razón, ambos cortados dentro de sus columnas;

@@ -97,6 +97,47 @@ export const REFERENCE_CODE_NAMES: Readonly<Record<number, string>> = {
   3: 'Corrige montos',
 }
 
+/** EN: Printed names of the payment media, as Formato DTE 2.5 words them (field 23 of the header, page 15). ES: `MedioPago` — Nombres impresos de los medios de pago, como los nombra el Formato DTE 2.5 (campo 23 del encabezado, página 15). */
+export const PAYMENT_MEDIUM_NAMES: Readonly<Record<string, string>> = {
+  CH: 'Cheque',
+  CF: 'Cheque a fecha',
+  LT: 'Letra',
+  EF: 'Efectivo',
+  PE: 'Pago a cuenta corriente',
+  TC: 'Tarjeta de crédito',
+  OT: 'Otro',
+}
+
+/** EN: Printed names of the payment media of a receipt (Formato Boletas Electrónicas 4.2, field 10 of the header, page 9). ES: `MedioPago` — Nombres impresos de los medios de pago de una boleta (Formato Boletas Electrónicas 4.2, campo 10 del encabezado, página 9). */
+export const RECEIPT_PAYMENT_MEDIUM_NAMES: Readonly<Record<string, string>> = {
+  1: 'Efectivo',
+  2: 'Pago electrónico',
+  3: 'Transferencia electrónica',
+  4: 'Cheque',
+  5: 'Otro',
+}
+
+/** EN: Printed names of the kinds of payment account, the values the schema admits (field 24 of the header, page 15). ES: `TpoCtaPago` — Nombres impresos de los tipos de cuenta del pago, los valores que admite el esquema (campo 24 del encabezado, página 15). */
+export const PAYMENT_ACCOUNT_NAMES: Readonly<Record<string, string>> = {
+  CORRIENTE: 'Cuenta corriente',
+  AHORRO: 'Cuenta de ahorro',
+  VISTA: 'Cuenta vista',
+}
+
+/** EN: Printed names of the kinds of special invoice (Formato DTE 2.5, field 31 of the header, page 16). ES: `TipoFactEsp` — Nombres impresos de los tipos de factura especial (Formato DTE 2.5, campo 31 del encabezado, página 16). */
+export const SPECIAL_INVOICE_NAMES: Readonly<Record<number, string>> = { 1: 'Factura Turista' }
+
+/** EN: Printed names of the documents of a tourist (Formato DTE 2.5, field 55 of the header, page 20). ES: `TipoDocID` — Nombres impresos de los documentos del turista (Formato DTE 2.5, campo 55 del encabezado, página 20). */
+export const FOREIGN_ID_NAMES: Readonly<Record<number, string>> = { 1: 'Pasaporte', 2: 'DNI' }
+
+/** EN: Printed names of who issues a guide for export (Formato DTE 2.5, field 38 of the header, page 18). ES: `CdgTraslado` — Nombres impresos del código emisor traslado excepcional de una guía de exportación (Formato DTE 2.5, campo 38 del encabezado, página 18). */
+export const EXCEPTIONAL_TRANSFER_NAMES: Readonly<Record<number, string>> = {
+  1: 'Exportador',
+  2: 'Agente de Aduana',
+  3: 'Vendedor',
+  4: 'Contribuyente autorizado expresamente por el SII',
+}
+
 /** EN: The notice printed where the stamp goes on a document that has none, and its legend. ES: El aviso que se imprime donde va el timbre en un documento que no lo trae, y su leyenda. */
 export const UNSTAMPED = { title: 'SIN TIMBRE ELECTRÓNICO', legend: 'Documento sin validez tributaria' } as const
 

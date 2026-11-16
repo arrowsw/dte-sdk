@@ -1362,6 +1362,20 @@ Compra`), what the document does to the referenced one before its reason (`Anula
 and unit prices with a point between the thousands and a comma before up to six decimals, and the total in words under
 the totals (`Son: …`). `parsePrintableDocuments` reads these into `paymentTerms`, `dueDate`, `dispatchType`, the `city`
 of each party, an item's `description`, a reference's `code` and `totals.constructionCredit`.
+The rest of that column prints too, when the document has it. Under the issue date, flowed on as many lines as they
+need: the payment medium and the kind of account in words (`Medio de Pago: Cheque a fecha`, `Tipo de Cuenta: Cuenta
+corriente`; a receipt names its media as its own format does), the account number and the bank, the description of the
+terms of payment, the amount paid and the balance owed, and each scheduled payment. Under the receiver: the kind of
+special invoice (`Tipo de Factura Especial: 1 - Factura Turista`), who issues a guide for export in words and the
+resolution that authorises them, the principal (`RUT Mandante`) and whoever asked for the invoice (`RUT Solicitante`).
+In the receiver's box, the document of a foreign receiver (`Identificación: Pasaporte N° …`). Among the totals, the
+base of the slaughter of meat, the base of the margins of trade and the deposit guarantee of containers, and under
+them the totals in another currency (`Otra Moneda: DOLAR USA`), each tax by the name of its code. Under an item, its
+surcharge, the bases and the price to the final consumer of a withholding agent, and its value in another currency;
+and a global discount or surcharge with its description. Every amount is the one the document carries.
+`parsePrintableDocuments` reads them into the optional fields of `PrintableDocument` named after them (`payments` is a
+list of `PrintablePayment`, the receiver a `PrintableReceiver` and `otherCurrency` a `PrintableOtherCurrency`). The
+customs area (`Aduana`) and the fields of export documents (110 to 112) are not printed yet.
 A document with no `TED` prints `SIN TIMBRE ELECTRÓNICO` in a box where the stamp goes, with the legend `Documento sin
 validez tributaria`, so its print never passes for that of a stamped one.
 `parsePrintableDocuments` takes the XML as text or as the bytes of its file, read as UTF-8 when they are UTF-8 and as
