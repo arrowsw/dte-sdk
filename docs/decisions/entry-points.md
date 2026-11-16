@@ -8,10 +8,10 @@ by Hans on 2026-11-14.
 
 | Entry | Holds | Size | Reaches `node:` |
 |---|---|---|---|
-| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 39.46 kB | No |
-| `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.4 kB | Yes, on first use |
-| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 80.33 kB | Yes, on first use |
-| `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 19.03 kB | Yes, on first use |
+| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 39.52 kB | No |
+| `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.38 kB | Yes, on first use |
+| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 80.32 kB | Yes, on first use |
+| `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 19.07 kB | Yes, on first use |
 | `dte-sdk/catalogs` | The SII's large code tables: the business activities | 10.65 kB | No |
 
 Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
@@ -95,6 +95,10 @@ The rest of the fields Formato DTE 2.5 marks to be printed (the payment, the spe
 export, the principal and the requester, the document of a foreign receiver, the bases, the deposit guarantee, the
 totals in another currency, and what prints under an item) took `dte-sdk/pdf` from 17.7 kB to 19.03 kB, over its
 18 kB limit, which went to 20 kB; the other entries did not move.
+The bound on the key a signature is checked with, also after 0.13.0, went into the RSA helper every check shares,
+in place of the bound the printed stamp carried, and took `dte-sdk` from 39.46 kB to 39.52 kB, `dte-sdk/node` from
+7.4 kB to 7.38 kB, `dte-sdk/portal` from 80.33 kB to 80.32 kB and `dte-sdk/pdf` from 19.03 kB to 19.07 kB, all under
+their limits; `dte-sdk/catalogs` did not move.
 
 ## Why
 

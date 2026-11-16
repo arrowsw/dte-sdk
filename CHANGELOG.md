@@ -100,11 +100,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declares, failed with `ENCODING_UNSUPPORTED_CHAR` or `PDF_RENDER_FAILED` at its first accented letter. It now hands
   the bytes to `parsePrintableDocuments`, which reads both.
 
-`dte-sdk/pdf` grows from 14.89 kB to 17.7 kB, over its 16 kB limit, which goes to 18 kB: it now holds the words of
-an amount and the names of the documents a reference can name, and reaches the helpers that check a stamp's
-signature. The rest of the print column takes it on to 19.03 kB, over that 18 kB limit, which goes to 20 kB: it holds
-the names of the payment media, the kinds of account, the special invoices, the documents of a tourist and the
-issuers of a guide for export.
+### Security
+
+- **The key a received document names is bounded before a signature is checked with it.** `verifyReceivedDocuments`
+  checks the stamp of each document with the key of the CAF the stamp carries, and its signature with the key of the
+  certificate it carries, and the cost of that check grows with the key: a document whose stamp named a modulus and an
+  exponent of 16 384 bits took 45 seconds to verify, against 4 ms for a real one. `rsaSha1VerifyBase64`, which every
+  check goes through, now returns `false` without trying the signature for a modulus over 512 bytes (4096 bits) or an
+  exponent over 4 bytes (32 bits), the bytes counted as decoded, leading zeros included. A CAF key is 512 to 1024 bits
+  with exponent 3 or 65537 and a certificate key at most 4096 bits, so no real key reaches the bound; a document that
+  names a larger one fails that check (`signatureValid: false`), in a few milliseconds.
+  - **What to change:** nothing.
+
+`dte-sdk/pdf` grows from 14.89 kB to 17.7 kB, over its 16 kB limit, which goes to 18 kB: it now holds the words of an
+amount and the names of the documents a reference can name, and reaches the helpers that check a stamp's signature.
+The rest of the print column takes it on to 19.03 kB, over that 18 kB limit, which goes to 20 kB: it holds the names
+of the payment media, the kinds of account, the special invoices, the documents of a tourist and the issuers of a
+guide for export. The bound on the key, shared by every check in place of the one the printed stamp carried, then
+takes `dte-sdk` from 39.46 kB to 39.52 kB, `dte-sdk/node` from 7.4 kB to 7.38 kB, `dte-sdk/portal` from 80.33 kB to
+80.32 kB and `dte-sdk/pdf` from 19.03 kB to 19.07 kB, all under their limits.
 
 ## [0.13.0] - 2026-11-14
 

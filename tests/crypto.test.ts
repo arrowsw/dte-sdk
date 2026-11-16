@@ -3,9 +3,9 @@ import { sha1Base64, toBinaryString } from '../src/crypto/digest'
 import {
   rsaSha1SignBase64,
   rsaSha1VerifyBase64,
-  rsaPublicKeyBytes,
   rsaPublicKeyParts,
   rsaPublicKeyPartsFromCertificatePem,
+  type RsaPublicKeyParts,
 } from '../src/crypto/rsa'
 import { parseCertificatePem, rutFromCertificate, certificateBase64 } from '../src/crypto/x509'
 import { fixtureText } from './support/fixtures'
@@ -48,16 +48,37 @@ describe('rsa', () => {
     expect(forge.util.decode64(rsaPublicKeyParts(keyPem).modulus).length).toBe(256)
   })
 
-  test('the size of a key is the bytes the verifier decodes, however its base64 is written', () => {
-    expect(rsaPublicKeyBytes(rsaPublicKeyParts(keyPem))).toEqual({ modulus: 256, exponent: 3 })
-    // Whitespace counts for nothing, and leading zero bytes count: the size bounds the work, not the number.
-    expect(rsaPublicKeyBytes({ modulus: ' AAAA\nAQAB ', exponent: 'AAAAAA==' })).toEqual({ modulus: 6, exponent: 4 })
-    // Padding in the middle makes one byte of each group: counting characters would call these 600 bytes 450.
-    expect(rsaPublicKeyBytes({ modulus: 'A==='.repeat(600), exponent: 'A==='.repeat(6) })).toEqual({
-      modulus: 600,
-      exponent: 6,
+  // The cost of checking a signature grows with the key, and a received document names its own, so a key larger than
+  // any CAF or certificate key is refused before its signature is tried. Each case writes the fixture's key with
+  // leading zero bytes, the same number: its signature verifies whenever it is tried.
+  describe.each([
+    ['modulus', 512],
+    ['exponent', 4],
+  ] as const)('a key whose %s is written long', (part, limit) => {
+    const parts = rsaPublicKeyParts(keyPem)
+    const signature = rsaSha1SignBase64(keyPem, '<DD>ñ</DD>', 'latin1')
+    const writtenIn = (bytes: number): RsaPublicKeyParts => {
+      const raw = Buffer.from(parts[part], 'base64')
+      return { ...parts, [part]: Buffer.concat([Buffer.alloc(bytes - raw.length), raw]).toString('base64') }
+    }
+    // Each leading zero byte as a group of its own, `AA==`: the bytes decoded are the same, the characters many more.
+    const inGroups = (bytes: number): RsaPublicKeyParts => {
+      const raw = Buffer.from(parts[part], 'base64')
+      return { ...parts, [part]: `${'AA=='.repeat(bytes - raw.length)}${parts[part]}` }
+    }
+
+    test('at the bound, its signature is tried and verifies, however its base64 is written', () => {
+      const key = writtenIn(limit)
+      expect(rsaSha1VerifyBase64(key, '<DD>ñ</DD>', 'latin1', signature)).toBe(true)
+      const wrapped = { ...key, [part]: key[part].replace(/.{1,64}/g, '$&\n') }
+      expect(rsaSha1VerifyBase64(wrapped, '<DD>ñ</DD>', 'latin1', signature)).toBe(true)
+      expect(rsaSha1VerifyBase64(inGroups(limit), '<DD>ñ</DD>', 'latin1', signature)).toBe(true)
     })
-    expect(rsaPublicKeyBytes({ modulus: '', exponent: '' })).toEqual({ modulus: 0, exponent: 0 })
+
+    test('one byte over, its signature is not tried', () => {
+      expect(rsaSha1VerifyBase64(writtenIn(limit + 1), '<DD>ñ</DD>', 'latin1', signature)).toBe(false)
+      expect(rsaSha1VerifyBase64(inGroups(limit + 1), '<DD>ñ</DD>', 'latin1', signature)).toBe(false)
+    })
   })
 })
 

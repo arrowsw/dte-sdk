@@ -17,8 +17,17 @@ const bigIntToBase64 = (value: forge.jsbn.BigInteger): string => {
   return forge.util.encode64(forge.util.hexToBytes(hex.length % 2 === 1 ? `0${hex}` : hex))
 }
 
-const base64ToBigInt = (value: string): forge.jsbn.BigInteger =>
-  new forge.jsbn.BigInteger(forge.util.bytesToHex(forge.util.decode64(value)), 16)
+const bytesToBigInt = (bytes: string): forge.jsbn.BigInteger =>
+  new forge.jsbn.BigInteger(forge.util.bytesToHex(bytes), 16)
+
+const base64ToBigInt = (value: string): forge.jsbn.BigInteger => bytesToBigInt(forge.util.decode64(value))
+
+// The cost of checking a signature grows with the key, and a received document names its own: the CAF its stamp
+// carries, the certificate of its signature. A CAF key is 512 to 1024 bits with exponent 3 or 65537 and a certificate
+// key at most 4096 bits, so a modulus over 4096 bits or an exponent over 32 bits is refused before the signature is
+// tried. The bytes counted are the ones decoded, leading zeros included, so no way of writing the base64 gets a larger
+// key past the bound.
+const MAX_KEY_BYTES = { modulus: 512, exponent: 4 } as const
 
 const sha1Of = (data: string, encoding: TextEncoding): forge.md.MessageDigest => {
   const md = forge.md.sha1.create()
@@ -46,22 +55,6 @@ export const isRsaKeyPair = (privateKey: forge.pki.rsa.PrivateKey, publicKey: Rs
   privateKey.n.equals(base64ToBigInt(publicKey.modulus)) && privateKey.e.equals(base64ToBigInt(publicKey.exponent))
 
 /**
- * EN: The size in bytes of the modulus and of the exponent of a public key, decoded as `rsaSha1VerifyBase64` decodes
- * them, so a bound checked on these sizes is a bound on the key the verification builds, however its base64 is
- * written. Leading zero bytes count: the size bounds the work, not the number.
- * ES: El tamaño en bytes del módulo y del exponente de una clave pública, decodificados como los decodifica
- * `rsaSha1VerifyBase64`, así una cota sobre estos tamaños es una cota sobre la llave que arma la verificación, se
- * escriba como se escriba su base64. Los bytes cero al inicio cuentan: el tamaño acota el trabajo, no el número.
- * @internal
- */
-export const rsaPublicKeyBytes = (
-  publicKey: RsaPublicKeyParts,
-): { readonly modulus: number; readonly exponent: number } => ({
-  modulus: forge.util.decode64(publicKey.modulus).length,
-  exponent: forge.util.decode64(publicKey.exponent).length,
-})
-
-/**
  * EN: Public modulus and exponent of a PEM certificate.
  * ES: Módulo y exponente públicos de un certificado PEM.
  */
@@ -80,8 +73,14 @@ export const rsaSha1SignBase64 = (privateKeyPem: string, data: string, encoding:
 }
 
 /**
- * EN: Verifies a SHA1withRSA base64 signature against a public key given as modulus/exponent. Never throws: malformed input is `false`.
- * ES: Verifica una firma SHA1withRSA en base64 contra una clave pública dada como módulo/exponente. Nunca lanza: entrada malformada es `false`.
+ * EN: Verifies a SHA1withRSA base64 signature against a public key given as modulus/exponent. Never throws: malformed
+ * input is `false`. A key larger than any CAF or certificate key, a modulus over 512 bytes (4096 bits) or an exponent
+ * over 4 bytes (32 bits), is `false` without the signature being tried, since the cost of the check grows with the
+ * key; the bytes are counted as decoded, leading zeros included.
+ * ES: Verifica una firma SHA1withRSA en base64 contra una clave pública dada como módulo/exponente. Nunca lanza:
+ * entrada malformada es `false`. Una clave mayor que cualquier clave de CAF o de certificado, un módulo de más de 512
+ * bytes (4096 bits) o un exponente de más de 4 bytes (32 bits), es `false` sin que se pruebe la firma, porque el costo
+ * del chequeo crece con la clave; los bytes se cuentan decodificados, incluidos los ceros al inicio.
  */
 export const rsaSha1VerifyBase64 = (
   publicKey: RsaPublicKeyParts,
@@ -90,7 +89,10 @@ export const rsaSha1VerifyBase64 = (
   signatureBase64: string,
 ): boolean => {
   try {
-    const key = forge.pki.setRsaPublicKey(base64ToBigInt(publicKey.modulus), base64ToBigInt(publicKey.exponent))
+    const modulus = forge.util.decode64(publicKey.modulus)
+    const exponent = forge.util.decode64(publicKey.exponent)
+    if (modulus.length > MAX_KEY_BYTES.modulus || exponent.length > MAX_KEY_BYTES.exponent) return false
+    const key = forge.pki.setRsaPublicKey(bytesToBigInt(modulus), bytesToBigInt(exponent))
     return key.verify(sha1Of(data, encoding).digest().getBytes(), forge.util.decode64(signatureBase64))
   } catch {
     return false

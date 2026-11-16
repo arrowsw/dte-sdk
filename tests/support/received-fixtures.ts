@@ -1,10 +1,12 @@
 // Documents as a supplier would send them, for the tests of verifyReceivedDocuments. A test "SII" (sii-test-key.pem,
 // from `npm run fixtures:sii`) signs the DA of every CAF here, the CAF key stamps the TED and the fixture certificate
 // signs the documents and the envelope. Every RUT, name and amount is invented.
+import { generatePrimeSync } from 'node:crypto'
+import forge from 'node-forge'
 import { parseCaf, type Caf } from '../../src/caf/parse'
 import { signWithCaf } from '../../src/caf/sign'
 import { loadCertificateFromPem } from '../../src/certificate/pem'
-import { rsaPublicKeyParts, rsaSha1SignBase64 } from '../../src/crypto/rsa'
+import { rsaPublicKeyParts, rsaPublicKeyPartsFromCertificatePem, rsaSha1SignBase64 } from '../../src/crypto/rsa'
 import { sha1Base64 } from '../../src/crypto/digest'
 import { createDocument } from '../../src/document/create'
 import { issueDocument } from '../../src/document/issue'
@@ -161,23 +163,64 @@ const envelopeXml = (documents: readonly SignedDocument[]): string =>
     certificate,
   ).xml
 
-const signatureOf = (signedInfo: string, canonicalSignedInfo: string): string =>
-  buildSignatureXml(signedInfo, wrapBase64(rsaSha1SignBase64(certificate.privateKeyPem, canonicalSignedInfo, 'utf8')), {
-    modulus: wrapBase64(certificate.publicKey.modulus),
-    exponent: certificate.publicKey.exponent,
-    certificate: wrapBase64(certificate.certificateBase64),
+/** Who signs a document: the fixture certificate, or another key with a certificate of its own. */
+export type Signer = Pick<typeof certificate, 'privateKeyPem' | 'certificateBase64' | 'publicKey'>
+
+const signatureOf = (signedInfo: string, canonicalSignedInfo: string, signer: Signer = certificate): string =>
+  buildSignatureXml(signedInfo, wrapBase64(rsaSha1SignBase64(signer.privateKeyPem, canonicalSignedInfo, 'utf8')), {
+    modulus: wrapBase64(signer.publicKey.modulus),
+    exponent: signer.publicKey.exponent,
+    certificate: wrapBase64(signer.certificateBase64),
+  })
+
+/**
+ * A 1024-bit key whose public exponent is `exponent`, which must be a prime, with a self-signed certificate of it. Node
+ * and forge generate no key with an exponent over 32 bits, so this one is put together from two primes.
+ */
+export const signerWithExponent = (exponent: bigint): Signer =>
+  once(`signer ${exponent}`, () => {
+    const big = (value: bigint): forge.jsbn.BigInteger => new forge.jsbn.BigInteger(value.toString(16), 16)
+    const [p, q] = [generatePrimeSync(512, { bigint: true }), generatePrimeSync(512, { bigint: true })]
+    const one = forge.jsbn.BigInteger.ONE
+    const e = big(exponent)
+    const d = e.modInverse(big((p - 1n) * (q - 1n)))
+    const privateKey = forge.pki.setRsaPrivateKey(
+      big(p * q),
+      e,
+      d,
+      big(p),
+      big(q),
+      d.mod(big(p).subtract(one)),
+      d.mod(big(q).subtract(one)),
+      big(q).modInverse(big(p)),
+    )
+    const cert = forge.pki.createCertificate()
+    cert.publicKey = forge.pki.setRsaPublicKey(big(p * q), e)
+    cert.serialNumber = '01'
+    cert.validity.notBefore = new Date('2026-01-01T00:00:00Z')
+    cert.validity.notAfter = new Date('2046-01-01T00:00:00Z')
+    cert.setSubject([{ name: 'commonName', value: 'FIRMANTE DE PRUEBA' }])
+    cert.setIssuer([{ name: 'commonName', value: 'FIRMANTE DE PRUEBA' }])
+    cert.sign(privateKey, forge.md.sha256.create())
+    const certificatePem = forge.pki.certificateToPem(cert)
+    return {
+      privateKeyPem: forge.pki.privateKeyToPem(privateKey),
+      certificateBase64: forge.util.encode64(forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes()),
+      publicKey: rsaPublicKeyPartsFromCertificatePem(certificatePem),
+    }
   })
 
 /**
  * A `<DTE>` signed again the way other software may sign it: with only the namespaces `declarations` puts on its root
  * (none, or only the SII's), so its digest covers neither `xmlns:xsi` nor, with none, `xmlns`. `edit` changes the
- * document before it is signed, and `editSignedInfo` the `SignedInfo` before it is signed.
+ * document before it is signed, `editSignedInfo` the `SignedInfo` before it is signed, and `signer` signs it.
  */
 export const signedElsewhere = (
   doc: SignedDocument,
   declarations: string,
   edit: (xml: string) => string = (xml) => xml,
   editSignedInfo: (signedInfo: string) => string = (signedInfo) => signedInfo,
+  signer: Signer = certificate,
 ): string => {
   const unsigned = edit(
     doc.xml.replace(/<Signature[\s\S]*<\/Signature>/, '').replace(/^<DTE[^>]*>/, `<DTE${declarations} version="1.0">`),
@@ -190,6 +233,7 @@ export const signedElsewhere = (
   const signature = signatureOf(
     editSignedInfo(buildSignedInfo(id, digest, { includeXsi: false })),
     editSignedInfo(canonical),
+    signer,
   )
   return unsigned.replace(/<\/DTE>$/, () => `${signature}</DTE>`)
 }
