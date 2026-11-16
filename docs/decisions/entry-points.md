@@ -8,9 +8,9 @@ by Hans on 2026-11-14.
 
 | Entry | Holds | Size | Reaches `node:` |
 |---|---|---|---|
-| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 39.47 kB | No |
-| `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.37 kB | Yes, on first use |
-| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 80.36 kB | Yes, on first use |
+| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 39.55 kB | No |
+| `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.38 kB | Yes, on first use |
+| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 80.33 kB | Yes, on first use |
 | `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 14.89 kB | Yes, on first use |
 | `dte-sdk/catalogs` | The SII's large code tables: the business activities | 10.65 kB | No |
 
@@ -85,6 +85,9 @@ The content rules `createDocument` checks before stamping, and the count of an e
 took `dte-sdk` from 38.95 kB to 39.47 kB, under its limit, and `dte-sdk/portal` from 79.83 kB to 80.36 kB, over its
 80 kB limit, which went to 82 kB; the new error code took `dte-sdk/node` from 7.36 kB to 7.37 kB, under its
 limit; `dte-sdk/pdf` did not move.
+The bound on the key a signature is checked with, after 0.13.0, took `dte-sdk` from 39.47 kB to 39.55 kB and
+`dte-sdk/node` from 7.37 kB to 7.38 kB, and left `dte-sdk/portal` at 80.33 kB from 80.36 kB, all under their limits;
+`dte-sdk/pdf` and `dte-sdk/catalogs` did not move.
 
 ## Why
 

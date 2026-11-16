@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with exponent 3 or 65537 and a certificate key at most 4096 bits, so no real key reaches the bound; a document that
   names a larger one fails that check (`signatureValid: false`), in a few milliseconds.
   - **What to change:** nothing.
+- **Size:** the bound took `dte-sdk` from 39.47 kB to 39.55 kB and `dte-sdk/node` from 7.37 kB to 7.38 kB, under
+  their limits; `dte-sdk/portal` measures 80.33 kB, from 80.36 kB.
 
 ## [0.13.0] - 2026-11-14
 
