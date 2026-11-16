@@ -368,8 +368,9 @@ const checkEnvelope = (xml: string, root: Element): ReceivedSignatureCheck =>
  * whose `DD` must agree with the header; that CAF against the document (the issuer, the type, the folio inside the
  * range); and the SII's signature over the CAF (`FRMA`) with the SII key of its `IDK` (`SII_CAF_KEYS`, or
  * `siiKeys`), for the CAFs of `environment` only (production by default). A document that fails a check is a result,
- * not an error; a CAF whose `IDK` has no known key leaves the document `unchecked`. Pure: no clock, no network. Not
- * checked: who owns the signing certificate, and whether the CAF had expired.
+ * not an error; a CAF whose `IDK` has no known key leaves the document `unchecked`. A key larger than any CAF or
+ * certificate key (a modulus over 4096 bits or an exponent over 32 bits) fails its check without its signature being
+ * tried. Pure: no clock, no network. Not checked: who owns the signing certificate, and whether the CAF had expired.
  * ES: Verifica los documentos de un `DTE`, `EnvioDTE` o `EnvioBOLETA` tal como llega de un proveedor, y la firma del
  * propio sobre. Cada documento se lee desde su elemento en la entrada parseada, nunca de un trozo del texto: su
  * firma se chequea sobre formas escritas desde ese elemento, y sus campos y su timbre se leen de él. Se chequea: su
@@ -377,8 +378,9 @@ const checkEnvelope = (xml: string, root: Element): ReceivedSignatureCheck =>
  * con el encabezado; ese CAF contra el documento (el emisor, el tipo, el folio dentro del rango); y la firma del SII
  * sobre el CAF (`FRMA`) con la llave del SII de su `IDK` (`SII_CAF_KEYS`, o `siiKeys`), solo para los CAF de
  * `environment` (producción por defecto). Un documento que falla un chequeo es un resultado, no un error; un CAF
- * cuyo `IDK` no tiene llave conocida deja el documento `unchecked`. Pura: sin reloj ni red. No se chequea: de quién
- * es el certificado que firma, ni si el CAF estaba vencido.
+ * cuyo `IDK` no tiene llave conocida deja el documento `unchecked`. Una llave mayor que cualquier llave de CAF o de
+ * certificado (un módulo de más de 4096 bits o un exponente de más de 32 bits) falla su chequeo sin que se pruebe su
+ * firma. Pura: sin reloj ni red. No se chequea: de quién es el certificado que firma, ni si el CAF estaba vencido.
  * @throws {DteError} EN: `XML_PARSE_FAILED` for empty or malformed XML, a DOCTYPE, another root, an envelope without exactly one `SetDTE`, a `DTE` out of place or prefixed, or a `DTE` without one unprefixed `Documento` or `Liquidacion`; `ENVELOPE_EMPTY` for an envelope without documents. ES: `XML_PARSE_FAILED` para XML vacío o malformado, un DOCTYPE, otro raíz, un sobre sin exactamente un `SetDTE`, un `DTE` fuera de lugar o con prefijo, o un `DTE` sin un `Documento` o `Liquidacion` sin prefijo; `ENVELOPE_EMPTY` para un sobre sin documentos.
  */
 export const verifyReceivedDocuments = (

@@ -1,4 +1,4 @@
-import { rsaPublicKeyBytes, rsaSha1VerifyBase64 } from '../crypto/rsa'
+import { rsaSha1VerifyBase64 } from '../crypto/rsa'
 import { child, signedForms } from '../xml/elements'
 import { parseXmlDom } from '../xml/parse'
 
@@ -8,23 +8,16 @@ const BETWEEN_TAGS = />\s+</g
 const textOf = (ted: string, tag: string): string =>
   new RegExp(`<${tag}(?:\\s[^>]*)?>([^<]*)</${tag}>`).exec(ted)?.[1] ?? ''
 
-// A stamp is input from anyone, and the cost of checking a signature grows with the key it names. A CAF key is 512 to
-// 1024 bits with a small exponent (3 or 65537), so a modulus over 4096 bits or an exponent over 32 bits is no CAF key
-// and its signature is not tried. The size is that of the bytes the verification itself decodes, so no way of writing
-// the base64 gets a larger key past the bound.
-const MAX_KEY_BYTES = { modulus: 512, exponent: 4 } as const
-
 // True when the signature of the stamp (`FRMT`) covers its `DD` as this text writes it. The key is the one of the CAF
-// the stamp itself carries, so nothing else is needed; anything missing, malformed or out of bounds is false.
-const verifies = (ted: string): boolean => {
-  const key = { modulus: textOf(ted, 'M'), exponent: textOf(ted, 'E') }
-  const size = rsaPublicKeyBytes(key)
-  return (
-    size.modulus <= MAX_KEY_BYTES.modulus &&
-    size.exponent <= MAX_KEY_BYTES.exponent &&
-    rsaSha1VerifyBase64(key, DD_PATTERN.exec(ted)?.[0] ?? '', 'latin1', textOf(ted, 'FRMT'))
+// the stamp itself carries, so nothing else is needed; anything missing, malformed or out of bounds is false. A stamp
+// is input from anyone, and `rsaSha1VerifyBase64` refuses a key larger than any CAF key before trying its signature.
+const verifies = (ted: string): boolean =>
+  rsaSha1VerifyBase64(
+    { modulus: textOf(ted, 'M'), exponent: textOf(ted, 'E') },
+    DD_PATTERN.exec(ted)?.[0] ?? '',
+    'latin1',
+    textOf(ted, 'FRMT'),
   )
-}
 
 // The stamp with its `DD` written from its element, in the forms a signature may cover (`signedForms`): what recovers
 // a file some tool wrote again with other escapes. None for a stamp that cannot be read or has no `DD`.
