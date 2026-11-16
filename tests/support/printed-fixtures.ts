@@ -215,3 +215,98 @@ export const constructionXml = thirdPartyXml.replace(
   '<MntTotal>11900</MntTotal>',
   '<CredEC>1235</CredEC><MntTotal>10665</MntTotal>',
 )
+
+/**
+ * An invoice that is part paid and part owed in instalments: it carries every payment field the format asks to print,
+ * an item with a surcharge and a global discount with its description.
+ */
+export const paidInvoice = issue({
+  type: 33,
+  folio: 41,
+  issueDate: '2026-11-05',
+  issuer,
+  receiver,
+  items: [{ name: 'Mueble de cocina', quantity: 1, unitPrice: 200000, surchargePercent: 5 }],
+  globalAdjustments: [{ kind: 'discount', valueType: 'amount', value: 10000, description: 'Pronto pago' }],
+  options: {
+    paymentTerms: 2,
+    settledAmount: 50000,
+    outstandingBalance: 188000,
+    payments: [
+      { date: '2026-12-05', amount: 94000, note: 'Cuota 1' },
+      { date: '2027-01-05', amount: 94000 },
+    ],
+    paymentMedium: 'CF',
+    paymentAccountType: 'CORRIENTE',
+    paymentAccountNumber: '000123456789',
+    paymentBank: 'Banco del Ejemplo',
+    paymentTermsCode: 'FRF',
+    paymentTermsNote: 'Fecha de recepción de la factura',
+    paymentTermsDays: 30,
+    dueDate: '2027-01-05',
+  },
+})
+
+type ThirdPartyParts = {
+  readonly idDoc?: string
+  readonly issuer?: string
+  readonly principal?: string
+  readonly receiver?: string
+  readonly requester?: string
+  readonly totals: string
+  readonly otherCurrency?: string
+  readonly body: string
+}
+
+/** A document of a third party with the parts given, and no stamp: the shapes `createDocument` never writes. */
+const thirdParty = (type: number, folio: number, parts: ThirdPartyParts): string =>
+  `<DTE version="1.0"><Documento ID="F${folio}T${type}"><Encabezado><IdDoc><TipoDTE>${type}</TipoDTE><Folio>${folio}</Folio><FchEmis>2026-10-03</FchEmis>${parts.idDoc ?? ''}</IdDoc>
+<Emisor><RUTEmisor>${ISSUER_RUT}</RUTEmisor><RznSoc>Comercial Andina SpA</RznSoc><GiroEmis>Comercio</GiroEmis>${parts.issuer ?? ''}<DirOrigen>Av. Los Aromos 1540</DirOrigen><CmnaOrigen>Arica</CmnaOrigen></Emisor>${parts.principal ?? ''}
+${parts.receiver ?? `<Receptor><RUTRecep>${RECEIVER_RUT}</RUTRecep><RznSocRecep>Comercializadora Rapel Ltda</RznSocRecep><GiroRecep>Comercio</GiroRecep><DirRecep>Pasaje Los Olmos 88</DirRecep><CmnaRecep>Providencia</CmnaRecep></Receptor>`}${parts.requester ?? ''}
+<Totales>${parts.totals}</Totales>${parts.otherCurrency ?? ''}</Encabezado>
+${parts.body}</Documento></DTE>`
+
+/** A tourist invoice: a foreign receiver without a RUT, named by the document that identifies the tourist. */
+export const touristXml = thirdParty(33, 50, {
+  idDoc: '<TipoFactEsp>1</TipoFactEsp>',
+  receiver: `<Receptor><RUTRecep>55555555-5</RUTRecep><RznSocRecep>Extranjero sin RUT</RznSocRecep><Extranjero><NumId>X1234567</NumId><Nacionalidad>032</Nacionalidad><TipoDocID>1</TipoDocID></Extranjero><GiroRecep>Turismo</GiroRecep><DirRecep>Hotel del Puerto</DirRecep><CmnaRecep>Arica</CmnaRecep></Receptor>`,
+  totals: '<MntNeto>10000</MntNeto><TasaIVA>19</TasaIVA><IVA>1900</IVA><MntTotal>11900</MntTotal>',
+  body: '<Detalle><NroLinDet>1</NroLinDet><NmbItem>Artesanía en cerámica</NmbItem><MontoItem>10000</MontoItem></Detalle>',
+})
+
+/**
+ * An invoice of a withholding agent of meat, issued on behalf of a principal and asked for by someone else: the bases
+ * of its items and totals, the advance VAT and a deposit guarantee for the containers.
+ */
+export const meatXml = thirdParty(33, 51, {
+  principal: '<RUTMandante>18264950-3</RUTMandante>',
+  requester: '<RUTSolicita>14625621-K</RUTSolicita>',
+  totals:
+    '<MntNeto>100000</MntNeto><MntBase>40000</MntBase><MntMargenCom>30000</MntMargenCom><TasaIVA>19</TasaIVA><IVA>19000</IVA><ImptoReten><TipoImp>17</TipoImp><TasaImp>5</TasaImp><MontoImp>2000</MontoImp></ImptoReten><GrntDep>2500</GrntDep><MntTotal>123500</MntTotal>',
+  body: '<Detalle><NroLinDet>1</NroLinDet><Retenedor><IndAgente>R</IndAgente><MntBaseFaena>40000</MntBaseFaena><MntMargComer>30000</MntMargComer><PrcConsFinal>1500</PrcConsFinal></Retenedor><NmbItem>Carne de vacuno</NmbItem><QtyItem>100</QtyItem><UnmdItem>KG</UnmdItem><PrcItem>1000</PrcItem><MontoItem>100000</MontoItem></Detalle>',
+})
+
+/** An invoice that states its amounts in another currency too: its totals, an item and a global discount. */
+export const otherCurrencyXml = thirdParty(33, 52, {
+  totals:
+    '<MntNeto>99000</MntNeto><MntExe>5000</MntExe><TasaIVA>19</TasaIVA><IVA>18810</IVA><MntTotal>122810</MntTotal>',
+  otherCurrency:
+    '<OtraMoneda><TpoMoneda>DOLAR USA</TpoMoneda><TpoCambio>950</TpoCambio><MntNetoOtrMnda>104.2105</MntNetoOtrMnda><MntExeOtrMnda>5.2632</MntExeOtrMnda><MntFaeCarneOtrMnda>42.1</MntFaeCarneOtrMnda><MntMargComOtrMnda>31.58</MntMargComOtrMnda><IVAOtrMnda>19.8</IVAOtrMnda><ImpRetOtrMnda><TipoImpOtrMnda>17</TipoImpOtrMnda><TasaImpOtrMnda>5</TasaImpOtrMnda><VlrImpOtrMnda>2.1</VlrImpOtrMnda></ImpRetOtrMnda><IVANoRetOtrMnda>1.5</IVANoRetOtrMnda><MntTotOtrMnda>129.27</MntTotOtrMnda></OtraMoneda>',
+  body: `<Detalle><NroLinDet>1</NroLinDet><NmbItem>Servidor</NmbItem><QtyItem>1</QtyItem><PrcItem>100000</PrcItem><OtrMnda><PrcOtrMon>105.263158</PrcOtrMon><Moneda>USD</Moneda><FctConv>950</FctConv><MontoItemOtrMnda>105.2632</MontoItemOtrMnda></OtrMnda><MontoItem>100000</MontoItem></Detalle>
+<Detalle><NroLinDet>2</NroLinDet><IndExe>1</IndExe><NmbItem>Flete</NmbItem><MontoItem>5000</MontoItem></Detalle>
+<DscRcgGlobal><NroLinDR>1</NroLinDR><TpoMov>D</TpoMov><GlosaDR>Cliente frecuente</GlosaDR><TpoValor>$</TpoValor><ValorDR>1000</ValorDR><ValorDROtrMnda>1.0526</ValorDROtrMnda></DscRcgGlobal>`,
+})
+
+/** A guide that moves goods for export, issued by a taxpayer the SII authorised by a resolution. */
+export const exportGuideXml = thirdParty(52, 53, {
+  idDoc: '<IndTraslado>8</IndTraslado>',
+  issuer: '<GuiaExport><CdgTraslado>4</CdgTraslado><FolioAut>1234</FolioAut><FchAut>2026-01-02</FchAut></GuiaExport>',
+  totals: '<MntTotal>0</MntTotal>',
+  body: '<Detalle><NroLinDet>1</NroLinDet><NmbItem>Cajón de uvas</NmbItem><QtyItem>50</QtyItem><MontoItem>0</MontoItem></Detalle>',
+})
+
+/** An exempt invoice with a deposit guarantee for its containers. */
+export const exemptDepositXml = thirdParty(34, 54, {
+  totals: '<MntExe>20000</MntExe><GrntDep>1500</GrntDep><MntTotal>21500</MntTotal>',
+  body: '<Detalle><NroLinDet>1</NroLinDet><IndExe>1</IndExe><NmbItem>Agua envasada</NmbItem><MontoItem>20000</MontoItem></Detalle>',
+})

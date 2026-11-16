@@ -19,6 +19,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reads them into `paymentTerms`, `dueDate`, an item's `description` and `totals.constructionCredit`. A document
   without them prints as before.
   - **What to change:** nothing.
+- **The printed sample prints the rest of the format's print column.** Formato DTE 2.5 marks more fields `I` (to be
+  printed) or `P` (to be printed in words), and the sample left them out. Now, when the document has them, on the
+  sheet and on the roll: under the issue date, flowed on as many lines as they need, the payment medium and the kind
+  of account in words, the account number and the bank (`MedioPago`, `TpoCtaPago`, `NumCtaPago`, `BcoPago`, page 15),
+  the description of the terms of payment (`TermPagoGlosa`, page 16), the amount paid and the balance owed
+  (`MntCancel`, `SaldoInsol`) and each scheduled payment (`MntPagos`, page 15); under the receiver, the kind of
+  special invoice (`TipoFactEsp`, `1 - Factura Turista`, page 16), who issues a guide for export in words and the
+  resolution that authorises them (`CdgTraslado`, `FolioAut`, `FchAut`, page 18), the principal (`RUTMandante`, page
+  19) and whoever asked for the invoice (`RUTSolicita`, page 22), both with dots; in the receiver's box, the document
+  of a foreign receiver (`TipoDocID` in words and `NumId`, as `Identificación: Pasaporte N° …`, pages 19 and 20);
+  among the totals, the base of the slaughter of meat, the base of the margins of trade (`MntBase`, `MntMargenCom`,
+  page 29) and the deposit guarantee of containers (`GrntDep`, page 31), and under them the totals in another
+  currency (`OtraMoneda`, pages 33 to 35), each tax by the name of its code; under an item, its surcharge
+  (`RecargoMonto`, page 41), the bases and the price to the final consumer of a withholding agent (`MntBaseFaena`,
+  `MntMargComer`, `PrcConsFinal`, page 37) and its value in another currency (`MontoItemOtrMnda`, page 40); and a
+  global discount or surcharge with its description (`GlosaDR`, page 44) and its value in another currency
+  (`ValorDROtrMnda`). A receipt's payment medium prints by the names of its own format (`1` is `Efectivo`). Every
+  amount is the one the document carries. `parsePrintableDocuments` reads them into `settledAmount`,
+  `outstandingBalance`, `payments` (`PrintablePayment`), `paymentMedium`, `paymentAccountType`,
+  `paymentAccountNumber`, `paymentBank`, `paymentTermsNote`, `specialInvoiceType`, `exceptionalTransferCode`,
+  `authorizationFolio`, `authorizationDate`, `principalRut`, `requesterRut`, the receiver's `foreignId` and
+  `foreignIdType` (`PrintableReceiver`), `totals.slaughterBase`, `totals.marginBase`, `totals.depositGuarantee`,
+  `otherCurrency` (`PrintableOtherCurrency`), an item's `surchargeAmount`, `surchargePercent`, `slaughterBase`,
+  `marginBase`, `finalConsumerPrice`, `otherCurrency` and `otherCurrencyAmount`, and an adjustment's `description`
+  and `otherCurrencyValue`. A document without them prints as before. The customs area (`Aduana`) and the fields of
+  export documents (110 to 112) are not printed yet.
+  - **What to change:** nothing.
 - **The printed sample says more, in words.** Who dispatches the goods prints under the receiver (`TipoDespacho`, as
   `Tipo de Despacho: 2 - Por cuenta del emisor a instalaciones del cliente`), the city of the issuer and of the
   receiver print when they are not the commune again (`CiudadOrigen`, `CiudadRecep`), a reference says what the
@@ -85,11 +112,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   names a larger one fails that check (`signatureValid: false`), in a few milliseconds.
   - **What to change:** nothing.
 
-`dte-sdk/pdf` grows from 14.89 kB to 17.7 kB, over its 16 kB limit, which goes to 18 kB: it now holds the words of
-an amount and the names of the documents a reference can name, and reaches the helpers that check a stamp's
-signature. The bound on the key, shared by every check in place of the one the printed stamp carried, then takes
-`dte-sdk` from 39.46 kB to 39.52 kB, `dte-sdk/node` from 7.4 kB to 7.38 kB, `dte-sdk/portal` from 80.33 kB to
-80.32 kB and `dte-sdk/pdf` from 17.7 kB to 17.68 kB, all under their limits.
+`dte-sdk/pdf` grows from 14.89 kB to 17.7 kB, over its 16 kB limit, which goes to 18 kB: it now holds the words of an
+amount and the names of the documents a reference can name, and reaches the helpers that check a stamp's signature.
+The rest of the print column takes it on to 19.03 kB, over that 18 kB limit, which goes to 20 kB: it holds the names
+of the payment media, the kinds of account, the special invoices, the documents of a tourist and the issuers of a
+guide for export. The bound on the key, shared by every check in place of the one the printed stamp carried, then
+takes `dte-sdk` from 39.46 kB to 39.52 kB, `dte-sdk/node` from 7.4 kB to 7.38 kB, `dte-sdk/portal` from 80.33 kB to
+80.32 kB and `dte-sdk/pdf` from 19.03 kB to 19.07 kB, all under their limits.
 
 ## [0.13.0] - 2026-11-14
 
