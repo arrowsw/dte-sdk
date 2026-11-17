@@ -6,6 +6,8 @@
  * impresas del SII: ancho de hoja, límites del alto, márgenes, recuadro del tipo, caja del timbre, fuentes, altos de
  * línea, tablas, colores y los textos fijos. Nada de esto es parámetro: la diagramación es la del SII.
  */
+import { DteError } from '../errors'
+import { isIsoDate } from '../time/chile'
 
 /** EN: Sheet width (21.5 cm) and height bounds (11 to 33 cm). ES: Ancho de la hoja (21,5 cm) y límites del alto (11 a 33 cm). */
 export const PAGE = { width: 609.45, minHeight: 311.81, maxHeight: 935.43 } as const
@@ -58,6 +60,27 @@ export const DEFAULT_SII_OFFICE = 'S.I.I. - SANTIAGO CENTRO'
  * ES: Línea de resolución impresa bajo el timbre cuando no se indica otra, para un año.
  */
 export const defaultResolution = (year: number): string => `Res. Ex. SII N° 0 del ${year}`
+
+/**
+ * EN: The resolution line printed under the stamp for the SII resolution of a company: `Res. Ex. SII N° {number} del
+ * {year}`, the wording of the default line with the number and the year of the date. Pure, so a caller can show the
+ * same line elsewhere.
+ * ES: La línea de resolución impresa bajo el timbre para la resolución del SII de una empresa: `Res. Ex. SII N°
+ * {número} del {año}`, con la redacción de la línea por defecto y el número y el año de la fecha. Pura, para que quien
+ * llama muestre la misma línea en otro lugar.
+ * @param resolution EN: `number` (`NroResol`, a whole number from 0; 0 is certification's) and `date` (`FchResol`, `YYYY-MM-DD`). ES: `number` (`NroResol`, entero desde 0; 0 es el de certificación) y `date` (`FchResol`, `AAAA-MM-DD`).
+ * @returns EN: the line, for example `Res. Ex. SII N° 99 del 2014`. ES: la línea, por ejemplo `Res. Ex. SII N° 99 del 2014`.
+ * @throws {DteError} EN: `INVALID_OPTION { field: 'resolution.number' }` when the number is not a whole number from 0, `INVALID_DATE { field: 'resolution.date' }` when the date is not a real `YYYY-MM-DD`. ES: `INVALID_OPTION { field: 'resolution.number' }` si el número no es un entero desde 0, `INVALID_DATE { field: 'resolution.date' }` si la fecha no es una `AAAA-MM-DD` real.
+ */
+export const resolutionLine = (resolution: { readonly number: number; readonly date: string }): string => {
+  if (!Number.isSafeInteger(resolution.number) || resolution.number < 0) {
+    throw new DteError('INVALID_OPTION', { field: 'resolution.number' })
+  }
+  if (typeof resolution.date !== 'string' || !isIsoDate(resolution.date)) {
+    throw new DteError('INVALID_DATE', { field: 'resolution.date' })
+  }
+  return `Res. Ex. SII N° ${resolution.number} del ${resolution.date.slice(0, 4)}`
+}
 
 /** EN: Text of the acknowledgement box (Res. Ex. 51 of 2005, Ley 19.983). ES: Texto del acuse de recibo (Res. Ex. 51 de 2005, Ley 19.983). */
 export const ACKNOWLEDGEMENT_TEXT =

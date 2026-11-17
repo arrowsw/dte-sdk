@@ -330,6 +330,18 @@ describe('a document with little data', () => {
     expect(text).toContain('Res. 80 de 2014')
   })
 
+  test('the resolution as data prints the default wording with its number and the year of its date', async () => {
+    const text = await pdfText(await roll(receiptDoc, { resolution: { number: 99, date: '2014-10-21' } }))
+    expect(text).toContain('Res. Ex. SII N° 99 del 2014')
+    expect(text).not.toContain('N° 0 del')
+  })
+
+  test('a resolution as data that is not valid throws on the roll too', async () => {
+    const error = await failure(roll(receiptDoc, { resolution: { number: 99, date: 'nope' } }))
+    expect(error.code).toBe('INVALID_DATE')
+    expect(error.details).toEqual({ field: 'resolution.date' })
+  })
+
   test('a document without type is MISSING_FIELD, and a character outside WinAnsi is PDF_RENDER_FAILED', async () => {
     expect((await failure(roll({ ...receiptDoc, type: 0 }))).code).toBe('MISSING_FIELD')
     const error = await failure(roll({ ...receiptDoc, items: [{ code: '', name: '你好' }] }))

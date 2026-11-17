@@ -1,6 +1,6 @@
 import fc from 'fast-check'
 import { PNG } from 'pngjs'
-import { BOX, GAP, LINE } from '../../src/pdf/layout'
+import { BOX, GAP, LINE, resolutionLine } from '../../src/pdf/layout'
 import { parsePrintableDocuments, type PrintableDocument, type PrintableTransport } from '../../src/pdf/parse'
 import { needsTransferableCopy, renderPrintedSample } from '../../src/pdf/render'
 import { FIXED_NOW } from '../support/fixtures'
@@ -125,6 +125,36 @@ describe('an invoice', () => {
   test('the default resolution takes the year from the system clock when no clock is given', async () => {
     const year = new Date().getFullYear()
     expect(await pdfText(await renderPrintedSample(invoiceDoc))).toContain(`Res. Ex. SII N° 0 del ${year}`)
+  })
+
+  test('the resolution as data prints the default wording with its number and the year of its date', async () => {
+    const text = await pdfText(await render(invoiceDoc, { resolution: { number: 99, date: '2014-10-21' } }))
+    expect(text).toContain('Res. Ex. SII N° 99 del 2014')
+    expect(text).not.toContain('N° 0 del')
+  })
+
+  test('the resolution as data ignores the clock, and number 0 is valid', async () => {
+    const text = await pdfText(await render(invoiceDoc, { resolution: { number: 0, date: '2025-12-31' } }))
+    expect(text).toContain('Res. Ex. SII N° 0 del 2025')
+    expect(text).not.toContain('del 2026')
+  })
+
+  test('a resolution as data that is not valid throws before any library is loaded', async () => {
+    const load = jest.fn()
+    const thrown = (resolution: { number: number; date: string }) =>
+      failure(renderPrintedSample(invoiceDoc, { resolution }, load))
+    const number = await thrown({ number: -1, date: '2014-10-21' })
+    expect(number.code).toBe('INVALID_OPTION')
+    expect(number.details).toEqual({ field: 'resolution.number' })
+    expect((await thrown({ number: 1.5, date: '2014-10-21' })).code).toBe('INVALID_OPTION')
+    expect((await thrown({ number: Number.NaN, date: '2014-10-21' })).code).toBe('INVALID_OPTION')
+    expect((await thrown({ number: '99' as unknown as number, date: '2014-10-21' })).code).toBe('INVALID_OPTION')
+    const date = await thrown({ number: 99, date: '2014-02-30' })
+    expect(date.code).toBe('INVALID_DATE')
+    expect(date.details).toEqual({ field: 'resolution.date' })
+    expect((await thrown({ number: 99, date: '21-10-2014' })).code).toBe('INVALID_DATE')
+    expect((await thrown({ number: 99, date: 20141021 as unknown as string })).code).toBe('INVALID_DATE')
+    expect(load).not.toHaveBeenCalled()
   })
 })
 
@@ -441,5 +471,21 @@ describe('sparse data', () => {
   test('a description wider than two columns is split by characters more than once', async () => {
     const wide = { ...invoiceDoc, tedXml: '', items: [{ code: '', name: 'W'.repeat(400) }] }
     expect((await pdfPage(await render(wide))).height).toBeGreaterThan(400)
+  })
+})
+
+describe('resolutionLine', () => {
+  test('writes the default wording with the number and the year of the date', () => {
+    expect(resolutionLine({ number: 99, date: '2014-10-21' })).toBe('Res. Ex. SII N° 99 del 2014')
+    expect(resolutionLine({ number: 0, date: '2026-01-01' })).toBe('Res. Ex. SII N° 0 del 2026')
+  })
+
+  test('a number that is not a whole number from 0, or a date that is not a real YYYY-MM-DD, throws with its field', () => {
+    expect(() => resolutionLine({ number: -1, date: '2014-10-21' })).toThrow(
+      expect.objectContaining({ code: 'INVALID_OPTION', details: { field: 'resolution.number' } }),
+    )
+    expect(() => resolutionLine({ number: 99, date: '2014-13-01' })).toThrow(
+      expect.objectContaining({ code: 'INVALID_DATE', details: { field: 'resolution.date' } }),
+    )
   })
 })
