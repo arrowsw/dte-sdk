@@ -1,8 +1,8 @@
 import fc from 'fast-check'
 import { createFolioAllocator } from '../../src/certification/folios'
 import { issueTestSet, issuerAsReceiver, type IssuedSet } from '../../src/certification/issue-set'
-import type { BasicSetPlan } from '../../src/certification/set-plan'
-import { calculateTotals } from '../../src/totals/calculate'
+import type { BasicSetPlan, PlannedItem } from '../../src/certification/set-plan'
+import { calculateLineAmount, calculateTotals } from '../../src/totals/calculate'
 import { verifyDocumentSignature } from '../../src/document/sign'
 import { verifyEnvelopeSignature } from '../../src/envelope/sign'
 import { verifyTed } from '../../src/ted/build'
@@ -693,6 +693,28 @@ describe('errors and defaults', () => {
   })
 })
 
+// A basic set of one invoice with the items given.
+const invoiceAlone = (items: readonly PlannedItem[]): BasicSetPlan => ({
+  kind: 'basic',
+  attentionNumber: ATTENTION,
+  invoices: [{ caseId: id(1), items }],
+  creditNotes: [],
+  debitNotes: [],
+  folios: { 33: 1 },
+})
+
+test('a basic invoice whose lines add up to nothing stops the set: it would carry no VAT', async () => {
+  // The SII rejects an invoice without its VAT (validation 55). A price of zero adds up to nothing, and so does a line
+  // whose discount rounds up to all of it.
+  const free = [{ name: 'Caja', quantity: 1, unitPrice: 0 }]
+  const discounted = [{ name: 'Caja', quantity: 1, unitPrice: 1, discountPercent: 50 }]
+  for (const items of [free, discounted]) {
+    const error = await failure(issueTestSet(invoiceAlone(items), issueOptions()))
+    expect(error.code).toBe('MISSING_FIELD')
+    expect(error.details).toEqual({ field: 'totals.vatAmount' })
+  }
+})
+
 test("random quantities and prices keep every document's totals consistent with calculateTotals", async () => {
   const item = fc.record({
     name: fc.constantFrom('Caja', 'Saco', 'Tubo'),
@@ -702,19 +724,11 @@ test("random quantities and prices keep every document's totals consistent with 
   })
   await fc.assert(
     fc.asyncProperty(fc.array(item, { minLength: 1, maxLength: 4 }), async (items) => {
-      const random: BasicSetPlan = {
-        kind: 'basic',
-        attentionNumber: ATTENTION,
-        invoices: [{ caseId: id(1), items }],
-        creditNotes: [],
-        debitNotes: [],
-        folios: { 33: 1 },
-      }
-      const issued = await issueTestSet(random, issueOptions())
+      // An invoice whose lines add up to nothing is refused, as the test above shows: it has no totals to compare.
+      fc.pre(items.some((line) => calculateLineAmount(line).amount > 0))
+      const issued = await issueTestSet(invoiceAlone(items), issueOptions())
       const document = issued.cases[0].document
-      const computed = calculateTotals(document.items, { type: 33, vatRate: 19 })
-      // Lines that add up to nothing leave the total alone, without the VAT rate.
-      expect(document.header.totals).toEqual(computed.totalAmount === 0 ? { totalAmount: 0 } : computed)
+      expect(document.header.totals).toEqual(calculateTotals(document.items, { type: 33, vatRate: 19 }))
     }),
     { numRuns: 10 },
   )
