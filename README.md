@@ -3,7 +3,7 @@
 
 [![npm version](https://img.shields.io/npm/v/dte-sdk?color=000&label=npm)](https://www.npmjs.com/package/dte-sdk)
 [![downloads](https://img.shields.io/npm/dm/dte-sdk?color=000)](https://www.npmjs.com/package/dte-sdk)
-[![bundle size](https://deno.bundlejs.com/badge?q=dte-sdk&treeshake=[*])](https://bundlejs.com/?q=dte-sdk)
+[![bundle size](https://deno.bundlejs.com/badge?q=dte-sdk&treeshake=[*]&config=%7B%22esbuild%22%3A%7B%22platform%22%3A%22node%22%7D%7D)](https://bundlejs.com/?q=dte-sdk&treeshake=[*]&config=%7B%22esbuild%22%3A%7B%22platform%22%3A%22node%22%7D%7D)
 [![types included](https://img.shields.io/npm/types/dte-sdk?color=000)](https://www.npmjs.com/package/dte-sdk)
 ![dependencies](https://img.shields.io/badge/dependencies-4-000)
 [![license](https://img.shields.io/npm/l/dte-sdk?color=000)](./LICENSE)
