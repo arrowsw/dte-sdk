@@ -362,6 +362,7 @@ const PDF_EXPORTS = [
   'renderPrintedSample',
   'renderPrintedSamples',
   'renderTedBarcode',
+  'resolutionLine',
   'siiOfficeForCommune',
   'writePrintedSamples',
 ] as const

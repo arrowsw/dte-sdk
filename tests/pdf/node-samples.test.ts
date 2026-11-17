@@ -4,7 +4,7 @@ import { PNG } from 'pngjs'
 import { findEnvelopeFiles, readPrintedSamples, samplePath, writePrintedSamples } from '../../src/pdf/node-samples'
 import { loadNodeFs, type NodeFsModules } from '../../src/sii/node-fs'
 import { FIXED_NOW } from '../support/fixtures'
-import { pdfImages } from '../support/pdf'
+import { pdfImages, pdfText } from '../support/pdf'
 import { failure } from '../support/portal'
 import { basicSetXml, receiptsXml } from '../support/printed-fixtures'
 import { createTempDirs } from '../support/temp-dir'
@@ -121,6 +121,23 @@ describe('writePrintedSamples', () => {
       logoPath: join(dir, 'none.jpg'),
     })
     expect(await pdfImages(await readFile(missing.samples[0].path))).toHaveLength(1)
+  })
+
+  test('a resolution given as data is printed with a logo read from a path too', async () => {
+    const dir = await envelopesDir()
+    const png = new PNG({ width: 4, height: 4 })
+    png.data.fill(120)
+    await writeFile(join(dir, 'logo.png'), PNG.sync.write(png))
+    const result = await writePrintedSamples({
+      xmlFiles: [join(dir, 'nested', 'EnvioBOLETA.xml')],
+      outDir: join(dir, 'r'),
+      options: { resolution: { number: 99, date: '2014-10-21' } },
+      logoPath: join(dir, 'logo.png'),
+    })
+    expect(result.success).toBe(true)
+    const pdf = await readFile(result.samples[0].path)
+    expect(await pdfImages(pdf)).toHaveLength(2)
+    expect(await pdfText(pdf)).toContain('Res. Ex. SII N° 99 del 2014')
   })
 
   test('a logo that cannot be read for another reason propagates', async () => {

@@ -122,3 +122,15 @@ test('a folio that is not a run of digits never becomes a file name: the documen
   ])
   expect(result).toMatchObject({ documents: 4, tests: 3, simulation: 0 })
 })
+
+test('the batch prints a resolution given as data on every sample and reports one that is not valid per sample', async () => {
+  const input = { envelopes: [{ name: 'envio-set-basico.xml', xml: basicSetXml }] }
+  const ok = await renderPrintedSamples({ ...input, options: { resolution: { number: 99, date: '2014-10-21' } } })
+  expect(ok.success).toBe(true)
+  expect(ok.samples.length).toBeGreaterThan(0)
+  for (const sample of ok.samples) expect(await pdfText(sample.bytes)).toContain('Res. Ex. SII N° 99 del 2014')
+  const bad = await renderPrintedSamples({ ...input, options: { resolution: { number: 99, date: 'nope' } } })
+  expect(bad.samples).toEqual([])
+  expect(bad.failures).toHaveLength(ok.samples.length)
+  for (const item of bad.failures) expect(item).toMatchObject({ code: 'INVALID_DATE', source: 'envio-set-basico.xml' })
+})

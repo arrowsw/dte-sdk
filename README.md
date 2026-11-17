@@ -1295,6 +1295,7 @@ import {
   parsePrintableDocuments,
   renderPrintedSample,
   renderPrintedSamples,
+  resolutionLine,
   writePrintedSamples,
   findEnvelopeFiles,
   readPrintedSamples,
@@ -1304,8 +1305,9 @@ import {
 const [doc] = parsePrintableDocuments(signed.xml)
 const pdf = await renderPrintedSample(doc, {
   siiOffice: 'S.I.I. - SANTIAGO ORIENTE', // default: the office of the issuer's commune
-  resolution: 'Res. Ex. SII N° 80 del 2014',
-})
+  resolution: { number: 80, date: '2014-10-21' }, // NroResol and FchResol; a string is printed as given
+}) // prints 'Res. Ex. SII N° 80 del 2014' under the stamp; default: 'Res. Ex. SII N° 0 del {year}'
+const line = resolutionLine({ number: 80, date: '2014-10-21' }) // the same line, to show it elsewhere
 const transferableCopy = await renderPrintedSample(doc, { transferable: true }) // adds the acknowledgement box and CEDIBLE
 
 // A document received from a third party, straight from the bytes of its file (UTF-8 or ISO-8859-1)
@@ -1390,6 +1392,10 @@ that verifies; a stamp no form of which verifies prints as written.
 otherwise the office of the issuer's commune (`CmnaOrigen`), looked up with `siiOfficeForCommune` in
 `SII_OFFICES` (355 commune names in 40
 offices, every official commune included, ignoring case, surrounding spaces and accents), and `S.I.I. - SANTIAGO CENTRO` for a commune the table lacks.
+The line under the stamp is `resolution`: a string printed as given, or the company's resolution as `{ number, date }`
+(`NroResol`, and `FchResol` as `YYYY-MM-DD`) printed as `Res. Ex. SII N° {number} del {year}`, the line
+`resolutionLine` returns alone; a number that is not a whole number from 0 throws `INVALID_OPTION` and a date that is
+not real `INVALID_DATE`. Without it the line is number 0 of the year of `now`, the one of certification.
 `paper: 'roll'` prints the continuous paper of the manual (the format of a point of sale printer) instead of the sheet,
 for any type: a page 80 mm wide, above the 7.5 cm the manual asks for, with the 0.5 cm border, as tall as its content
 with no cap, and the order the manual gives for it: the type box centred, the SII office, the issuer, the receiver, the

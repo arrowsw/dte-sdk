@@ -19,6 +19,7 @@ import {
   TYPE_BOX,
   UNSTAMPED,
   defaultResolution,
+  resolutionLine,
 } from './layout'
 import {
   cityOf,
@@ -71,11 +72,11 @@ export type PrintedLogo = {
 export type PrintedSampleOptions = {
   /** EN: SII office under the type box; default the office of the issuer's commune (`siiOfficeForCommune`), or `S.I.I. - SANTIAGO CENTRO` when the commune is not in the table. ES: Oficina del SII bajo el recuadro; por defecto la oficina de la comuna del emisor (`siiOfficeForCommune`), o `S.I.I. - SANTIAGO CENTRO` si la comuna no está en la tabla. */
   readonly siiOffice?: string
-  /** EN: Resolution line under the stamp; default `Res. Ex. SII N° 0 del {year}`. ES: Línea de resolución bajo el timbre; por defecto `Res. Ex. SII N° 0 del {año}`. */
-  readonly resolution?: string
+  /** EN: Resolution line under the stamp: a string printed as given, or the company's resolution as data, `{ number, date }` (`NroResol` and `FchResol` as `YYYY-MM-DD`), printed as `resolutionLine` writes it; default `Res. Ex. SII N° 0 del {year}`. ES: Línea de resolución bajo el timbre: un texto que se imprime tal cual, o la resolución de la empresa como dato, `{ number, date }` (`NroResol` y `FchResol` como `AAAA-MM-DD`), que se imprime como la escribe `resolutionLine`; por defecto `Res. Ex. SII N° 0 del {año}`. */
+  readonly resolution?: string | { readonly number: number; readonly date: string }
   /** EN: Logo at the top left; one the library cannot embed is ignored. ES: Logo arriba a la izquierda; uno que la librería no pueda incrustar se ignora. */
   readonly logo?: PrintedLogo
-  /** EN: Clock for the year of the default resolution. ES: Reloj para el año de la resolución por defecto. */
+  /** EN: Clock for the year of the default resolution (not used when `resolution` is given). ES: Reloj para el año de la resolución por defecto (no se usa si se da `resolution`). */
   readonly now?: () => Date
 }
 
@@ -929,10 +930,19 @@ const embedLogo = async (document: PDFDocument, logo: PrintedLogo | undefined): 
   }
 }
 
+// The resolution line of the options: as given, from data, or the default of the clock's year.
+const resolutionOf = (options: PrintedSampleOptions): string =>
+  typeof options.resolution === 'string'
+    ? options.resolution
+    : options.resolution
+      ? resolutionLine(options.resolution)
+      : defaultResolution((options.now ?? (() => new Date()))().getFullYear())
+
 const draw = async (
   modules: PdfModules,
   doc: PrintableDocument,
   options: RenderPrintedSampleOptions,
+  resolution: string,
 ): Promise<Uint8Array> => {
   const { pdf } = modules
   const document = await pdf.PDFDocument.create()
@@ -949,7 +959,6 @@ const draw = async (
   const unstamped = doc.tedXml === '' && options.stamp !== false
   const transferable = options.transferable === true && needsTransferableCopy(doc)
   const office = options.siiOffice ?? siiOfficeForCommune(doc.issuer.commune) ?? DEFAULT_SII_OFFICE
-  const resolution = options.resolution ?? defaultResolution((options.now ?? (() => new Date()))().getFullYear())
   if (options.paper === 'roll') {
     const rows = buildRoll({ doc, fonts, office, resolution, logo, stamp, unstamped, transferable })
     const height = rollHeight(rows, fonts)
@@ -1084,7 +1093,7 @@ const checkPaperAndStamp = (doc: PrintableDocument, { paper, stamp }: RenderPrin
  * @param options EN: office, resolution, logo, clock, `transferable`, `paper` and `stamp`. ES: oficina, resolución, logo, reloj, `transferable`, `paper` y `stamp`.
  * @param load EN: loader of the two libraries, for tests. ES: cargador de las dos librerías, para tests.
  * @returns EN: the PDF bytes. ES: los bytes del PDF.
- * @throws {DteError} EN: `MISSING_FIELD` (field `TipoDTE`) when the type is 0, `INVALID_OPTION` (`paper` when it is neither `'sheet'` nor `'roll'`; `stamp` when it is not a boolean, or is `false` on a document that is not a receipt), `ENCODING_UNSUPPORTED_CHAR` for a TED with a code point above U+00FF, `DEPENDENCY_UNAVAILABLE` when a library cannot be loaded, `PDF_RENDER_FAILED` (with `type` and `folio`) when a library throws while drawing, for example on a character outside WinAnsi. ES: `MISSING_FIELD` (campo `TipoDTE`) cuando el tipo es 0, `INVALID_OPTION` (`paper` si no es `'sheet'` ni `'roll'`; `stamp` si no es booleano, o es `false` en un documento que no es boleta), `ENCODING_UNSUPPORTED_CHAR` ante un TED con un code point mayor a U+00FF, `DEPENDENCY_UNAVAILABLE` si una librería no se puede cargar, `PDF_RENDER_FAILED` (con `type` y `folio`) si una librería lanza al dibujar, por ejemplo ante un carácter fuera de WinAnsi.
+ * @throws {DteError} EN: `MISSING_FIELD` (field `TipoDTE`) when the type is 0, `INVALID_OPTION` (`paper` when it is neither `'sheet'` nor `'roll'`; `stamp` when it is not a boolean, or is `false` on a document that is not a receipt; `resolution.number` when a resolution given as data has a number that is not a whole number from 0), `INVALID_DATE` (field `resolution.date`) when its date is not a real `YYYY-MM-DD`, `ENCODING_UNSUPPORTED_CHAR` for a TED with a code point above U+00FF, `DEPENDENCY_UNAVAILABLE` when a library cannot be loaded, `PDF_RENDER_FAILED` (with `type` and `folio`) when a library throws while drawing, for example on a character outside WinAnsi. ES: `MISSING_FIELD` (campo `TipoDTE`) cuando el tipo es 0, `INVALID_OPTION` (`paper` si no es `'sheet'` ni `'roll'`; `stamp` si no es booleano, o es `false` en un documento que no es boleta; `resolution.number` si una resolución dada como dato trae un número que no es un entero desde 0), `INVALID_DATE` (campo `resolution.date`) si su fecha no es una `AAAA-MM-DD` real, `ENCODING_UNSUPPORTED_CHAR` ante un TED con un code point mayor a U+00FF, `DEPENDENCY_UNAVAILABLE` si una librería no se puede cargar, `PDF_RENDER_FAILED` (con `type` y `folio`) si una librería lanza al dibujar, por ejemplo ante un carácter fuera de WinAnsi.
  */
 export const renderPrintedSample = async (
   doc: PrintableDocument,
@@ -1093,9 +1102,10 @@ export const renderPrintedSample = async (
 ): Promise<Uint8Array> => {
   if (!doc.type) throw new DteError('MISSING_FIELD', { field: 'TipoDTE' })
   checkPaperAndStamp(doc, options)
+  const resolution = resolutionOf(options)
   const modules = await load()
   try {
-    return await draw(modules, doc, options)
+    return await draw(modules, doc, options, resolution)
   } catch (error) {
     if (isDteError(error)) throw error
     throw new DteError('PDF_RENDER_FAILED', { reason: errorMessage(error), type: doc.type, folio: doc.folio })

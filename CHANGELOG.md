@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The printed sample takes the company's resolution as data.** `PrintedSampleOptions.resolution`, beside the string
+  it has always taken, accepts `{ number, date }` (`NroResol`, and `FchResol` as `YYYY-MM-DD`) and prints the line in
+  the wording of the default, `Res. Ex. SII N° {number} del {year}`, with the year of the date, on the sheet and on the
+  roll, so a company in production no longer writes the SII's line itself nor sets the clock to get its year. The new
+  pure `resolutionLine({ number, date })`, exported from `dte-sdk/pdf`, returns the same line for a caller that shows
+  it elsewhere. A number that is not a whole number from 0 throws `INVALID_OPTION` (`resolution.number`) and a date
+  that is not a real `YYYY-MM-DD` throws `INVALID_DATE` (`resolution.date`), before the PDF libraries load;
+  `renderPrintedSamples` and `writePrintedSamples` report it as a failure of each sample. A string is printed as
+  before, and without `resolution` the line is still number 0 of the year of `now`.
+  - **What to change:** nothing. To print a production resolution, pass it as `{ number, date }` instead of writing
+    the line.
+
 ## [0.14.0] - 2026-11-16
 
 ### Added
