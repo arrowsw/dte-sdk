@@ -163,11 +163,15 @@ const assignmentSignatures = (assignment: AssignmentZone): readonly SignatureVer
 }
 
 /**
- * EN: Verifies every signature of an assignment file (AEC): the assigned document's own, the one over its zone, each
+ * EN: **Unstable**: it is held to the files the builders write, none of which has been registered at the SII yet, so
+ * its shape may change in any release, a patch included.
+ * Verifies every signature of an assignment file (AEC): the assigned document's own, the one over its zone, each
  * signature of each assignment and the one over the whole file. Each zone is checked as it stands in the file, with
  * the namespaces it inherits there, so a result is the one a verifier of the whole file reaches. Pure: no clock and no
  * network. Whose certificates they are is not checked.
- * ES: Verifica cada firma de un archivo de cesión (AEC): la del propio documento cedido, la de su área, cada firma de
+ * ES: **Inestable**: se rige por los archivos que arman los constructores, ninguno de los cuales se ha registrado aún en
+ * el SII, así que su forma puede cambiar en cualquier versión, incluso un patch.
+ * Verifica cada firma de un archivo de cesión (AEC): la del propio documento cedido, la de su área, cada firma de
  * cada cesión y la de todo el archivo. Cada zona se revisa como está en el archivo, con los namespaces que hereda ahí,
  * así un resultado es el que obtiene quien verifica el archivo completo. Pura: sin reloj ni red. No revisa de quién
  * son los certificados.
@@ -175,7 +179,7 @@ const assignmentSignatures = (assignment: AssignmentZone): readonly SignatureVer
  * @returns EN: each signature's verification, and whether all of them verified. ES: la verificación de cada firma, y si todas verificaron.
  * @throws {DteError} EN: `XML_PARSE_FAILED` (see `readAssignmentFile`), `SIGNATURE_NOT_FOUND` for a zone without a signature. ES: `XML_PARSE_FAILED` (ver `readAssignmentFile`), `SIGNATURE_NOT_FOUND` para una zona sin firma.
  */
-export const verifyAssignment = (xml: string): AssignmentVerification => {
+export const unstable_verifyAssignment = (xml: string): AssignmentVerification => {
   const file = readAssignmentFile(xml)
   const document = verifyDocumentSignature(file.document.text)
   const assignedDocument = verifyEnveloped(file.assignedDocument.text, {

@@ -1,5 +1,5 @@
-import { createAssignment } from '../../src/assignment/build'
-import { readAssignmentFile, standalone, verifyAssignment } from '../../src/assignment/read'
+import { unstable_createAssignment } from '../../src/assignment/build'
+import { readAssignmentFile, standalone, unstable_verifyAssignment } from '../../src/assignment/read'
 import { DteError } from '../../src/errors'
 import { signEnveloped } from '../../src/signature/xmldsig'
 import { parseXmlDom } from '../../src/xml/parse'
@@ -10,8 +10,8 @@ import { validateAgainstXsd } from '../support/xsd'
 
 jest.setTimeout(60_000)
 
-const file = createAssignment(firstAssignment())
-const twoSigners = createAssignment(
+const file = unstable_createAssignment(firstAssignment())
+const twoSigners = unstable_createAssignment(
   firstAssignment({
     assignor: {
       ...issuerParty,
@@ -83,9 +83,9 @@ describe('readAssignmentFile', () => {
   })
 })
 
-describe('verifyAssignment', () => {
+describe('unstable_verifyAssignment', () => {
   test('one verification per signature, the assignment`s in the signers` order', () => {
-    const verification = verifyAssignment(twoSigners)
+    const verification = unstable_verifyAssignment(twoSigners)
     expect(verification.valid).toBe(true)
     expect(verification.assignments).toEqual([
       [
@@ -96,7 +96,7 @@ describe('verifyAssignment', () => {
   })
 
   test('a change in any zone fails that zone and the whole file', () => {
-    const document = verifyAssignment(
+    const document = unstable_verifyAssignment(
       replaced(file, '<MntTotal>254363</MntTotal></Totales>', '<MntTotal>1</MntTotal></Totales>'),
     )
     expect([document.document.valid, document.assignedDocument.valid, document.file.valid, document.valid]).toEqual([
@@ -105,7 +105,7 @@ describe('verifyAssignment', () => {
       false,
       false,
     ])
-    const assignment = verifyAssignment(replaced(file, '<MontoCesion>254363', '<MontoCesion>254362'))
+    const assignment = unstable_verifyAssignment(replaced(file, '<MontoCesion>254363', '<MontoCesion>254362'))
     expect([assignment.document.valid, assignment.assignments[0][0].valid, assignment.file.valid]).toEqual([
       true,
       false,
@@ -115,11 +115,11 @@ describe('verifyAssignment', () => {
     const values = Array.from(twoSigners.matchAll(/<SignatureValue>([^<]*)<\/SignatureValue>/g), (m) => m[1])
     const at = twoSigners.lastIndexOf(values[3])
     const swapped = `${twoSigners.slice(0, at)}${values[0]}${twoSigners.slice(at + values[3].length)}`
-    expect(verifyAssignment(swapped).assignments[0].map((signature) => signature.valid)).toEqual([true, false])
+    expect(unstable_verifyAssignment(swapped).assignments[0].map((signature) => signature.valid)).toEqual([true, false])
   })
 
   test('a namespace the root adds changes what every zone covers there, and none verifies', () => {
-    const added = verifyAssignment(
+    const added = unstable_verifyAssignment(
       replaced(file, '<AEC xmlns="http://www.sii.cl/SiiDte"', '<AEC xmlns="http://www.sii.cl/SiiDte" xmlns:x="urn:x"'),
     )
     expect([
@@ -151,7 +151,7 @@ describe('verifyAssignment', () => {
       'DocumentoCesion',
     ],
   ])('refuses an assignment %s', (_name, edit, code, field) => {
-    expect(caught(() => verifyAssignment(edit(file)))).toMatchObject({ code, details: { field } })
+    expect(caught(() => unstable_verifyAssignment(edit(file)))).toMatchObject({ code, details: { field } })
   })
 })
 
@@ -172,7 +172,7 @@ describe('the signatures of an assignment are its children', () => {
     const wrapped = fileWith((xml) =>
       replaced(xml, /(<\/DocumentoCesion>)(<Signature[\s\S]*?<\/Signature>)/, '$1<Extra>$2</Extra>'),
     )
-    expect(caught(() => verifyAssignment(wrapped))).toMatchObject({
+    expect(caught(() => unstable_verifyAssignment(wrapped))).toMatchObject({
       code: 'XML_PARSE_FAILED',
       details: { field: 'Signature' },
     })
@@ -187,7 +187,7 @@ describe('the signatures of an assignment are its children', () => {
         '$1<Signature>',
       ),
     )
-    expect(caught(() => verifyAssignment(renamed))).toMatchObject({
+    expect(caught(() => unstable_verifyAssignment(renamed))).toMatchObject({
       code: 'XML_PARSE_FAILED',
       details: { field: 'Signature' },
     })

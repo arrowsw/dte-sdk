@@ -1,11 +1,11 @@
 import {
   ASSIGNABLE_DOCUMENT_TYPES,
-  createAssignment,
-  createReassignment,
+  unstable_createAssignment,
+  unstable_createReassignment,
   isAssignableDocumentType,
   MAX_ASSIGNMENTS,
 } from '../../src/assignment/build'
-import { verifyAssignment } from '../../src/assignment/read'
+import { unstable_verifyAssignment } from '../../src/assignment/read'
 import { sha1Base64 } from '../../src/crypto/digest'
 import { rsaPublicKeyPartsFromCertificatePem, rsaSha1VerifyBase64 } from '../../src/crypto/rsa'
 import { verifyDocumentSignature } from '../../src/document/sign'
@@ -109,15 +109,15 @@ describe('the assignable document types', () => {
   })
 })
 
-describe('createAssignment', () => {
-  const xml = createAssignment(firstAssignment())
+describe('unstable_createAssignment', () => {
+  const xml = unstable_createAssignment(firstAssignment())
 
   test('is an AEC the SII schema takes', async () => {
     expect(await validateAgainstXsd(xml, 'AEC')).toEqual([])
   })
 
   test('every signature verifies, the document`s own included, by the file`s reader and in place', () => {
-    const verification = verifyAssignment(xml)
+    const verification = unstable_verifyAssignment(xml)
     expect(verification.valid).toBe(true)
     expect(verification.document.referenceId).toBe('DTE_T33F7')
     expect(verification.assignedDocument.referenceId).toBe('DTECedido_T33F7')
@@ -171,7 +171,7 @@ describe('createAssignment', () => {
   })
 
   test('the optional fields, sanitized, when they are given', async () => {
-    const full = createAssignment(
+    const full = unstable_createAssignment(
       firstAssignment({
         amount: 100000,
         otherTerms: 'Pago a 30 días, "sin" recurso',
@@ -187,22 +187,22 @@ describe('createAssignment', () => {
       '<MontoCesion>100000</MontoCesion><UltimoVencimiento>2026-12-15</UltimoVencimiento><OtrasCondiciones>Pago a 30 días, sin recurso</OtrasCondiciones><eMailDeudor>pagos@rapel.test</eMailDeudor><TmstCesion>',
     )
     // Blank fields, or a contact without fields, write nothing.
-    const blank = createAssignment(firstAssignment({ otherTerms: '  ', debtorEmail: '', contact: {} }))
+    const blank = unstable_createAssignment(firstAssignment({ otherTerms: '  ', debtorEmail: '', contact: {} }))
     expect(blank).not.toMatch(/<(OtrasCondiciones|eMailDeudor|NmbContacto|FonoContacto|MailContacto)>/)
   })
 
   test('the text, markup included, is escaped', async () => {
-    const escaped = createAssignment(
+    const escaped = unstable_createAssignment(
       firstAssignment({ assignee: { ...financier, businessName: 'Fondo <A> & B' }, otherTerms: 'a < b & c' }),
     )
     expect(escaped).toContain('<RazonSocial>Fondo &lt;A&gt; &amp; B</RazonSocial>')
     expect(escaped).toContain('<OtrasCondiciones>a &lt; b &amp; c</OtrasCondiciones>')
     expect(await validateAgainstXsd(escaped, 'AEC')).toEqual([])
-    expect(verifyAssignment(escaped).valid).toBe(true)
+    expect(unstable_verifyAssignment(escaped).valid).toBe(true)
   })
 
   test('an XML declaration and whitespace before the document are dropped', () => {
-    const declared = createAssignment(
+    const declared = unstable_createAssignment(
       firstAssignment({ document: `<?xml version="1.0" encoding="ISO-8859-1"?>\n  ${invoice.xml}\n` }),
     )
     expect(declared).toBe(xml)
@@ -213,14 +213,14 @@ describe('createAssignment', () => {
     // verifies. One that holds the tags that close the file must not draw the file's signature into it.
     const commented = invoice.xml.replace('</DTE>', '<!--</DocumentoAEC></AEC>--></DTE>')
     expect(verifyDocumentSignature(commented).valid).toBe(true)
-    const file = createAssignment(firstAssignment({ document: commented }))
+    const file = unstable_createAssignment(firstAssignment({ document: commented }))
     expect(file.endsWith('</Signature></AEC>')).toBe(true)
-    expect(verifyAssignment(file).valid).toBe(true)
+    expect(unstable_verifyAssignment(file).valid).toBe(true)
     expect(await validateAgainstXsd(file, 'AEC')).toEqual([])
     // One that holds the tags that close a zone leaves a file its reader cannot cut: it is refused, not handed back.
     const zone = invoice.xml.replace('</DTE>', '<!--</DocumentoDTECedido></DTECedido>--></DTE>')
     expect(verifyDocumentSignature(zone).valid).toBe(true)
-    expect(caught(() => createAssignment(firstAssignment({ document: zone }))).code).toBe('XML_PARSE_FAILED')
+    expect(caught(() => unstable_createAssignment(firstAssignment({ document: zone }))).code).toBe('XML_PARSE_FAILED')
   })
 
   test('a file is handed back only when every signature of it verifies', () => {
@@ -230,7 +230,7 @@ describe('createAssignment', () => {
     )
     expect(clashing).toContain('<Documento ID="DTECedido_T33F7"')
     expect(verifyDocumentSignature(clashing).valid).toBe(true)
-    expect(caught(() => createAssignment(firstAssignment({ document: clashing })))).toMatchObject({
+    expect(caught(() => unstable_createAssignment(firstAssignment({ document: clashing })))).toMatchObject({
       code: 'SIGNATURE_INVALID',
       details: { field: 'DocumentoDTECedido' },
     })
@@ -238,7 +238,7 @@ describe('createAssignment', () => {
 
   test('the clock is the current time when none is given', () => {
     const before = chileTimestamp(new Date())
-    const now = createAssignment(firstAssignment({ now: undefined }))
+    const now = unstable_createAssignment(firstAssignment({ now: undefined }))
     expect(tagText(now, 'TmstCesion')[0] >= before).toBe(true)
   })
 
@@ -262,7 +262,7 @@ describe('createAssignment', () => {
     ],
   ])('%s', async (_name, document, assignor, type, debtorName, debtorRut) => {
     const total = Number(tagText(document, 'MntTotal')[0])
-    const file = createAssignment(
+    const file = unstable_createAssignment(
       firstAssignment({
         document,
         assignor: {
@@ -273,7 +273,7 @@ describe('createAssignment', () => {
       }),
     )
     expect(await validateAgainstXsd(file, 'AEC')).toEqual([])
-    expect(verifyAssignment(file).valid).toBe(true)
+    expect(unstable_verifyAssignment(file).valid).toBe(true)
     expect(tagText(file, 'TipoDTE')).toEqual([String(type), String(type)])
     expect(tagText(file, 'DeclaracionJurada')[0]).toContain(`deudor de la factura ${debtorName}, RUT ${debtorRut},`)
   })
@@ -284,10 +284,10 @@ describe('createAssignment', () => {
       { rut: RECEIVER_RUT, name: 'Pedro Soto', certificate: certificateOf(RECEIVER_RUT) },
       { rut: FINANCIER_RUT, name: 'Luisa Díaz', certificate: certificateOf(null) },
     ]
-    const file = createAssignment(firstAssignment({ assignor: { ...issuerParty, signers } }))
+    const file = unstable_createAssignment(firstAssignment({ assignor: { ...issuerParty, signers } }))
     expect(await validateAgainstXsd(file, 'AEC')).toEqual([])
     expect(tagText(file, 'Nombre')).toEqual(['Carolina Valdés Rojas', 'Pedro Soto', 'Luisa Díaz'])
-    const verification = verifyAssignment(file)
+    const verification = unstable_verifyAssignment(file)
     expect(verification.valid).toBe(true)
     expect(verification.assignments[0]).toHaveLength(3)
     expect(inPlace(file).every((check) => check.digest && check.value)).toBe(true)
@@ -295,25 +295,29 @@ describe('createAssignment', () => {
 
   describe('refuses before signing', () => {
     test('a document that is not one signed DTE', () => {
-      expect(caught(() => createAssignment(firstAssignment({ document: envelopeXml([invoice]) }))).details).toEqual({
+      expect(
+        caught(() => unstable_createAssignment(firstAssignment({ document: envelopeXml([invoice]) }))).details,
+      ).toEqual({
         field: 'DTE',
         reason: 'expected a DTE that declares xmlns="http://www.sii.cl/SiiDte"',
       })
       const bare = invoice.xml.replace(' xmlns="http://www.sii.cl/SiiDte"', '')
-      expect(caught(() => createAssignment(firstAssignment({ document: bare }))).code).toBe('XML_PARSE_FAILED')
-      expect(caught(() => createAssignment(firstAssignment({ document: '<Otro/>' }))).code).toBe('XML_PARSE_FAILED')
+      expect(caught(() => unstable_createAssignment(firstAssignment({ document: bare }))).code).toBe('XML_PARSE_FAILED')
+      expect(caught(() => unstable_createAssignment(firstAssignment({ document: '<Otro/>' }))).code).toBe(
+        'XML_PARSE_FAILED',
+      )
     })
 
     test('a document whose signature does not verify', () => {
       const tampered = invoice.xml.replace('<MntTotal>254363</MntTotal>', '<MntTotal>254364</MntTotal>')
-      expect(caught(() => createAssignment(firstAssignment({ document: tampered })))).toMatchObject({
+      expect(caught(() => unstable_createAssignment(firstAssignment({ document: tampered })))).toMatchObject({
         code: 'SIGNATURE_INVALID',
         details: { field: 'DTE' },
       })
     })
 
     test('a type the format does not let assign', () => {
-      const error = caught(() => createAssignment(firstAssignment({ document: guide(1).xml })))
+      const error = caught(() => unstable_createAssignment(firstAssignment({ document: guide(1).xml })))
       expect(error).toMatchObject({ code: 'INVALID_DOCUMENT_TYPE', details: { field: 'TipoDTE', type: 52 } })
     })
 
@@ -366,13 +370,16 @@ describe('createAssignment', () => {
     ])('%s', (_name, from, to, code, field) => {
       const document = resignedDocument(invoice.xml, (xml) => xml.replace(from, to))
       expect(verifyDocumentSignature(document).valid).toBe(true)
-      expect(caught(() => createAssignment(firstAssignment({ document })))).toMatchObject({ code, details: { field } })
+      expect(caught(() => unstable_createAssignment(firstAssignment({ document })))).toMatchObject({
+        code,
+        details: { field },
+      })
     })
 
     test('a purchase invoice without its debtor`s name, its issuer`s', () => {
       const document = resignedDocument(purchase.xml, (xml) => xml.replace('<RznSoc>Comercial Andina SpA</RznSoc>', ''))
       const input = firstAssignment({ document, assignor: { ...receiverParty, signers: [] } })
-      expect(caught(() => createAssignment(input))).toMatchObject({
+      expect(caught(() => unstable_createAssignment(input))).toMatchObject({
         code: 'MISSING_FIELD',
         details: { field: 'RznSoc' },
       })
@@ -380,14 +387,16 @@ describe('createAssignment', () => {
 
     test('a first assignment by anyone but the document`s creditor', () => {
       const byReceiver = firstAssignment({ assignor: { ...receiverParty, signers: [] } })
-      expect(caught(() => createAssignment(byReceiver))).toMatchObject({
+      expect(caught(() => unstable_createAssignment(byReceiver))).toMatchObject({
         code: 'INVALID_OPTION',
         details: { field: 'assignor.rut' },
       })
       const byIssuer = firstAssignment({ document: purchase.xml })
-      expect(caught(() => createAssignment(byIssuer)).details.field).toBe('assignor.rut')
+      expect(caught(() => unstable_createAssignment(byIssuer)).details.field).toBe('assignor.rut')
       expect(
-        caught(() => createAssignment(firstAssignment({ assignor: { ...issuerParty, rut: 'x', signers: [] } }))),
+        caught(() =>
+          unstable_createAssignment(firstAssignment({ assignor: { ...issuerParty, rut: 'x', signers: [] } })),
+        ),
       ).toMatchObject({ code: 'INVALID_RUT', details: { field: 'assignor.rut' } })
     })
 
@@ -396,21 +405,21 @@ describe('createAssignment', () => {
       ['four signers', Array.from({ length: 4 }, () => ({ rut: ISSUER_RUT, name: 'Ana' }))],
       ['signers that are not a list', 'Ana' as never],
     ])('%s', (_name, signers) => {
-      const error = caught(() => createAssignment(firstAssignment({ assignor: { ...issuerParty, signers } })))
+      const error = caught(() => unstable_createAssignment(firstAssignment({ assignor: { ...issuerParty, signers } })))
       expect(error).toMatchObject({ code: 'INVALID_OPTION', details: { field: 'assignor.signers' } })
     })
 
     test('a signer whose certificate is of another RUT, or a signer that is not a RUT', () => {
       const other = [{ rut: RECEIVER_RUT, name: 'Pedro Soto' }]
       expect(
-        caught(() => createAssignment(firstAssignment({ assignor: { ...issuerParty, signers: other } }))),
+        caught(() => unstable_createAssignment(firstAssignment({ assignor: { ...issuerParty, signers: other } }))),
       ).toMatchObject({
         code: 'INVALID_OPTION',
         details: { field: 'assignor.signers', index: 0, reason: 'the certificate is of another RUT' },
       })
       const invalid = [{ rut: 'nadie', name: 'Pedro Soto' }]
       expect(
-        caught(() => createAssignment(firstAssignment({ assignor: { ...issuerParty, signers: invalid } }))),
+        caught(() => unstable_createAssignment(firstAssignment({ assignor: { ...issuerParty, signers: invalid } }))),
       ).toMatchObject({
         code: 'INVALID_RUT',
         details: { field: 'assignor.signers.0.rut' },
@@ -423,7 +432,7 @@ describe('createAssignment', () => {
       ['more than the total', 254364],
       ['not a number', Number.NaN],
     ])('an amount that is %s', (_name, amount) => {
-      expect(caught(() => createAssignment(firstAssignment({ amount })))).toMatchObject({
+      expect(caught(() => unstable_createAssignment(firstAssignment({ amount })))).toMatchObject({
         code: 'INVALID_AMOUNT',
         details: { field: 'amount' },
       })
@@ -434,14 +443,14 @@ describe('createAssignment', () => {
       ['before 2003-04-01', '2003-03-31'],
       ['after 2050-12-31', '2051-01-01'],
     ])('a last due date that is %s', (_name, lastDueDate) => {
-      expect(caught(() => createAssignment(firstAssignment({ lastDueDate })))).toMatchObject({
+      expect(caught(() => unstable_createAssignment(firstAssignment({ lastDueDate })))).toMatchObject({
         code: 'INVALID_DATE',
         details: { field: 'lastDueDate' },
       })
     })
 
     test('a last due date written DD-MM-YYYY is read as the date it is', () => {
-      expect(createAssignment(firstAssignment({ lastDueDate: '15-12-2026' }))).toBe(xml)
+      expect(unstable_createAssignment(firstAssignment({ lastDueDate: '15-12-2026' }))).toBe(xml)
     })
 
     test.each([
@@ -503,7 +512,10 @@ describe('createAssignment', () => {
         'MailContacto',
       ],
     ])('%s', (_name, overrides, code, field) => {
-      expect(caught(() => createAssignment(firstAssignment(overrides)))).toMatchObject({ code, details: { field } })
+      expect(caught(() => unstable_createAssignment(firstAssignment(overrides)))).toMatchObject({
+        code,
+        details: { field },
+      })
     })
 
     test('a sworn statement longer than its 512 characters', () => {
@@ -512,7 +524,7 @@ describe('createAssignment', () => {
         assignor: { ...issuerParty, ...long, signers: [{ rut: ISSUER_RUT, name: 'Ana' }] },
         assignee: { ...financier, ...long },
       })
-      expect(caught(() => createAssignment(input))).toMatchObject({
+      expect(caught(() => unstable_createAssignment(input))).toMatchObject({
         code: 'FIELD_TOO_LONG',
         details: { field: 'DeclaracionJurada', maxLength: 512 },
       })
@@ -520,13 +532,13 @@ describe('createAssignment', () => {
   })
 })
 
-describe('createReassignment', () => {
-  const first = createAssignment(firstAssignment())
-  const second = createReassignment(laterAssignment(first, financier, secondFinancier))
+describe('unstable_createReassignment', () => {
+  const first = unstable_createAssignment(firstAssignment())
+  const second = unstable_createReassignment(laterAssignment(first, financier, secondFinancier))
 
   test('carries the previous file`s zones as they were signed and adds the next assignment', async () => {
     expect(await validateAgainstXsd(second, 'AEC')).toEqual([])
-    const verification = verifyAssignment(second)
+    const verification = unstable_verifyAssignment(second)
     expect(verification.valid).toBe(true)
     expect(verification.assignments.map((signatures) => signatures[0].referenceId)).toEqual([
       'Cesion_T33F7_1',
@@ -551,10 +563,10 @@ describe('createReassignment', () => {
       '<DTECedido xmlns="http://www.sii.cl/SiiDte" version="1.0">',
       '<DTECedido version="1.0">',
     )
-    expect(verifyAssignment(inheriting).valid).toBe(true)
-    const next = createReassignment(laterAssignment(inheriting, financier, secondFinancier))
+    expect(unstable_verifyAssignment(inheriting).valid).toBe(true)
+    const next = unstable_createReassignment(laterAssignment(inheriting, financier, secondFinancier))
     expect(await validateAgainstXsd(next, 'AEC')).toEqual([])
-    expect(verifyAssignment(next).valid).toBe(true)
+    expect(unstable_verifyAssignment(next).valid).toBe(true)
   })
 
   // Each of the 39 calls verifies the file it is given and the file it returns, one signature at a time: some
@@ -563,11 +575,11 @@ describe('createReassignment', () => {
     const parties = [financier, secondFinancier]
     let file = first
     for (let sequence = 2; sequence <= MAX_ASSIGNMENTS; sequence += 1)
-      file = createReassignment(laterAssignment(file, parties[sequence % 2], parties[(sequence + 1) % 2]))
+      file = unstable_createReassignment(laterAssignment(file, parties[sequence % 2], parties[(sequence + 1) % 2]))
     expect(tagText(file, 'SeqCesion')).toHaveLength(MAX_ASSIGNMENTS)
     expect(await validateAgainstXsd(file, 'AEC')).toEqual([])
-    expect(verifyAssignment(file).valid).toBe(true)
-    const full = caught(() => createReassignment(laterAssignment(file, financier, secondFinancier)))
+    expect(unstable_verifyAssignment(file).valid).toBe(true)
+    const full = caught(() => unstable_createReassignment(laterAssignment(file, financier, secondFinancier)))
     expect(full).toMatchObject({ code: 'INVALID_OPTION', details: { field: 'SeqCesion' } })
   }, 300_000)
 
@@ -577,9 +589,11 @@ describe('createReassignment', () => {
     const clashing = resignedDocument(invoice.xml, (unsigned) =>
       unsigned.replace(/<Documento ID="[^"]*"/, '<Documento ID="AEC_T33F7_2"'),
     )
-    const previous = createAssignment(firstAssignment({ document: clashing }))
-    expect(verifyAssignment(previous).valid).toBe(true)
-    expect(caught(() => createReassignment(laterAssignment(previous, financier, secondFinancier)))).toMatchObject({
+    const previous = unstable_createAssignment(firstAssignment({ document: clashing }))
+    expect(unstable_verifyAssignment(previous).valid).toBe(true)
+    expect(
+      caught(() => unstable_createReassignment(laterAssignment(previous, financier, secondFinancier))),
+    ).toMatchObject({
       code: 'SIGNATURE_INVALID',
       details: { field: 'DocumentoAEC' },
     })
@@ -587,7 +601,9 @@ describe('createReassignment', () => {
 
   test('refuses a previous file with a signature that does not verify, naming its zone', () => {
     const tampered = first.replace('<MontoCesion>254363</MontoCesion>', '<MontoCesion>1</MontoCesion>')
-    expect(caught(() => createReassignment(laterAssignment(tampered, financier, secondFinancier)))).toMatchObject({
+    expect(
+      caught(() => unstable_createReassignment(laterAssignment(tampered, financier, secondFinancier))),
+    ).toMatchObject({
       code: 'SIGNATURE_INVALID',
       details: { field: 'DocumentoCesion' },
     })
@@ -595,17 +611,19 @@ describe('createReassignment', () => {
       '<RutCesionario>10000004-0</RutCesionario>',
       '<RutCesionario>11111111-1</RutCesionario>',
     )
-    expect(caught(() => createReassignment(laterAssignment(cover, financier, secondFinancier))).details.field).toBe(
-      'DocumentoAEC',
-    )
+    expect(
+      caught(() => unstable_createReassignment(laterAssignment(cover, financier, secondFinancier))).details.field,
+    ).toBe('DocumentoAEC')
   })
 
   test('refuses previous assignments that are not numbered from 1', () => {
     const misnumbered = resignedFile(first, (cesion) =>
       cesion.replace('<SeqCesion>1</SeqCesion>', '<SeqCesion>2</SeqCesion>'),
     )
-    expect(verifyAssignment(misnumbered).valid).toBe(true)
-    expect(caught(() => createReassignment(laterAssignment(misnumbered, financier, secondFinancier)))).toMatchObject({
+    expect(unstable_verifyAssignment(misnumbered).valid).toBe(true)
+    expect(
+      caught(() => unstable_createReassignment(laterAssignment(misnumbered, financier, secondFinancier))),
+    ).toMatchObject({
       code: 'INVALID_OPTION',
       details: { field: 'SeqCesion' },
     })
@@ -613,7 +631,7 @@ describe('createReassignment', () => {
 
   test('refuses an assignor that is not the previous assignee', () => {
     const input = laterAssignment(first, secondFinancier, financier)
-    expect(caught(() => createReassignment(input))).toMatchObject({
+    expect(caught(() => unstable_createReassignment(input))).toMatchObject({
       code: 'INVALID_OPTION',
       details: { field: 'assignor.rut', reason: 'a later assignment is made by the assignee of the previous one' },
     })
@@ -621,6 +639,6 @@ describe('createReassignment', () => {
 
   test('holds the new assignment to the same rules', () => {
     const input = laterAssignment(first, financier, secondFinancier, { amount: 254364 })
-    expect(caught(() => createReassignment(input)).code).toBe('INVALID_AMOUNT')
+    expect(caught(() => unstable_createReassignment(input)).code).toBe('INVALID_AMOUNT')
   })
 })

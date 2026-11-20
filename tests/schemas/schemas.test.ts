@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { createAssignment } from '../../src/assignment/build'
+import { unstable_createAssignment } from '../../src/assignment/build'
 import { signPurchaseSalesBook } from '../../src/books/purchase-sales'
 import {
   loadSchemaValidator,
@@ -140,7 +140,7 @@ describe('validateAgainstSchema', () => {
   })
 
   test('an assignment file, by the schema of its element, from its text and from the bytes of its file', async () => {
-    const assignment = createAssignment(firstAssignment())
+    const assignment = unstable_createAssignment(firstAssignment())
     expect(schemaOf(assignment)).toBe('AEC')
     expect(await validateAgainstSchema(assignment)).toEqual([])
     expect(await validateAgainstSchema(encodeLatin1(assignment))).toEqual([])
