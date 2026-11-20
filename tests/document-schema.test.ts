@@ -795,6 +795,23 @@ describe('what the schema refuses in an export document', () => {
     ])
   })
 
+  test('a control character in a text written as it comes is dropped, and the document is still XML', async () => {
+    // A code, the folio of a reference and the note of a payment are written as they are given.
+    const xml = issue({
+      ...base,
+      type: 33,
+      folio: 92,
+      items: [{ name: 'Plan anual', unitPrice: 100000, codes: [{ type: 'INT1', value: 'L\u00011' }] }],
+      references: [{ documentType: 801, folio: 'OC\u0001-1', date: '2026-11-01' }],
+      options: { paymentTerms: 2, payments: [{ date: '2026-12-01', amount: 100, note: 'Cuota\u00011' }] },
+    }).xml
+    expect(xml).toContain('<VlrCodigo>L1</VlrCodigo>')
+    expect(xml).toContain('<FolioRef>OC-1</FolioRef>')
+    expect(xml).toContain('<GlosaPagos>Cuota1</GlosaPagos>')
+    expect(await validateAgainstXsd(xml, 'DTE')).toEqual([])
+    expect(verifyDocumentSignature(xml).valid).toBe(true)
+  })
+
   test.each([
     ['CodAdicSucur', '<CodAdicSucur>CL-01</CodAdicSucur>', '<DirOrigen>'],
     ['IdAdicOtr', '<IdAdicOtr>DUS-1</IdAdicOtr>', '<FchRef>'],

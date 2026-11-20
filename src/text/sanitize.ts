@@ -1,9 +1,5 @@
 import { DteError } from '../errors'
-
-// The control characters XML 1.0 forbids. A text with one of them is not XML: no parser reads the document it would be
-// written in.
-// eslint-disable-next-line no-control-regex
-const FORBIDDEN_CONTROLS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g
+import { dropForbiddenControls } from '../xml/escape'
 
 /**
  * EN: Normalizes free text for a DTE field: drops apostrophes and double quotes (they break the SII signature
@@ -17,14 +13,14 @@ const FORBIDDEN_CONTROLS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g
  */
 export const sanitizeText = (text: string | null | undefined): string => {
   if (text === undefined || text === null) return ''
-  return String(text)
-    .replace(/['´`]/g, '')
-    .replace(/"/g, '')
-    .replace(/[—–]/g, '-')
-    .replace(/…/g, '...')
-    .replace(/[\u0100-\uFFFF]/g, '')
-    .replace(FORBIDDEN_CONTROLS, '')
-    .trim()
+  return dropForbiddenControls(
+    String(text)
+      .replace(/['´`]/g, '')
+      .replace(/"/g, '')
+      .replace(/[—–]/g, '-')
+      .replace(/…/g, '...')
+      .replace(/[\u0100-\uFFFF]/g, ''),
+  ).trim()
 }
 
 const LIGATURES: Readonly<Record<string, string>> = {

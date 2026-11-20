@@ -23,6 +23,11 @@ describe('escape', () => {
 })
 
 describe('buildXml', () => {
+  test('a control character XML 1.0 forbids is dropped, from a text and from an attribute alike', () => {
+    const xml = buildXml({ A: { '@_ID': 'x\u0001y', B: 'OC\u0001-1\u001f', C: 'a\tb\nc\rd' } })
+    expect(xml).toBe('<A ID="xy"><B>OC-1</B><C>a\tb\nc\rd</C></A>')
+  })
+
   test('renders attributes, nested objects, arrays and escapes values in insertion order', () => {
     const xml = buildXml({
       DTE: {
