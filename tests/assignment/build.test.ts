@@ -557,6 +557,8 @@ describe('createReassignment', () => {
     expect(verifyAssignment(next).valid).toBe(true)
   })
 
+  // Each of the 39 calls verifies the file it is given and the file it returns, one signature at a time: some
+  // 1 800 checks in all, which a CI runner has taken over two minutes for. This one test has its own limit.
   test(`a file holds up to ${MAX_ASSIGNMENTS} assignments`, async () => {
     const parties = [financier, secondFinancier]
     let file = first
@@ -567,7 +569,7 @@ describe('createReassignment', () => {
     expect(verifyAssignment(file).valid).toBe(true)
     const full = caught(() => createReassignment(laterAssignment(file, financier, secondFinancier)))
     expect(full).toMatchObject({ code: 'INVALID_OPTION', details: { field: 'SeqCesion' } })
-  })
+  }, 300_000)
 
   test('refuses a previous file with a signature that does not verify, naming its zone', () => {
     const tampered = first.replace('<MontoCesion>254363</MontoCesion>', '<MontoCesion>1</MontoCesion>')
