@@ -14,6 +14,7 @@ import {
   certificate,
   envelopeAround,
   envelopeOf,
+  exportInput,
   invoiceInput,
   issued,
   OTHER_RUT,
@@ -755,6 +756,32 @@ describe('verifyReceivedDocuments: the node checked is the node read', () => {
   })
 })
 
+describe('verifyReceivedDocuments: an export document', () => {
+  const exported = (): string => issued(5, signedCaf({ type: 110 }), exportInput(5)).xml
+
+  test('is read under Exportaciones, with a total that has decimals, and its signature, stamp and CAF verify', () => {
+    const document = only(exported())
+    expect(document).toMatchObject({ id: 'DTE_T110F5', type: 110, folio: 5, totalAmount: 1234.5, status: 'valid' })
+    expect(document.signature).toEqual({ ...VALID_SIGNATURE, referenceId: 'DTE_T110F5' })
+    expect(document.ted).toEqual(VALID_TED)
+    expect(document.caf).toEqual({ ...VALID_CAF, documentType: 110 })
+  })
+
+  test('its stamp is compared by the value of its total: rounded to a whole number it is a mismatch', () => {
+    const xml = exported()
+    expect(xml).toContain('<MNT>1234.5</MNT>')
+    expect(only(xml.replace('<MNT>1234.5</MNT>', '<MNT>1235</MNT>')).ted.mismatches).toEqual(['totalAmount'])
+    expect(only(xml.replace('<MNT>1234.5</MNT>', '<MNT>1234.50</MNT>')).ted.mismatches).toEqual([])
+    expect(only(xml.replace('<MNT>1234.5</MNT>', '<MNT>USD</MNT>')).ted.mismatches).toEqual(['totalAmount'])
+  })
+
+  test('a Documento still reads its total as a whole number only', () => {
+    const xml = issued(1).xml
+    const total = /<MntTotal>(\d+)<\/MntTotal>/.exec(xml)?.[1]
+    expect(only(xml.replace(`<MntTotal>${total}</MntTotal>`, `<MntTotal>${total}.5</MntTotal>`)).totalAmount).toBeNull()
+  })
+})
+
 describe('verifyReceivedDocuments: the environment', () => {
   const production = { siiKeys: { 300: TEST_SII_KEYS[100] } }
 
@@ -856,10 +883,10 @@ describe('verifyReceivedDocuments: malformed input throws', () => {
     expectFailure(() => verify(alone), 'XML_PARSE_FAILED', { field: 'Documento' })
   })
 
-  test('a DTE without one Documento or Liquidacion is XML_PARSE_FAILED, with its index', () => {
+  test('a DTE without one Documento, Liquidacion or Exportaciones is XML_PARSE_FAILED, with its index', () => {
     const second = issued(2)
-      .xml.replace(/<Documento /, '<Exportaciones ')
-      .replace('</Documento>', '</Exportaciones>')
+      .xml.replace(/<Documento /, '<Boleta ')
+      .replace('</Documento>', '</Boleta>')
     expectFailure(() => verify(envelopeAround([issued(1).xml, second])), 'XML_PARSE_FAILED', {
       field: 'Documento',
       index: 1,

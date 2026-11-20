@@ -101,3 +101,36 @@ export const totalsWarnings = (type: DocumentType, totals: Totals): readonly Doc
     ...(type === 33 && !(net > 0) ? [{ validation: 56, field: 'totals.netAmount' } as const] : []),
   ]
 }
+
+// `MntExe` and `MntTotal` of `Exportaciones` are decimals from zero up to 99999999999999.9999, with four decimals.
+const MAX_EXPORT_AMOUNT = 1e14
+const EXPORT_AMOUNTS = ['exemptAmount', 'totalAmount'] as const
+
+const isExportAmount = (amount: number): boolean =>
+  typeof amount === 'number' &&
+  Number.isFinite(amount) &&
+  amount >= 0 &&
+  amount < MAX_EXPORT_AMOUNT &&
+  Number(amount.toFixed(4)) === amount
+
+/**
+ * EN: Refuses the totals of an export document the SII rejects: an exempt amount or a total that is not a number from
+ * zero up with four decimals at most, as `Exportaciones` declares them, and a total that is not the exempt amount, the
+ * one amount an export adds up to, or is not zero on an export without payment (Formato DTE 2.5, field 124).
+ * ES: Rechaza los totales de un documento de exportación que el SII rechaza: un monto exento o un total que no es un
+ * número desde cero con cuatro decimales a lo más, como los declara `Exportaciones`, y un total que no es el monto
+ * exento, el único monto que suma una exportación, o que no es cero en una exportación sin pago (Formato DTE 2.5,
+ * campo 124).
+ * @param totals EN: the totals, worked out or given. ES: los totales, calculados o entregados.
+ * @param withoutPayment EN: the export is without payment (`FmaPagExp` 21). ES: la exportación es sin pago (`FmaPagExp` 21).
+ * @throws {DteError} EN: `INVALID_AMOUNT`, and `TOTAL_MISMATCH` with `expected` and `actual`, with the field in `details.field`. ES: `INVALID_AMOUNT`, y `TOTAL_MISMATCH` con `expected` y `actual`, con el campo en `details.field`.
+ */
+export const assertExportTotals = (totals: Totals, withoutPayment: boolean): void => {
+  for (const field of EXPORT_AMOUNTS) {
+    const amount = totals[field]
+    if (amount !== undefined && !isExportAmount(amount))
+      throw new DteError('INVALID_AMOUNT', { field: `totals.${field}` })
+  }
+  const expected = withoutPayment ? 0 : (totals.exemptAmount ?? 0)
+  if (totals.totalAmount !== expected) throw mismatch('totals.totalAmount', expected, totals.totalAmount)
+}

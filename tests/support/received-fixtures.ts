@@ -104,6 +104,19 @@ export const invoiceInput = (folio: number, overrides: Partial<DocumentInput> = 
   ...overrides,
 })
 
+/** An export invoice of the fixture issuer to a receiver abroad, in dollars, with a total that has decimals. */
+export const exportInput = (folio: number, overrides: Partial<DocumentInput> = {}): DocumentInput =>
+  invoiceInput(folio, {
+    type: 110,
+    receiver: { rut: '55555555-5', businessName: 'Andes Trading LLC', address: '1200 Harbor Blvd', city: 'Miami' },
+    currency: 'DOLAR USA',
+    items: [{ name: 'Uva de mesa', quantity: 100, unit: 'KN', unitPrice: 12.345 }],
+    transport: {
+      customs: { saleModality: 1, saleClause: 2, saleClauseTotal: 1234.5, transportRoute: 1, receiverCountry: 225 },
+    },
+    ...overrides,
+  })
+
 /** A document issued the normal way: stamped with `caf` and signed with the fixture certificate. */
 export const issued = (folio: number, caf: Caf = signedCaf(), overrides: Partial<DocumentInput> = {}): SignedDocument =>
   once(`issued ${folio} ${caf.xml} ${JSON.stringify(overrides)}`, () =>

@@ -1,7 +1,14 @@
 import { readReceivedEnvelope, verifyReceivedDocuments } from '../src'
 import { DteError } from '../src/errors'
 import { ISSUER_RUT, RECEIVER_RUT } from './support/fixtures'
-import { envelopeAround, invoiceInput, issued, signedCaf, TEST_SII_KEYS } from './support/received-fixtures'
+import {
+  envelopeAround,
+  exportInput,
+  invoiceInput,
+  issued,
+  signedCaf,
+  TEST_SII_KEYS,
+} from './support/received-fixtures'
 
 // A supplier issues the envelope; the company receives it.
 const SUPPLIER = RECEIVER_RUT
@@ -136,10 +143,24 @@ describe('readReceivedEnvelope', () => {
     expect(failure(() => readReceivedEnvelope(envelope(''))).code).toBe('ENVELOPE_EMPTY')
   })
 
-  test('a DTE holds one Documento or Liquidacion, and no other kind of document', () => {
-    const exported = document(110, 2).replace(/<(\/?)Documento/g, '<$1Exportaciones')
-    refused(envelope(document(33, 1) + exported), { field: 'Documento', index: 1 })
+  test('a DTE holds one Documento, Liquidacion or Exportaciones, and no other kind of document', () => {
+    const other = document(39, 2).replace(/<(\/?)Documento/g, '<$1Boleta')
+    refused(envelope(document(33, 1) + other), { field: 'Documento', index: 1 })
     refused(envelope('<DTE version="1.0"/>'), { field: 'Documento', index: 0 })
+  })
+
+  test('an export document is read under Exportaciones; a total with decimals has no place in an answer', () => {
+    const whole = issued(
+      6,
+      signedCaf({ type: 110 }),
+      exportInput(6, { items: [{ name: 'Uva', quantity: 100, unit: 'KN', unitPrice: 12 }] }),
+    )
+    const exported = whole.xml
+    expect(readReceivedEnvelope(envelopeAround([exported])).documents).toEqual([
+      { type: 110, folio: 6, issueDate: '2026-11-15', issuerRut: ISSUER_RUT, receiverRut: '55555555-5', total: 1200 },
+    ])
+    const decimals = issued(7, signedCaf({ type: 110 }), exportInput(7)).xml
+    refused(envelopeAround([decimals]), { field: 'MntTotal', index: 0 })
   })
 
   test.each([

@@ -61,6 +61,86 @@ export const SERVICE_INDICATORS = {
 export type ServiceIndicator = (typeof SERVICE_INDICATORS)[keyof typeof SERVICE_INDICATORS]
 
 /**
+ * EN: Service indicator of an export document (`IdDoc/IndServicio`), the values the `Exportaciones` root of
+ * `DTE_v10.xsd` admits (Formato DTE 2.5, field 9 of the header): 3 services the customs service treats as exports, 4
+ * hotel services, 5 international land transport and 6 services rendered and used wholly abroad.
+ * ES: `IndServicio` — Indicador de servicio de un documento de exportación, los valores que admite la raíz
+ * `Exportaciones` de `DTE_v10.xsd` (Formato DTE 2.5, campo 9 del encabezado): 3 servicios calificados como tales por
+ * Aduana, 4 servicios de hotelería, 5 servicio de transporte terrestre internacional y 6 servicios prestados y
+ * utilizados totalmente en el extranjero.
+ */
+export const EXPORT_SERVICE_INDICATORS = {
+  services: 3,
+  hotel: 4,
+  internationalLandTransport: 5,
+  servicesAbroad: 6,
+} as const
+/** EN: Union of `EXPORT_SERVICE_INDICATORS` values. ES: Unión de los valores de `EXPORT_SERVICE_INDICATORS`. */
+export type ExportServiceIndicator = (typeof EXPORT_SERVICE_INDICATORS)[keyof typeof EXPORT_SERVICE_INDICATORS]
+
+/**
+ * EN: The currencies `TipMonType` of `SiiTypes_v10.xsd` admits, as the SII writes them: the currency of an export
+ * document (`Totales/TpoMoneda`) and of its other-currency totals (`OtraMoneda/TpoMoneda`).
+ * ES: `TpoMoneda` — Las monedas que admite `TipMonType` de `SiiTypes_v10.xsd`, tal como las escribe el SII: la moneda
+ * de un documento de exportación (`Totales/TpoMoneda`) y la de sus totales en otra moneda (`OtraMoneda/TpoMoneda`).
+ */
+export const CURRENCIES = [
+  'BOLIVAR',
+  'BOLIVIANO',
+  'CHELIN',
+  'CORONA DIN',
+  'CORONA NOR',
+  'CORONA SC',
+  'CRUZEIRO REAL',
+  'DIRHAM',
+  'DOLAR AUST',
+  'DOLAR CAN',
+  'DOLAR HK',
+  'DOLAR NZ',
+  'DOLAR SIN',
+  'DOLAR TAI',
+  'DOLAR USA',
+  'DRACMA',
+  'ESCUDO',
+  'EURO',
+  'FLORIN',
+  'FRANCO BEL',
+  'FRANCO FR',
+  'FRANCO SZ',
+  'GUARANI',
+  'LIBRA EST',
+  'LIRA',
+  'MARCO AL',
+  'MARCO FIN',
+  'NUEVO SOL',
+  'OTRAS MONEDAS',
+  'PESETA',
+  'PESO',
+  'PESO CL',
+  'PESO COL',
+  'PESO MEX',
+  'PESO URUG',
+  'RAND',
+  'RENMINBI',
+  'RUPIA',
+  'SUCRE',
+  'YEN',
+] as const
+/** EN: Union of `CURRENCIES`. ES: Unión de `CURRENCIES`. */
+export type Currency = (typeof CURRENCIES)[number]
+
+/** EN: Type guard for `Currency`. ES: Guarda de tipo para `Currency`. */
+export const isCurrency = (value: unknown): value is Currency => (CURRENCIES as readonly unknown[]).includes(value)
+
+/**
+ * EN: The currency of the other-currency totals of an export document: Formato DTE 2.5, field 129, asks for Chilean
+ * pesos there.
+ * ES: `OtraMoneda/TpoMoneda` — La moneda de los totales en otra moneda de un documento de exportación: el Formato DTE
+ * 2.5, campo 129, pide ahí pesos chilenos (PESO CL).
+ */
+export const CHILEAN_PESO: Currency = 'PESO CL'
+
+/**
  * EN: Payment terms (`IdDoc/FmaPago`).
  * ES: `FmaPago` — Forma de pago: 1 contado, 2 crédito, 3 sin costo (entrega gratuita).
  */
@@ -144,6 +224,9 @@ export const SII_RUT = '60803000-K'
 
 /** EN: Generic final-consumer RUT used on receipts without an identified buyer. ES: RUT genérico de consumidor final para boletas sin comprador identificado: 66666666-6. */
 export const FINAL_CONSUMER_RUT = '66666666-6'
+
+/** EN: Generic RUT of the foreign receiver of an export document (Formato DTE 2.5, field 50 of the header). ES: RUT genérico del receptor extranjero de un documento de exportación (Formato DTE 2.5, campo 50 del encabezado): 55555555-5. */
+export const FOREIGN_RECEIVER_RUT = '55555555-5'
 
 /** EN: `IDK` value that marks a certification-environment CAF. ES: `IDK` — Valor que marca un CAF del ambiente de certificación (100). */
 export const CERTIFICATION_KEY_ID = 100

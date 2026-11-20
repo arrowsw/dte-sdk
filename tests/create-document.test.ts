@@ -1,7 +1,9 @@
 import { createDocument, FIELD_LIMITS } from '../src/document/create'
 import { fromSiiDocument, toSiiDocument } from '../src/model/codec'
 import { DteError } from '../src/errors'
-import type { DocumentInput } from '../src/model/document'
+import type { Currency } from '../src/catalogs/codes'
+import { FOREIGN_RECEIVER_RUT } from '../src/catalogs/codes'
+import type { DocumentInput, LineItemInput } from '../src/model/document'
 import { FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from './support/fixtures'
 
 const issuer = {
@@ -1186,4 +1188,417 @@ describe('what the schema admits on a receipt (39, 41)', () => {
       expect(createDocument(document).header).not.toHaveProperty('softwareProviderRut')
     },
   )
+})
+
+// `DTE_v10.xsd` gives an export document a root of its own, `Exportaciones`: its totals are a currency, an exempt
+// amount and a total with four decimals, it declares the foreign receiver and the customs area, and it declares less
+// than `Documento` in `IdDoc`, the totals, the transport and a line. What it does not declare is refused; what Formato
+// DTE 2.5 asks of an export invoice is required.
+describe('what the schema admits on an export document (110, 111, 112)', () => {
+  const foreign = {
+    rut: FOREIGN_RECEIVER_RUT,
+    businessName: 'Andes Trading LLC',
+    address: '1200 Harbor Blvd',
+    city: 'Miami',
+  }
+  const customs = { saleModality: 1, saleClause: 2, saleClauseTotal: 1234.5, transportRoute: 1, receiverCountry: 225 }
+  const line = { name: 'Uva de mesa', quantity: 100, unit: 'KN', unitPrice: 12.345 }
+  const exportOf = (overrides: Partial<DocumentInput> = {}) =>
+    createDocument({
+      type: 110,
+      folio: 1,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver: foreign,
+      currency: 'DOLAR USA',
+      items: [line],
+      transport: { customs },
+      ...overrides,
+    })
+  const note = (type: 111 | 112, overrides: Partial<DocumentInput> = {}) =>
+    exportOf({
+      type,
+      receiver: { ...foreign, city: undefined },
+      items: [{ name: 'Diferencia', amount: 10.5 }],
+      transport: undefined,
+      references: [{ documentType: 110, folio: 1, date: '2026-11-10', code: 3 }],
+      ...overrides,
+    })
+
+  test('an export invoice is exempt as a whole, in its currency, with the decimals of its amounts', () => {
+    const doc = exportOf()
+    expect(doc.id).toBe('DTE_T110F1')
+    expect(doc.header.currency).toBe('DOLAR USA')
+    expect(doc.items[0]).toEqual({ lineNumber: 1, ...line, amount: 1234.5 })
+    expect(doc.header.totals).toEqual({ exemptAmount: 1234.5, totalAmount: 1234.5 })
+    expect(doc.header.receiver).toEqual(foreign)
+    expect(doc.header.transport).toEqual({ customs })
+    expect(doc.header.otherCurrency).toBeUndefined()
+    expect(doc.warnings).toBeUndefined()
+  })
+
+  test('with an exchange rate it carries its totals in pesos, each rounded half away from zero to a whole peso', () => {
+    // 1234.5 × 950.25 = 1173083.625.
+    expect(exportOf({ exchangeRate: 950.25 }).header.otherCurrency).toEqual({
+      currency: 'PESO CL',
+      exchangeRate: 950.25,
+      exemptAmount: 1173084,
+      totalAmount: 1173084,
+    })
+    expect(exportOf({ exchangeRate: 950.123456 }).header.otherCurrency?.exchangeRate).toBe(950.1235)
+  })
+
+  test.each([0, -1, 1_000_000, Number.NaN])('an exchange rate of %p is refused', (exchangeRate) => {
+    expectError(() => exportOf({ exchangeRate }), 'INVALID_AMOUNT', { field: 'exchangeRate' })
+  })
+
+  test('a line is its quantity by its price to four decimals, with a discount and a surcharge in whole units', () => {
+    const doc = exportOf({
+      items: [
+        { name: 'Vino', quantity: 3, unit: 'BOT', unitPrice: 1234.565, surchargePercent: 3 },
+        { name: 'Pisco', quantity: 1 / 3, unit: 'BOT', unitPrice: 100, discountPercent: 10 },
+        { name: 'Flete interno', quantity: 1, unit: 'U', amount: 10.123456 },
+      ],
+    })
+    expect(
+      doc.items.map(({ amount, discountAmount, surchargeAmount }) => ({ amount, discountAmount, surchargeAmount })),
+    ).toEqual([
+      // 3 × 1234.565 = 3703.695, and its 3 % is 111.11085, written as 111.
+      { amount: 3814.695, discountAmount: undefined, surchargeAmount: 111 },
+      // 0.333333 × 100 = 33.3333, and its 10 % is 3.33333, written as 3.
+      { amount: 30.3333, discountAmount: 3, surchargeAmount: undefined },
+      { amount: 10.1235, discountAmount: undefined, surchargeAmount: undefined },
+    ])
+    expect(doc.header.totals).toEqual({ exemptAmount: 3855.1518, totalAmount: 3855.1518 })
+  })
+
+  test.each<[string, LineItemInput]>([
+    ['a negative amount', { name: 'Ajuste', quantity: 1, unit: 'U', amount: -1 }],
+    ['an amount past 14 digits', { name: 'Ajuste', quantity: 1, unit: 'U', amount: 1e14 }],
+    ['a quantity by a price past 14 digits', { name: 'Granel', quantity: 1_000_000, unit: 'KN', unitPrice: 1e8 }],
+    ['a discount above the line', { name: 'Granel', quantity: 1, unit: 'KN', unitPrice: 10, discountPercent: 200 }],
+  ])('%s is refused: MontoItem is a decimal from zero up', (_label, item) => {
+    expectError(() => exportOf({ items: [item] }), 'INVALID_AMOUNT', { field: 'items[0].amount' })
+  })
+
+  test('the global adjustments apply to the exempt amount, in order', () => {
+    const doc = exportOf({
+      globalAdjustments: [
+        { kind: 'surcharge', valueType: 'amount', value: 150.25, description: 'Flete', exemptIndicator: 1 },
+        { kind: 'discount', valueType: 'percent', value: 3.33, exemptIndicator: 1 },
+      ],
+    })
+    // 1234.5 + 150.25 = 1384.75; its 3.33 % is 46.112175, 46.1122 to four decimals.
+    expect(doc.header.totals).toEqual({ exemptAmount: 1338.6378, totalAmount: 1338.6378 })
+    expectError(
+      () =>
+        exportOf({ globalAdjustments: [{ kind: 'discount', valueType: 'amount', value: 2000, exemptIndicator: 1 }] }),
+      'INVALID_AMOUNT',
+      { field: 'totals.exemptAmount' },
+    )
+  })
+
+  test('non-billable lines are not totalled: Exportaciones has no MontoNF', () => {
+    const doc = exportOf({ items: [line, { ...line, name: 'Muestra', exemptIndicator: 2 }, { ...line, exempt: true }] })
+    expect(doc.items.map((item) => item.exemptIndicator)).toEqual([undefined, 2, 1])
+    expect(doc.header.totals).toEqual({ exemptAmount: 2469, totalAmount: 2469 })
+  })
+
+  test('an export without payment (FmaPagExp 21) has a total of zero', () => {
+    expect(exportOf({ options: { exportPaymentTerms: '21' } }).header.totals).toEqual({
+      exemptAmount: 1234.5,
+      totalAmount: 0,
+    })
+    expect(exportOf({ options: { exportPaymentTerms: '2' } }).header.options).toEqual({ exportPaymentTerms: '2' })
+  })
+
+  test('totals given by the caller are checked: four decimals, from zero up, and a total that is the exempt amount', () => {
+    expect(exportOf({ totals: { exemptAmount: 99.5, totalAmount: 99.5 } }).header.totals).toEqual({
+      exemptAmount: 99.5,
+      totalAmount: 99.5,
+    })
+    expect(exportOf({ totals: { totalAmount: 0 } }).header.totals).toEqual({ totalAmount: 0 })
+    expect(exportOf({ totals: { totalAmount: 0 }, exchangeRate: 950 }).header.otherCurrency).toEqual({
+      currency: 'PESO CL',
+      exchangeRate: 950,
+      exemptAmount: 0,
+      totalAmount: 0,
+    })
+    expectError(() => exportOf({ totals: { exemptAmount: 99.5, totalAmount: 100 } }), 'TOTAL_MISMATCH', {
+      field: 'totals.totalAmount',
+      expected: 99.5,
+      actual: 100,
+    })
+    expectError(
+      () => exportOf({ options: { exportPaymentTerms: '21' }, totals: { exemptAmount: 5, totalAmount: 5 } }),
+      'TOTAL_MISMATCH',
+      { expected: 0, actual: 5 },
+    )
+    expectError(() => exportOf({ totals: { exemptAmount: 1.00001, totalAmount: 1.00001 } }), 'INVALID_AMOUNT', {
+      field: 'totals.exemptAmount',
+    })
+    expectError(() => exportOf({ totals: { exemptAmount: 1, totalAmount: -1 } }), 'INVALID_AMOUNT', {
+      field: 'totals.totalAmount',
+    })
+    expectError(() => exportOf({ totals: { totalAmount: 1e14 } }), 'INVALID_AMOUNT', { field: 'totals.totalAmount' })
+  })
+
+  test.each<[string, Partial<DocumentInput>]>([
+    ['pricesIncludeVat', { pricesIncludeVat: true }],
+    ['withholdVat', { withholdVat: true }],
+    ['commissions', { commissions: [{ kind: 'commission', description: 'Comisión', netValue: 10 }] }],
+    ['options.noDebitReduction', { options: { noDebitReduction: 1 } }],
+    ['options.transferType', { options: { transferType: 9 } }],
+    ['options.printFormat', { options: { printFormat: 'T' } }],
+    ['options.grossAmounts', { options: { grossAmounts: 1 } }],
+    ['options.purchaseTransactionType', { options: { purchaseTransactionType: 1 } }],
+    ['options.saleTransactionType', { options: { saleTransactionType: 1 } }],
+    ['options.netAmountsIndicator', { options: { netAmountsIndicator: 2 } }],
+    ['options.serviceIndicator', { options: { serviceIndicator: 1 } }],
+    ['options.serviceIndicator', { options: { serviceIndicator: 2 } }],
+    ['options.exportPaymentTerms', { options: { exportPaymentTerms: 'A1' } }],
+    ['options.exportPaymentTerms', { options: { exportPaymentTerms: '100' } }],
+    ['options.exportPaymentTerms', { options: { exportPaymentTerms: '00' } }],
+    ['totals.netAmount', { totals: { netAmount: 10, exemptAmount: 0, totalAmount: 10 } }],
+    ['totals.vatRate', { totals: { vatRate: 19, totalAmount: 0 } }],
+    ['totals.vatAmount', { totals: { vatAmount: 0, totalAmount: 0 } }],
+    ['totals.withholdings', { totals: { withholdings: [{ taxCode: 15, rate: 19, amount: 1 }], totalAmount: 0 } }],
+    ['totals.commissions', { totals: { commissions: { netValue: 1 }, totalAmount: 0 } }],
+    ['totals.nonBillableAmount', { totals: { nonBillableAmount: 1, totalAmount: 0 } }],
+    ['totals.periodAmount', { totals: { periodAmount: 0, totalAmount: 0 } }],
+    ['totals.amountDue', { totals: { amountDue: 0, totalAmount: 0 } }],
+    ['transport.trailerLicensePlate', { transport: { trailerLicensePlate: 'JK1234', customs } }],
+    ['transport.departureDate', { transport: { departureDate: '2026-11-15', customs } }],
+    ['transport.departureTime', { transport: { departureTime: '08:30', customs } }],
+    ['transport.arrivalDate', { transport: { arrivalDate: '2026-11-16', customs } }],
+    ['items[0].withholdingAgent', { items: [{ ...line, withholdingAgent: {} }] }],
+    ['items[0].additionalTaxCodes', { items: [{ ...line, additionalTaxCodes: [27] }] }],
+    [
+      'globalAdjustments[0].exemptIndicator',
+      { globalAdjustments: [{ kind: 'discount', valueType: 'amount', value: 1 }] },
+    ],
+    [
+      'globalAdjustments[0].exemptIndicator',
+      { globalAdjustments: [{ kind: 'discount', valueType: 'amount', value: 1, exemptIndicator: 2 }] },
+    ],
+    ['currency', { currency: 'DOLLAR' as Currency }],
+    ['receiver.rut', { receiver: { ...foreign, rut: RECEIVER_RUT } }],
+    ['items[0].settledDocumentType', { items: [{ ...line, settledDocumentType: '33' }] }],
+    [
+      'transport.customs.packages',
+      {
+        transport: {
+          customs: {
+            ...customs,
+            totalPackages: 11,
+            packages: Array.from({ length: 11 }, () => ({ code: 13, count: 1 })),
+          },
+        },
+      },
+    ],
+    ['transport.customs.saleModality', { transport: { customs: { ...customs, saleModality: 100 } } }],
+    ['transport.customs.saleClause', { transport: { customs: { ...customs, saleClause: 0 } } }],
+    ['transport.customs.transportRoute', { transport: { customs: { ...customs, transportRoute: 1.5 } } }],
+    ['transport.customs.loadingPort', { transport: { customs: { ...customs, loadingPort: 10000 } } }],
+    ['transport.customs.receiverCountry', { transport: { customs: { ...customs, receiverCountry: 1000 } } }],
+    [
+      'transport.customs.packages[0].code',
+      { transport: { customs: { ...customs, totalPackages: 1, packages: [{ code: 1000 }] } } },
+    ],
+  ])('%s is refused: Exportaciones does not declare or admit what it writes', (field, overrides) => {
+    expectError(() => exportOf(overrides), 'INVALID_OPTION', { field })
+  })
+
+  test.each<[string, Partial<DocumentInput>]>([
+    ['currency', { currency: undefined }],
+    ['receiver.city', { receiver: { ...foreign, city: undefined } }],
+    ['receiver.address', { receiver: { ...foreign, address: undefined } }],
+    ['options.paymentTermsNote', { options: { paymentTermsCode: 'FRF' } }],
+    ['transport.customs.receiverCountry', { transport: undefined }],
+    ['transport.customs.receiverCountry', { transport: { customs: { ...customs, receiverCountry: undefined } } }],
+    ['transport.customs.saleModality', { transport: { customs: { ...customs, saleModality: undefined } } }],
+    ['transport.customs.saleClause', { transport: { customs: { ...customs, saleClause: undefined } } }],
+    ['transport.customs.saleClauseTotal', { transport: { customs: { ...customs, saleClauseTotal: undefined } } }],
+    ['transport.customs.transportRoute', { transport: { customs: { ...customs, transportRoute: undefined } } }],
+    ['transport.customs.tareUnit', { transport: { customs: { ...customs, tare: 100 } } }],
+    ['transport.customs.grossWeightUnit', { transport: { customs: { ...customs, grossWeight: 100.5 } } }],
+    ['transport.customs.netWeightUnit', { transport: { customs: { ...customs, netWeight: 90.25 } } }],
+    ['transport.customs.totalPackages', { transport: { customs: { ...customs, packages: [{ code: 13, count: 2 }] } } }],
+    ['items[0].quantity', { items: [{ name: 'Granel', unit: 'KN', amount: 10 }] }],
+    ['items[0].unit', { items: [{ name: 'Granel', quantity: 1, unitPrice: 10 }] }],
+  ])('%s is required on an export invoice', (field, overrides) => {
+    expectError(() => exportOf(overrides), 'MISSING_FIELD', { field })
+  })
+
+  test.each([
+    [3, 'transport.customs.transportRoute'],
+    [4, undefined],
+    [5, 'transport.customs.transportRoute'],
+    [6, 'items[0].quantity'],
+  ] as const)('service indicator %p excuses what Formato DTE 2.5 says it excuses', (serviceIndicator, required) => {
+    const bare = {
+      transport: { customs: { receiverCountry: 225 } },
+      items: [{ name: 'Servicio', amount: 100 }],
+      options: { serviceIndicator },
+    }
+    if (required === undefined) expect(exportOf(bare).header.totals.totalAmount).toBe(100)
+    else expectError(() => exportOf(bare), 'MISSING_FIELD', { field: required })
+  })
+
+  test('service indicator 6 is excused of nothing: the sale clause is asked for too', () => {
+    expectError(
+      () => exportOf({ transport: { customs: { receiverCountry: 225 } }, options: { serviceIndicator: 6 } }),
+      'MISSING_FIELD',
+      { field: 'transport.customs.saleModality' },
+    )
+    expect(exportOf({ options: { serviceIndicator: 6 } }).header.options).toEqual({ serviceIndicator: 6 })
+  })
+
+  test.each([111, 112] as const)(
+    'an export note (%p) asks for none of it, and its commune is not asked either',
+    (type) => {
+      const doc = note(type)
+      expect(doc.header.totals).toEqual({ exemptAmount: 10.5, totalAmount: 10.5 })
+      expect(doc.header.receiver.commune).toBeUndefined()
+      expect(note(type, { transport: { customs: { totalPackages: 1 } } }).header.transport).toEqual({
+        customs: { totalPackages: 1 },
+      })
+      expectError(() => note(type, { transport: { customs: { packages: [{ code: 13 }] } } }), 'MISSING_FIELD', {
+        field: 'transport.customs.totalPackages',
+      })
+      expectError(() => note(type, { options: { paymentTermsCode: 'FRF' } }), 'MISSING_FIELD', {
+        field: 'options.paymentTermsNote',
+      })
+    },
+  )
+
+  test('the customs area is normalized: codes, counts, weights to two decimals, amounts to four, texts and the RUT', () => {
+    const doc = exportOf({
+      transport: {
+        licensePlate: 'ABCD12',
+        customs: {
+          ...customs,
+          saleClauseTotal: 1234.567,
+          transportName: '  MV Pacific Star ',
+          carrierRut: '12.345.678-5',
+          carrierName: 'Naviera del Sur',
+          carrierAdditionalId: 'NV-1',
+          booking: 'BK-1',
+          operator: 'OP-1',
+          loadingPort: 906,
+          loadingPortAdditionalId: 'SAI',
+          unloadingPort: 211,
+          unloadingPortAdditionalId: 'MIA',
+          tare: 2200,
+          tareUnit: 6,
+          grossWeight: 18450.756,
+          grossWeightUnit: 6,
+          netWeight: 16250.5,
+          netWeightUnit: 6,
+          totalItems: 1,
+          totalPackages: 1,
+          packages: [
+            { code: 75, count: 1, marks: 'CONT 1', containerId: 'MSCU1234565', seal: 'SL-1', sealIssuer: 'Aduana' },
+          ],
+          freight: 1250.123456,
+          insurance: 75.5,
+          destinationCountry: 225,
+        },
+      },
+    })
+    expect(doc.header.transport).toEqual({
+      licensePlate: 'ABCD12',
+      customs: {
+        ...customs,
+        saleClauseTotal: 1234.57,
+        transportName: 'MV Pacific Star',
+        carrierRut: RECEIVER_RUT,
+        carrierName: 'Naviera del Sur',
+        carrierAdditionalId: 'NV-1',
+        booking: 'BK-1',
+        operator: 'OP-1',
+        loadingPort: 906,
+        loadingPortAdditionalId: 'SAI',
+        unloadingPort: 211,
+        unloadingPortAdditionalId: 'MIA',
+        tare: 2200,
+        tareUnit: 6,
+        grossWeight: 18450.76,
+        grossWeightUnit: 6,
+        netWeight: 16250.5,
+        netWeightUnit: 6,
+        totalItems: 1,
+        totalPackages: 1,
+        packages: [
+          { code: 75, count: 1, marks: 'CONT 1', containerId: 'MSCU1234565', seal: 'SL-1', sealIssuer: 'Aduana' },
+        ],
+        freight: 1250.1235,
+        insurance: 75.5,
+        destinationCountry: 225,
+      },
+    })
+  })
+
+  test.each([
+    ['freight', 0],
+    ['insurance', -1],
+    ['saleClauseTotal', 0.001],
+    ['grossWeight', 100_000_000],
+  ] as const)('a %s of %p is refused', (field, value) => {
+    expectError(() => exportOf({ transport: { customs: { ...customs, [field]: value } } }), 'INVALID_AMOUNT', {
+      field: `transport.customs.${field}`,
+    })
+  })
+
+  test('the issuer, the foreign receiver and a reference carry the identifiers only Exportaciones declares', () => {
+    const doc = exportOf({
+      issuer: { ...issuer, additionalBranchCode: ' CL-01 ', additionalId: 'EXP-7' },
+      receiver: {
+        ...foreign,
+        commune: 'Florida',
+        foreign: { id: '59-1234567', nationality: '225', additionalId: 'VAT-1' },
+      },
+      references: [{ documentType: 807, folio: '123', date: '2026-11-10', otherAdditionalId: 'DUS-1' }],
+    })
+    expect(doc.header.issuer).toMatchObject({ additionalBranchCode: 'CL-01', additionalId: 'EXP-7' })
+    expect(doc.header.receiver).toMatchObject({
+      commune: 'Florida',
+      foreign: { id: '59-1234567', nationality: '225', additionalId: 'VAT-1' },
+    })
+    expect(doc.references[0].otherAdditionalId).toBe('DUS-1')
+    expect(exportOf({ receiver: { ...foreign, foreign: { id: ' ' } } }).header.receiver.foreign).toBeUndefined()
+    expectError(() => exportOf({ receiver: { ...foreign, foreign: { nationality: 'USA1' } } }), 'FIELD_TOO_LONG', {
+      field: 'Nacionalidad',
+    })
+  })
+
+  test.each<[string, Partial<DocumentInput>]>([
+    ['currency', { currency: 'DOLAR USA' }],
+    ['exchangeRate', { exchangeRate: 950 }],
+    ['issuer.additionalBranchCode', { issuer: { ...issuer, additionalBranchCode: 'CL-01' } }],
+    ['issuer.additionalId', { issuer: { ...issuer, additionalId: 'EXP-7' } }],
+    ['receiver.foreign', { receiver: { ...receiver, foreign: {} } }],
+    ['transport.customs', { transport: { customs: {} } }],
+    [
+      'references[0].otherAdditionalId',
+      { references: [{ documentType: 33, folio: 1, date: '2026-11-10', otherAdditionalId: 'X' }] },
+    ],
+    ['options.serviceIndicator', { options: { serviceIndicator: 5 } }],
+    ['options.serviceIndicator', { options: { serviceIndicator: 6 } }],
+  ])('%s is refused on an invoice: only Exportaciones declares or admits it', (field, overrides) => {
+    expectError(() => createDocument({ type: 33, folio: 1, issuer, receiver, items, ...overrides }), 'INVALID_OPTION', {
+      field,
+    })
+  })
+
+  test('a receipt refuses them too', () => {
+    expectError(() => createDocument({ type: 39, folio: 1, issuer, items, currency: 'EURO' }), 'INVALID_OPTION', {
+      field: 'currency',
+    })
+  })
+
+  test('it admits 60 lines', () => {
+    expect(exportOf({ items: Array.from({ length: 60 }, () => line) }).items).toHaveLength(60)
+    expectError(() => exportOf({ items: Array.from({ length: 61 }, () => line) }), 'INVALID_OPTION', { field: 'items' })
+  })
 })

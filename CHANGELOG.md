@@ -49,6 +49,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Export documents: the export invoice (110) and the export debit (111) and credit (112) notes.** The README listed
+  them as planned after the first certification. They go through the same functions as the other types
+  (`createDocument`, `stampDocument`, `signDocument`, `issueDocument`, `createEnvelope`, `calculateTotals`) and are
+  written under their own root, `Exportaciones`, which `documentElementName` now names. `DOCUMENT_TYPES` gains
+  `exportInvoice`, `exportDebitNote` and `exportCreditNote`; `isExport` says which types they are, and `isNote` now
+  counts 111 and 112. `DocumentInput` gains `currency` (`TpoMoneda`, required on them, one of `CURRENCIES`, the 40 of
+  the schema's `TipMonType`, with `isCurrency`) and `exchangeRate` (`TpoCambio`), which adds the totals in pesos
+  (`Header.otherCurrency`, `OtraMoneda`, in `PESO CL` as Formato DTE 2.5 field 129 asks). The model gains the foreign
+  receiver (`receiver.foreign`, `Extranjero`: `id`, `nationality`, `additionalId`), the customs area
+  (`transport.customs`, `Aduana`, with its package types, `PackageType`), the issuer's `additionalBranchCode`
+  (`CodAdicSucur`) and `additionalId` (`IdAdicEmisor`) and a reference's `otherAdditionalId` (`IdAdicOtr`), with their
+  SII shapes (`SiiExtranjero`, `SiiAduana`, `SiiTipoBultos`, `SiiOtraMoneda`); `fromSiiDocument` reads them back. Their
+  amounts are in the document's currency with the four decimals the schema admits: a line is its quantity by its price
+  rounded to four decimals, less its discount and plus its surcharge, each a whole number because `DescuentoMonto` and
+  `RecargoMonto` are (`calculateExportLineAmount`); the totals are the exempt amount, the only one an export has, and the
+  same total, or zero on an export without payment, `FmaPagExp` 21 (field 124) (`calculateExportTotals`); and each
+  amount in pesos is the amount by the rate rounded half away from zero to a whole peso (`convertToPesos`). All of it is
+  worked out exactly, over the decimal digits as written, so binary floating point never decides a rounding. The stamp
+  carries the total as the document writes it, decimals and all. Before stamping, `createDocument` refuses what
+  `Exportaciones` does not declare (prices with VAT, the withholding, commissions, six options of `IdDoc`, every total
+  but the exempt amount and the total, the trailer plate and the departure and arrival of the transport, a line's
+  withholding agent and additional taxes), a service indicator other than 3 to 6 (`EXPORT_SERVICE_INDICATORS`), an
+  `exportPaymentTerms` that is not a code of one or two digits, a receiver whose RUT is not the generic 55555555-5 the
+  format gives (`FOREIGN_RECEIVER_RUT`), a global adjustment without `exemptIndicator: 1` and more than ten package
+  types, and asks on a 110 for what Formato DTE 2.5 asks: the receiver's city and country, each weight's unit and, unless
+  the service indicator excuses them, the sale modality, clause and clause total, the transport route and each line's
+  quantity and unit; a commune is not asked of a receiver abroad. Every other type refuses the new fields, and the
+  service indicators 5 and 6. A received export document is read and verified under `Exportaciones`, its total and the
+  `MNT` of its stamp read with their decimals; `readReceivedEnvelope` refuses one whose total has decimals, which the
+  answers have no place for. The SII's `DTE_v10.xsd` and `EnvioDTE_v10.xsd` validate every variant the tests build,
+  and none has been sent to the SII. Not done yet: the printed sample of an export document, the export sets of the
+  certification runner, the books, and the customs service's code tables, which are written as given. `dte-sdk` grows
+  from 43.06 kB to 46.24 kB, over its 44 kB limit, which goes to 48 kB, and `dte-sdk/portal` from 82.11 kB to
+  84.82 kB, over its 84 kB limit, which goes to 86 kB.
+  - **What to change:** nothing for the other types. Code that switches over `DocumentType`, or keeps a record keyed by
+    it, has three new members; `HeaderOptions.serviceIndicator` also takes `ExportServiceIndicator`.
 - **The assignment of an invoice: the electronic assignment file (AEC), built and signed, and its registration.** The
   README listed the assignment of invoices as planned after the first certification. `createAssignment(input)` builds
   and signs, with no network, the file with which the creditor of a document assigns it to a financier under Ley

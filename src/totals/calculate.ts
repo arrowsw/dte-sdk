@@ -1,6 +1,7 @@
 import { VAT_RATE, WITHHOLDING_TAX_CODES } from '../catalogs/codes'
-import { isReceipt, type DocumentType } from '../catalogs/document-types'
+import { isExport, isReceipt, type DocumentType } from '../catalogs/document-types'
 import type { CommissionLineInput, GlobalAdjustment, LineItem, Totals } from '../model/document'
+import { calculateExportTotals } from './export'
 
 /**
  * EN: Inputs of a line amount.
@@ -65,6 +66,8 @@ export type TotalsOptions = {
   readonly withholdVat?: boolean
   /** EN: Commission and other charge lines: summed into the summary and taken off the total; the summary's VAT is the VAT rate by their total net value, rounded once, unless a line states its `vatValue`, and then it is the sum of the lines' VAT. ES: `Comisiones` — Líneas de comisiones y otros cargos: se suman en `Totales/Comisiones` y se restan del total; el IVA del resumen es la tasa de IVA por su valor neto total, redondeado una vez, salvo que una línea declare su `vatValue`, y entonces es la suma del IVA de las líneas. */
   readonly commissions?: readonly Pick<CommissionLineInput, 'netValue' | 'exemptValue' | 'vatValue'>[]
+  /** EN: An export document without payment (`FmaPagExp` 21), whose total is zero; read only on an export document. ES: Un documento de exportación sin pago (`FmaPagExp` 21), cuyo total es cero; solo se lee en un documento de exportación. */
+  readonly withoutPayment?: boolean
 }
 
 type Bases = { readonly affected: number; readonly exempt: number; readonly nonBillable: number }
@@ -122,18 +125,25 @@ const sumCommissions = (lines: NonNullable<TotalsOptions['commissions']>, vatRat
  * is net + exempt + VAT (left out when withheld) less those charges (Formato DTE 2.5, field 124). Keys come out in
  * schema order and zero sections are omitted, exactly as the SII expects. On a settlement invoice (43) the net, the
  * exempt amount, the VAT and the total keep their sign, so the total may be zero or negative, and non-billable lines
- * are not totalled, because `Liquidacion` declares no `MontoNF`.
+ * are not totalled, because `Liquidacion` declares no `MontoNF`. An export document (110, 111, 112) has the totals of
+ * `calculateExportTotals`: its exempt amount and its total, in its currency with four decimals.
  * ES: Calcula `Totales` desde las líneas: neto, exento, IVA (derivado del bruto con `pricesIncludeVat`), no facturable,
  * retención en facturas de compra, el resumen de comisiones y otros cargos, y el total, que es neto + exento + IVA (sin
  * el IVA si está retenido) menos esos cargos (Formato DTE 2.5, campo 124). Las claves salen en el orden del esquema y
  * las secciones en cero se omiten, tal como espera el SII. En una liquidación factura (43) el neto, el exento, el IVA y
  * el total conservan su signo, así que el total puede ser cero o negativo, y las líneas no facturables no se totalizan,
- * porque `Liquidacion` no declara `MontoNF`.
+ * porque `Liquidacion` no declara `MontoNF`. Un documento de exportación (110, 111, 112) tiene los totales de
+ * `calculateExportTotals`: su monto exento y su total, en su moneda con cuatro decimales.
  */
 export const calculateTotals = (
   items: readonly Pick<LineItem, 'amount' | 'exemptIndicator'>[],
   options: TotalsOptions,
 ): Totals => {
+  if (isExport(options.type))
+    return calculateExportTotals(items, {
+      globalAdjustments: options.globalAdjustments,
+      withoutPayment: options.withoutPayment,
+    })
   const vatRate = options.vatRate ?? VAT_RATE
   const receipt = isReceipt(options.type)
   const settlement = options.type === 43

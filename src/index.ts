@@ -18,6 +18,7 @@ export {
   isReceipt,
   isExemptType,
   isNote,
+  isExport,
   requiresReceiver,
   isTransferable,
   documentTypeName,
@@ -30,6 +31,10 @@ export {
   TRANSFER_TYPES,
   DISPATCH_TYPES,
   SERVICE_INDICATORS,
+  EXPORT_SERVICE_INDICATORS,
+  CURRENCIES,
+  isCurrency,
+  CHILEAN_PESO,
   PAYMENT_TERMS,
   PAYMENT_MEDIA,
   isPaymentMedium,
@@ -40,6 +45,7 @@ export {
   VAT_RATE,
   SII_RUT,
   FINAL_CONSUMER_RUT,
+  FOREIGN_RECEIVER_RUT,
   CERTIFICATION_KEY_ID,
 } from './catalogs/codes'
 export type {
@@ -48,6 +54,8 @@ export type {
   TransferType,
   DispatchType,
   ServiceIndicator,
+  ExportServiceIndicator,
+  Currency,
   PaymentTerms,
   PaymentMedium,
   ReceiptPaymentMedium,
@@ -108,6 +116,7 @@ export type {
   IssuerInput,
   Receiver,
   ReceiverInput,
+  ForeignReceiver,
   ItemCode,
   LineItem,
   LineItemInput,
@@ -126,8 +135,12 @@ export type {
   Driver,
   Transport,
   TransportInput,
+  Customs,
+  CustomsInput,
+  PackageType,
   Payment,
   HeaderOptions,
+  OtherCurrency,
   SubtotalInfo,
   Header,
   Document,
@@ -141,8 +154,12 @@ export type {
   SiiMntPagos,
   SiiEmisor,
   SiiReceptor,
+  SiiExtranjero,
   SiiTransporte,
+  SiiAduana,
+  SiiTipoBultos,
   SiiTotales,
+  SiiOtraMoneda,
   SiiImptoReten,
   SiiComisionesTotales,
   SiiDetalle,
@@ -163,6 +180,8 @@ export { chileDate, chileTimestamp, chileDateTimeParts, toIsoDate, isIsoDate } f
 export type { ChileDateTimeParts } from './time/chile'
 export { calculateLineAmount, calculateTotals } from './totals/calculate'
 export type { LineAmountInput, LineAmount, TotalsOptions } from './totals/calculate'
+export { calculateExportLineAmount, calculateExportTotals, convertToPesos } from './totals/export'
+export type { ExportLineAmountInput, ExportLineAmount, ExportTotalsOptions } from './totals/export'
 
 export { createDocument, FIELD_LIMITS } from './document/create'
 export type { CreateDocumentOptions } from './document/create'

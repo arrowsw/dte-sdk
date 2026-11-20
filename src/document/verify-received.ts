@@ -20,12 +20,12 @@ import {
   isPlain,
   named,
   signedForms,
-  signedInteger,
   textAt,
   writeXml,
 } from '../xml/elements'
 import {
   readReceivedStructure,
+  receivedAmount,
   type ReceivedDocumentElements,
   type ReceivedHeader,
   type ReceivedRoot,
@@ -124,7 +124,7 @@ export type ReceivedCafCheck = {
 export type ReceivedDocument = {
   /** EN: The `<DTE>` written from its element (`writeXml`): the elements, attributes, own namespace declarations, text, comments and instructions of the input, which read back and verify the same, but not the input byte for byte (a CDATA section becomes escaped text, a character reference the character, an empty element `<X/>`); the namespaces it inherits from the envelope are not added. To archive a received document, keep the input's own bytes, since this is a rewrite. ES: El `<DTE>` escrito desde su elemento (`writeXml`): los elementos, atributos, declaraciones de namespace propias, texto, comentarios e instrucciones de la entrada, que se leen y verifican igual, pero no la entrada byte a byte (una sección CDATA pasa a texto escapado, una referencia de carácter al carácter, un elemento vacío a `<X/>`); no se agregan los namespaces que hereda del sobre. Para archivar un documento recibido, guarda los bytes de la propia entrada, porque esto es una reescritura. */
   readonly xml: string
-  /** EN: `ID` of the signed element. ES: `Documento/@ID` (o `Liquidacion/@ID`) — `ID` del elemento firmado. */
+  /** EN: `ID` of the signed element. ES: `Documento/@ID` (o `Liquidacion/@ID`, `Exportaciones/@ID`) — `ID` del elemento firmado. */
   readonly id: string | null
   /** EN: Document type, any SII code. ES: `TipoDTE` — Tipo de documento, cualquier código del SII. */
   readonly type: number | null
@@ -244,14 +244,15 @@ const NO_CAF: ReceivedCafCheck = {
   status: 'invalid',
 }
 
-const tedMismatches = (dd: Element, header: Header): readonly TedMismatch[] => {
+// `MNT` is read as its root declares `MntTotal`: with decimals on an export document.
+const tedMismatches = (dd: Element, header: Header, signed: Element): readonly TedMismatch[] => {
   const differs: Readonly<Record<TedMismatch, boolean>> = {
     issuerRut: !sameRut(textAt(dd, 'RE'), header.issuerRut),
     documentType: header.type === null || integer(textAt(dd, 'TD')) !== header.type,
     folio: header.folio === null || integer(textAt(dd, 'F')) !== header.folio,
     issueDate: header.issueDate === null || textAt(dd, 'FE') !== header.issueDate,
     receiverRut: !sameRut(textAt(dd, 'RR'), header.receiverRut),
-    totalAmount: header.totalAmount === null || signedInteger(textAt(dd, 'MNT')) !== header.totalAmount,
+    totalAmount: header.totalAmount === null || receivedAmount(signed, textAt(dd, 'MNT')) !== header.totalAmount,
   }
   return (Object.keys(differs) as TedMismatch[]).filter((field) => differs[field])
 }
@@ -332,7 +333,7 @@ const checkStamp = (
   const block = readCaf(parts.dd)
   const key = { modulus: textAt(block?.da, 'RSAPK', 'M') ?? '', exponent: textAt(block?.da, 'RSAPK', 'E') ?? '' }
   const signatureValid = signedForms(parts.dd).some((data) => rsaSha1VerifyBase64(key, data, 'latin1', parts.signature))
-  const mismatches = tedMismatches(parts.dd, header)
+  const mismatches = tedMismatches(parts.dd, header, signed)
   return {
     ted: { found: true, signatureValid, mismatches, valid: signatureValid && mismatches.length === 0 },
     caf: block === null ? NO_CAF : checkCaf(block, header, rules),
@@ -381,7 +382,7 @@ const checkEnvelope = (xml: string, root: Element): ReceivedSignatureCheck =>
  * cuyo `IDK` no tiene llave conocida deja el documento `unchecked`. Una llave mayor que cualquier llave de CAF o de
  * certificado (un módulo de más de 4096 bits o un exponente de más de 32 bits) falla su chequeo sin que se pruebe su
  * firma. Pura: sin reloj ni red. No se chequea: de quién es el certificado que firma, ni si el CAF estaba vencido.
- * @throws {DteError} EN: `XML_PARSE_FAILED` for empty or malformed XML, a DOCTYPE, another root, an envelope without exactly one `SetDTE`, a `DTE` out of place or prefixed, or a `DTE` without one unprefixed `Documento` or `Liquidacion`; `ENVELOPE_EMPTY` for an envelope without documents. ES: `XML_PARSE_FAILED` para XML vacío o malformado, un DOCTYPE, otro raíz, un sobre sin exactamente un `SetDTE`, un `DTE` fuera de lugar o con prefijo, o un `DTE` sin un `Documento` o `Liquidacion` sin prefijo; `ENVELOPE_EMPTY` para un sobre sin documentos.
+ * @throws {DteError} EN: `XML_PARSE_FAILED` for empty or malformed XML, a DOCTYPE, another root, an envelope without exactly one `SetDTE`, a `DTE` out of place or prefixed, or a `DTE` without one unprefixed `Documento`, `Liquidacion` or `Exportaciones`; `ENVELOPE_EMPTY` for an envelope without documents. ES: `XML_PARSE_FAILED` para XML vacío o malformado, un DOCTYPE, otro raíz, un sobre sin exactamente un `SetDTE`, un `DTE` fuera de lugar o con prefijo, o un `DTE` sin un `Documento`, `Liquidacion` o `Exportaciones` sin prefijo; `ENVELOPE_EMPTY` para un sobre sin documentos.
  */
 export const verifyReceivedDocuments = (
   xml: string,

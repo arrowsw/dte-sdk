@@ -25,7 +25,7 @@ export type SiiMntPagos = {
  * ES: `IdDoc` con las etiquetas oficiales, en el orden del esquema.
  */
 export type SiiIdDoc = {
-  /** EN: Document type (33, 34, 39, 41, 43, 46, 52, 56, 61). ES: `TipoDTE` — Tipo de DTE. */
+  /** EN: Document type (33, 34, 39, 41, 43, 46, 52, 56, 61, 110, 111, 112). ES: `TipoDTE` — Tipo de DTE. */
   readonly TipoDTE: number
   /** EN: Sequential number authorized by the CAF. ES: `Folio` — Folio del documento. */
   readonly Folio: number
@@ -105,6 +105,8 @@ export type SiiEmisor = {
   readonly Sucursal?: string
   /** EN: SII branch code. ES: `CdgSIISucur` — Código de sucursal registrado en el SII. */
   readonly CdgSIISucur?: number
+  /** EN: Additional branch code (export documents). ES: `CodAdicSucur` — Código adicional de la sucursal (documentos de exportación). */
+  readonly CodAdicSucur?: string
   /** EN: Issuer street address. ES: `DirOrigen` — Dirección de origen. */
   readonly DirOrigen: string
   /** EN: Issuer commune. ES: `CmnaOrigen` — Comuna de origen. */
@@ -113,6 +115,18 @@ export type SiiEmisor = {
   readonly CiudadOrigen?: string
   /** EN: Salesperson code. ES: `CdgVendedor` — Código del vendedor. */
   readonly CdgVendedor?: string
+  /** EN: Additional identifier of the issuer (export documents). ES: `IdAdicEmisor` — Identificador adicional del emisor (documentos de exportación). */
+  readonly IdAdicEmisor?: string
+}
+
+/** EN: `Extranjero`, SII shape. ES: `Extranjero` en forma SII. */
+export type SiiExtranjero = {
+  /** EN: Identification number of the foreign receiver. ES: `NumId` — Número identificador del receptor extranjero. */
+  readonly NumId?: string
+  /** EN: Nationality of the foreign receiver. ES: `Nacionalidad` — Nacionalidad del receptor extranjero. */
+  readonly Nacionalidad?: string
+  /** EN: Additional identifier of the foreign receiver. ES: `IdAdicRecep` — Identificador adicional del receptor extranjero. */
+  readonly IdAdicRecep?: string
 }
 
 /** EN: `Receptor`, SII shape. ES: `Receptor` en forma SII. */
@@ -123,6 +137,8 @@ export type SiiReceptor = {
   readonly CdgIntRecep?: string
   /** EN: Receiver business name. ES: `RznSocRecep` — Razón social del receptor. */
   readonly RznSocRecep: string
+  /** EN: Foreign receiver (export documents). ES: `Extranjero` — Receptor extranjero (documentos de exportación). */
+  readonly Extranjero?: SiiExtranjero
   /** EN: Receiver line of business. ES: `GiroRecep` — Giro del receptor. */
   readonly GiroRecep?: string
   /** EN: Contact person. ES: `Contacto` — Persona de contacto. */
@@ -141,6 +157,80 @@ export type SiiReceptor = {
   readonly CmnaPostal?: string
   /** EN: Postal city. ES: `CiudadPostal` — Ciudad postal. */
   readonly CiudadPostal?: string
+}
+
+/** EN: `TipoBultos`, SII shape. ES: `TipoBultos` en forma SII. */
+export type SiiTipoBultos = {
+  /** EN: Package type code. ES: `CodTpoBultos` — Código del tipo de bulto. */
+  readonly CodTpoBultos?: number
+  /** EN: Number of packages. ES: `CantBultos` — Cantidad de bultos. */
+  readonly CantBultos?: number
+  /** EN: Marks. ES: `Marcas` — Marcas. */
+  readonly Marcas?: string
+  /** EN: Container id. ES: `IdContainer` — Id del contenedor. */
+  readonly IdContainer?: string
+  /** EN: Seal. ES: `Sello` — Sello. */
+  readonly Sello?: string
+  /** EN: Seal issuer. ES: `EmisorSello` — Emisor del sello. */
+  readonly EmisorSello?: string
+}
+
+/** EN: `Aduana`, SII shape. ES: `Aduana` en forma SII. */
+export type SiiAduana = {
+  /** EN: Sale modality code. ES: `CodModVenta` — Código de la modalidad de venta. */
+  readonly CodModVenta?: number
+  /** EN: Sale clause code. ES: `CodClauVenta` — Código de la cláusula de venta. */
+  readonly CodClauVenta?: number
+  /** EN: Total of the sale clause. ES: `TotClauVenta` — Total de la cláusula de venta. */
+  readonly TotClauVenta?: number
+  /** EN: Transport route code. ES: `CodViaTransp` — Código de la vía de transporte. */
+  readonly CodViaTransp?: number
+  /** EN: Name of the means of transport. ES: `NombreTransp` — Nombre o identificación del medio de transporte. */
+  readonly NombreTransp?: string
+  /** EN: Carrier company RUT. ES: `RUTCiaTransp` — RUT de la compañía transportadora. */
+  readonly RUTCiaTransp?: string
+  /** EN: Carrier company name. ES: `NomCiaTransp` — Nombre de la compañía transportadora. */
+  readonly NomCiaTransp?: string
+  /** EN: Additional identifier of the carrier company. ES: `IdAdicTransp` — Identificador adicional de la compañía transportadora. */
+  readonly IdAdicTransp?: string
+  /** EN: Booking number. ES: `Booking` — Número de booking o reserva. */
+  readonly Booking?: string
+  /** EN: Operator code. ES: `Operador` — Código del operador. */
+  readonly Operador?: string
+  /** EN: Port of loading code. ES: `CodPtoEmbarque` — Código del puerto de embarque. */
+  readonly CodPtoEmbarque?: number
+  /** EN: Additional identifier of the port of loading. ES: `IdAdicPtoEmb` — Identificador adicional del puerto de embarque. */
+  readonly IdAdicPtoEmb?: string
+  /** EN: Port of unloading code. ES: `CodPtoDesemb` — Código del puerto de desembarque. */
+  readonly CodPtoDesemb?: number
+  /** EN: Additional identifier of the port of unloading. ES: `IdAdicPtoDesemb` — Identificador adicional del puerto de desembarque. */
+  readonly IdAdicPtoDesemb?: string
+  /** EN: Tare. ES: `Tara` — Tara. */
+  readonly Tara?: number
+  /** EN: Unit of the tare. ES: `CodUnidMedTara` — Unidad de medida de la tara. */
+  readonly CodUnidMedTara?: number
+  /** EN: Total gross weight. ES: `PesoBruto` — Total peso bruto. */
+  readonly PesoBruto?: number
+  /** EN: Unit of the gross weight. ES: `CodUnidPesoBruto` — Unidad del peso bruto. */
+  readonly CodUnidPesoBruto?: number
+  /** EN: Total net weight. ES: `PesoNeto` — Total peso neto. */
+  readonly PesoNeto?: number
+  /** EN: Unit of the net weight. ES: `CodUnidPesoNeto` — Unidad del peso neto. */
+  readonly CodUnidPesoNeto?: number
+  /** EN: Total items. ES: `TotItems` — Total de ítems. */
+  readonly TotItems?: number
+  /** EN: Total packages. ES: `TotBultos` — Total de bultos. */
+  readonly TotBultos?: number
+  /** EN: Package types. ES: `TipoBultos` — Tipos de bultos. */
+  readonly TipoBultos?: readonly SiiTipoBultos[]
+  /** EN: Freight. ES: `MntFlete` — Monto del flete. */
+  readonly MntFlete?: number
+  /** EN: Insurance. ES: `MntSeguro` — Monto del seguro. */
+  readonly MntSeguro?: number
+  /** EN: Country of the receiver. ES: `CodPaisRecep` — Código del país del receptor. */
+  readonly CodPaisRecep?: number
+  /** EN: Country of destination. ES: `CodPaisDestin` — Código del país de destino. */
+  readonly CodPaisDestin?: number
 }
 
 /** EN: `Transporte`, SII shape. ES: `Transporte` en forma SII. */
@@ -165,6 +255,8 @@ export type SiiTransporte = {
   readonly HraSalida?: string
   /** EN: Arrival date, `YYYY-MM-DD`. ES: `FchLlegada` — Fecha de llegada. */
   readonly FchLlegada?: string
+  /** EN: Customs area (export documents). ES: `Aduana` — Área aduanera (documentos de exportación). */
+  readonly Aduana?: SiiAduana
 }
 
 /** EN: `ImptoReten`, SII shape. ES: `ImptoReten` en forma SII. */
@@ -189,6 +281,8 @@ export type SiiComisionesTotales = {
 
 /** EN: `Totales`, SII shape, schema order. ES: `Totales` en forma SII, orden del esquema. */
 export type SiiTotales = {
+  /** EN: Currency of an export document's amounts. ES: `TpoMoneda` — Tipo de moneda de la transacción de exportación. */
+  readonly TpoMoneda?: string
   /** EN: Net amount. ES: `MntNeto` — Monto neto. */
   readonly MntNeto?: number
   /** EN: Exempt amount. ES: `MntExe` — Monto exento. */
@@ -219,6 +313,18 @@ export type SiiTotales = {
   readonly VlrPagar?: number
 }
 
+/** EN: `OtraMoneda`, SII shape. ES: `OtraMoneda` en forma SII. */
+export type SiiOtraMoneda = {
+  /** EN: The other currency. ES: `TpoMoneda` — Código de la otra moneda. */
+  readonly TpoMoneda: string
+  /** EN: Exchange rate. ES: `TpoCambio` — Tipo de cambio. */
+  readonly TpoCambio?: number
+  /** EN: Exempt amount in the other currency. ES: `MntExeOtrMnda` — Monto exento en otra moneda. */
+  readonly MntExeOtrMnda?: number
+  /** EN: Total in the other currency. ES: `MntTotOtrMnda` — Monto total en otra moneda. */
+  readonly MntTotOtrMnda: number
+}
+
 /** EN: `Encabezado`, SII shape. ES: `Encabezado` en forma SII. */
 export type SiiEncabezado = {
   /** EN: Document identification. ES: `IdDoc` — Identificación del documento. */
@@ -233,6 +339,8 @@ export type SiiEncabezado = {
   readonly Transporte?: SiiTransporte
   /** EN: Totals. ES: `Totales` — Totales. */
   readonly Totales: SiiTotales
+  /** EN: Totals in another currency (export documents: in pesos). ES: `OtraMoneda` — Totales en otra moneda (documentos de exportación: en pesos). */
+  readonly OtraMoneda?: SiiOtraMoneda
 }
 
 /** EN: `CdgItem`, SII shape. ES: `CdgItem` en forma SII. */
@@ -347,6 +455,8 @@ export type SiiReferencia = {
   readonly FolioRef: string
   /** EN: RUT of the other issuer, when the referenced document is not ours. ES: `RUTOtr` — RUT de otro contribuyente emisor. */
   readonly RUTOtr?: string
+  /** EN: Additional code of the other issuer (export documents). ES: `IdAdicOtr` — Código adicional del otro contribuyente (documentos de exportación). */
+  readonly IdAdicOtr?: string
   /** EN: Referenced document date. ES: `FchRef` — Fecha de referencia. */
   readonly FchRef: string
   /** EN: Reference code: 1 voids, 2 corrects text, 3 corrects amounts. ES: `CodRef` — Código de referencia. */
@@ -388,8 +498,8 @@ export type SiiComisiones = {
 }
 
 /**
- * EN: The document body with official tags, in the order `Documento`/`Liquidacion` require. `TED` and `TmstFirma` are added when rendering.
- * ES: Cuerpo del documento con etiquetas oficiales, en el orden que exigen `Documento`/`Liquidacion`. `TED` y `TmstFirma` se agregan al renderizar.
+ * EN: The document body with official tags, in the order `Documento`/`Liquidacion`/`Exportaciones` require. `TED` and `TmstFirma` are added when rendering.
+ * ES: Cuerpo del documento con etiquetas oficiales, en el orden que exigen `Documento`/`Liquidacion`/`Exportaciones`. `TED` y `TmstFirma` se agregan al renderizar.
  */
 export type SiiDocumento = {
   /** EN: Header. ES: `Encabezado` — Encabezado. */
