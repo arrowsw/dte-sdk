@@ -21,6 +21,12 @@ export const DOCUMENT_TYPES = {
   debitNote: 56,
   /** EN: Credit note. ES: 61 — Nota de Crédito Electrónica. */
   creditNote: 61,
+  /** EN: Export invoice: VAT-exempt, in a foreign currency, under the root `Exportaciones`. ES: 110 — Factura de Exportación Electrónica: exenta, en moneda extranjera, bajo la raíz `Exportaciones`. */
+  exportInvoice: 110,
+  /** EN: Export debit note. ES: 111 — Nota de Débito de Exportación Electrónica. */
+  exportDebitNote: 111,
+  /** EN: Export credit note. ES: 112 — Nota de Crédito de Exportación Electrónica. */
+  exportCreditNote: 112,
 } as const
 
 /**
@@ -33,12 +39,13 @@ export type DocumentType = (typeof DOCUMENT_TYPES)[keyof typeof DOCUMENT_TYPES]
  * EN: Every supported code, ascending.
  * ES: Todos los códigos soportados, ascendentes.
  */
-export const DOCUMENT_TYPE_VALUES: readonly DocumentType[] = [33, 34, 39, 41, 43, 46, 52, 56, 61]
+export const DOCUMENT_TYPE_VALUES: readonly DocumentType[] = [33, 34, 39, 41, 43, 46, 52, 56, 61, 110, 111, 112]
 
 const RECEIPT_TYPES: readonly DocumentType[] = [39, 41]
 const EXEMPT_TYPES: readonly DocumentType[] = [34, 41]
-const NOTE_TYPES: readonly DocumentType[] = [56, 61]
-const RECEIVER_REQUIRED_TYPES: readonly DocumentType[] = [33, 34, 43, 46, 52, 56, 61]
+const NOTE_TYPES: readonly DocumentType[] = [56, 61, 111, 112]
+const RECEIVER_REQUIRED_TYPES: readonly DocumentType[] = [33, 34, 43, 46, 52, 56, 61, 110, 111, 112]
+const EXPORT_TYPES: readonly DocumentType[] = [110, 111, 112]
 const TRANSFERABLE_TYPES: readonly DocumentType[] = [33, 34, 43, 46, 52]
 
 type NameVariants = { readonly long: string; readonly short: string; readonly printed: string }
@@ -61,6 +68,21 @@ const NAMES: Readonly<Record<DocumentType, NameVariants>> = {
   52: { long: 'Guía de Despacho Electrónica', short: 'GUIA DESPACHO', printed: 'GUÍA DE DESPACHO ELECTRÓNICA' },
   56: { long: 'Nota de Débito Electrónica', short: 'NOTA DEBITO', printed: 'NOTA DE DÉBITO ELECTRÓNICA' },
   61: { long: 'Nota de Crédito Electrónica', short: 'NOTA CREDITO', printed: 'NOTA DE CRÉDITO ELECTRÓNICA' },
+  110: {
+    long: 'Factura de Exportación Electrónica',
+    short: 'FACTURA EXPORTACION',
+    printed: 'FACTURA DE EXPORTACIÓN ELECTRÓNICA',
+  },
+  111: {
+    long: 'Nota de Débito de Exportación Electrónica',
+    short: 'NOTA DEBITO EXPORTACION',
+    printed: 'NOTA DE DÉBITO DE EXPORTACIÓN ELECTRÓNICA',
+  },
+  112: {
+    long: 'Nota de Crédito de Exportación Electrónica',
+    short: 'NOTA CREDITO EXPORTACION',
+    printed: 'NOTA DE CRÉDITO DE EXPORTACIÓN ELECTRÓNICA',
+  },
 }
 
 /**
@@ -83,10 +105,20 @@ export const isReceipt = (type: DocumentType): boolean => RECEIPT_TYPES.includes
 export const isExemptType = (type: DocumentType): boolean => EXEMPT_TYPES.includes(type)
 
 /**
- * EN: True for debit and credit notes (56, 61), which must reference another document.
- * ES: True para notas de débito y crédito (56, 61), que deben referenciar otro documento.
+ * EN: True for debit and credit notes (56, 61, and the export ones, 111 and 112), which must reference another
+ * document.
+ * ES: True para notas de débito y crédito (56, 61, y las de exportación, 111 y 112), que deben referenciar otro
+ * documento.
  */
 export const isNote = (type: DocumentType): boolean => NOTE_TYPES.includes(type)
+
+/**
+ * EN: True for the export documents (110, 111, 112): their root is `Exportaciones`, their amounts are in a foreign
+ * currency and exempt, and their receiver is abroad.
+ * ES: True para los documentos de exportación (110, 111, 112): su raíz es `Exportaciones`, sus montos van en moneda
+ * extranjera y exentos, y su receptor está en el extranjero.
+ */
+export const isExport = (type: DocumentType): boolean => EXPORT_TYPES.includes(type)
 
 /**
  * EN: True when the type needs an identified receiver (everything but receipts).

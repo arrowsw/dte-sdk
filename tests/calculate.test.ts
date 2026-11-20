@@ -1,4 +1,10 @@
 import { calculateLineAmount, calculateTotals } from '../src/totals/calculate'
+import {
+  calculateExportLineAmount,
+  calculateExportTotals,
+  convertToPesos,
+  roundHalfAwayFromZero,
+} from '../src/totals/export'
 
 const line = (amount: number, exemptIndicator?: 1 | 2 | 3 | 4 | 5 | 6) => ({ amount, exemptIndicator })
 
@@ -335,5 +341,131 @@ describe('calculateTotals on a settlement invoice (43)', () => {
   test('any other type still drops a negative net and reports its non-billable amount', () => {
     expect(calculateTotals([line(-1000)], { type: 33 })).toEqual({ vatRate: 19, totalAmount: 0 })
     expect(calculateTotals([line(-300, 2)], { type: 33 })).toEqual({ totalAmount: 0, nonBillableAmount: -300 })
+  })
+})
+
+// The amounts of an export document are in a foreign currency, with four decimals in a line and in the totals and none
+// in a line's discount and surcharge, as `Exportaciones` declares them. Each is worked out over the decimal digits of
+// the numbers as JavaScript writes them, so binary floating point never decides a rounding.
+describe('roundHalfAwayFromZero', () => {
+  test.each([
+    [1.00005, 4, 1.0001],
+    [0.1 + 0.2, 4, 0.3],
+    [1.005, 2, 1.01],
+    [-2.5, 0, -3],
+    [-1.00005, 4, -1.0001],
+    [2.4999, 0, 2],
+    [1e-7, 6, 0],
+    [5e-7, 6, 0.000001],
+    [12, 4, 12],
+  ])('%p to %p decimals is %p', (value, decimals, expected) => {
+    expect(roundHalfAwayFromZero(value, decimals)).toBe(expected)
+  })
+})
+
+describe('calculateExportLineAmount', () => {
+  test.each([
+    [
+      { quantity: 3, unitPrice: 1234.565 },
+      { base: 3703.695, discountAmount: 0, surchargeAmount: 0, amount: 3703.695 },
+    ],
+    [
+      { quantity: 0.333333, unitPrice: 100 },
+      { base: 33.3333, discountAmount: 0, surchargeAmount: 0, amount: 33.3333 },
+    ],
+    // 1.000005 × 1.5 = 1.5000075, which rounds half away from zero to 1.5000 + 0.0001.
+    [
+      { quantity: 1.000005, unitPrice: 1.5 },
+      { base: 1.5, discountAmount: 0, surchargeAmount: 0, amount: 1.5 },
+    ],
+    [
+      { quantity: 1.00005, unitPrice: 1.5 },
+      { base: 1.5001, discountAmount: 0, surchargeAmount: 0, amount: 1.5001 },
+    ],
+    // Its 3 % is 37.035: a whole 37, the only amount `RecargoMonto` admits.
+    [
+      { quantity: 10, unitPrice: 123.45, surchargePercent: 3 },
+      { base: 1234.5, discountAmount: 0, surchargeAmount: 37, amount: 1271.5 },
+    ],
+    // Its 10 % is 123.45, a whole 123; half a unit rounds away from zero.
+    [
+      { quantity: 1, unitPrice: 1234.5, discountPercent: 10 },
+      { base: 1234.5, discountAmount: 123, surchargeAmount: 0, amount: 1111.5 },
+    ],
+    [
+      { quantity: 1, unitPrice: 25, discountPercent: 10 },
+      { base: 25, discountAmount: 3, surchargeAmount: 0, amount: 22 },
+    ],
+    [{}, { base: 0, discountAmount: 0, surchargeAmount: 0, amount: 0 }],
+    [{ unitPrice: 0.1 + 0.2 }, { base: 0.3, discountAmount: 0, surchargeAmount: 0, amount: 0.3 }],
+  ])('%p → %p', (input, expected) => {
+    expect(calculateExportLineAmount(input)).toEqual(expected)
+  })
+})
+
+describe('calculateExportTotals', () => {
+  const adjustment = (kind: 'discount' | 'surcharge', valueType: 'percent' | 'amount', value: number) => ({
+    lineNumber: 1,
+    kind,
+    valueType,
+    value,
+    exemptIndicator: 1 as const,
+  })
+
+  test('the exempt amount is the sum of the lines that are not non-billable, and the total is the exempt amount', () => {
+    expect(calculateExportTotals([line(1000.5), line(0.25, 1), line(99, 2), line(7, 6)])).toEqual({
+      exemptAmount: 1000.75,
+      totalAmount: 1000.75,
+    })
+    expect(calculateExportTotals([])).toEqual({ exemptAmount: 0, totalAmount: 0 })
+  })
+
+  test('the global adjustments apply in order, a percent of the running amount rounded to four decimals', () => {
+    const totals = calculateExportTotals([line(1000.5)], {
+      globalAdjustments: [adjustment('surcharge', 'amount', 150.25), adjustment('discount', 'percent', 3.33)],
+    })
+    // 1150.75 less its 3.33 %, 38.319975, which is 38.32 to four decimals.
+    expect(totals).toEqual({ exemptAmount: 1112.43, totalAmount: 1112.43 })
+    expect(
+      calculateExportTotals([line(100)], {
+        globalAdjustments: [adjustment('discount', 'amount', 150), adjustment('surcharge', 'percent', 10)],
+      }),
+    ).toEqual({ exemptAmount: -55, totalAmount: -55 })
+  })
+
+  test('an export without payment totals zero, and keeps its exempt amount', () => {
+    expect(calculateExportTotals([line(10.5)], { withoutPayment: true })).toEqual({
+      exemptAmount: 10.5,
+      totalAmount: 0,
+    })
+  })
+
+  test('calculateTotals gives an export document these totals', () => {
+    const items = [line(1000.5), line(3, 2)]
+    const globalAdjustments = [adjustment('surcharge', 'amount', 0.5)]
+    expect(calculateTotals(items, { type: 110, globalAdjustments })).toEqual({ exemptAmount: 1001, totalAmount: 1001 })
+    expect(calculateTotals(items, { type: 112, withoutPayment: true, pricesIncludeVat: true })).toEqual({
+      exemptAmount: 1000.5,
+      totalAmount: 0,
+    })
+  })
+})
+
+describe('convertToPesos', () => {
+  test.each([
+    // 1234.5 × 950.25 = 1173083.625.
+    [1234.5, 950.25, 1173084],
+    // 1.015 × 100 = 101.5, exactly; in binary floating point it is 101.49999999999999.
+    [1.015, 100, 102],
+    [0.5, 1, 1],
+    [0.4999, 1, 0],
+    [8820, 950.25, 8381205],
+    [12944.75, 950.25, 12300749],
+    // 1234.5678 × 948.1234 = 1170522.62006652.
+    [1234.5678, 948.1234, 1170523],
+    [0, 950, 0],
+    [-1.5, 1, -2],
+  ])('%p at %p is %p pesos', (amount, rate, pesos) => {
+    expect(convertToPesos(amount, rate)).toBe(pesos)
   })
 })

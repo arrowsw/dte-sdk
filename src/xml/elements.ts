@@ -48,6 +48,15 @@ export const signedInteger = (text: string | null): number | null =>
   text !== null && /^-?\d+$/.test(text) ? Number(text) : null
 
 /**
+ * EN: The text as a number written in digits, with a minus sign and decimals if it has them, or null when it is not
+ * one. For the amounts the schema declares as decimals, such as the total of an export document.
+ * ES: El texto como número escrito en dígitos, con signo menos y decimales si los trae, o null si no lo es. Para los
+ * montos que el esquema declara como decimales, como el total de un documento de exportación.
+ */
+export const decimalNumber = (text: string | null): number | null =>
+  text !== null && /^-?\d+(\.\d+)?$/.test(text) ? Number(text) : null
+
+/**
  * EN: Every element below an element, in document order.
  * ES: Todos los elementos bajo un elemento, en el orden del documento.
  */

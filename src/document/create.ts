@@ -1,15 +1,21 @@
 import {
+  CHILEAN_PESO,
+  EXPORT_SERVICE_INDICATORS,
   FINAL_CONSUMER_RUT,
+  FOREIGN_RECEIVER_RUT,
+  isCurrency,
   SERVICE_INDICATORS,
   TRANSFER_TYPES,
   VAT_RATE,
   WITHHOLDING_TAX_CODES,
 } from '../catalogs/codes'
-import { isDocumentType, isExemptType, isReceipt, type DocumentType } from '../catalogs/document-types'
+import { isDocumentType, isExemptType, isExport, isReceipt, type DocumentType } from '../catalogs/document-types'
 import { DteError } from '../errors'
 import type {
   CommissionLine,
   CommissionLineInput,
+  Customs,
+  CustomsInput,
   Document,
   DocumentInput,
   GlobalAdjustment,
@@ -19,6 +25,8 @@ import type {
   IssuerInput,
   LineItem,
   LineItemInput,
+  OtherCurrency,
+  PackageType,
   Receiver,
   ReceiverInput,
   ReceiptReference,
@@ -26,6 +34,7 @@ import type {
   Reference,
   ReferenceInput,
   SubtotalInfo,
+  Totals,
   Transport,
   TransportInput,
 } from '../model/document'
@@ -33,7 +42,8 @@ import { toSiiRut } from '../model/rut'
 import { assertMaxLength, sanitizeText } from '../text/sanitize'
 import { chileDate, toIsoDate } from '../time/chile'
 import { calculateLineAmount, calculateTotals, commissionVat } from '../totals/calculate'
-import { assertTotals, totalsWarnings } from './content-rules'
+import { calculateExportLineAmount, convertToPesos, roundHalfAwayFromZero } from '../totals/export'
+import { assertExportTotals, assertTotals, totalsWarnings } from './content-rules'
 
 /**
  * EN: `xs:maxLength` of the SII schema per element; `createDocument` enforces them on sanitized text.
@@ -76,6 +86,23 @@ export const FIELD_LIMITS = {
   DirDest: 70,
   CmnaDest: 20,
   CiudadDest: 20,
+  CodAdicSucur: 20,
+  IdAdicEmisor: 20,
+  NumId: 20,
+  Nacionalidad: 3,
+  IdAdicRecep: 20,
+  IdAdicOtr: 20,
+  NombreTransp: 40,
+  NomCiaTransp: 40,
+  IdAdicTransp: 20,
+  Booking: 20,
+  Operador: 20,
+  IdAdicPtoEmb: 20,
+  IdAdicPtoDesemb: 20,
+  Marcas: 255,
+  IdContainer: 25,
+  Sello: 20,
+  EmisorSello: 70,
 } as const
 
 type LimitedField = keyof typeof FIELD_LIMITS
@@ -113,6 +140,42 @@ const NOT_IN_RECEIPT_LINE = [
 // A receipt's `IndExe` is 1, 2 or 6, and its `IndMntNeto` is 2.
 const RECEIPT_EXEMPT_INDICATORS: readonly unknown[] = [undefined, 1, 2, 6]
 
+// What `Exportaciones`, the root of an export document, does not declare and `Documento` does: six of the options of
+// `IdDoc`, every total but the exempt amount and the total, four fields of the transport and two of a line.
+const NOT_IN_EXPORT_OPTIONS = [
+  'noDebitReduction',
+  'transferType',
+  'printFormat',
+  'grossAmounts',
+  'purchaseTransactionType',
+  'saleTransactionType',
+] as const
+const NOT_IN_EXPORT_TOTALS = [
+  'netAmount',
+  'vatRate',
+  'vatAmount',
+  'ownVatAmount',
+  'thirdPartyVatAmount',
+  'withholdings',
+  'commissions',
+  'nonBillableAmount',
+  'periodAmount',
+  'previousBalance',
+  'amountDue',
+] as const
+const NOT_IN_EXPORT_TRANSPORT = ['trailerLicensePlate', 'departureDate', 'departureTime', 'arrivalDate'] as const
+const NOT_IN_EXPORT_LINE = ['withholdingAgent', 'additionalTaxCodes'] as const
+const EXPORT_SERVICES: readonly unknown[] = Object.values(EXPORT_SERVICE_INDICATORS)
+// `maxOccurs` of `TipoBultos`.
+const MAX_PACKAGE_TYPES = 10
+// Formato DTE 2.5: on an export invoice the quantity and unit of each line (fields 15 and 21 of the detail) and the
+// sale modality, clause and clause total (fields 74 to 76 of the header) are required unless the service indicator is
+// 3, 4 or 5, and the transport route (field 77) unless it is 4.
+const SERVICES_WITHOUT_SALE: readonly unknown[] = [3, 4, 5]
+const SERVICES_WITHOUT_ROUTE: readonly unknown[] = [4]
+// `FmaPagExp` 21, an export without payment, makes the total zero (Formato DTE 2.5, field 124).
+const WITHOUT_PAYMENT = 21
+
 /**
  * EN: Options of `createDocument`.
  * ES: Opciones de `createDocument`.
@@ -146,10 +209,15 @@ const finiteNumber = (value: number | undefined, path: string): number | undefin
 // The decimal types of the SII schema, as digits before the point and decimals after it: `Dec12_6Type` (`QtyItem`,
 // `PrcItem`, `QtyRef`, `PrcRef`), `PctType` (`DescuentoPct`, `RecargoPct`, `TasaComision`) and `Dec16_2Type`
 // (`ValorDR`). A number with more decimals fails the schema, and with it the whole envelope.
+// On an export document, also `Dec14_4Type` (`MntFlete`, `MntSeguro`), `Dec6_4Type` (`TpoCambio`) and the
+// `PesoBruto` and `PesoNeto` of `Aduana`, ten digits of which two are decimals.
 const DECIMAL_TYPES = {
   quantity: { digits: 12, decimals: 6 },
   percent: { digits: 3, decimals: 2 },
   value: { digits: 16, decimals: 2 },
+  amount: { digits: 14, decimals: 4 },
+  rate: { digits: 6, decimals: 4 },
+  weight: { digits: 8, decimals: 2 },
 } as const
 
 // Rounds a number to the decimals its type holds, as the amounts of a line are rounded to pesos, so what plain
@@ -197,6 +265,23 @@ const refuse = (field: string): never => {
 // Whether the caller gave a value that would be written: an empty list writes nothing.
 const given = (value: unknown): boolean => value !== undefined && !(Array.isArray(value) && value.length === 0)
 
+// An amount above zero of a decimal type: freight, insurance, an exchange rate and a sale clause total.
+const positive = (value: number | undefined, type: keyof typeof DECIMAL_TYPES, path: string): number | undefined => {
+  const fitted = decimal(value, type, path)
+  if (fitted !== undefined && !(fitted > 0)) throw new DteError('INVALID_AMOUNT', { field: path })
+  return fitted
+}
+
+// A `positiveInteger` of the schema with at most `digits` digits: a code of a customs table or a count.
+const whole = (value: number | undefined, digits: number, path: string): number | undefined => {
+  if (value !== undefined && !(Number.isSafeInteger(value) && value >= 1 && value < 10 ** digits))
+    throw new DteError('INVALID_OPTION', { field: path })
+  return value
+}
+
+// `MontoItem` of `Exportaciones`: a decimal from zero up to 99999999999999.9999.
+const MAX_EXPORT_AMOUNT = 1e14
+
 // `Liquidacion` declares less than `Documento`: no transport, no global or line discounts and surcharges, no `RUTOtr`
 // in a reference, no `MontoNF`. Each of these would be written under it and fail the schema.
 const assertSettlement = (input: DocumentInput): void => {
@@ -233,6 +318,51 @@ const assertReceipt = (input: DocumentInput): void => {
   })
 }
 
+// `Exportaciones` declares less than `Documento` in `IdDoc`, the totals, the transport and a line, and nothing of the
+// commissions or of a withholding; its service indicator is 3 to 6, and its global adjustments apply to the exempt
+// amount, the only one it has, so each one says so (`IndExeDR` 1; Formato DTE 2.5, section D). Its `FmaPagExp` is a
+// code of one or two digits.
+const assertExport = (input: DocumentInput): void => {
+  const { options, totals, transport } = input
+  if (input.pricesIncludeVat) refuse('pricesIncludeVat')
+  if (input.withholdVat) refuse('withholdVat')
+  if (given(input.commissions)) refuse('commissions')
+  for (const option of NOT_IN_EXPORT_OPTIONS) if (options?.[option] !== undefined) refuse(`options.${option}`)
+  if (options?.serviceIndicator !== undefined && !EXPORT_SERVICES.includes(options.serviceIndicator))
+    refuse('options.serviceIndicator')
+  const terms = options?.exportPaymentTerms
+  if (terms !== undefined && !(/^\d{1,2}$/.test(terms) && Number(terms) > 0)) refuse('options.exportPaymentTerms')
+  for (const total of NOT_IN_EXPORT_TOTALS) if (given(totals?.[total])) refuse(`totals.${total}`)
+  for (const field of NOT_IN_EXPORT_TRANSPORT) if (transport?.[field] !== undefined) refuse(`transport.${field}`)
+  input.items.forEach((item, index) => {
+    for (const field of NOT_IN_EXPORT_LINE) if (given(item[field])) refuse(`items[${index}].${field}`)
+  })
+  ;(input.globalAdjustments ?? []).forEach((adjustment, index) => {
+    if (adjustment.exemptIndicator !== 1) refuse(`globalAdjustments[${index}].exemptIndicator`)
+  })
+  if (input.currency === undefined) throw new DteError('MISSING_FIELD', { field: 'currency' })
+  if (!isCurrency(input.currency)) refuse('currency')
+  // Formato DTE 2.5, field 28: on an export document a payment terms code needs its description.
+  if (options?.paymentTermsCode !== undefined && options.paymentTermsNote === undefined)
+    throw new DteError('MISSING_FIELD', { field: 'options.paymentTermsNote' })
+}
+
+// What only `Exportaciones` declares, and the service indicators only it admits, are refused on any other type.
+const assertNotExport = (input: DocumentInput): void => {
+  if (input.currency !== undefined) refuse('currency')
+  if (input.exchangeRate !== undefined) refuse('exchangeRate')
+  if (input.issuer.additionalBranchCode !== undefined) refuse('issuer.additionalBranchCode')
+  if (input.issuer.additionalId !== undefined) refuse('issuer.additionalId')
+  if (input.receiver?.foreign !== undefined) refuse('receiver.foreign')
+  if (input.transport?.customs !== undefined) refuse('transport.customs')
+  ;(input.references ?? []).forEach((reference, index) => {
+    if (reference.otherAdditionalId !== undefined) refuse(`references[${index}].otherAdditionalId`)
+  })
+  const service = input.options?.serviceIndicator
+  if (service !== undefined && !(Object.values(SERVICE_INDICATORS) as readonly unknown[]).includes(service))
+    refuse('options.serviceIndicator')
+}
+
 const siiBranchCode = (value: number | undefined): number | undefined => {
   if (value !== undefined && !(Number.isSafeInteger(value) && value > 0 && value <= MAX_SII_BRANCH_CODE))
     throw new DteError('INVALID_OPTION', { field: 'issuer.siiBranchCode' })
@@ -264,6 +394,8 @@ const normalizeIssuer = (input: IssuerInput, receipt: boolean): Issuer => {
     commune,
     city: text(input.city, 'CiudadOrigen') ?? commune,
     salespersonCode: text(input.salespersonCode, 'CdgVendedor'),
+    additionalBranchCode: text(input.additionalBranchCode, 'CodAdicSucur'),
+    additionalId: text(input.additionalId, 'IdAdicEmisor'),
   })
 }
 
@@ -274,20 +406,40 @@ const FINAL_CONSUMER: Receiver = {
   commune: 'Santiago',
 }
 
+// The foreign receiver of an export document, left out when it brings nothing.
+const normalizeForeign = (input: ReceiverInput['foreign']): Receiver['foreign'] => {
+  if (input === undefined) return undefined
+  const foreign = compact({
+    id: text(input.id, 'NumId'),
+    nationality: text(input.nationality, 'Nacionalidad'),
+    additionalId: text(input.additionalId, 'IdAdicRecep'),
+  })
+  return Object.keys(foreign).length > 0 ? foreign : undefined
+}
+
 const normalizeReceiver = (input: ReceiverInput | undefined, type: DocumentType): Receiver => {
   const receipt = isReceipt(type)
+  const exported = isExport(type)
   if (input === undefined) {
     if (receipt) return FINAL_CONSUMER
     throw new DteError('MISSING_FIELD', { field: 'receiver' })
   }
+  const rut = toSiiRut(input.rut, 'receiver.rut')
+  // Formato DTE 2.5, field 50: the receiver of an export document is 55.555.555-5.
+  if (exported && rut !== FOREIGN_RECEIVER_RUT) refuse('receiver.rut')
   const address = text(input.address, 'DirRecep')
   const commune = text(input.commune, 'CmnaRecep')
+  const city = text(input.city, 'CiudadRecep')
   if (!receipt && address === undefined) throw new DteError('MISSING_FIELD', { field: 'receiver.address' })
-  if (!receipt && commune === undefined) throw new DteError('MISSING_FIELD', { field: 'receiver.commune' })
+  // The receiver of an export document is abroad: no commune is asked of it (Formato DTE 2.5, field 61), and an export
+  // invoice asks for its city (field 62).
+  if (!receipt && !exported && commune === undefined) throw new DteError('MISSING_FIELD', { field: 'receiver.commune' })
+  if (type === 110 && city === undefined) throw new DteError('MISSING_FIELD', { field: 'receiver.city' })
   return compact({
-    rut: toSiiRut(input.rut, 'receiver.rut'),
+    rut,
     internalCode: text(input.internalCode, 'CdgIntRecep'),
     businessName: requiredText(input.businessName, 'RznSocRecep', 'receiver.businessName'),
+    foreign: normalizeForeign(input.foreign),
     // `Liquidacion` asks the receiver for `GiroRecep`; `Documento` leaves it optional.
     businessActivity:
       type === 43
@@ -297,7 +449,7 @@ const normalizeReceiver = (input: ReceiverInput | undefined, type: DocumentType)
     email: input.email,
     address,
     commune,
-    city: text(input.city, 'CiudadRecep'),
+    city,
     postalAddress: text(input.postalAddress, 'DirPostal'),
     postalCommune: text(input.postalCommune, 'CmnaPostal'),
     postalCity: text(input.postalCity, 'CiudadPostal'),
@@ -321,30 +473,53 @@ const withholdingAgentOf = (input: LineItemInput['withholdingAgent'], path: stri
   })
 }
 
-const normalizeItem = (input: LineItemInput, index: number, type: DocumentType): LineItem => {
+// The amounts of a line: whole pesos, or, on an export document, its currency with four decimals and whole discount
+// and surcharge amounts. A given amount is taken as it comes, and on an export document rounded to four decimals.
+const lineAmounts = (
+  input: LineItemInput,
+  path: string,
+  type: DocumentType,
+  parts: { quantity?: number; unitPrice?: number; discountPercent?: number; surchargePercent?: number },
+): { readonly amount: number; readonly discountAmount: number; readonly surchargeAmount: number } => {
+  if (isExport(type)) {
+    const computed = calculateExportLineAmount(parts)
+    const given = finiteNumber(input.amount, `${path}.amount`)
+    const amount = given === undefined ? computed.amount : roundHalfAwayFromZero(given, 4)
+    if (!(amount >= 0 && amount < MAX_EXPORT_AMOUNT)) throw new DteError('INVALID_AMOUNT', { field: `${path}.amount` })
+    return { ...computed, amount }
+  }
+  const computed = calculateLineAmount(parts)
+  const amount = finiteNumber(input.amount, `${path}.amount`) ?? computed.amount
+  // `MontoItem` is a whole number from zero up in `Documento` and in a receipt, and of either sign only in
+  // `Liquidacion`: a line discount above 100 % leaves a line below zero.
+  if (!(Number.isInteger(amount) && (type === 43 || amount >= 0)))
+    throw new DteError('INVALID_AMOUNT', { field: `${path}.amount` })
+  return { ...computed, amount }
+}
+
+const normalizeItem = (input: LineItemInput, index: number, type: DocumentType, counted: boolean): LineItem => {
   const path = `items[${index}]`
   const unitPrice = decimal(input.unitPrice, 'quantity', `${path}.unitPrice`)
   // A priced line is computed with a quantity of 1 when it brings none, and is written with it. A dispatch guide
-  // needs the quantity on every line (Formato DTE 2.5, field 15), priced or not.
-  const counted = unitPrice !== undefined || type === 52
-  const quantity = decimal(input.quantity, 'quantity', `${path}.quantity`) ?? (counted ? 1 : undefined)
+  // needs the quantity on every line (Formato DTE 2.5, field 15), priced or not; an export invoice of goods asks each
+  // line for its quantity and its unit (fields 15 and 21), which `counted` says.
+  const quantity =
+    decimal(input.quantity, 'quantity', `${path}.quantity`) ?? (unitPrice !== undefined || type === 52 ? 1 : undefined)
+  if (counted && quantity === undefined) throw new DteError('MISSING_FIELD', { field: `${path}.quantity` })
+  if (counted && text(input.unit, 'UnmdItem') === undefined)
+    throw new DteError('MISSING_FIELD', { field: `${path}.unit` })
   const discountPercent = decimal(input.discountPercent, 'percent', `${path}.discountPercent`)
   const decimals = input.unitPriceDecimals
   if (decimals !== undefined && !(Number.isInteger(decimals) && decimals >= 0 && decimals <= 6))
     throw new DteError('INVALID_OPTION', { field: `${path}.unitPriceDecimals` })
   const surchargePercent = decimal(input.surchargePercent, 'percent', `${path}.surchargePercent`)
-  const computed = calculateLineAmount({ quantity, unitPrice, discountPercent, surchargePercent })
+  const computed = lineAmounts(input, path, type, { quantity, unitPrice, discountPercent, surchargePercent })
   const settledDocumentType = text(input.settledDocumentType, 'TpoDocLiq')
   // `TpoDocLiq` is a line of `Liquidacion`: required there, and declared nowhere else.
   if (type === 43 && settledDocumentType === undefined)
     throw new DteError('MISSING_FIELD', { field: `${path}.settledDocumentType` })
   if (type !== 43 && settledDocumentType !== undefined) refuse(`${path}.settledDocumentType`)
   const exemptIndicator = input.exemptIndicator ?? (input.exempt || isExemptType(type) ? 1 : undefined)
-  const amount = finiteNumber(input.amount, `${path}.amount`) ?? computed.amount
-  // `MontoItem` is a whole number from zero up in `Documento` and in a receipt, and of either sign only in
-  // `Liquidacion`: a line discount above 100 % leaves a line below zero.
-  if (!(Number.isInteger(amount) && (type === 43 || amount >= 0)))
-    throw new DteError('INVALID_AMOUNT', { field: `${path}.amount` })
   return compact({
     lineNumber: index + 1,
     codes: input.codes,
@@ -365,7 +540,7 @@ const normalizeItem = (input: LineItemInput, index: number, type: DocumentType):
     surchargePercent,
     surchargeAmount: computed.surchargeAmount > 0 ? computed.surchargeAmount : undefined,
     additionalTaxCodes: input.additionalTaxCodes,
-    amount,
+    amount: computed.amount,
   })
 }
 
@@ -386,6 +561,7 @@ const normalizeReference = (input: ReferenceInput, index: number): Reference =>
     global: input.global ? (true as const) : undefined,
     folio: String(input.folio),
     otherRut: input.otherRut === undefined ? undefined : toSiiRut(input.otherRut, `references[${index}].otherRut`),
+    otherAdditionalId: text(input.otherAdditionalId, 'IdAdicOtr'),
     date: toIsoDate(input.date, `references[${index}].date`),
     code: input.code,
     reason: text(input.reason, 'RazonRef'),
@@ -440,6 +616,78 @@ const normalizeSubtotal = (input: SubtotalInfo, index: number, receipt: boolean)
       : requiredText(input.description, 'GlosaSTI', `subtotals[${index}].description`),
   })
 
+const normalizePackage = (input: PackageType, index: number): PackageType => {
+  const path = `transport.customs.packages[${index}]`
+  return compact({
+    code: whole(input.code, 3, `${path}.code`),
+    count: whole(input.count, 10, `${path}.count`),
+    marks: text(input.marks, 'Marcas'),
+    containerId: text(input.containerId, 'IdContainer'),
+    seal: text(input.seal, 'Sello'),
+    sealIssuer: text(input.sealIssuer, 'EmisorSello'),
+  })
+}
+
+// The customs area: codes of one to four digits, counts, weights with two decimals and amounts with four, and the
+// texts with their limits. What Formato DTE 2.5 asks of an export invoice is checked by `assertCustoms`.
+const normalizeCustoms = (input: CustomsInput | undefined): Customs | undefined => {
+  if (input === undefined) return undefined
+  const path = 'transport.customs'
+  if ((input.packages ?? []).length > MAX_PACKAGE_TYPES) refuse(`${path}.packages`)
+  return compact({
+    saleModality: whole(input.saleModality, 2, `${path}.saleModality`),
+    saleClause: whole(input.saleClause, 2, `${path}.saleClause`),
+    saleClauseTotal: positive(input.saleClauseTotal, 'value', `${path}.saleClauseTotal`),
+    transportRoute: whole(input.transportRoute, 2, `${path}.transportRoute`),
+    transportName: text(input.transportName, 'NombreTransp'),
+    carrierRut: input.carrierRut === undefined ? undefined : toSiiRut(input.carrierRut, `${path}.carrierRut`),
+    carrierName: text(input.carrierName, 'NomCiaTransp'),
+    carrierAdditionalId: text(input.carrierAdditionalId, 'IdAdicTransp'),
+    booking: text(input.booking, 'Booking'),
+    operator: text(input.operator, 'Operador'),
+    loadingPort: whole(input.loadingPort, 4, `${path}.loadingPort`),
+    loadingPortAdditionalId: text(input.loadingPortAdditionalId, 'IdAdicPtoEmb'),
+    unloadingPort: whole(input.unloadingPort, 4, `${path}.unloadingPort`),
+    unloadingPortAdditionalId: text(input.unloadingPortAdditionalId, 'IdAdicPtoDesemb'),
+    tare: whole(input.tare, 7, `${path}.tare`),
+    tareUnit: whole(input.tareUnit, 2, `${path}.tareUnit`),
+    grossWeight: decimal(input.grossWeight, 'weight', `${path}.grossWeight`),
+    grossWeightUnit: whole(input.grossWeightUnit, 2, `${path}.grossWeightUnit`),
+    netWeight: decimal(input.netWeight, 'weight', `${path}.netWeight`),
+    netWeightUnit: whole(input.netWeightUnit, 2, `${path}.netWeightUnit`),
+    totalItems: whole(input.totalItems, 18, `${path}.totalItems`),
+    totalPackages: whole(input.totalPackages, 18, `${path}.totalPackages`),
+    packages: input.packages?.map(normalizePackage),
+    freight: positive(input.freight, 'amount', `${path}.freight`),
+    insurance: positive(input.insurance, 'amount', `${path}.insurance`),
+    receiverCountry: whole(input.receiverCountry, 3, `${path}.receiverCountry`),
+    destinationCountry: whole(input.destinationCountry, 3, `${path}.destinationCountry`),
+  })
+}
+
+// What Formato DTE 2.5 asks of the customs area: package types only with their total (the table of package types,
+// after field 95); and on an export invoice the receiver's country (field 104), each weight with its unit (fields 89,
+// 91 and 93), and, unless its service indicator excuses them, the sale modality, clause and total and the route.
+const assertCustoms = (customs: Customs | undefined, type: DocumentType, service: unknown): void => {
+  const path = 'transport.customs'
+  const missing = (field: string): never => {
+    throw new DteError('MISSING_FIELD', { field: `${path}.${field}` })
+  }
+  if (given(customs?.packages) && customs?.totalPackages === undefined) missing('totalPackages')
+  if (type !== 110) return
+  if (customs?.receiverCountry === undefined) missing('receiverCountry')
+  if (!SERVICES_WITHOUT_SALE.includes(service))
+    for (const field of ['saleModality', 'saleClause', 'saleClauseTotal'] as const)
+      if (customs?.[field] === undefined) missing(field)
+  if (!SERVICES_WITHOUT_ROUTE.includes(service) && customs?.transportRoute === undefined) missing('transportRoute')
+  for (const [measure, unit] of [
+    ['tare', 'tareUnit'],
+    ['grossWeight', 'grossWeightUnit'],
+    ['netWeight', 'netWeightUnit'],
+  ] as const)
+    if (customs?.[measure] !== undefined && customs[unit] === undefined) missing(unit)
+}
+
 const normalizeTransport = (input: TransportInput | undefined): Transport | undefined =>
   input === undefined
     ? undefined
@@ -460,7 +708,20 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
         departureDate: transportDate(input.departureDate, 'transport.departureDate'),
         departureTime: transportTime(input.departureTime, 'transport.departureTime'),
         arrivalDate: transportDate(input.arrivalDate, 'transport.arrivalDate'),
+        customs: normalizeCustoms(input.customs),
       })
+
+// The totals of an export document in pesos, when it brings the exchange rate: `PESO CL`, as Formato DTE 2.5 asks
+// (fields 129 to 132 and 138), each amount `convertToPesos` of the document's.
+const otherCurrencyOf = (rate: number | undefined, totals: Totals): OtherCurrency | undefined =>
+  rate === undefined
+    ? undefined
+    : {
+        currency: CHILEAN_PESO,
+        exchangeRate: rate,
+        exemptAmount: convertToPesos(totals.exemptAmount ?? 0, rate),
+        totalAmount: convertToPesos(totals.totalAmount, rate),
+      }
 
 /**
  * EN: Builds a normalized `Document` from caller input: validates type, folio and dates, normalizes RUTs with rut.ts,
@@ -485,8 +746,14 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
  * e-mail, activity code and salesperson and the receiver's business activity, which a receipt has no element for,
  * and the receiver's e-mail and postal address. `softwareProviderRut` (`RUTProvSW`) and `netAmountsIndicator`
  * (`IndMntNeto`) are a receipt's alone, and a receipt (39) issued without `pricesIncludeVat` whose totals carry a
- * net amount gets `IndMntNeto=2` by itself. What the SII would reject in the content is refused before anything is
- * stamped: more than 60 lines, or 1,000 on a receipt; on every type but a receipt, an issuer without its activity code
+ * net amount gets `IndMntNeto=2` by itself. An export document (110, 111, 112) is held to what its root,
+ * `Exportaciones`, declares: its `currency` is required, its receiver is the generic 55555555-5 and needs no commune,
+ * its amounts carry four decimals and its line discounts and surcharges whole numbers, its totals are its exempt amount
+ * and the same total (zero without payment, `FmaPagExp` 21), and with an `exchangeRate` it carries them in pesos; it
+ * refuses what `Exportaciones` does not declare, a service indicator outside 3 to 6 and a global adjustment that does
+ * not apply to the exempt amount, and on a 110 it asks for what Formato DTE 2.5 asks of the receiver, the customs area
+ * and the lines. Every other type refuses what only an export document carries. What the SII would reject in the
+ * content is refused before anything is stamped: more than 60 lines, or 1,000 on a receipt; on every type but a receipt, an issuer without its activity code
  * (`Acteco`) and an informative subtotal without its description (`GlosaSTI`), which the schema requires; a line
  * amount that is not a whole number, or is below zero on any type but a 43; and, over the totals worked out or given,
  * the amounts their types do not admit, an invoice (33) without VAT (validation 55), an
@@ -518,7 +785,13 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
  * sucursal, el teléfono, el correo, el código de actividad y el vendedor del emisor y el giro del receptor, para los
  * que la boleta no tiene elemento, y el correo y la dirección postal del receptor. `softwareProviderRut`
  * (`RUTProvSW`) y `netAmountsIndicator` (`IndMntNeto`) son solo de la boleta, y una boleta (39) emitida sin
- * `pricesIncludeVat` cuyos totales traen monto neto recibe sola `IndMntNeto=2`. Lo que el SII rechazaría en el
+ * `pricesIncludeVat` cuyos totales traen monto neto recibe sola `IndMntNeto=2`. Un documento de exportación (110,
+ * 111, 112) se atiene a lo que declara su raíz, `Exportaciones`: su `currency` es obligatoria, su receptor es el genérico
+ * 55555555-5 y no se le pide comuna, sus montos llevan cuatro decimales y los descuentos y recargos de línea enteros,
+ * sus totales son su monto exento y el mismo total (cero sin pago, `FmaPagExp` 21), y con un `exchangeRate` los lleva en
+ * pesos; rechaza lo que `Exportaciones` no declara, un indicador de servicio fuera de 3 a 6 y un ajuste global que no
+ * aplica al monto exento, y en un 110 pide lo que el Formato DTE 2.5 pide del receptor, del área aduanera y de las
+ * líneas. Todo otro tipo rechaza lo que solo lleva un documento de exportación. Lo que el SII rechazaría en el
  * contenido se rechaza antes de timbrar nada: más de 60 líneas, o 1.000 en una boleta; en todo tipo salvo la boleta,
  * un emisor sin código de actividad (`Acteco`) y un subtotal informativo sin glosa (`GlosaSTI`), que el esquema exige;
  * un monto de línea que no es entero, o que es negativo en cualquier tipo salvo el 43; y, sobre los totales calculados
@@ -528,19 +801,22 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
  * un monto total en cero en un 33, 34, 43 o 46 (validación 10), un monto neto en cero en un 33, 43 o 46 (validación
  * 12), y una factura (33) cuyo monto neto no es mayor que cero (validación 56). Cada revisión se detiene en la primera
  * falla que encuentra. Pura: misma entrada, misma salida.
- * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `MISSING_FIELD` (also a commission line with neither a net nor an exempt value, a settlement invoice whose receiver has no `businessActivity`, an `issuer.activityCode` or a `subtotals[i].description` missing on a type that is not a receipt, and the `totals.vatAmount` of a 33 or the `totals.exemptAmount` of a 34), `FIELD_TOO_LONG`, `INVALID_AMOUNT` (also a quantity, a price, a percentage, an adjustment value or a commission rate with more digits than its schema type holds, an `items[i].amount` that is not a whole number or is negative outside a 43, and a total its schema type or validation 57 does not admit); `TOTAL_MISMATCH` for a `totals.totalAmount` or a `totals.periodAmount` that does not add up, with `expected` and `actual`; `INVALID_TIME` for a `transport.departureTime` that is not `HH:MM:SS` or `HH:MM`; `INVALID_OPTION` for `references` on a receipt, `receiptReferences` on any other type, an `options.transferType` outside 1 to 9, more than 20 `commissions`, more `items` than the type admits, an `issuer.activityCode` that is not a positive integer of at most six digits, a `settledDocumentType` on a type other than 43, on a 43 whatever `Liquidacion` does not declare, on a receipt whatever its schema does not declare, and an `options.netAmountsIndicator` or a `softwareProviderRut` on a type that is not a receipt, with the field in `details.field`. ES: los mismos códigos; `INVALID_AMOUNT` también por una cantidad, un precio, un porcentaje, el valor de un ajuste o la tasa de una comisión con más dígitos de los que admite su tipo del esquema, por un `items[i].amount` que no es entero o es negativo fuera de un 43, y por un total que su tipo del esquema o la validación 57 no admite; `MISSING_FIELD` también por una línea de comisión sin valor neto ni exento, por una liquidación factura cuyo receptor no trae `businessActivity`, por un `issuer.activityCode` o un `subtotals[i].description` ausente en un tipo que no es boleta, y por el `totals.vatAmount` de un 33 o el `totals.exemptAmount` de un 34; `TOTAL_MISMATCH` por un `totals.totalAmount` o un `totals.periodAmount` que no cuadra, con `expected` y `actual`; `INVALID_TIME` por un `transport.departureTime` que no es `HH:MM:SS` ni `HH:MM`; `INVALID_OPTION` por `references` en una boleta, `receiptReferences` en cualquier otro tipo, un `options.transferType` fuera de 1 a 9, más de 20 `commissions`, más `items` de los que admite el tipo, un `issuer.activityCode` que no es un entero positivo de hasta seis dígitos, un `settledDocumentType` en un tipo distinto del 43, en un 43 lo que `Liquidacion` no declara, en una boleta lo que su esquema no declara, y un `options.netAmountsIndicator` o un `softwareProviderRut` en un tipo que no es boleta, con el campo en `details.field`.
+ * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `MISSING_FIELD` (also a commission line with neither a net nor an exempt value, a settlement invoice whose receiver has no `businessActivity`, an `issuer.activityCode` or a `subtotals[i].description` missing on a type that is not a receipt, the `totals.vatAmount` of a 33 or the `totals.exemptAmount` of a 34, the `currency` of an export document and, on a 110, the receiver's `city`, a line's `quantity` and `unit` and the fields of `transport.customs` Formato DTE 2.5 asks for), `FIELD_TOO_LONG`, `INVALID_AMOUNT` (also a quantity, a price, a percentage, an adjustment value or a commission rate with more digits than its schema type holds, an `items[i].amount` that is not a whole number or is negative outside a 43, a total its schema type or validation 57 does not admit, and on an export document an amount below zero or past four decimals and an exchange rate, freight, insurance or clause total that is not above zero); `TOTAL_MISMATCH` for a `totals.totalAmount` or a `totals.periodAmount` that does not add up, with `expected` and `actual`; `INVALID_TIME` for a `transport.departureTime` that is not `HH:MM:SS` or `HH:MM`; `INVALID_OPTION` for `references` on a receipt, `receiptReferences` on any other type, an `options.transferType` outside 1 to 9, more than 20 `commissions`, more `items` than the type admits, an `issuer.activityCode` that is not a positive integer of at most six digits, a `settledDocumentType` on a type other than 43, on a 43 whatever `Liquidacion` does not declare, on a receipt whatever its schema does not declare, an `options.netAmountsIndicator` or a `softwareProviderRut` on a type that is not a receipt, on an export document whatever `Exportaciones` does not declare, a service indicator outside 3 to 6, an `exportPaymentTerms` that is not a code of one or two digits, a `currency` outside `CURRENCIES`, a receiver RUT other than 55555555-5, a global adjustment without `exemptIndicator` 1 and a customs code past its digits, and on any other type the fields only an export document carries and the service indicators 5 and 6, with the field in `details.field`. ES: los mismos códigos; `INVALID_AMOUNT` también por una cantidad, un precio, un porcentaje, el valor de un ajuste o la tasa de una comisión con más dígitos de los que admite su tipo del esquema, por un `items[i].amount` que no es entero o es negativo fuera de un 43, por un total que su tipo del esquema o la validación 57 no admite, y en un documento de exportación por un monto negativo o con más de cuatro decimales y un tipo de cambio, flete, seguro o total de cláusula que no es mayor que cero; `MISSING_FIELD` también por una línea de comisión sin valor neto ni exento, por una liquidación factura cuyo receptor no trae `businessActivity`, por un `issuer.activityCode` o un `subtotals[i].description` ausente en un tipo que no es boleta, por el `totals.vatAmount` de un 33 o el `totals.exemptAmount` de un 34, por la `currency` de un documento de exportación y, en un 110, por la `city` del receptor, la `quantity` y la `unit` de una línea y los campos de `transport.customs` que pide el Formato DTE 2.5; `TOTAL_MISMATCH` por un `totals.totalAmount` o un `totals.periodAmount` que no cuadra, con `expected` y `actual`; `INVALID_TIME` por un `transport.departureTime` que no es `HH:MM:SS` ni `HH:MM`; `INVALID_OPTION` por `references` en una boleta, `receiptReferences` en cualquier otro tipo, un `options.transferType` fuera de 1 a 9, más de 20 `commissions`, más `items` de los que admite el tipo, un `issuer.activityCode` que no es un entero positivo de hasta seis dígitos, un `settledDocumentType` en un tipo distinto del 43, en un 43 lo que `Liquidacion` no declara, en una boleta lo que su esquema no declara, un `options.netAmountsIndicator` o un `softwareProviderRut` en un tipo que no es boleta, en un documento de exportación lo que `Exportaciones` no declara, un indicador de servicio fuera de 3 a 6, un `exportPaymentTerms` que no es un código de uno o dos dígitos, una `currency` fuera de `CURRENCIES`, un RUT de receptor distinto de 55555555-5, un ajuste global sin `exemptIndicator` 1 y un código aduanero con más dígitos de los que admite, y en cualquier otro tipo los campos que solo lleva un documento de exportación y los indicadores de servicio 5 y 6, con el campo en `details.field`.
  */
 export const createDocument = (input: DocumentInput, options: CreateDocumentOptions = {}): Document => {
   if (!isDocumentType(input.type)) throw new DteError('INVALID_DOCUMENT_TYPE', { type: input.type })
   if (!Number.isInteger(input.folio) || input.folio <= 0) throw new DteError('INVALID_FOLIO', { folio: input.folio })
   const type = input.type
   const receipt = isReceipt(type)
+  const exported = isExport(type)
   const issueDate = input.issueDate === undefined ? chileDate(options.now) : toIsoDate(input.issueDate, 'issueDate')
   const issuer = normalizeIssuer(input.issuer, receipt)
   const receiver = normalizeReceiver(input.receiver, type)
   if (input.items.length === 0) throw new DteError('MISSING_FIELD', { field: 'items' })
   if (input.items.length > (receipt ? MAX_RECEIPT_LINES : MAX_LINES)) refuse('items')
   if (type === 43) assertSettlement(input)
+  if (exported) assertExport(input)
+  else assertNotExport(input)
   if (receipt) assertReceipt(input)
   // `IndMntNeto` and `RUTProvSW` are a receipt's: no other document declares them.
   else if (input.options?.netAmountsIndicator !== undefined) refuse('options.netAmountsIndicator')
@@ -548,7 +824,9 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
   const softwareProviderRut =
     input.softwareProviderRut === undefined ? undefined : toSiiRut(input.softwareProviderRut, 'softwareProviderRut')
   if ((input.commissions ?? []).length > MAX_COMMISSIONS) refuse('commissions')
-  const lines = input.items.map((item, index) => normalizeItem(item, index, type))
+  const service = input.options?.serviceIndicator
+  const counted = type === 110 && !SERVICES_WITHOUT_SALE.includes(service)
+  const lines = input.items.map((item, index) => normalizeItem(item, index, type, counted))
   // A receipt's `Referencia` has no date: the invoice shape would fail the receipts schema, and the other way round.
   if (receipt && (input.references ?? []).length > 0) throw new DteError('INVALID_OPTION', { field: 'references' })
   if (!receipt && (input.receiptReferences ?? []).length > 0)
@@ -559,10 +837,13 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
   const globalAdjustments = (input.globalAdjustments ?? []).map(normalizeAdjustment)
   const commissions = (input.commissions ?? []).map(normalizeCommission)
   const transport = normalizeTransport(input.transport)
+  if (exported) assertCustoms(transport?.customs, type, service)
+  const exchangeRate = positive(input.exchangeRate, 'rate', 'exchangeRate')
   // The schema admits `IndTraslado` 1 to 9; the three types Res. Ex. 144/2026 names wait for a code it admits.
   const transferType = input.options?.transferType
   if (transferType !== undefined && !Object.values(TRANSFER_TYPES).includes(transferType))
     throw new DteError('INVALID_OPTION', { field: 'options.transferType' })
+  const withoutPayment = Number(input.options?.exportPaymentTerms) === WITHOUT_PAYMENT
   const totals =
     input.totals ??
     calculateTotals(lines, {
@@ -573,10 +854,12 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
       withholdVat: input.withholdVat,
       // The lines as the caller gave them, checked above: the summary's VAT depends on whether a line states its own.
       commissions: input.commissions,
+      withoutPayment,
     })
   // Totals the caller gave are the caller's to match with the lines; what the SII checks over the totals themselves is
   // checked here, on them and on the ones worked out.
-  assertTotals(type, totals)
+  if (exported) assertExportTotals(totals, withoutPayment)
+  else assertTotals(type, totals)
   const warnings = totalsWarnings(type, totals)
   const withheld = input.totals === undefined && totals.withholdings !== undefined
   const items = withheld ? withTotalWithholdingCode(lines) : lines
@@ -603,7 +886,9 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
       receiver,
       softwareProviderRut,
       transport,
+      currency: input.currency,
       totals,
+      otherCurrency: otherCurrencyOf(exchangeRate, totals),
     }),
     items,
     subtotals,

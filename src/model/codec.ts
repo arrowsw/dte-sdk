@@ -5,16 +5,19 @@
  * oficial, y la expansión de su abreviatura, está documentado una sola vez en los campos de `./sii`; las claves de
  * abajo siguen el orden del XSD.
  */
-import { isReceipt, type DocumentType } from '../catalogs/document-types'
+import { isExport, isReceipt, type DocumentType } from '../catalogs/document-types'
+import type { Currency } from '../catalogs/codes'
 import type { ExemptIndicator, ReferenceCode } from '../catalogs/codes'
 import type {
   CommissionLine,
+  Customs,
   Document,
   GlobalAdjustment,
   Header,
   HeaderOptions,
   Issuer,
   LineItem,
+  OtherCurrency,
   Receiver,
   ReceiptReference,
   Reference,
@@ -24,12 +27,14 @@ import type {
 } from './document'
 import { toSiiRut } from './rut'
 import type {
+  SiiAduana,
   SiiComisiones,
   SiiDetalle,
   SiiDocumento,
   SiiDscRcgGlobal,
   SiiEmisor,
   SiiIdDoc,
+  SiiOtraMoneda,
   SiiReceptor,
   SiiReferencia,
   SiiReferenciaBoleta,
@@ -115,10 +120,12 @@ const toSiiEmisor = (issuer: Issuer, receipt: boolean): SiiEmisor =>
         Acteco: issuer.activityCode,
         Sucursal: issuer.branch,
         CdgSIISucur: issuer.siiBranchCode,
+        CodAdicSucur: issuer.additionalBranchCode,
         DirOrigen: issuer.address,
         CmnaOrigen: issuer.commune,
         CiudadOrigen: issuer.city,
         CdgVendedor: issuer.salespersonCode,
+        IdAdicEmisor: issuer.additionalId,
       })
 
 const toSiiReceptor = (receiver: Receiver, receipt: boolean): SiiReceptor =>
@@ -136,6 +143,13 @@ const toSiiReceptor = (receiver: Receiver, receipt: boolean): SiiReceptor =>
         RUTRecep: receiver.rut,
         CdgIntRecep: receiver.internalCode,
         RznSocRecep: receiver.businessName,
+        Extranjero:
+          receiver.foreign &&
+          compact({
+            NumId: receiver.foreign.id,
+            Nacionalidad: receiver.foreign.nationality,
+            IdAdicRecep: receiver.foreign.additionalId,
+          }),
         GiroRecep: receiver.businessActivity,
         Contacto: receiver.contact,
         CorreoRecep: receiver.email,
@@ -146,6 +160,47 @@ const toSiiReceptor = (receiver: Receiver, receipt: boolean): SiiReceptor =>
         CmnaPostal: receiver.postalCommune,
         CiudadPostal: receiver.postalCity,
       })
+
+// `Aduana`, the customs area of an export document, in the order of `Exportaciones`.
+const toSiiAduana = (customs: Customs): SiiAduana =>
+  compact({
+    CodModVenta: customs.saleModality,
+    CodClauVenta: customs.saleClause,
+    TotClauVenta: customs.saleClauseTotal,
+    CodViaTransp: customs.transportRoute,
+    NombreTransp: customs.transportName,
+    RUTCiaTransp: customs.carrierRut,
+    NomCiaTransp: customs.carrierName,
+    IdAdicTransp: customs.carrierAdditionalId,
+    Booking: customs.booking,
+    Operador: customs.operator,
+    CodPtoEmbarque: customs.loadingPort,
+    IdAdicPtoEmb: customs.loadingPortAdditionalId,
+    CodPtoDesemb: customs.unloadingPort,
+    IdAdicPtoDesemb: customs.unloadingPortAdditionalId,
+    Tara: customs.tare,
+    CodUnidMedTara: customs.tareUnit,
+    PesoBruto: customs.grossWeight,
+    CodUnidPesoBruto: customs.grossWeightUnit,
+    PesoNeto: customs.netWeight,
+    CodUnidPesoNeto: customs.netWeightUnit,
+    TotItems: customs.totalItems,
+    TotBultos: customs.totalPackages,
+    TipoBultos: customs.packages?.map((pack) =>
+      compact({
+        CodTpoBultos: pack.code,
+        CantBultos: pack.count,
+        Marcas: pack.marks,
+        IdContainer: pack.containerId,
+        Sello: pack.seal,
+        EmisorSello: pack.sealIssuer,
+      }),
+    ),
+    MntFlete: customs.freight,
+    MntSeguro: customs.insurance,
+    CodPaisRecep: customs.receiverCountry,
+    CodPaisDestin: customs.destinationCountry,
+  })
 
 const toSiiTransporte = (transport: Transport | undefined): SiiTransporte | undefined =>
   transport === undefined
@@ -164,7 +219,25 @@ const toSiiTransporte = (transport: Transport | undefined): SiiTransporte | unde
         FchSalida: transport.departureDate,
         HraSalida: transport.departureTime,
         FchLlegada: transport.arrivalDate,
+        Aduana: transport.customs && toSiiAduana(transport.customs),
       })
+
+// An export document's `Totales` carry its currency, its exempt amount, which the schema always asks for, and its
+// total: nothing else.
+const toSiiExportTotales = (totals: Totals, currency: Currency | undefined): SiiTotales => ({
+  TpoMoneda: currency,
+  MntExe: totals.exemptAmount ?? 0,
+  MntTotal: totals.totalAmount,
+})
+
+const toSiiOtraMoneda = (other: OtherCurrency | undefined): SiiOtraMoneda | undefined =>
+  other &&
+  compact({
+    TpoMoneda: other.currency,
+    TpoCambio: other.exchangeRate,
+    MntExeOtrMnda: other.exemptAmount,
+    MntTotOtrMnda: other.totalAmount,
+  })
 
 // A receipt's `Totales` carry no rate, no withholdings and no commissions, and its period's total is `TotalPeriodo`.
 const toSiiTotales = (totals: Totals, receipt: boolean): SiiTotales =>
@@ -284,6 +357,7 @@ const toSiiReferencia = (reference: Reference): SiiReferencia =>
     IndGlobal: reference.global ? 1 : undefined,
     FolioRef: reference.folio,
     RUTOtr: reference.otherRut,
+    IdAdicOtr: reference.otherAdditionalId,
     FchRef: reference.date,
     CodRef: reference.code,
     RazonRef: reference.reason,
@@ -315,11 +389,14 @@ const nonEmpty = <T>(list: readonly T[]): readonly T[] | undefined => (list.leng
 /**
  * EN: Maps a domain `Document` to the SII-shaped structure (official tags, schema order). This is the only place
  * that knows the tag names; the XML is always rendered from its output. A receipt (39, 41) is written with the shape
- * of the receipts schema and nothing else: what the document carries that this shape does not write is left out.
+ * of the receipts schema and nothing else: what the document carries that this shape does not write is left out. An
+ * export document (110, 111, 112) writes its currency, its exempt amount and its total as its `Totales`, and its totals
+ * in pesos as `OtraMoneda`.
  * ES: Convierte un `Document` de dominio a la estructura SII (etiquetas oficiales, orden del esquema). Es el único
  * lugar que conoce los nombres de etiqueta; el XML siempre se renderiza desde su salida. Una boleta (39, 41) se
  * escribe con la forma del esquema de boletas y nada más: lo que el documento traiga y esa forma no escriba queda
- * fuera.
+ * fuera. Un documento de exportación (110, 111, 112) escribe como sus `Totales` su moneda, su monto exento y su total,
+ * y sus totales en pesos como `OtraMoneda`.
  */
 export const toSiiDocument = (doc: Document): SiiDocumento => {
   const { header } = doc
@@ -338,7 +415,10 @@ export const toSiiDocument = (doc: Document): SiiDocumento => {
           Emisor: toSiiEmisor(header.issuer, receipt),
           Receptor: toSiiReceptor(header.receiver, receipt),
           Transporte: toSiiTransporte(header.transport),
-          Totales: toSiiTotales(header.totals, receipt),
+          Totales: isExport(header.type)
+            ? toSiiExportTotales(header.totals, header.currency)
+            : toSiiTotales(header.totals, receipt),
+          OtraMoneda: toSiiOtraMoneda(header.otherCurrency),
         }),
     Detalle: doc.items.map((item) => toSiiDetalle(item, receipt)),
     SubTotInfo: nonEmpty(doc.subtotals.map(toSiiSubTotInfo)),
@@ -400,6 +480,8 @@ const fromSiiEmisor = (emisor: SiiEmisor): Issuer =>
     commune: emisor.CmnaOrigen,
     city: emisor.CiudadOrigen,
     salespersonCode: emisor.CdgVendedor,
+    additionalBranchCode: emisor.CodAdicSucur,
+    additionalId: emisor.IdAdicEmisor,
   })
 
 const fromSiiReceptor = (receptor: SiiReceptor): Receiver =>
@@ -407,6 +489,13 @@ const fromSiiReceptor = (receptor: SiiReceptor): Receiver =>
     rut: toSiiRut(receptor.RUTRecep, 'Receptor.RUTRecep'),
     internalCode: receptor.CdgIntRecep,
     businessName: receptor.RznSocRecep,
+    foreign:
+      receptor.Extranjero &&
+      compact({
+        id: receptor.Extranjero.NumId,
+        nationality: receptor.Extranjero.Nacionalidad,
+        additionalId: receptor.Extranjero.IdAdicRecep,
+      }),
     businessActivity: receptor.GiroRecep,
     contact: receptor.Contacto,
     email: receptor.CorreoRecep,
@@ -416,6 +505,56 @@ const fromSiiReceptor = (receptor: SiiReceptor): Receiver =>
     postalAddress: receptor.DirPostal,
     postalCommune: receptor.CmnaPostal,
     postalCity: receptor.CiudadPostal,
+  })
+
+const fromSiiAduana = (aduana: SiiAduana): Customs =>
+  compact({
+    saleModality: aduana.CodModVenta,
+    saleClause: aduana.CodClauVenta,
+    saleClauseTotal: aduana.TotClauVenta,
+    transportRoute: aduana.CodViaTransp,
+    transportName: aduana.NombreTransp,
+    carrierRut:
+      aduana.RUTCiaTransp === undefined ? undefined : toSiiRut(aduana.RUTCiaTransp, 'Transporte.Aduana.RUTCiaTransp'),
+    carrierName: aduana.NomCiaTransp,
+    carrierAdditionalId: aduana.IdAdicTransp,
+    booking: aduana.Booking,
+    operator: aduana.Operador,
+    loadingPort: aduana.CodPtoEmbarque,
+    loadingPortAdditionalId: aduana.IdAdicPtoEmb,
+    unloadingPort: aduana.CodPtoDesemb,
+    unloadingPortAdditionalId: aduana.IdAdicPtoDesemb,
+    tare: aduana.Tara,
+    tareUnit: aduana.CodUnidMedTara,
+    grossWeight: aduana.PesoBruto,
+    grossWeightUnit: aduana.CodUnidPesoBruto,
+    netWeight: aduana.PesoNeto,
+    netWeightUnit: aduana.CodUnidPesoNeto,
+    totalItems: aduana.TotItems,
+    totalPackages: aduana.TotBultos,
+    packages: aduana.TipoBultos?.map((pack) =>
+      compact({
+        code: pack.CodTpoBultos,
+        count: pack.CantBultos,
+        marks: pack.Marcas,
+        containerId: pack.IdContainer,
+        seal: pack.Sello,
+        sealIssuer: pack.EmisorSello,
+      }),
+    ),
+    freight: aduana.MntFlete,
+    insurance: aduana.MntSeguro,
+    receiverCountry: aduana.CodPaisRecep,
+    destinationCountry: aduana.CodPaisDestin,
+  })
+
+const fromSiiOtraMoneda = (other: SiiOtraMoneda | undefined): OtherCurrency | undefined =>
+  other &&
+  compact({
+    currency: other.TpoMoneda as Currency,
+    exchangeRate: other.TpoCambio,
+    exemptAmount: other.MntExeOtrMnda,
+    totalAmount: other.MntTotOtrMnda,
   })
 
 const fromSiiTransporte = (transporte: SiiTransporte | undefined): Transport | undefined =>
@@ -439,6 +578,7 @@ const fromSiiTransporte = (transporte: SiiTransporte | undefined): Transport | u
         departureDate: transporte.FchSalida,
         departureTime: transporte.HraSalida,
         arrivalDate: transporte.FchLlegada,
+        customs: transporte.Aduana && fromSiiAduana(transporte.Aduana),
       })
 
 const fromSiiTotales = (totales: SiiTotales): Totals =>
@@ -524,6 +664,7 @@ const fromSiiReferencia = (reference: SiiReferencia): Reference =>
     global: reference.IndGlobal === 1 ? (true as const) : undefined,
     folio: String(reference.FolioRef),
     otherRut: reference.RUTOtr === undefined ? undefined : toSiiRut(reference.RUTOtr, 'Referencia.RUTOtr'),
+    otherAdditionalId: reference.IdAdicOtr,
     date: reference.FchRef,
     code: reference.CodRef as ReferenceCode | undefined,
     reason: reference.RazonRef,
@@ -573,7 +714,9 @@ export const fromSiiDocument = (sii: SiiDocumento): Document => {
       softwareProviderRut:
         sii.Encabezado.RUTProvSW === undefined ? undefined : toSiiRut(sii.Encabezado.RUTProvSW, 'Encabezado.RUTProvSW'),
       transport: fromSiiTransporte(sii.Encabezado.Transporte),
+      currency: sii.Encabezado.Totales.TpoMoneda as Currency | undefined,
       totals: fromSiiTotales(sii.Encabezado.Totales),
+      otherCurrency: fromSiiOtraMoneda(sii.Encabezado.OtraMoneda),
     }),
     items: sii.Detalle.map(fromSiiDetalle),
     subtotals: (sii.SubTotInfo ?? []).map(fromSiiSubTotInfo),

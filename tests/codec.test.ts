@@ -441,6 +441,137 @@ describe('fromSiiDocument', () => {
 
 // `EnvioBOLETA_v11.xsd` declares a receipt's own `IdDoc`, issuer, totals and line, shorter than the invoice's and in
 // an order of their own. The codec writes that shape for a 39 and a 41, whatever the document carries.
+// An export document is written under `Exportaciones`: its totals are its currency, its exempt amount and its total,
+// its totals in pesos follow them, and the foreign receiver, the customs area and the identifiers only it declares sit
+// where the schema puts them.
+describe('the shape of an export document', () => {
+  const exported = (overrides: Partial<Parameters<typeof createDocument>[0]> = {}): Document =>
+    createDocument({
+      type: 110,
+      folio: 3,
+      issueDate: '2026-11-15',
+      issuer: {
+        ...issuer,
+        siiBranchCode: 81,
+        additionalBranchCode: 'CL-01',
+        salespersonCode: 'V1',
+        additionalId: 'EXP-7',
+      },
+      receiver: {
+        rut: '55555555-5',
+        businessName: 'Andes Trading LLC',
+        foreign: { id: '59-1234567', nationality: '225', additionalId: 'VAT-1' },
+        address: '1200 Harbor Blvd',
+        city: 'Miami',
+      },
+      currency: 'DOLAR USA',
+      exchangeRate: 950.25,
+      items: [{ name: 'Uva de mesa', quantity: 800, unit: 'KN', unitPrice: 12.25, discountPercent: 10 }],
+      transport: {
+        licensePlate: 'ABCD12',
+        customs: {
+          saleModality: 1,
+          saleClause: 2,
+          saleClauseTotal: 8820,
+          transportRoute: 1,
+          carrierRut: RECEIVER_RUT,
+          totalPackages: 1,
+          packages: [
+            { code: 75, count: 1, marks: 'CONT 1', containerId: 'MSCU1234565', seal: 'S-1', sealIssuer: 'Aduana' },
+          ],
+          freight: 150.25,
+          receiverCountry: 225,
+        },
+      },
+      references: [
+        { documentType: 807, folio: '7001', date: '2026-11-14', otherRut: RECEIVER_RUT, otherAdditionalId: 'D-1' },
+      ],
+      ...overrides,
+    })
+
+  test('every element is written under the tag and in the order its schema gives it', () => {
+    const sii = toSiiDocument(exported())
+    expect(Object.keys(sii.Encabezado)).toEqual(['IdDoc', 'Emisor', 'Receptor', 'Transporte', 'Totales', 'OtraMoneda'])
+    expect(Object.keys(sii.Encabezado.Emisor)).toEqual([
+      'RUTEmisor',
+      'RznSoc',
+      'GiroEmis',
+      'Telefono',
+      'CorreoEmisor',
+      'Acteco',
+      'CdgSIISucur',
+      'CodAdicSucur',
+      'DirOrigen',
+      'CmnaOrigen',
+      'CiudadOrigen',
+      'CdgVendedor',
+      'IdAdicEmisor',
+    ])
+    expect(sii.Encabezado.Receptor).toEqual({
+      RUTRecep: '55555555-5',
+      RznSocRecep: 'Andes Trading LLC',
+      Extranjero: { NumId: '59-1234567', Nacionalidad: '225', IdAdicRecep: 'VAT-1' },
+      DirRecep: '1200 Harbor Blvd',
+      CiudadRecep: 'Miami',
+    })
+    expect(sii.Encabezado.Transporte).toEqual({
+      Patente: 'ABCD12',
+      Aduana: {
+        CodModVenta: 1,
+        CodClauVenta: 2,
+        TotClauVenta: 8820,
+        CodViaTransp: 1,
+        RUTCiaTransp: RECEIVER_RUT,
+        TotBultos: 1,
+        TipoBultos: [
+          {
+            CodTpoBultos: 75,
+            CantBultos: 1,
+            Marcas: 'CONT 1',
+            IdContainer: 'MSCU1234565',
+            Sello: 'S-1',
+            EmisorSello: 'Aduana',
+          },
+        ],
+        MntFlete: 150.25,
+        CodPaisRecep: 225,
+      },
+    })
+    expect(sii.Encabezado.Totales).toEqual({ TpoMoneda: 'DOLAR USA', MntExe: 8820, MntTotal: 8820 })
+    expect(Object.keys(sii.Encabezado.Totales)).toEqual(['TpoMoneda', 'MntExe', 'MntTotal'])
+    expect(sii.Encabezado.OtraMoneda).toEqual({
+      TpoMoneda: 'PESO CL',
+      TpoCambio: 950.25,
+      MntExeOtrMnda: 8381205,
+      MntTotOtrMnda: 8381205,
+    })
+    expect(Object.keys(sii.Referencia?.[0] ?? {})).toEqual([
+      'NroLinRef',
+      'TpoDocRef',
+      'FolioRef',
+      'RUTOtr',
+      'IdAdicOtr',
+      'FchRef',
+    ])
+  })
+
+  test('totals given without an exempt amount write it as zero, which the schema asks for', () => {
+    const sii = toSiiDocument(exported({ exchangeRate: undefined, totals: { totalAmount: 0 } }))
+    expect(sii.Encabezado.Totales).toEqual({ TpoMoneda: 'DOLAR USA', MntExe: 0, MntTotal: 0 })
+    expect(sii.Encabezado.OtraMoneda).toBeUndefined()
+  })
+
+  test('it maps back: the currency, the totals in pesos, the customs area and the identifiers', () => {
+    const doc = exported()
+    expect(fromSiiDocument(toSiiDocument(doc))).toEqual(doc)
+    const bare = exported({
+      transport: { customs: { transportRoute: 4, receiverCountry: 225 } },
+      options: { serviceIndicator: 4 },
+    })
+    expect(fromSiiDocument(toSiiDocument(bare))).toEqual(bare)
+  })
+})
+
 describe('the shape of a receipt', () => {
   const receipt = createDocument({
     type: 39,

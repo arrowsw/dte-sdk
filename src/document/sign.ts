@@ -18,9 +18,9 @@ export type SignedDocument = StampedDocument & {
 }
 
 /**
- * EN: Signs a stamped document with the issuer certificate (enveloped XMLDSig over `Documento`/`Liquidacion`).
+ * EN: Signs a stamped document with the issuer certificate (enveloped XMLDSig over `Documento`/`Liquidacion`/`Exportaciones`).
  * `TmstFirma` is the Chile time of `now`, or `signedAt` as given.
- * ES: Firma un documento timbrado con el certificado del emisor (XMLDSig envuelta sobre `Documento`/`Liquidacion`).
+ * ES: Firma un documento timbrado con el certificado del emisor (XMLDSig envuelta sobre `Documento`/`Liquidacion`/`Exportaciones`).
  * `TmstFirma` es la hora de Chile de `now`, o `signedAt` tal como se entrega.
  */
 export const signDocument = (
@@ -40,9 +40,14 @@ export const signDocument = (
   return { ...doc, xml, signedAt, signature }
 }
 
+// The signed element a `<DTE>` holds, by the first of the three roots it names.
+const signedElementOf = (xml: string): string =>
+  xml.includes('<Liquidacion') ? 'Liquidacion' : xml.includes('<Exportaciones') ? 'Exportaciones' : 'Documento'
+
 /**
- * EN: Verifies the signature of a `<DTE>` XML (own or received).
- * ES: Verifica la firma de un XML `<DTE>` (propio o recibido).
+ * EN: Verifies the signature of a `<DTE>` XML (own or received), over its `Documento`, `Liquidacion` or
+ * `Exportaciones`.
+ * ES: Verifica la firma de un XML `<DTE>` (propio o recibido), sobre su `Documento`, `Liquidacion` o `Exportaciones`.
  */
 export const verifyDocumentSignature = (xml: string): SignatureVerification =>
-  verifyEnveloped(xml, { elementTag: xml.includes('<Liquidacion') ? 'Liquidacion' : 'Documento', rootTag: 'DTE' })
+  verifyEnveloped(xml, { elementTag: signedElementOf(xml), rootTag: 'DTE' })

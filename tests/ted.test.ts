@@ -125,6 +125,33 @@ describe('stampDocument', () => {
     expect(verifyTed(ted.xml, caf43)).toBe(true)
   })
 
+  // `DTE_v10.xsd` declares the `MNT` of `Exportaciones` as a decimal with four decimals, as it does its `MntTotal`. The
+  // stamp carries the total as the document writes it, decimals and all, never rounded to a whole number.
+  test.each([
+    [12.345, '1234.5'],
+    [12.3456789, '1234.5679'],
+    [12, '1200'],
+  ])('an export invoice of 100 units at %p stamps MNT %s, as its total', (unitPrice, mnt) => {
+    const caf110 = parseCaf(fixtureText('caf-33.xml').replace(/<TD>33<\/TD>/, '<TD>110</TD>'))
+    const exported = createDocument({
+      type: 110,
+      folio: 7,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver: { rut: '55555555-5', businessName: 'Andes Trading LLC', address: '1200 Harbor Blvd', city: 'Miami' },
+      currency: 'DOLAR USA',
+      items: [{ name: 'Uva de mesa', quantity: 100, unit: 'KN', unitPrice }],
+      transport: {
+        customs: { saleModality: 1, saleClause: 2, saleClauseTotal: 1, transportRoute: 1, receiverCountry: 225 },
+      },
+    })
+    const { ted } = stampDocument(exported, caf110, { now: FIXED_NOW })
+    expect(ted.totalAmount).toBe(Number(mnt))
+    expect(ted.totalAmount).toBe(exported.header.totals.totalAmount)
+    expect(ted.xml).toContain(`<RR>55555555-5</RR><RSR>Andes Trading LLC</RSR><MNT>${mnt}</MNT>`)
+    expect(verifyTed(ted.xml, caf110)).toBe(true)
+  })
+
   test('verifyTed fails on tampered DD, tampered signature or foreign CAF', () => {
     const { ted } = stampDocument(invoice(), caf, { now: FIXED_NOW })
     expect(verifyTed(ted.xml.replace('<MNT>2380</MNT>', '<MNT>2381</MNT>'), caf)).toBe(false)

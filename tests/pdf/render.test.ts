@@ -217,9 +217,9 @@ describe('the other types', () => {
 
   test('a type outside the catalog prints as DTE {type} and a settlement invoice under Liquidacion prints', async () => {
     const unknown = await pdfText(
-      await render(first(thirdPartyXml.replace('<TipoDTE>33</TipoDTE>', '<TipoDTE>110</TipoDTE>'))),
+      await render(first(thirdPartyXml.replace('<TipoDTE>33</TipoDTE>', '<TipoDTE>999</TipoDTE>'))),
     )
-    expect(unknown).toContain('DTE 110')
+    expect(unknown).toContain('DTE 999')
     const settlement = await pdfText(await render(first(settlementXml)))
     expect(settlement).toContain('LIQUIDACIÓN FACTURA')
     expect(settlement).toContain('Comisionista')

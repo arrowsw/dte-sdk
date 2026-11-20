@@ -1,7 +1,11 @@
+import { parseCaf } from '../src/caf/parse'
+import { FOREIGN_RECEIVER_RUT } from '../src/catalogs/codes'
 import type { DocumentType } from '../src/catalogs/document-types'
-import type { SignedDocument } from '../src/document/sign'
+import { verifyDocumentSignature, type SignedDocument } from '../src/document/sign'
+import { verifyReceivedDocuments } from '../src/document/verify-received'
 import type { DocumentInput } from '../src/model/document'
-import { RECEIVER_RUT } from './support/fixtures'
+import { verifyTed } from '../src/ted/build'
+import { RECEIVER_RUT, fixtureText } from './support/fixtures'
 import { envelopeXml, issue, issuer, receiver } from './support/printed-fixtures'
 import { validateAgainstXsd } from './support/xsd'
 
@@ -12,7 +16,8 @@ import { validateAgainstXsd } from './support/xsd'
 jest.setTimeout(60_000)
 
 const base = { issueDate: '2026-11-15', issuer, receiver }
-type Variant = Omit<DocumentInput, 'type' | 'folio' | 'issueDate' | 'issuer' | 'receiver'>
+type Variant = Omit<DocumentInput, 'type' | 'folio' | 'issueDate' | 'issuer' | 'receiver'> &
+  Partial<Pick<DocumentInput, 'issuer' | 'receiver'>>
 
 const invoiceReference = { documentType: 33, folio: 7, date: '2026-11-01' }
 const setReference = { documentType: 'SET', folio: 'CASO-1', date: '2026-11-15', reason: 'Set de pruebas' } as const
@@ -34,6 +39,45 @@ const wholeTransport = {
   departureTime: '08:30',
   arrivalDate: '2026-11-16',
 }
+
+// An export document goes to a receiver abroad, under the generic RUT the format gives, in a foreign currency.
+const foreignReceiver = {
+  rut: FOREIGN_RECEIVER_RUT,
+  businessName: 'Andes Trading LLC',
+  address: '1200 Harbor Blvd',
+  city: 'Miami',
+  foreign: { id: '59-1234567', nationality: '225' },
+}
+const exportBase = { receiver: foreignReceiver, currency: 'DOLAR USA' } as const
+// What an export of goods carries in its customs area: sale modality, clause and total, route, ports, countries,
+// weights with their units, and the packages with their marks; the codes are illustrative.
+const goodsCustoms = {
+  saleModality: 1,
+  saleClause: 2,
+  saleClauseTotal: 12500.5,
+  transportRoute: 1,
+  transportName: 'MV Pacific Star',
+  carrierRut: RECEIVER_RUT,
+  carrierName: 'Naviera del Sur',
+  booking: 'BK-778899',
+  loadingPort: 906,
+  unloadingPort: 211,
+  tare: 2200,
+  tareUnit: 6,
+  grossWeight: 18450.75,
+  grossWeightUnit: 6,
+  netWeight: 16250.5,
+  netWeightUnit: 6,
+  totalItems: 2,
+  totalPackages: 801,
+  packages: [
+    { code: 13, count: 800, marks: 'ANDES MIAMI 1-800' },
+    { code: 75, count: 1, marks: 'CONT 1', containerId: 'MSCU1234565', seal: 'SL-0098', sealIssuer: 'Aduana de Chile' },
+  ],
+  receiverCountry: 225,
+  destinationCountry: 225,
+}
+const exportInvoiceReference = { documentType: 110, folio: 1, date: '2026-11-10' }
 
 const VARIANTS: Record<Exclude<DocumentType, 39 | 41>, Record<string, Variant>> = {
   33: {
@@ -272,6 +316,94 @@ const VARIANTS: Record<Exclude<DocumentType, 39 | 41>, Record<string, Variant>> 
       withholdVat: true,
     },
   },
+  110: {
+    'goods with packages and a container, in dollars, with the totals in pesos': {
+      ...exportBase,
+      items: [
+        { name: 'Uva de mesa', quantity: 800, unit: 'KN', unitPrice: 12.25, codes: [{ type: 'INT1', value: 'UV-1' }] },
+        { name: 'Pallet de madera', quantity: 1, unit: 'U', unitPrice: 2700.5 },
+      ],
+      transport: { customs: goodsCustoms },
+      options: { paymentTerms: 2, exportPaymentTerms: '1', dueDate: '2026-12-15' },
+      exchangeRate: 950.25,
+    },
+    'freight and insurance in the customs area and as two global surcharges on the exempt amount': {
+      ...exportBase,
+      items: [{ name: 'Salmón congelado', quantity: 1000.5, unit: 'KN', unitPrice: 9.875 }],
+      transport: { customs: { ...goodsCustoms, saleClause: 1, freight: 1250.1234, insurance: 75.5 } },
+      globalAdjustments: [
+        { kind: 'surcharge', valueType: 'amount', value: 1250.12, description: 'Flete', exemptIndicator: 1 },
+        { kind: 'surcharge', valueType: 'amount', value: 75.5, description: 'Seguro', exemptIndicator: 1 },
+      ],
+      exchangeRate: 948.5,
+    },
+    'a line surcharge, a line discount and a global discount in percent': {
+      ...exportBase,
+      currency: 'EURO',
+      items: [
+        { name: 'Vino tinto', quantity: 120, unit: 'BOT', unitPrice: 8.4, surchargePercent: 10 },
+        { name: 'Vino blanco', quantity: 60, unit: 'BOT', unitPrice: 7.2, discountPercent: 5 },
+      ],
+      transport: { customs: goodsCustoms },
+      globalAdjustments: [{ kind: 'discount', valueType: 'percent', value: 2.5, exemptIndicator: 1 }],
+    },
+    'services rendered abroad: no quantity or unit, no sale clause, with the issuer and receiver identifiers': {
+      ...exportBase,
+      issuer: { ...issuer, additionalBranchCode: 'CL-01', additionalId: 'EXP-7' },
+      receiver: { ...foreignReceiver, foreign: { ...foreignReceiver.foreign, additionalId: 'VAT-US-1' } },
+      items: [{ name: 'Desarrollo de software a medida', amount: 15000 }],
+      transport: { customs: { transportRoute: 4, receiverCountry: 225, destinationCountry: 225 } },
+      options: {
+        serviceIndicator: 3,
+        paymentTermsCode: 'FRF',
+        paymentTermsNote: 'Fecha de recepción',
+        paymentTermsDays: 30,
+      },
+      exchangeRate: 950,
+    },
+    'samples without payment: a total of zero': {
+      ...exportBase,
+      items: [{ name: 'Muestra de aceite de oliva', quantity: 6, unit: 'BOT', unitPrice: 15 }],
+      transport: { customs: { ...goodsCustoms, packages: undefined, totalPackages: 1 } },
+      options: { exportPaymentTerms: '21' },
+    },
+    'the smallest valid document': {
+      ...exportBase,
+      receiver: { rut: FOREIGN_RECEIVER_RUT, businessName: 'Andes Trading LLC', address: 'Calle 1', city: 'Lima' },
+      items: [{ name: 'Asesoría', amount: 100 }],
+      transport: { customs: { transportRoute: 4, receiverCountry: 219 } },
+      options: { serviceIndicator: 4 },
+    },
+  },
+  111: {
+    'raises the price, referencing the export invoice': {
+      ...exportBase,
+      items: [{ name: 'Diferencia de precio', amount: 250.75 }],
+      references: [{ ...exportInvoiceReference, code: 3, reason: 'Corrige monto', otherAdditionalId: 'REF-1' }],
+      exchangeRate: 950.25,
+    },
+    'the smallest valid document': {
+      ...exportBase,
+      receiver: { rut: FOREIGN_RECEIVER_RUT, businessName: 'Andes Trading LLC', address: 'Calle 1' },
+      items: [{ name: 'Interés', amount: 1 }],
+      references: [{ ...exportInvoiceReference, code: 3 }],
+    },
+  },
+  112: {
+    'cancels the export invoice, with its customs area and the totals in pesos': {
+      ...exportBase,
+      items: [{ name: 'Uva de mesa', quantity: 800, unit: 'KN', unitPrice: 12.25 }],
+      transport: { customs: goodsCustoms },
+      references: [{ ...exportInvoiceReference, code: 1, reason: 'Anula factura de exportación' }],
+      exchangeRate: 950.25,
+    },
+    'a discount on the exempt amount, referencing the export invoice and the SET': {
+      ...exportBase,
+      items: [{ name: 'Descuento por calidad', amount: 500 }],
+      globalAdjustments: [{ kind: 'discount', valueType: 'amount', value: 10.5, exemptIndicator: 1 }],
+      references: [setReference, { ...exportInvoiceReference, code: 3, reason: 'Corrige monto' }],
+    },
+  },
 }
 
 describe.each(Object.entries(VARIANTS))('type %s', (type, variants) => {
@@ -291,6 +423,25 @@ describe.each(Object.entries(VARIANTS))('type %s', (type, variants) => {
   test('every variant together in one signed envelope validates against EnvioDTE_v10.xsd', async () => {
     expect(await validateAgainstXsd(envelopeXml(entries.map((_, index) => issued(index))), 'EnvioDTE')).toEqual([])
   })
+
+  // An export document is signed over `Exportaciones` and stamped with the total it writes: both verify, by the
+  // signature alone, by the stamp against the CAF, and as a received document.
+  if (Number(type) >= 110)
+    test.each(entries.map(([name], index) => [name, index] as const))(
+      '%s: its signature and its stamp verify',
+      (_name, index) => {
+        const document = issued(index)
+        const caf = parseCaf(fixtureText('caf-33.xml').replace(/<TD>33<\/TD>/, `<TD>${type}</TD>`))
+        expect(verifyDocumentSignature(document.xml).valid).toBe(true)
+        expect(verifyTed(document.ted.xml, caf)).toBe(true)
+        expect(document.xml).toContain(`<MntTotal>${document.header.totals.totalAmount}</MntTotal>`)
+        expect(document.ted.xml).toContain(`<MNT>${document.header.totals.totalAmount}</MNT>`)
+        const [received] = verifyReceivedDocuments(document.xml, { environment: 'certification' }).documents
+        expect(received).toMatchObject({ totalAmount: document.header.totals.totalAmount })
+        expect(received.signature.valid).toBe(true)
+        expect(received.ted).toEqual({ found: true, signatureValid: true, mismatches: [], valid: true })
+      },
+    )
 })
 
 // What `createDocument` refuses or rewrites because the schema would reject it. If a new `DTE_v10.xsd` admits these,
@@ -489,5 +640,175 @@ describe('what the schema refuses in a settlement invoice', () => {
     expect(await validateAgainstXsd(invoice.replace('<NmbItem>', '<TpoDocLiq>33</TpoDocLiq><NmbItem>'), 'DTE')).toEqual(
       [expect.stringContaining(`Element '${ns('TpoDocLiq')}': This element is not expected.`)],
     )
+  })
+})
+
+// An export document has a root of its own, `Exportaciones`. What follows is what `createDocument` refuses, requires
+// or rounds on a 110, 111 or 112 because the schema would reject the document, each written by hand into a signed one
+// to show the rejection. If a new `DTE_v10.xsd` admits one, its test fails and the model can follow.
+describe('what the schema refuses in an export document', () => {
+  const ns = (element: string): string => `{http://www.sii.cl/SiiDte}${element}`
+  let signed: SignedDocument | undefined
+  const exported = (): string =>
+    (signed ??= issue({
+      ...base,
+      ...exportBase,
+      type: 110,
+      folio: 99,
+      items: [{ name: 'Uva de mesa', quantity: 800, unit: 'KN', unitPrice: 12.25, discountPercent: 10 }],
+      transport: { licensePlate: 'ABCD12', customs: { ...goodsCustoms, freight: 150.25 } },
+      references: [{ documentType: 807, folio: '7001', date: '2026-11-14', otherRut: RECEIVER_RUT }],
+      exchangeRate: 950.25,
+    })).xml
+  const rejected = async (xml: string): Promise<readonly string[]> => {
+    expect(await validateAgainstXsd(exported(), 'DTE')).toEqual([])
+    expect(xml).not.toBe(exported())
+    return validateAgainstXsd(xml, 'DTE')
+  }
+
+  test('the document it is written into validates, with its currency, its totals in pesos and its stamp', async () => {
+    const xml = exported()
+    expect(xml).toContain('<Exportaciones ID="DTE_T110F99">')
+    expect(xml).toContain(
+      '<Totales><TpoMoneda>DOLAR USA</TpoMoneda><MntExe>8820</MntExe><MntTotal>8820</MntTotal></Totales>',
+    )
+    expect(xml).toContain(
+      '<OtraMoneda><TpoMoneda>PESO CL</TpoMoneda><TpoCambio>950.25</TpoCambio><MntExeOtrMnda>8381205</MntExeOtrMnda><MntTotOtrMnda>8381205</MntTotOtrMnda></OtraMoneda>',
+    )
+    expect(xml).toContain(
+      '<DescuentoPct>10</DescuentoPct><DescuentoMonto>980</DescuentoMonto><MontoItem>8820</MontoItem>',
+    )
+    expect(xml).toContain('<MNT>8820</MNT>')
+    expect(await validateAgainstXsd(xml, 'DTE')).toEqual([])
+  })
+
+  // Each element only `Documento` declares, written where the codec would put it.
+  test.each([
+    ['IndNoRebaja', '<IndNoRebaja>1</IndNoRebaja>', '</FchEmis>', 'after'],
+    ['IndTraslado', '<IndTraslado>9</IndTraslado>', '</FchEmis>', 'after'],
+    ['TpoImpresion', '<TpoImpresion>T</TpoImpresion>', '</FchEmis>', 'after'],
+    ['MntBruto', '<MntBruto>1</MntBruto>', '</FchEmis>', 'after'],
+    ['TpoTranVenta', '<TpoTranVenta>1</TpoTranVenta>', '</FchEmis>', 'after'],
+    ['PatenteCarro', '<PatenteCarro>JK1234</PatenteCarro>', '</Patente>', 'after'],
+    ['FchSalida', '<FchSalida>2026-11-15</FchSalida>', '<Aduana>', 'before'],
+    ['MntNeto', '<MntNeto>10</MntNeto>', '<MntExe>', 'before'],
+    ['TasaIVA', '<TasaIVA>19</TasaIVA>', '</MntExe>', 'after'],
+    ['MontoNF', '<MontoNF>5</MontoNF>', '</MntTotal>', 'after'],
+    ['Retenedor', '<Retenedor><IndAgente>R</IndAgente></Retenedor>', '<NmbItem>', 'before'],
+    ['TpoDocLiq', '<TpoDocLiq>33</TpoDocLiq>', '<NmbItem>', 'before'],
+    ['CodImpAdic', '<CodImpAdic>27</CodImpAdic>', '<MontoItem>', 'before'],
+    [
+      'Comisiones',
+      '<Comisiones><NroLinCom>1</NroLinCom><TipoMovim>C</TipoMovim><Glosa>C</Glosa><ValComNeto>1</ValComNeto><ValComExe>0</ValComExe></Comisiones>',
+      '<TED',
+      'before',
+    ],
+  ] as const)('%s, which Exportaciones does not declare, fails it', async (element, written, anchor, side) => {
+    const xml = exported().replace(anchor, side === 'after' ? `${anchor}${written}` : `${written}${anchor}`)
+    expect(await rejected(xml)).toEqual([
+      expect.stringContaining(`Element '${ns(element)}': This element is not expected.`),
+    ])
+  })
+
+  test.each([
+    ['TpoMoneda', /<Totales><TpoMoneda>[^<]*<\/TpoMoneda>/, '<Totales>', `Expected is ( ${ns('TpoMoneda')} )`],
+    ['MntExe', /<MntExe>[^<]*<\/MntExe>/, '', `Expected is ( ${ns('MntExe')} )`],
+  ])('totals without %s fail it: the schema asks for it', async (_element, written, replacement, expected) => {
+    expect(await rejected(exported().replace(written, replacement))).toEqual([expect.stringContaining(expected)])
+  })
+
+  test.each([
+    [
+      'IndServicio 1, which only Documento admits',
+      '</FchEmis>',
+      '</FchEmis><IndServicio>1</IndServicio>',
+      'IndServicio',
+    ],
+    ['a currency outside TipMonType', '<TpoMoneda>DOLAR USA</TpoMoneda>', '<TpoMoneda>USD</TpoMoneda>', 'TpoMoneda'],
+    ['an amount with five decimals', '<MntTotal>8820</MntTotal>', '<MntTotal>8820.00001</MntTotal>', 'MntTotal'],
+    ['a negative amount', '<MntExe>8820</MntExe>', '<MntExe>-8820</MntExe>', 'MntExe'],
+    [
+      'a line discount with decimals',
+      '<DescuentoMonto>980</DescuentoMonto>',
+      '<DescuentoMonto>980.5</DescuentoMonto>',
+      'DescuentoMonto',
+    ],
+    ['a freight of zero', /<MntFlete>[^<]*<\/MntFlete>/, '<MntFlete>0</MntFlete>', 'MntFlete'],
+    ['an exchange rate of zero', '<TpoCambio>950.25</TpoCambio>', '<TpoCambio>0</TpoCambio>', 'TpoCambio'],
+    [
+      'a code of the customs tables with more digits',
+      '<CodModVenta>1</CodModVenta>',
+      '<CodModVenta>100</CodModVenta>',
+      'CodModVenta',
+    ],
+    [
+      'a nationality longer than 3',
+      '<Nacionalidad>225</Nacionalidad>',
+      '<Nacionalidad>2250</Nacionalidad>',
+      'Nacionalidad',
+    ],
+    [
+      'a gross weight with more digits',
+      '<PesoBruto>18450.75</PesoBruto>',
+      '<PesoBruto>1234567890.5</PesoBruto>',
+      'PesoBruto',
+    ],
+  ] as const)('%s fails it', async (_label, anchor, written, element) => {
+    expect(await rejected(exported().replace(anchor, written))).toEqual([
+      expect.stringContaining(`Element '${ns(element)}': `),
+    ])
+  })
+
+  test('the stamp of an export document carries its total with its decimals, which only Exportaciones admits', async () => {
+    const decimals = issue({
+      ...base,
+      ...exportBase,
+      type: 110,
+      folio: 98,
+      items: [{ name: 'Asesoría', amount: 1234.5678 }],
+      transport: { customs: { transportRoute: 4, receiverCountry: 225 } },
+      options: { serviceIndicator: 4 },
+    }).xml
+    expect(decimals).toContain('<MntTotal>1234.5678</MntTotal>')
+    expect(decimals).toContain('<MNT>1234.5678</MNT>')
+    expect(await validateAgainstXsd(decimals, 'DTE')).toEqual([])
+    const invoice = issue({ ...base, type: 33, folio: 93, items: [{ name: 'Plan anual', unitPrice: 100000 }] }).xml
+    const errors = await validateAgainstXsd(
+      invoice
+        .replace('<MntTotal>119000</MntTotal>', '<MntTotal>119000.5</MntTotal>')
+        .replace('<MNT>119000</MNT>', '<MNT>119000.5</MNT>'),
+      'DTE',
+    )
+    expect(errors).toEqual([
+      expect.stringContaining(`Element '${ns('MntTotal')}': '119000.5' is not a valid value`),
+      expect.stringContaining(`Element '${ns('MNT')}': '119000.5' is not a valid value`),
+    ])
+  })
+
+  test('an 11th package type fails it', async () => {
+    const xml = exported()
+    const pack = /<TipoBultos>[\s\S]*?<\/TipoBultos>/.exec(xml)?.[0] ?? ''
+    const ten = xml.replace(pack, pack.repeat(9))
+    expect(await validateAgainstXsd(ten, 'DTE')).toEqual([])
+    expect(await validateAgainstXsd(ten.replace(pack, pack + pack), 'DTE')).toEqual([
+      expect.stringContaining(`Element '${ns('TipoBultos')}': This element is not expected.`),
+    ])
+  })
+
+  test.each([
+    ['CodAdicSucur', '<CodAdicSucur>CL-01</CodAdicSucur>', '<DirOrigen>'],
+    ['IdAdicOtr', '<IdAdicOtr>DUS-1</IdAdicOtr>', '<FchRef>'],
+  ])('%s on an invoice fails it: only Exportaciones declares it', async (element, written, anchor) => {
+    const invoice = issue({
+      ...base,
+      type: 33,
+      folio: 92,
+      items: [{ name: 'Plan anual', unitPrice: 100000 }],
+      references: [{ documentType: 801, folio: 'OC-1', date: '2026-11-01' }],
+    }).xml
+    expect(await validateAgainstXsd(invoice, 'DTE')).toEqual([])
+    expect(await validateAgainstXsd(invoice.replace(anchor, `${written}${anchor}`), 'DTE')).toEqual([
+      expect.stringContaining(`Element '${ns(element)}': This element is not expected.`),
+    ])
   })
 })

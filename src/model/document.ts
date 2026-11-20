@@ -1,7 +1,9 @@
 import type { DocumentType } from '../catalogs/document-types'
 import type {
+  Currency,
   DispatchType,
   ExemptIndicator,
+  ExportServiceIndicator,
   PaymentTerms,
   ReferenceCode,
   ServiceIndicator,
@@ -38,6 +40,10 @@ export type Issuer = {
   readonly city?: string
   /** EN: Salesperson code; left out of a receipt. ES: `CdgVendedor` — Código del vendedor; no se escribe en una boleta. */
   readonly salespersonCode?: string
+  /** EN: Additional branch code for free use (max 20); an export document's alone, and refused on any other type. ES: `CodAdicSucur` — Código adicional de la sucursal, de uso libre, máximo 20; solo de un documento de exportación, y se rechaza en cualquier otro tipo. */
+  readonly additionalBranchCode?: string
+  /** EN: Additional identifier of the issuer for free use (max 20); an export document's alone, and refused on any other type. ES: `IdAdicEmisor` — Identificador adicional del emisor, de uso libre, máximo 20; solo de un documento de exportación, y se rechaza en cualquier otro tipo. */
+  readonly additionalId?: string
 }
 
 /**
@@ -45,6 +51,19 @@ export type Issuer = {
  * ES: Emisor tal como lo entrega el llamador: el RUT puede venir en cualquier forma.
  */
 export type IssuerInput = Omit<Issuer, 'rut'> & { readonly rut: string }
+
+/**
+ * EN: The foreign receiver of an export document (`Extranjero`): every field is optional in the schema.
+ * ES: `Extranjero` — El receptor extranjero de un documento de exportación: el esquema deja opcional cada campo.
+ */
+export type ForeignReceiver = {
+  /** EN: Personal or tax identification number the foreign administration gave the receiver, with its dashes and check digits (max 20). ES: `NumId` — Número o código de identificación personal del receptor extranjero, otorgado por la administración tributaria extranjera u organismo competente, con guiones y dígitos verificadores, máximo 20. */
+  readonly id?: string
+  /** EN: Nationality, by the customs service's table of countries (max 3). ES: `Nacionalidad` — Nacionalidad del receptor extranjero, según la tabla de países de Aduana, máximo 3. */
+  readonly nationality?: string
+  /** EN: Additional identifier of the foreign receiver for free use (max 20). ES: `IdAdicRecep` — Identificador adicional del receptor extranjero, de uso libre, máximo 20. */
+  readonly additionalId?: string
+}
 
 /**
  * EN: Party that receives the document (`Receptor`).
@@ -57,17 +76,19 @@ export type Receiver = {
   readonly internalCode?: string
   /** EN: Legal/business name (max 100). ES: `RznSocRecep` — Razón social del receptor, máximo 100. */
   readonly businessName: string
+  /** EN: The receiver abroad of an export document; refused on any other type. ES: `Extranjero` — El receptor en el extranjero de un documento de exportación; se rechaza en cualquier otro tipo. */
+  readonly foreign?: ForeignReceiver
   /** EN: Line of business (max 40); required on a settlement invoice (43), and left out of a receipt, which has no element for it. ES: `GiroRecep` — Giro del receptor, máximo 40; obligatorio en una liquidación factura (43), y no se escribe en una boleta, que no tiene elemento para él. */
   readonly businessActivity?: string
   /** EN: Contact person (max 80). ES: `Contacto` — Persona de contacto, máximo 80. */
   readonly contact?: string
   /** EN: Email (max 80); not written on a receipt. ES: `CorreoRecep` — Correo del receptor, máximo 80; no se escribe en una boleta. */
   readonly email?: string
-  /** EN: Street address (max 70); required except on receipts. ES: `DirRecep` — Dirección del receptor, máximo 70; obligatoria salvo en boletas. */
+  /** EN: Street address (max 70), the one abroad on an export document; required except on receipts. ES: `DirRecep` — Dirección del receptor, máximo 70, la del extranjero en un documento de exportación; obligatoria salvo en boletas. */
   readonly address?: string
-  /** EN: Commune (max 20); required except on receipts. ES: `CmnaRecep` — Comuna del receptor, máximo 20; obligatoria salvo en boletas. */
+  /** EN: Commune (max 20); required except on receipts and export documents. ES: `CmnaRecep` — Comuna del receptor, máximo 20; obligatoria salvo en boletas y documentos de exportación. */
   readonly commune?: string
-  /** EN: City (max 20). ES: `CiudadRecep` — Ciudad del receptor, máximo 20. */
+  /** EN: City (max 20); required on an export invoice (110). ES: `CiudadRecep` — Ciudad del receptor, máximo 20; obligatoria en una factura de exportación (110). */
   readonly city?: string
   /** EN: Postal address (max 70); not written on a receipt. ES: `DirPostal` — Dirección postal, máximo 70; no se escribe en una boleta. */
   readonly postalAddress?: string
@@ -146,7 +167,7 @@ export type LineItemInput = {
   readonly referenceUnit?: string
   /** EN: Reference price, rounded to six decimals; refused on a receipt. ES: `PrcRef` — Precio de referencia, redondeado a seis decimales; se rechaza en una boleta. */
   readonly referencePrice?: number
-  /** EN: Explicit line amount; skips the quantity × price computation. ES: `MontoItem` — Monto explícito de la línea; omite el cálculo cantidad × precio. */
+  /** EN: Explicit line amount; skips the quantity × price computation. On an export document it is rounded to the four decimals the schema holds. ES: `MontoItem` — Monto explícito de la línea; omite el cálculo cantidad × precio. En un documento de exportación se redondea a los cuatro decimales que admite el esquema. */
   readonly amount?: number
 }
 
@@ -193,7 +214,7 @@ export type LineItem = {
   readonly surchargeAmount?: number
   /** EN: Additional tax codes. ES: `CodImpAdic` — Códigos de impuesto adicional. */
   readonly additionalTaxCodes?: readonly number[]
-  /** EN: Line amount, integer pesos. ES: `MontoItem` — Monto de la línea, entero en pesos. */
+  /** EN: Line amount: whole pesos, or, on an export document, the document's currency with up to four decimals. ES: `MontoItem` — Monto de la línea: pesos enteros o, en un documento de exportación, la moneda del documento con hasta cuatro decimales. */
   readonly amount: number
 }
 
@@ -228,13 +249,15 @@ export type CommissionTotals = {
 }
 
 /**
- * EN: Document totals (`Totales`). Integer pesos.
- * ES: `Totales` — Totales del documento. Enteros en pesos.
+ * EN: Document totals (`Totales`). Integer pesos, except on an export document: there only the exempt amount and the
+ * total are written, in the document's currency with up to four decimals.
+ * ES: `Totales` — Totales del documento. Enteros en pesos, salvo en un documento de exportación: ahí solo se escriben el
+ * monto exento y el total, en la moneda del documento con hasta cuatro decimales.
  */
 export type Totals = {
   /** EN: Net amount: VAT-affected lines before tax; omitted when 0, and negative only on a settlement invoice (43). ES: `MntNeto` — Monto neto: líneas afectas sin IVA; se omite si es 0, y es negativo solo en una liquidación factura (43). */
   readonly netAmount?: number
-  /** EN: Exempt amount (`IndExe=1` lines); negative only on a settlement invoice (43). ES: `MntExe` — Monto exento (líneas con `IndExe=1`); negativo solo en una liquidación factura (43). */
+  /** EN: Exempt amount (`IndExe=1` lines); negative only on a settlement invoice (43), and on an export document every line but the non-billable ones, with up to four decimals. ES: `MntExe` — Monto exento (líneas con `IndExe=1`); negativo solo en una liquidación factura (43), y en un documento de exportación toda línea salvo las no facturables, con hasta cuatro decimales. */
   readonly exemptAmount?: number
   /** EN: VAT rate percent (19); never on receipts, where it is refused. ES: `TasaIVA` — Tasa de IVA (19); nunca en boletas, donde se rechaza. */
   readonly vatRate?: number
@@ -248,7 +271,7 @@ export type Totals = {
   readonly withholdings?: readonly Withholding[]
   /** EN: Totals of the commission and other charge lines; refused on a receipt. ES: `Comisiones` — Totales de las líneas de comisiones y otros cargos; se rechazan en una boleta. */
   readonly commissions?: CommissionTotals
-  /** EN: Document total: net + VAT + exempt (VAT excluded when withheld), less the commissions and other charges; zero or negative only on a settlement invoice (43). `createDocument` refuses one that does not add up, unless the totals carry a tax code other than 15. ES: `MntTotal` — Monto total: neto + IVA + exento (sin IVA si está retenido), menos las comisiones y otros cargos; cero o negativo solo en una liquidación factura (43). `createDocument` rechaza uno que no cuadra, salvo que los totales traigan un código de impuesto distinto del 15. */
+  /** EN: Document total: net + VAT + exempt (VAT excluded when withheld), less the commissions and other charges; zero or negative only on a settlement invoice (43), and on an export document the exempt amount, or zero without payment. `createDocument` refuses one that does not add up, unless the totals carry a tax code other than 15. ES: `MntTotal` — Monto total: neto + IVA + exento (sin IVA si está retenido), menos las comisiones y otros cargos; cero o negativo solo en una liquidación factura (43), y en un documento de exportación el monto exento, o cero sin pago. `createDocument` rechaza uno que no cuadra, salvo que los totales traigan un código de impuesto distinto del 15. */
   readonly totalAmount: number
   /** EN: Non-billable amount (lines with `IndExe` 2-6); refused on a settlement invoice (43), whose root has no `MontoNF`. ES: `MontoNF` — Monto no facturable (líneas con `IndExe` 2 a 6); se rechaza en una liquidación factura (43), cuya raíz no tiene `MontoNF`. */
   readonly nonBillableAmount?: number
@@ -279,6 +302,8 @@ export type ReferenceInput = {
   readonly global?: boolean
   /** EN: RUT of another issuer; refused on a settlement invoice (43). ES: `RUTOtr` — RUT de otro contribuyente; se rechaza en una liquidación factura (43). */
   readonly otherRut?: string
+  /** EN: Additional code of the other issuer for free use (max 20); an export document's alone, and refused on any other type. ES: `IdAdicOtr` — Código adicional del otro contribuyente, de uso libre, máximo 20; solo de un documento de exportación, y se rechaza en cualquier otro tipo. */
+  readonly otherAdditionalId?: string
 }
 
 /**
@@ -296,6 +321,8 @@ export type Reference = {
   readonly folio: string
   /** EN: RUT of another issuer. ES: `RUTOtr` — RUT de otro contribuyente. */
   readonly otherRut?: SiiRut
+  /** EN: Additional code of the other issuer (export documents). ES: `IdAdicOtr` — Código adicional del otro contribuyente (documentos de exportación). */
+  readonly otherAdditionalId?: string
   /** EN: Referenced document date. ES: `FchRef` — Fecha del documento referenciado. */
   readonly date: string
   /** EN: Reference code. ES: `CodRef` — Código de referencia. */
@@ -412,12 +439,106 @@ export type Driver = {
 }
 
 /**
+ * EN: One kind of package of an export document (`TipoBultos`). Every field is optional in the schema; Formato DTE 2.5
+ * (fields 99 to 101) uses the container id, the seal and its issuer only when the package is a container.
+ * ES: `TipoBultos` — Un tipo de bulto de un documento de exportación. El esquema deja opcional cada campo; el Formato
+ * DTE 2.5 (campos 99 a 101) usa el id del contenedor, el sello y su emisor solo cuando el bulto es un contenedor.
+ */
+export type PackageType = {
+  /** EN: Package type code, by the customs service's table of package types (1 to 999). ES: `CodTpoBultos` — Código del tipo de bulto, según la tabla de tipos de bultos de Aduana, de 1 a 999. */
+  readonly code?: number
+  /** EN: Number of packages of this type (1 to 9999999999). ES: `CantBultos` — Cantidad de bultos de este tipo, de 1 a 9999999999. */
+  readonly count?: number
+  /** EN: Marks of the packages (max 255). ES: `Marcas` — Identificación de marcas, máximo 255. */
+  readonly marks?: string
+  /** EN: Container id, with its dash and check digit (max 25). ES: `IdContainer` — Id del contenedor, con guion y dígito verificador, máximo 25. */
+  readonly containerId?: string
+  /** EN: Seal of the container, with its check digit (max 20). ES: `Sello` — Sello del contenedor, con dígito verificador, máximo 20. */
+  readonly seal?: string
+  /** EN: Name of the issuer of the seal (max 70). ES: `EmisorSello` — Nombre del emisor del sello, máximo 70. */
+  readonly sealIssuer?: string
+}
+
+/**
+ * EN: The customs area of an export document (`Transporte/Aduana`). The codes are those of the customs service's
+ * tables, which dte-sdk does not check. The schema declares every field optional; on an export invoice (110)
+ * `createDocument` asks for what Formato DTE 2.5 asks: the receiver's country, and, unless the service indicator says
+ * otherwise, the sale modality, the sale clause and its total and the transport route.
+ * ES: `Aduana` (dentro de `Transporte`) — El área aduanera de un documento de exportación. Los códigos son los de las
+ * tablas de Aduana, que dte-sdk no revisa. El esquema declara opcional cada campo; en una factura de exportación (110)
+ * `createDocument` pide lo que pide el Formato DTE 2.5: el país del receptor y, salvo que el indicador de servicio diga
+ * otra cosa, la modalidad de venta, la cláusula de venta y su total y la vía de transporte.
+ */
+export type Customs = {
+  /** EN: Sale modality code (1 to 99); required on an export invoice (110) unless its service indicator is 3, 4 or 5. ES: `CodModVenta` — Código de la modalidad de venta, de 1 a 99; obligatorio en una factura de exportación (110) salvo que su indicador de servicio sea 3, 4 o 5. */
+  readonly saleModality?: number
+  /** EN: Sale clause code, as the export declaration states it (1 to 99); required like the sale modality. ES: `CodClauVenta` — Código de la cláusula de venta, la que indica el DUS, de 1 a 99; obligatorio como la modalidad de venta. */
+  readonly saleClause?: number
+  /** EN: Total of the sale clause, rounded to two decimals; required like the sale modality. ES: `TotClauVenta` — Total de la cláusula de venta, redondeado a dos decimales; obligatorio como la modalidad de venta. */
+  readonly saleClauseTotal?: number
+  /** EN: Transport route code (1 to 99); required on an export invoice (110) unless its service indicator is 4. ES: `CodViaTransp` — Código de la vía de transporte, de 1 a 99; obligatorio en una factura de exportación (110) salvo que su indicador de servicio sea 4. */
+  readonly transportRoute?: number
+  /** EN: Name or identification of the means of transport (max 40). ES: `NombreTransp` — Nombre o identificación del medio de transporte, máximo 40. */
+  readonly transportName?: string
+  /** EN: RUT of the carrier company, or of the agency that represents a foreign one in Chile. ES: `RUTCiaTransp` — RUT de la compañía transportadora, o de la agencia que representa en Chile a una extranjera. */
+  readonly carrierRut?: SiiRut
+  /** EN: Name of the carrier company (max 40). ES: `NomCiaTransp` — Nombre de la compañía transportadora, máximo 40. */
+  readonly carrierName?: string
+  /** EN: Additional identifier of the carrier company for free use (max 20). ES: `IdAdicTransp` — Identificador adicional de la compañía transportadora, de uso libre, máximo 20. */
+  readonly carrierAdditionalId?: string
+  /** EN: Booking number of the operator (max 20). ES: `Booking` — Número de booking o reserva del operador, máximo 20. */
+  readonly booking?: string
+  /** EN: Operator code (max 20). ES: `Operador` — Código del operador, máximo 20. */
+  readonly operator?: string
+  /** EN: Port of loading code (1 to 9999). ES: `CodPtoEmbarque` — Código del puerto de embarque, de 1 a 9999. */
+  readonly loadingPort?: number
+  /** EN: Additional identifier of the port of loading for free use (max 20). ES: `IdAdicPtoEmb` — Identificador adicional del puerto de embarque, de uso libre, máximo 20. */
+  readonly loadingPortAdditionalId?: string
+  /** EN: Port of unloading code (1 to 9999). ES: `CodPtoDesemb` — Código del puerto de desembarque, de 1 a 9999. */
+  readonly unloadingPort?: number
+  /** EN: Additional identifier of the port of unloading for free use (max 20). ES: `IdAdicPtoDesemb` — Identificador adicional del puerto de desembarque, de uso libre, máximo 20. */
+  readonly unloadingPortAdditionalId?: string
+  /** EN: Tare, a whole number (1 to 9999999). ES: `Tara` — Tara, un número entero de 1 a 9999999. */
+  readonly tare?: number
+  /** EN: Unit of measure of the tare (1 to 99); required with the tare on an export invoice (110). ES: `CodUnidMedTara` — Unidad de medida de la tara, de 1 a 99; obligatoria con la tara en una factura de exportación (110). */
+  readonly tareUnit?: number
+  /** EN: Total gross weight, rounded to two decimals, eight digits before the point. ES: `PesoBruto` — Total peso bruto, redondeado a dos decimales, ocho dígitos antes del punto. */
+  readonly grossWeight?: number
+  /** EN: Unit of the gross weight (1 to 99); required with the gross weight on an export invoice (110). ES: `CodUnidPesoBruto` — Unidad del peso bruto, de 1 a 99; obligatoria con el peso bruto en una factura de exportación (110). */
+  readonly grossWeightUnit?: number
+  /** EN: Total net weight, rounded to two decimals, eight digits before the point. ES: `PesoNeto` — Total peso neto, redondeado a dos decimales, ocho dígitos antes del punto. */
+  readonly netWeight?: number
+  /** EN: Unit of the net weight (1 to 99); required with the net weight on an export invoice (110). ES: `CodUnidPesoNeto` — Unidad del peso neto, de 1 a 99; obligatoria con el peso neto en una factura de exportación (110). */
+  readonly netWeightUnit?: number
+  /** EN: Total number of items of the document. ES: `TotItems` — Total de ítems del documento. */
+  readonly totalItems?: number
+  /** EN: Total number of packages; required when `packages` are given. ES: `TotBultos` — Cantidad total de bultos; obligatoria cuando vienen `packages`. */
+  readonly totalPackages?: number
+  /** EN: The kinds of packages, at most 10. ES: `TipoBultos` — Los tipos de bultos, 10 como máximo. */
+  readonly packages?: readonly PackageType[]
+  /** EN: Freight in the document's currency, above zero, rounded to four decimals; informative, it is not added to the total. ES: `MntFlete` — Monto del flete en la moneda de venta, mayor que cero, redondeado a cuatro decimales; informativo, no se suma al total. */
+  readonly freight?: number
+  /** EN: Insurance in the document's currency, above zero, rounded to four decimals; informative, it is not added to the total. ES: `MntSeguro` — Monto del seguro en la moneda de venta, mayor que cero, redondeado a cuatro decimales; informativo, no se suma al total. */
+  readonly insurance?: number
+  /** EN: Country of the foreign receiver, by the customs service's table of countries (1 to 999); required on an export invoice (110). ES: `CodPaisRecep` — Código del país del receptor extranjero, según la tabla de países de Aduana, de 1 a 999; obligatorio en una factura de exportación (110). */
+  readonly receiverCountry?: number
+  /** EN: Country of destination, by the same table (1 to 999). ES: `CodPaisDestin` — Código del país de destino, según la misma tabla, de 1 a 999. */
+  readonly destinationCountry?: number
+}
+
+/**
+ * EN: The customs area as the caller provides it: the carrier's RUT in any shape.
+ * ES: El área aduanera tal como la entrega el llamador: el RUT de la compañía transportadora en cualquier forma.
+ */
+export type CustomsInput = Omit<Customs, 'carrierRut'> & { readonly carrierRut?: string }
+
+/**
  * EN: Transport data of the goods a document moves (`Transporte`): a dispatch guide (52), or an invoice that moves
- * them. The schema declares every field optional. Res. Ex. 144/2026 asks a document that moves goods for the
+ * them, and of an export document, which carries its customs area here. The schema declares every field optional. Res. Ex. 144/2026 asks a document that moves goods for the
  * destination, the driver, the carrier, the plates and the departure date, lets what is unknown when issuing be
  * completed by a later guide, and makes the departure time optional.
  * ES: `Transporte` — Datos del transporte de los bienes que ampara el documento: una guía de despacho (52), o una
- * factura que los traslada. El esquema declara opcional cada campo. La Res. Ex. 144/2026 pide al documento que ampara
+ * factura que los traslada, y de un documento de exportación, que trae aquí su área aduanera. El esquema declara opcional cada campo. La Res. Ex. 144/2026 pide al documento que ampara
  * un traslado el destino, el chofer, el transportista, las patentes y la fecha de salida, deja completar con una guía
  * posterior lo que no se conoce al emitir, y hace opcional la hora de salida.
  */
@@ -442,6 +563,8 @@ export type Transport = {
   readonly departureTime?: string
   /** EN: Date the goods arrive, or are expected to on a transfer of more than one day, `YYYY-MM-DD` from 2003-04-01 to 2050-12-31. ES: `FchLlegada` — Fecha de llegada, o la estimada en un traslado de más de un día, `AAAA-MM-DD` entre 2003-04-01 y 2050-12-31. */
   readonly arrivalDate?: string
+  /** EN: Customs area of an export document; refused on any other type. ES: `Aduana` — Área aduanera de un documento de exportación; se rechaza en cualquier otro tipo. */
+  readonly customs?: Customs
 }
 
 /**
@@ -450,9 +573,11 @@ export type Transport = {
  * ES: Transporte tal como lo entrega el llamador: fechas también como `DD-MM-AAAA` o `DD/MM/AAAA`, y la hora también
  * como `HH:MM`, que se escribe con `:00`.
  */
-export type TransportInput = Omit<Transport, 'carrierRut' | 'driver'> & {
+export type TransportInput = Omit<Transport, 'carrierRut' | 'driver' | 'customs'> & {
   readonly carrierRut?: string
   readonly driver?: { readonly rut: string; readonly name: string }
+  /** EN: Customs area of an export document, the carrier's RUT in any shape. ES: `Aduana` — Área aduanera de un documento de exportación, con el RUT de la compañía transportadora en cualquier forma. */
+  readonly customs?: CustomsInput
 }
 
 /**
@@ -485,8 +610,8 @@ export type HeaderOptions = {
   readonly transferType?: TransferType
   /** EN: Print format: `N` normal, `T` ticket. ES: `TpoImpresion` — Formato de impresión: `N` normal, `T` ticket. */
   readonly printFormat?: 'N' | 'T'
-  /** EN: Service indicator. ES: `IndServicio` — Indicador de servicio (1-4; 3 por defecto en boletas). */
-  readonly serviceIndicator?: ServiceIndicator
+  /** EN: Service indicator: 1 to 4, and on an export document 3 to 6 (`EXPORT_SERVICE_INDICATORS`), as each root admits. ES: `IndServicio` — Indicador de servicio: 1 a 4 (3 por defecto en boletas), y en un documento de exportación 3 a 6 (`EXPORT_SERVICE_INDICATORS`), como admite cada raíz. */
+  readonly serviceIndicator?: ServiceIndicator | ExportServiceIndicator
   /** EN: Line amounts include VAT (`MntBruto=1`); set automatically with `pricesIncludeVat`. ES: `MntBruto` — Montos de las líneas con IVA incluido (1); se fija solo con `pricesIncludeVat`. */
   readonly grossAmounts?: 1
   /** EN: Purchase transaction type. ES: `TpoTranCompra` — Tipo de transacción de compra (1-7). */
@@ -495,7 +620,7 @@ export type HeaderOptions = {
   readonly saleTransactionType?: number
   /** EN: Payment terms. ES: `FmaPago` — Forma de pago (1 contado, 2 crédito, 3 sin costo). */
   readonly paymentTerms?: PaymentTerms
-  /** EN: Export payment terms. ES: `FmaPagExp` — Forma de pago de exportación. */
+  /** EN: Export payment terms, the code of the customs service's table of payment forms (1 to 99, in digits); on an export document 21, without payment, makes its total zero (Formato DTE 2.5, field 124). ES: `FmaPagExp` — Forma de pago de exportación, el código de la tabla de formas de pago de Aduana (1 a 99, en dígitos); en un documento de exportación el 21, sin pago, deja su total en cero (Formato DTE 2.5, campo 124). */
   readonly exportPaymentTerms?: string
   /** EN: Settlement date. ES: `FchCancel` — Fecha de cancelación. */
   readonly settlementDate?: string
@@ -553,6 +678,21 @@ export type SubtotalInfo = {
 }
 
 /**
+ * EN: The totals of an export document in Chilean pesos (`OtraMoneda`), worked out from the exchange rate.
+ * ES: `OtraMoneda` — Los totales de un documento de exportación en pesos chilenos, calculados desde el tipo de cambio.
+ */
+export type OtherCurrency = {
+  /** EN: The other currency: `PESO CL`. ES: `TpoMoneda` — La otra moneda: `PESO CL`. */
+  readonly currency: Currency
+  /** EN: Exchange rate to pesos, rounded to four decimals. ES: `TpoCambio` — Tipo de cambio a pesos, redondeado a cuatro decimales. */
+  readonly exchangeRate?: number
+  /** EN: Exempt amount in pesos. ES: `MntExeOtrMnda` — Monto exento en pesos. */
+  readonly exemptAmount?: number
+  /** EN: Total in pesos. ES: `MntTotOtrMnda` — Monto total en pesos. */
+  readonly totalAmount: number
+}
+
+/**
  * EN: Document header (`Encabezado`).
  * ES: `Encabezado` — Encabezado del documento.
  */
@@ -571,7 +711,11 @@ export type Header = {
   readonly softwareProviderRut?: SiiRut
   /** EN: Transport of the goods. ES: `Transporte` — Transporte de los bienes. */
   readonly transport?: Transport
+  /** EN: Currency of an export document's amounts. ES: `TpoMoneda` (dentro de `Totales`) — Moneda de los montos de un documento de exportación. */
+  readonly currency?: Currency
   readonly totals: Totals
+  /** EN: Totals of an export document in pesos. ES: `OtraMoneda` — Totales de un documento de exportación en pesos. */
+  readonly otherCurrency?: OtherCurrency
 }
 
 /**
@@ -646,4 +790,8 @@ export type DocumentInput = {
   readonly withholdVat?: boolean
   /** EN: Explicit totals (advanced), written as given; computed when omitted. ES: `Totales` — Totales explícitos (uso avanzado), escritos tal como vienen; se calculan si se omiten. */
   readonly totals?: Totals
+  /** EN: Currency of the amounts of an export document, required there and refused on any other type. ES: `TpoMoneda` — Moneda de los montos de un documento de exportación, obligatoria en él y rechazada en cualquier otro tipo. */
+  readonly currency?: Currency
+  /** EN: Exchange rate of the currency to Chilean pesos on the issue date, above zero, rounded to four decimals: an export document with one carries its totals in pesos (`OtraMoneda`, `PESO CL`), each `convertToPesos` of its amount. Refused on any other type. ES: `TpoCambio` — Tipo de cambio de la moneda a pesos chilenos a la fecha de emisión, mayor que cero, redondeado a cuatro decimales: un documento de exportación que lo trae lleva sus totales en pesos (`OtraMoneda`, `PESO CL`), cada uno el `convertToPesos` de su monto. Se rechaza en cualquier otro tipo. */
+  readonly exchangeRate?: number
 }

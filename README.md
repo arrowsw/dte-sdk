@@ -23,10 +23,11 @@ register, the MIPYME backup), the certification process and the printed
 samples. The API is readable English, with bilingual (EN/ES) documentation on
 every field.
 
-- 🧾 **Document types** 33, 34, 39, 41, 43, 46, 52, 56 and 61.
+- 🧾 **Document types** 33, 34, 39, 41, 43, 46, 52, 56 and 61, and the export documents 110, 111 and 112.
 - 🧮 **Totals done right** — per-line rounding, exempt and non-billable lines,
   VAT-included prices (`MntBruto`), global discounts, purchase-invoice withholding,
-  commissions taken off the total of a settlement invoice.
+  commissions taken off the total of a settlement invoice, and export amounts in their currency with four decimals,
+  converted to pesos exactly.
 - 🔏 **TED + XMLDSig** — the electronic stamp signed with the CAF key and the
   enveloped signature the SII validates, byte for byte.
 - ✉️ **Envelopes** — `EnvioDTE` and `EnvioBOLETA` with cover and signed `SetDTE`.
@@ -62,7 +63,8 @@ every field.
 - [Installation](#installation)
 - [Entry points](#entry-points)
 - [Quick start](#quick-start)
-- [Step by step](#step-by-step)
+- [Step by step](#step-by-step): [transport of goods](#transport-of-goods),
+  [settlement invoices](#settlement-invoices), [export documents](#export-documents), [receipts](#receipts)
 - [Validating against the SII's schemas](#validating-against-the-siis-schemas)
 - [Answering a received envelope](#answering-a-received-envelope)
 - [Assigning an invoice](#assigning-an-invoice)
@@ -109,7 +111,8 @@ rejects in a document's content, which now asks for the issuer's activity code o
 sent to the SII. 0.14.0 prints on the printed sample the fields Formato DTE 2.5 marks to be printed, and writes more of
 the document in words; it reads a document received from a third party from the bytes of its file and prints its stamp
 as it was signed, and it bounds the key a received document names before a signature is checked with it. None of it has
-been sent to the SII. Every area this README describes ships in 0.14.0.
+been sent to the SII. Every area this README describes ships in 0.14.0. The export documents (110, 111 and 112), not
+released yet, are checked against `DTE_v10.xsd`, and none has been sent to the SII.
 Releases before 1.0.0 come out as the work lands, without waiting for the runs against the
 real SII; those runs come before 1.0.0, the first version recommended for production.
 
@@ -149,8 +152,6 @@ Still to come before 1.0.0: running every area against the real SII, starting wi
 to be compared against real answers ([issue 14](https://github.com/arrowsw/dte-sdk/issues/14)), and the improvements of
 the certification runner set aside to keep it to field behaviour, to be weighed after the first real certification
 ([issue 29](https://github.com/arrowsw/dte-sdk/issues/29)).
-
-Planned, after the first certification: export documents (110, 111 and 112).
 
 Planned, with no date:
 
@@ -316,6 +317,7 @@ check stops at the first fault it finds:
 | An exempt invoice (34) has an exempt amount above zero, and no net amount or VAT | validation 57 | `MISSING_FIELD` or `INVALID_AMOUNT` |
 | The total adds up: net + exempt + VAT, less the VAT withheld and the commissions | Formato DTE 2.5 field 124 | `TOTAL_MISMATCH`, with `expected` and `actual` |
 | The period amount is the total plus the non-billable amount | Formato DTE 2.5 field 126 | `TOTAL_MISMATCH` |
+| On an export document, a line amount, an exempt amount and a total from zero up with four decimals at most, and a total that is the exempt amount, or zero without payment | `MontoItem`, `MntExe`, `MntTotal` of `Exportaciones`, Formato DTE 2.5 field 124 | `INVALID_AMOUNT`, `TOTAL_MISMATCH` |
 
 The validations are those of the SII's "Nuevas validaciones a la IECV, DTE y DJ 3327 y 3328". They hold for totals
 worked out from the lines and for totals given by hand. A document the SII accepts with an objection (a "reparo") is
@@ -437,6 +439,91 @@ totals, because a 43 has no `MontoNF`.
 The same sums apply to the commission lines of a purchase invoice (46) and of the notes that correct one. The printed
 sample prints the commissions and takes them off in its totals. The certification runner issues the settlement set:
 see [The settlement set](#the-settlement-set).
+
+### Export documents
+
+An export invoice (110), and the export debit (111) and credit (112) notes that correct one, have a root of their own,
+`Exportaciones`. Their receiver is abroad, under the generic RUT 55555555-5 (`FOREIGN_RECEIVER_RUT`, Formato DTE 2.5,
+field 50), their amounts are in a foreign currency with decimals and exempt as a whole, and the customs area goes in
+`transport.customs`:
+
+```typescript
+import { createDocument, FOREIGN_RECEIVER_RUT } from 'dte-sdk'
+
+const exportInvoice = createDocument({
+  type: 110,
+  folio: 1,
+  issuer,
+  receiver: {
+    rut: FOREIGN_RECEIVER_RUT,
+    businessName: 'Andes Trading LLC',
+    address: '1200 Harbor Blvd', // DirRecep: the address abroad
+    city: 'Miami', // CiudadRecep: asked for on a 110; no commune is
+    foreign: { id: '59-1234567', nationality: '225' }, // Extranjero: NumId, Nacionalidad
+  },
+  currency: 'DOLAR USA', // TpoMoneda, one of CURRENCIES
+  exchangeRate: 950.25, // TpoCambio: writes the totals in pesos, OtraMoneda
+  items: [{ name: 'Uva de mesa', quantity: 800, unit: 'KN', unitPrice: 12.25 }],
+  transport: {
+    customs: {
+      saleModality: 1, // CodModVenta
+      saleClause: 2, // CodClauVenta
+      saleClauseTotal: 9800, // TotClauVenta
+      transportRoute: 1, // CodViaTransp
+      loadingPort: 906, // CodPtoEmbarque
+      unloadingPort: 211, // CodPtoDesemb
+      grossWeight: 8450.75, // PesoBruto, with its unit
+      grossWeightUnit: 6, // CodUnidPesoBruto
+      totalPackages: 800, // TotBultos
+      packages: [{ code: 13, count: 800, marks: 'ANDES MIAMI 1-800' }], // TipoBultos
+      freight: 150.25, // MntFlete: informative, not added to the total
+      receiverCountry: 225, // CodPaisRecep
+      destinationCountry: 225, // CodPaisDestin
+    },
+  },
+  globalAdjustments: [
+    { kind: 'surcharge', valueType: 'amount', value: 150.25, description: 'Flete', exemptIndicator: 1 },
+  ],
+})
+
+exportInvoice.header.totals // { exemptAmount: 9950.25, totalAmount: 9950.25 }
+exportInvoice.header.otherCurrency
+// { currency: 'PESO CL', exchangeRate: 950.25, exemptAmount: 9455225, totalAmount: 9455225 }
+```
+
+- **The amounts.** A line is its quantity by its price rounded to the four decimals of `MontoItem`, less its discount
+  and plus its surcharge, each its percent of that base rounded to a whole number, the only amount `DescuentoMonto` and
+  `RecargoMonto` admit (`calculateExportLineAmount`). The totals are the exempt amount, the sum of the lines with no
+  exemption indicator or with 1 and the global adjustments, and the total, the same amount, or zero on an export
+  without payment (`exportPaymentTerms: '21'`, Formato DTE 2.5, field 124) (`calculateExportTotals`, which
+  `calculateTotals` calls for these types). Each is worked out exactly, over the decimal digits as written, and rounded
+  half away from zero. With `exchangeRate`, `OtraMoneda` carries the exempt amount and the total in Chilean pesos, as
+  field 129 asks: each the amount by the rate, rounded half away from zero to a whole peso (`convertToPesos`). The
+  stamp carries the total as the document writes it, decimals and all.
+- **What it refuses.** What `Exportaciones` does not declare: `pricesIncludeVat`, `withholdVat`, `commissions`, the
+  options `noDebitReduction`, `transferType`, `printFormat`, `grossAmounts`, `purchaseTransactionType`,
+  `saleTransactionType` and `netAmountsIndicator`, every total but `exemptAmount` and `totalAmount`, the transport's
+  trailer plate, departure and arrival, and a line's `withholdingAgent`, `additionalTaxCodes` and `settledDocumentType`;
+  a `serviceIndicator` other than 3 to 6 (`EXPORT_SERVICE_INDICATORS`); an `exportPaymentTerms` that is not a code of one
+  or two digits; a `currency` outside the schema's list; a receiver whose RUT is not 55555555-5; a global adjustment
+  without `exemptIndicator: 1`, since an export has no other amount to apply it to; and more than ten package types.
+  Each throws `INVALID_OPTION` with the field in `details.field`; a code of the customs area with more digits than the
+  schema admits, too. An amount past the schema's digits, below zero, or above zero where the schema asks it (freight,
+  insurance, the exchange rate, the clause total) is `INVALID_AMOUNT`.
+- **What it requires.** `currency` (`MISSING_FIELD`), and the total of packages when the package types are given. On
+  an export invoice (110), what Formato DTE 2.5 asks: the receiver's city (field 62) and country (field 104), each
+  weight's unit (fields 89, 91 and 93), and, unless the service indicator excuses them, the sale modality, clause and
+  clause total (3, 4 or 5 excuse them, fields 74 to 76), the transport route (4 excuses it, field 77) and each line's
+  quantity and unit (3, 4 or 5, fields 15 and 21 of the detail). A payment terms code needs its description (field 28).
+- **What the other types refuse.** `currency`, `exchangeRate`, `receiver.foreign`, `transport.customs`, the issuer's
+  `additionalBranchCode` and `additionalId` and a reference's `otherAdditionalId`, which only `Exportaciones` declares
+  or which dte-sdk writes only there, and the service indicators 5 and 6.
+- **Not checked yet.** The codes of the customs service's tables (countries, ports, sale modalities and clauses,
+  transport routes, units, package types, payment forms) are written as given; whether a package is a container, and
+  so carries its id, seal and seal issuer; the cancellation date of an export paid in advance; that a note references
+  the export invoice it corrects; and the value of a global adjustment in another currency (`ValorDROtrMnda`). The
+  printed sample does not print an export document's customs area or currency yet, and the certification runner has
+  no export sets.
 
 ### Receipts
 
@@ -658,12 +745,13 @@ const toAnswer = documents.filter((doc) => doc.status === 'valid' && isClaimDocu
 checked three ways, and its `status` is `invalid` when a check fails, `unchecked` when none fails but the CAF's `IDK`
 has no known key, and `valid` otherwise:
 
-- **`signature`**: its XMLDSig signature over `Documento` (or `Liquidacion`), with `found`, `digestValid` and
+- **`signature`**: its XMLDSig signature over `Documento` (or `Liquidacion`, or `Exportaciones`), with `found`, `digestValid` and
   `signatureValid`. It proves the document is intact with respect to the certificate it carries, not whose that
   certificate is.
 - **`ted`**: the stamp. Its `FRMT` must verify with the key of the CAF the TED carries, over the `DD` as ISO-8859-1
   bytes, and its `DD` must agree with the header: `mismatches` names what differs among the issuer, the type, the folio,
-  the date, the receiver and the total. `RSR` and `IT1` are free text each issuer folds its own way, and are not compared.
+  the date, the receiver and the total, which on an export document is compared by value with its decimals. `RSR` and
+  `IT1` are free text each issuer folds its own way, and are not compared.
 - **`caf`**: the CAF in the stamp, against the document (`mismatches`: another issuer, another type, a folio outside its
   range) and against the SII: `siiSignature` checks its `FRMA`, the SII's signature over `DA`, with the SII key its
   `IDK` names.
@@ -1606,6 +1694,8 @@ tables of Formato DTE 2.5 and of the receipts' format:
 | `RECEIPT_PAYMENT_MEDIA` | `MedioPago` of a receipt | `'1'` to `'5'` | Formato Boletas Electrónicas 4.2, page 9 |
 | `REFERENCE_DOCUMENT_TYPES` | `TpoDocRef` | 42 numeric codes a reference can name, with their names | Formato DTE 2.5, pages 45 and 3 |
 | `RECEIPT_REFERENCE_DOCUMENT_TYPES` | `TpoDocRef` of a receipt | the 11 codes a receipt's reference can name | Formato Boletas Electrónicas 4.2, page 18 |
+| `CURRENCIES` | `TpoMoneda` | the 40 currencies an export document can be in, `PESO CL` among them | `TipMonType` of `SiiTypes_v10.xsd` |
+| `EXPORT_SERVICE_INDICATORS` | `IndServicio` of an export document | 3 to 6 | Formato DTE 2.5, page 13 |
 
 ```typescript
 import { ADDITIONAL_TAXES, isAdditionalTaxCode, isReferenceDocumentType } from 'dte-sdk'

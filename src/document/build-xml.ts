@@ -1,4 +1,4 @@
-import type { DocumentType } from '../catalogs/document-types'
+import { isExport, type DocumentType } from '../catalogs/document-types'
 import { toSiiDocument } from '../model/codec'
 import type { Document } from '../model/document'
 import type { Ted } from '../ted/build'
@@ -14,11 +14,13 @@ const TED_PLACEHOLDER = '__DTE_SDK_TED__'
 const LINE_BREAK_AFTER = /<\/(Encabezado|Detalle|SubTotInfo|DscRcgGlobal|Referencia|Comisiones|TED)><(?=[A-Za-z])/g
 
 /**
- * EN: Name of the signed element: `Liquidacion` for settlement invoices (43), `Documento` otherwise.
- * ES: Nombre del elemento firmado: `Liquidacion` para liquidación factura (43), `Documento` para el resto.
+ * EN: Name of the signed element: `Liquidacion` for settlement invoices (43), `Exportaciones` for export documents
+ * (110, 111, 112), `Documento` otherwise.
+ * ES: Nombre del elemento firmado: `Liquidacion` para liquidación factura (43), `Exportaciones` para documentos de
+ * exportación (110, 111, 112), `Documento` para el resto.
  */
-export const documentElementName = (type: DocumentType): 'Documento' | 'Liquidacion' =>
-  type === 43 ? 'Liquidacion' : 'Documento'
+export const documentElementName = (type: DocumentType): 'Documento' | 'Liquidacion' | 'Exportaciones' =>
+  type === 43 ? 'Liquidacion' : isExport(type) ? 'Exportaciones' : 'Documento'
 
 /**
  * EN: Options of `buildDocumentXml`.

@@ -9,16 +9,16 @@ on 2026-11-14 to ship inside the package with their validator as an optional pee
 
 | Entry | Holds | Size | Reaches `node:` |
 |---|---|---|---|
-| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, the assignment of invoices, SII web services client over `fetch`, public registry of issuers | 43.06 kB | Not by import: it asks the runtime for `node:crypto` at the first signature |
+| `dte-sdk` | Documents (export documents included), stamps, signatures, envelopes, books, verification of received documents, the assignment of invoices, SII web services client over `fetch`, public registry of issuers | 46.24 kB | Not by import: it asks the runtime for `node:crypto` at the first signature |
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.4 kB | Yes, on first use |
-| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 82.11 kB | Yes, on first use |
-| `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 19.59 kB | Yes, on first use |
+| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 84.82 kB | Yes, on first use |
+| `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 19.68 kB | Yes, on first use |
 | `dte-sdk/catalogs` | The SII's large code tables: the business activities | 10.65 kB | No |
 | `dte-sdk/schemas` | The SII's schemas as text and the validation of a document against them; `xmllint-wasm` is an optional peer | 24.64 kB | No |
 
 Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
 it. The decision was taken at phase 5b-2, which took `dte-sdk/portal` from 39.35 kB to 55.86 kB; each limit was then the
-measure rounded up to the next 2 kB. The sizes above were measured again on 2026-11-19, with the assignment of invoices. `createDirectoryTokenCache` took
+measure rounded up to the next 2 kB. The sizes above were measured again on 2026-11-20, with the export documents. `createDirectoryTokenCache` took
 `dte-sdk/node` from 4.19 kB to 4.71 kB, and the CAF file search, which parses CAFs, took it to 6.30 kB, over its 6 kB
 limit, which went to 8 kB. The SII office table took `dte-sdk/pdf` from 8.49 kB to 10.45 kB. That table is about 1.9 kB
 of data that the renderer needs for its default office, so it fits neither the root (30.49 kB plus the table is
@@ -132,6 +132,14 @@ client, the upload kind and the new error code took `dte-sdk/node` from 7.38 kB 
 82.01 kB to 82.11 kB and `dte-sdk/pdf` from 19.58 kB to 19.59 kB, all under their limits; `dte-sdk/catalogs` did not
 move. The assignment stays in the root, beside the answers to a received envelope it resembles: it builds on the
 document's signature and the upload of the web services client, which the root already carries.
+The export documents (110, 111, 112), also after 0.14.0, measured before and after on the same machine: their root of
+its own in the codec, what `createDocument` refuses and requires on one, the customs area, the currencies of the
+schema and the exact arithmetic of their amounts and of their totals in pesos took `dte-sdk` from 43.06 kB to
+46.24 kB, over its 44 kB limit, which went to 48 kB, and `dte-sdk/portal`, whose certification runner builds documents
+with the same code, from 82.11 kB to 84.82 kB, over its 84 kB limit, which went to 86 kB; their names took
+`dte-sdk/pdf` from 19.59 kB to 19.68 kB, under its limit; `dte-sdk/node`, `dte-sdk/catalogs` and `dte-sdk/schemas` did
+not move. They stay in the root with the other document types: they are issued, stamped, signed and sent through the
+same functions.
 
 ## Why
 
