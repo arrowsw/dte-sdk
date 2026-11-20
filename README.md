@@ -160,7 +160,8 @@ Planned, with no date:
 - **A lock for the directory folio registry that holds across processes.** Today it is for a single process.
 
 Out of scope: forms F29 and F22, which are tax returns and not electronic documents, and may be offered later as a
-separate tool; fee receipts (boletas de honorarios); and the exchange e-mail.
+separate tool; fee receipts (boletas de honorarios); the exchange e-mail; and issuing through the SII's free invoicing
+system, which is for a company that issues without software of its own.
 
 ## Installation
 
@@ -526,9 +527,9 @@ exportInvoice.header.otherCurrency
 - **Not checked yet.** The codes of the customs service's tables (countries, ports, sale modalities and clauses,
   transport routes, units, package types, payment forms) are written as given; whether a package is a container, and
   so carries its id, seal and seal issuer; the cancellation date of an export paid in advance; that a note references
-  the export invoice it corrects; and the value of a global adjustment in another currency (`ValorDROtrMnda`). The
-  printed sample does not print an export document's customs area or currency yet, and the certification runner has
-  no export sets.
+  the export invoice it corrects; and the value of a global adjustment in another currency (`ValorDROtrMnda`). An
+  export document is not printed yet (`renderPrintedSample` refuses it with `INVALID_DOCUMENT_TYPE`), and the
+  certification runner has no export sets.
 
 ### Receipts
 
