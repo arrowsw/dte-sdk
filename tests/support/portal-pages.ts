@@ -21,6 +21,28 @@ export const companyResolutionPage = (date = '21-09-2026', number = '80'): strin
 <tr><td>Fecha Autorizaci&oacute;n</td><td>&nbsp;01-10-2026</td>
 </table>`)
 
+export const REGISTRY_FORM = page(
+  `<FORM action="/cvc_cgi/dte/ce_consulta_e" method=post><input type=text name=RUT_EMP><input type=text name=DV_EMP><input type=submit name=ACEPTAR value=Consultar></FORM>`,
+)
+
+// Written by hand on the markup of the public registry, with the row the registry adds for a session: the mailbox of
+// the exchange. Company, RUT, address and dates are made up.
+export const registryPage = (mailbox = '<td>Mail de contacto</td><td>&nbsp; dte@andina.example</td>'): string =>
+  page(`<table border="1">
+<tr><td>&nbsp; Rut</td><td>&nbsp; 10000004-0</td></tr>
+<tr><td>&nbsp; Raz&oacute;n Social/Nombres</td><td>&nbsp; COMERCIAL ANDINA SPA</td></tr>
+<tr><td>&nbsp; N° Resoluci&oacute;n</td><td>&nbsp; 80</td></tr>
+<tr><td>&nbsp; Fecha Resoluci&oacute;n</td><td>&nbsp; 21-09-2026</td></tr>
+<tr>${mailbox}</tr>
+</table>
+<table border="1">
+<tr><td>C&oacute;digo</td><td>Descripci&oacute;n</td><td>Autorizado</td><td>Desautorizado</td></tr>
+<tr><td>33</td><td>FACTURA ELECTRONICA</td><td>01-10-2026</td><td>&nbsp;</td></tr>
+<tr><td>52</td><td>GUIA DE DESPACHO ELECTRONICA</td><td>01-10-2026</td><td>15-10-2026</td></tr>
+</table>`)
+
+export const UNLISTED_ISSUER = page('<p>El RUT ingresado no corresponde a una empresa autorizada</p>')
+
 export const NOT_AUTHORIZED_COMPANY = page(
   '<p>el Contribuyente no est&aacute; autorizado para operar en esta modalidad</p>',
 )

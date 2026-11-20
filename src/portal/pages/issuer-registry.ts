@@ -82,6 +82,23 @@ export const parseIssuerRegistry = (html: string): IssuerRegistryEntry => {
   }
 }
 
+const EXCHANGE_LABEL = /mail|correo/i
+const EMAIL = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/
+
+/**
+ * EN: The exchange mailbox of an answer of `ce_consulta_e`, the page of the registry a session reads: the value beside
+ * the label that names a mail, when it is an address. An issuer may have registered none, and then it is null.
+ * ES: La casilla de intercambio de una respuesta de `ce_consulta_e`, la página del registro que lee una sesión: el
+ * valor junto a la etiqueta que nombra un correo, cuando es una dirección. Un emisor puede no haber registrado ninguna,
+ * y entonces es null.
+ */
+export const parseExchangeEmail = (html: string): string | null => {
+  const cells = cellsOf(html)
+  const index = cells.findIndex((cell) => EXCHANGE_LABEL.test(cell) && !EMAIL.test(cell))
+  const value = index < 0 ? '' : (cells[index + 1] ?? '').trim()
+  return EMAIL.test(value) ? value : null
+}
+
 /**
  * EN: The registry answers a RUT that is not an authorized issuer with a sentence, on HTTP 200.
  * ES: El registro responde a un RUT que no es emisor autorizado con una frase, en HTTP 200.

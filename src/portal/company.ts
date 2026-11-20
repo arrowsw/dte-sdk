@@ -1,7 +1,7 @@
 import type { Environment } from '../catalogs/codes'
 import { cgiUrl } from '../catalogs/portal'
 import { DteError, errorMessage } from '../errors'
-import type { SiiRut } from '../model/rut'
+import { toSiiRut, type SiiRut } from '../model/rut'
 import type { CallOverrides } from '../sii/client'
 import { resolvePortalCompany, type PortalClient } from './client'
 import { sessionRut } from './cookies'
@@ -13,6 +13,12 @@ import {
   type CompanyResolution,
   type TaxpayerData,
 } from './pages/company'
+import {
+  isUnlistedIssuer,
+  parseExchangeEmail,
+  parseIssuerRegistry,
+  type IssuerRegistryEntry,
+} from './pages/issuer-registry'
 import {
   companyFields,
   ensurePage,
@@ -52,6 +58,38 @@ export type IssuerProfile = {
 const RESOLUTION_ENTRY = 'ad_empresa1'
 const RESOLUTION_PAGE = 'ad_empresa2'
 const TAXPAYER_PAGE = 'ce_consulta_muestra_e'
+const REGISTRY_ENTRY = 'ce_consulta_rut'
+const REGISTRY_PAGE = 'ce_consulta_e'
+
+/**
+ * EN: An authorized issuer as the registry answers a session, with the mailbox it registered for the exchange.
+ * ES: Un emisor autorizado tal como el registro lo responde a una sesión, con la casilla que registró para el
+ * intercambio.
+ */
+export type ExchangeMailbox = IssuerRegistryEntry & {
+  /** EN: The RUT asked for. ES: `RUT_EMP` + `DV_EMP` — El RUT consultado. */
+  readonly rut: SiiRut
+  /** EN: Mailbox the issuer registered to exchange documents with other taxpayers, or null when it registered none. ES: `Mail de contacto` — Casilla que el emisor registró para intercambiar documentos con otros contribuyentes, o null si no registró ninguna. */
+  readonly exchangeEmail: string | null
+}
+
+const readExchangeMailbox = async (
+  context: PortalContext,
+  rut: SiiRut,
+  environment: Environment,
+): Promise<ExchangeMailbox> => {
+  const entry = await ensurePage(context, REGISTRY_ENTRY, cgiUrl(environment, REGISTRY_ENTRY))
+  const page = await submitForm(context, REGISTRY_PAGE, cgiUrl(environment, REGISTRY_PAGE), entry.url, {
+    ...companyFields(rut),
+    ACEPTAR: 'Consultar',
+  })
+  if (isUnlistedIssuer(page.html))
+    throw rejected(context, 'companyNotAuthorized', { portalMessage: portalMessageOf(page.html) })
+  const listed = parseIssuerRegistry(page.html)
+  if (listed.businessName === null && listed.documents.length === 0)
+    throw unexpectedPage(context, REGISTRY_PAGE, page.html)
+  return { rut, ...listed, exchangeEmail: parseExchangeEmail(page.html) }
+}
 
 const readResolution = async (
   context: PortalContext,
@@ -102,6 +140,39 @@ export const fetchCompanyResolution = (
   withPortalSession(portal, 'fetchCompanyResolution', overrides, (context) => {
     const rut = resolvePortalCompany(portal, input.companyRut)
     return withFreshSessionRetry(context, () => readResolution(context, rut, input.environment ?? portal.environment))
+  })
+
+/**
+ * EN: **Unstable**: its shape may change in any version, a patch included. The page it reads has not been read by this
+ * library against the SII yet; once it has, in both environments, it becomes `fetchExchangeMailbox`.
+ *
+ * The mailbox an authorized issuer registered for the exchange of documents, which is where the answers to a received
+ * document go (the reception answer, the commercial result and the receipt of goods). The message a document arrives
+ * in does not name it: its sender is whatever system delivered it. The public registry does not show it either, so
+ * this asks the registry with a session, in the client's environment, along with the issuer's name, resolution and
+ * authorized document types. It changes nothing in the SII.
+ * ES: **Inestable**: su forma puede cambiar en cualquier versión, incluso un patch. La página que lee aún no la ha leído
+ * esta librería contra el SII; cuando lo haya hecho, en ambos ambientes, pasa a llamarse `fetchExchangeMailbox`.
+ *
+ * La casilla que un emisor autorizado registró para el intercambio de documentos, que es adonde van las respuestas a un
+ * documento recibido (la respuesta de recepción, el resultado comercial y el recibo de mercaderías). El mensaje en que
+ * llega un documento no la nombra: su remitente es el sistema que lo entregó. El registro público tampoco la muestra,
+ * así que esta función consulta el registro con una sesión, en el ambiente del cliente, junto con el nombre, la
+ * resolución y los tipos de documento autorizados del emisor. No cambia nada en el SII.
+ * @param portal EN: the client. ES: el cliente.
+ * @param input EN: the RUT of the issuer to look up. ES: el RUT del emisor por consultar.
+ * @param overrides EN: per-call overrides. ES: ajustes de la llamada.
+ * @returns EN: the registry entry with the mailbox. ES: la entrada del registro con la casilla.
+ * @throws {DteError} EN: `INVALID_RUT`; `SII_PORTAL_REJECTED { rejection: 'companyNotAuthorized' }` when the SII says the RUT is not an authorized issuer; `SII_PORTAL_UNEXPECTED_PAGE` when the answer has neither a name nor document types; session and transport codes. ES: `INVALID_RUT`; `SII_PORTAL_REJECTED { rejection: 'companyNotAuthorized' }` si el SII dice que el RUT no es emisor autorizado; `SII_PORTAL_UNEXPECTED_PAGE` si la respuesta no trae nombre ni tipos de documento; códigos de sesión y de transporte.
+ */
+export const unstable_fetchExchangeMailbox = (
+  portal: PortalClient,
+  input: { readonly rut: string },
+  overrides?: CallOverrides,
+): Promise<ExchangeMailbox> =>
+  withPortalSession(portal, 'fetchExchangeMailbox', overrides, (context) => {
+    const rut = toSiiRut(input.rut, 'rut')
+    return withFreshSessionRetry(context, () => readExchangeMailbox(context, rut, portal.environment))
   })
 
 /**

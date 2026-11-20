@@ -120,7 +120,18 @@ guarded('differential of the books against the external harness', () => {
           otherTaxes: [{ code: 28, rate: 1.5, amount: 1500 }],
         },
         { ...line, type: 34, folio: 205, exemptAmount: 9000 },
-        { ...line, type: 46, folio: 6, netAmount: 20000, vatAmount: 3800, taxRate: 19, totalVatWithheld: 3800 },
+        // The total is given: on a purchase line dte-sdk takes the withheld VAT off under its code in `OtrosImp`, as
+        // the format has it, and this line carries it in the field of the sales detail.
+        {
+          ...line,
+          type: 46,
+          folio: 6,
+          netAmount: 20000,
+          vatAmount: 3800,
+          taxRate: 19,
+          totalVatWithheld: 3800,
+          totalAmount: 20000,
+        },
       ],
     })
     const theirs = callHarness({

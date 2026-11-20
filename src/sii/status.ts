@@ -7,6 +7,7 @@ import {
   documentStatusMessage,
   isTokenErrorStatus,
   uploadStatusMessage,
+  uploadVerdict,
   type DocumentStatusClass,
   type UploadStatusClass,
 } from '../catalogs/upload-status'
@@ -42,6 +43,15 @@ export type UploadStatusCounts = {
   readonly rejected: number
   /** EN: Documents accepted with objections. ES: `REPAROS` / `reparos` — Documentos aceptados con reparos. */
   readonly objections: number
+}
+
+/**
+ * EN: Document counts of one document type of an envelope.
+ * ES: Cantidades de documentos de un tipo de documento de un envío.
+ */
+export type UploadStatusTypeCounts = UploadStatusCounts & {
+  /** EN: Document type the counts are of; empty when the SII names none. ES: `TIPO_DOCTO` / `tipo` — Tipo de documento de las cantidades; vacío si el SII no lo nombra. */
+  readonly documentType: string
 }
 
 /**
@@ -87,7 +97,12 @@ export type UploadStatusDocument = {
 export type UploadStatus = {
   /** EN: SII status code. ES: `ESTADO` / `estado` — Código de estado del envío. */
   readonly code: string
-  /** EN: Outcome class of the code on this channel. ES: Clase de resultado del código en este canal. */
+  /**
+   * EN: Verdict of the upload: the class of the code on this channel, lowered by the counts when the SII processed the
+   * envelope and rejected or objected documents inside it (`uploadVerdict`). `EPR` alone is not an acceptance.
+   * ES: Veredicto del envío: la clase del código en este canal, rebajada por las cantidades cuando el SII procesó el
+   * sobre y rechazó o reparó documentos que trae (`uploadVerdict`). `EPR` por sí solo no es una aceptación.
+   */
   readonly status: UploadStatusClass
   /** EN: Spanish gloss from the SII, else from the catalog. ES: `GLOSA` — Glosa del SII, si no la del catálogo. */
   readonly message: string
@@ -95,9 +110,11 @@ export type UploadStatus = {
   readonly trackId: string
   /** EN: Channel the answer came from. ES: Canal por el que respondió el SII. */
   readonly channel: TokenChannel
-  /** EN: Counts when the SII reports them. ES: `INFORMADOS` … `REPAROS` — Cantidades cuando el SII las informa. */
+  /** EN: Counts when the SII reports them, added up over every document type of the envelope. ES: `INFORMADOS` … `REPAROS` — Cantidades cuando el SII las informa, sumadas sobre todos los tipos de documento del envío. */
   readonly counts: UploadStatusCounts | null
-  /** EN: Document type the counts refer to (SOAP). ES: `TIPO_DOCTO` — Tipo de documento al que se refieren las cantidades (SOAP). */
+  /** EN: The counts of each document type, in the order of the answer; empty when the SII reports none. ES: Las cantidades de cada tipo de documento, en el orden de la respuesta; vacío si el SII no informa ninguna. */
+  readonly countsByType: readonly UploadStatusTypeCounts[]
+  /** EN: First document type the SII reports counts for (SOAP). ES: `TIPO_DOCTO` — Primer tipo de documento del que el SII informa cantidades (SOAP). */
   readonly documentType: string | null
   /** EN: Per-document detail (REST only). ES: `detalle_rep_rech` — Detalle por documento (solo REST). */
   readonly documents: readonly UploadStatusDocument[]
@@ -250,19 +267,60 @@ const toDocument = (value: unknown): UploadStatusDocument => {
   }
 }
 
-const sumCounts = (stats: readonly unknown[]): UploadStatusCounts =>
-  stats.reduce<UploadStatusCounts>(
-    (acc, value) => {
-      const entry = asRecord(value)
-      return {
-        reported: acc.reported + (num(entry.informados) ?? 0),
-        accepted: acc.accepted + (num(entry.aceptados) ?? 0),
-        rejected: acc.rejected + (num(entry.rechazados) ?? 0),
-        objections: acc.objections + (num(entry.reparos) ?? 0),
-      }
-    },
-    { reported: 0, accepted: 0, rejected: 0, objections: 0 },
-  )
+const restTypeCounts = (value: unknown): UploadStatusTypeCounts => {
+  const entry = asRecord(value)
+  return {
+    documentType: str(entry.tipo),
+    reported: num(entry.informados) ?? 0,
+    accepted: num(entry.aceptados) ?? 0,
+    rejected: num(entry.rechazados) ?? 0,
+    objections: num(entry.reparos) ?? 0,
+  }
+}
+
+// The counts of the whole envelope: null when the SII reported none, since no counts is not the same as zero rejected.
+const sumCounts = (byType: readonly UploadStatusTypeCounts[]): UploadStatusCounts | null =>
+  byType.length === 0
+    ? null
+    : byType.reduce<UploadStatusCounts>(
+        (acc, entry) => ({
+          reported: acc.reported + entry.reported,
+          accepted: acc.accepted + entry.accepted,
+          rejected: acc.rejected + entry.rejected,
+          objections: acc.objections + entry.objections,
+        }),
+        { reported: 0, accepted: 0, rejected: 0, objections: 0 },
+      )
+
+const TYPE_ANCHOR = /<TIPO_DOCTO>([^<]*)<\/TIPO_DOCTO>/gi
+
+// `QueryEstUp` answers one block of counts per document type of the envelope, each opened by its `TIPO_DOCTO`. A block
+// is read up to the next one, so the counts of two types never mix; without a type, the counts are of the answer as a
+// whole. A block that reports no `INFORMADOS` is not counts.
+const soapTypeCounts = (xml: string): readonly UploadStatusTypeCounts[] => {
+  const anchors = Array.from(xml.matchAll(TYPE_ANCHOR))
+  const blocks =
+    anchors.length === 0
+      ? [{ documentType: '', text: xml }]
+      : anchors.map((anchor, index) => ({
+          documentType: anchor[1].trim(),
+          text: xml.slice(anchor.index, anchors[index + 1]?.index ?? xml.length),
+        }))
+  return blocks.flatMap(({ documentType, text }) => {
+    const reported = numberOrNull(extractTagContent(text, 'INFORMADOS'))
+    return reported === null
+      ? []
+      : [
+          {
+            documentType,
+            reported,
+            accepted: numberOrNull(extractTagContent(text, 'ACEPTADOS')) ?? 0,
+            rejected: numberOrNull(extractTagContent(text, 'RECHAZADOS')) ?? 0,
+            objections: numberOrNull(extractTagContent(text, 'REPAROS')) ?? 0,
+          },
+        ]
+  })
+}
 
 // A token the SII refuses renews once in `withToken`; any other negative `ESTADO` is a transient failure of the query
 // service itself, which the retry policy repeats.
@@ -301,22 +359,16 @@ const soapUploadStatus = async (
   })
   const { code, message } = readSiiResponse(xml, 'queryUploadStatus')
   assertStatusCode(code, 'queryUploadStatus', xml)
-  const reported = numberOrNull(extractTagContent(xml, 'INFORMADOS'))
+  const countsByType = soapTypeCounts(xml)
+  const counts = sumCounts(countsByType)
   return {
     code,
-    status: classifyUploadStatus(code, 'soap'),
+    status: uploadVerdict(classifyUploadStatus(code, 'soap'), counts),
     message: gloss(message) ?? uploadStatusMessage(code, 'soap'),
     trackId,
     channel: 'soap',
-    counts:
-      reported === null
-        ? null
-        : {
-            reported,
-            accepted: numberOrNull(extractTagContent(xml, 'ACEPTADOS')) ?? 0,
-            rejected: numberOrNull(extractTagContent(xml, 'RECHAZADOS')) ?? 0,
-            objections: numberOrNull(extractTagContent(xml, 'REPAROS')) ?? 0,
-          },
+    counts,
+    countsByType,
     documentType: extractTagContent(xml, 'TIPO_DOCTO'),
     documents: [],
     raw: xml,
@@ -364,14 +416,16 @@ const restUploadStatus = async (
   const code = str(json.estado)
   if (code === '')
     throw new DteError('SII_RESPONSE_INVALID', { operation: 'queryUploadStatus', body: bodyExcerpt(text) })
-  const stats = asArray(json.estadistica)
+  const countsByType = asArray(json.estadistica).map(restTypeCounts)
+  const counts = sumCounts(countsByType)
   return {
     code,
-    status: classifyUploadStatus(code, 'rest'),
+    status: uploadVerdict(classifyUploadStatus(code, 'rest'), counts),
     message: uploadStatusMessage(code, 'rest'),
     trackId,
     channel: 'rest',
-    counts: stats.length === 0 ? null : sumCounts(stats),
+    counts,
+    countsByType,
     documentType: null,
     documents: asArray(json.detalle_rep_rech).map(toDocument),
     raw: text,
@@ -382,12 +436,18 @@ const restUploadStatus = async (
  * EN: Status of an upload by TrackID: `QueryEstUp` on the `soap` channel (default) or the receipts REST envelope
  * status on `rest`. Unlike an upload, a status query is safe to repeat, so it follows the normal retry policy: query
  * errors (`-1` … `-14`), transport failures and 5xx answers are retried. A token the SII refuses (`-3`, `-13`,
- * `001`–`003`, HTTP 401) renews the token once. The TrackID must be digits only.
+ * `001`–`003`, HTTP 401) renews the token once. The TrackID must be digits only. `status` is the verdict of the
+ * upload, not the class of its code alone: the SII answers `EPR` once it has processed the envelope, whatever it did
+ * with each document, so an `EPR` whose counts report rejected documents is `partiallyRejected` or `rejected`, and one
+ * with objections alone is `acceptedWithObjections`. `countsByType` has the counts of each document type.
  * ES: Estado de un envío por TrackID: `QueryEstUp` por el canal `soap` (por defecto) o el estado de envío REST de
  * boletas por `rest`. A diferencia de una subida, una consulta de estado se puede repetir sin riesgo, así que sigue la
  * política de reintentos normal: errores de consulta (`-1` … `-14`), fallas de transporte y respuestas 5xx se
  * reintentan. Un token que el SII rechaza (`-3`, `-13`, `001`–`003`, HTTP 401) renueva el token una vez. El TrackID
- * debe ser solo dígitos.
+ * debe ser solo dígitos. `status` es el veredicto del envío, no la clase de su código solo: el SII responde `EPR` en
+ * cuanto procesó el sobre, haya hecho lo que haya hecho con cada documento, así que un `EPR` cuyas cantidades informan
+ * documentos rechazados es `partiallyRejected` o `rejected`, y uno solo con reparos es `acceptedWithObjections`.
+ * `countsByType` trae las cantidades de cada tipo de documento.
  * @throws {DteError} EN: `SII_QUERY_ERROR { code }`, `SII_TOKEN_INVALID`, `SII_HTTP_ERROR`, `SII_RESPONSE_INVALID`, `SII_SOAP_FAULT`, `INVALID_OPTION { field: 'trackId' | 'channel' }`, `MISSING_FIELD`, `INVALID_RUT`, transport codes. ES: los mismos códigos.
  */
 export const queryUploadStatus = async (

@@ -73,13 +73,19 @@ export {
 export type { SoapEndpoints, RestEndpoints } from './catalogs/endpoints'
 export {
   classifyUploadStatus,
+  uploadVerdict,
   uploadStatusMessage,
   isRetryableStatus,
   classifyDocumentStatus,
   documentStatusMessage,
   isTokenErrorStatus,
 } from './catalogs/upload-status'
-export type { UploadStatusClass, UploadChannel, DocumentStatusClass } from './catalogs/upload-status'
+export type {
+  UploadStatusClass,
+  UploadVerdictCounts,
+  UploadChannel,
+  DocumentStatusClass,
+} from './catalogs/upload-status'
 export { RECEPTION_STATUS, classifyReceptionStatus, receptionStatusMessage } from './catalogs/reception-status'
 export type { ReceptionStatusClass } from './catalogs/reception-status'
 export {
@@ -104,6 +110,7 @@ export type {
   ItemCode,
   LineItem,
   LineItemInput,
+  WithholdingAgentLine,
   Withholding,
   CommissionTotals,
   Totals,
@@ -138,6 +145,7 @@ export type {
   SiiImptoReten,
   SiiComisionesTotales,
   SiiDetalle,
+  SiiRetenedor,
   SiiCdgItem,
   SiiSubTotInfo,
   SiiDscRcgGlobal,
@@ -214,8 +222,9 @@ export {
   rsaSha1VerifyBase64,
   rsaPublicKeyParts,
   rsaPublicKeyPartsFromCertificatePem,
+  rsaSigningEngine,
 } from './crypto/rsa'
-export type { RsaPublicKeyParts } from './crypto/rsa'
+export type { RsaPublicKeyParts, RsaSigningEngine } from './crypto/rsa'
 export { parseCertificatePem, certificateBase64 } from './crypto/x509'
 export type { ParsedCertificate } from './crypto/x509'
 
@@ -391,6 +400,7 @@ export { queryUploadStatus, waitForUploadStatus, queryDocumentStatus, folioRecei
 export type {
   UploadStatus,
   UploadStatusCounts,
+  UploadStatusTypeCounts,
   UploadStatusDocument,
   UploadStatusDocumentError,
   QueryUploadStatusInput,

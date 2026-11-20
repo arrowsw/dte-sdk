@@ -2,6 +2,7 @@ import { createGuideBook, signGuideBook, type SignedGuideBook } from '../books/g
 import { createPurchaseSalesBook, signPurchaseSalesBook, type SignedPurchaseSalesBook } from '../books/purchase-sales'
 import { accumulateBookTotals, sumBookEntries } from '../books/totals'
 import { CERTIFICATION_COUNTERPARTY } from '../catalogs/certification'
+import { WITHHOLDING_TAX_CODES } from '../catalogs/codes'
 import type { Certificate } from '../certificate/certificate'
 import { DteError } from '../errors'
 import type { BookEntryInput, BookTotals, GuideEntryInput, PurchaseSalesBook } from '../model/book'
@@ -188,8 +189,6 @@ export const createCertificationSalesBook = (
   return signPurchaseSalesBook(book, input.certificate)
 }
 
-// The retained VAT travels in `OtrosImp` as a fraction, as the field writes it, while every other rate is a percentage.
-const WITHHOLDING_RATE = 0.19
 const FREE_DELIVERY_CODE = 4 as const
 const EXEMPT_BOOK_NON_RECOVERABLE_CODE = 1 as const
 
@@ -248,8 +247,11 @@ const purchaseLine = (document: TestBookDocument, period: string, exemptBook: bo
     taxKind: commonUse ? ('vat' as const) : undefined,
     commonUseVat: commonUse ? vat : undefined,
     nonRecoverableVat: freeDelivery ? [{ code: FREE_DELIVERY_CODE, amount: vat }] : undefined,
-    otherTaxes: withheld ? [{ code: 15, rate: WITHHOLDING_RATE, amount: vat }] : undefined,
-    totalVatWithheld: withheld ? vat : undefined,
+    // A purchase invoice that withholds the whole VAT reports it in `OtrosImp`, with code 15 and the rate of the tax
+    // (the format, section 3.4, fields 21 to 23); `IVARetTotal` is a field of the sales detail.
+    otherTaxes: withheld
+      ? [{ code: WITHHOLDING_TAX_CODES.totalVatWithholding, rate: VAT_RATE, amount: vat }]
+      : undefined,
     ...reference,
   })
   let entry = line
@@ -336,13 +338,15 @@ const fieldSummary = (
 /**
  * EN: A purchase book of the certification from a purchase-book set: one line per supplier document with the SII's
  * placeholder counterparty, the VAT at 19 % of the affected amount, common-use VAT, non-recoverable VAT for free
- * deliveries, the withholding of a purchase invoice, the referenced folio of a note from its observation, and, for the
+ * deliveries, the whole VAT a purchase invoice withholds as another tax with code 15 and off its total, the referenced
+ * folio of a note from its observation, and, for the
  * exempt taxpayers' book, non-recoverable VAT on every affected line, the paper exempt invoice as type 32 and notes
  * inheriting the amounts of the document they reference. Totals follow the field formula. Book `MENSUAL`, submission
  * `TOTAL`, the proportionality factor of the set.
  * ES: Un libro de compras de la certificación desde un set de libro de compras: una línea por documento de proveedor
  * con la contraparte de relleno del SII, el IVA al 19 % del afecto, IVA de uso común, IVA no recuperable en entregas
- * gratuitas, la retención de una factura de compra, el folio referido de una nota tomado de su observación y, en el
+ * gratuitas, el IVA completo que retiene una factura de compra como otro impuesto con el código 15 y fuera de su total,
+ * el folio referido de una nota tomado de su observación y, en el
  * libro para exentos, IVA no recuperable en toda línea afecta, la factura exenta en papel como tipo 32 y notas que
  * heredan los montos del documento que refieren. Los totales siguen la fórmula del campo. Libro `MENSUAL`, envío `TOTAL`,
  * el factor de proporcionalidad del set.

@@ -1,4 +1,4 @@
-import { BinaryBitmap, HybridBinarizer, PDF417Reader, RGBLuminanceSource } from '@zxing/library'
+import { BinaryBitmap, HybridBinarizer, PDF417Reader, ResultMetadataType, RGBLuminanceSource } from '@zxing/library'
 import { PNG } from 'pngjs'
 
 export type Luminance = { readonly width: number; readonly height: number; readonly luminance: Uint8ClampedArray }
@@ -30,3 +30,12 @@ export const decodePdf417 = ({ width, height, luminance }: Luminance): string =>
     .getText()
 
 export const decodePdf417Png = (png: Uint8Array): string => decodePdf417(pngLuminance(png))
+
+/** The error correction level an independent reader finds in a PDF417 symbol. */
+export const pdf417ErrorCorrectionLevel = (png: Uint8Array): number => {
+  const { width, height, luminance } = pngLuminance(png)
+  const result = new PDF417Reader().decode(
+    new BinaryBitmap(new HybridBinarizer(new RGBLuminanceSource(luminance, width, height))),
+  )
+  return Number(result.getResultMetadata().get(ResultMetadataType.ERROR_CORRECTION_LEVEL))
+}

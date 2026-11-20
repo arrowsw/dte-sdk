@@ -230,6 +230,14 @@ const toSiiDetalle = (item: LineItem, receipt: boolean): SiiDetalle =>
         CdgItem: item.codes?.map((code) => ({ TpoCodigo: code.type, VlrCodigo: code.value })),
         TpoDocLiq: item.settledDocumentType,
         IndExe: item.exemptIndicator,
+        Retenedor:
+          item.withholdingAgent &&
+          compact({
+            IndAgente: 'R' as const,
+            MntBaseFaena: item.withholdingAgent.slaughterBase,
+            MntMargComer: item.withholdingAgent.marginBase,
+            PrcConsFinal: item.withholdingAgent.finalConsumerPrice,
+          }),
         NmbItem: item.name,
         DscItem: item.description,
         QtyRef: item.referenceQuantity,
@@ -463,6 +471,13 @@ const fromSiiDetalle = (detalle: SiiDetalle): LineItem =>
     codes: detalle.CdgItem?.map((code) => ({ type: code.TpoCodigo, value: code.VlrCodigo })),
     settledDocumentType: detalle.TpoDocLiq,
     exemptIndicator: detalle.IndExe as ExemptIndicator | undefined,
+    withholdingAgent:
+      detalle.Retenedor &&
+      compact({
+        slaughterBase: detalle.Retenedor.MntBaseFaena,
+        marginBase: detalle.Retenedor.MntMargComer,
+        finalConsumerPrice: detalle.Retenedor.PrcConsFinal,
+      }),
     name: detalle.NmbItem,
     description: detalle.DscItem,
     referenceQuantity: detalle.QtyRef,

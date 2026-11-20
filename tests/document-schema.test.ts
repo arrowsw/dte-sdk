@@ -201,6 +201,17 @@ const VARIANTS: Record<Exclude<DocumentType, 39 | 41>, Record<string, Variant>> 
       items: [{ name: 'Chatarra de fierro', quantity: 300, unitPrice: 1200, additionalTaxCodes: [15] }],
     },
     'without withholding': { items: [{ name: 'Chatarra de fierro', unitPrice: 1200 }], withholdVat: false },
+    'the lines of a withholding agent, marked alone and with the bases they declare': {
+      items: [
+        { name: 'Chatarra de fierro', quantity: 300, unitPrice: 1200, withholdingAgent: {} },
+        {
+          name: 'Carne en vara',
+          unitPrice: 5000,
+          exempt: true,
+          withholdingAgent: { slaughterBase: 4000, marginBase: 0, finalConsumerPrice: 6500 },
+        },
+      ],
+    },
     'a global discount and a reference': {
       items: [{ name: 'Chatarra de fierro', quantity: 10, unitPrice: 1000, additionalTaxCodes: [15] }],
       globalAdjustments: [{ kind: 'discount', valueType: 'amount', value: 100 }],
@@ -460,6 +471,15 @@ describe('what the schema refuses in a settlement invoice', () => {
     expect(errors).toEqual([
       expect.stringContaining(`Element '${ns('MntTotal')}': '-119000' is not a valid value`),
       expect.stringContaining(`Element '${ns('MNT')}': '-119000' is not a valid value`),
+    ])
+  })
+
+  test('Retenedor on its line fails it: only Documento declares it', async () => {
+    const settlement = issue({ ...base, type: 43, folio: 96, items: [settledLine] }).xml
+    expect(await validateAgainstXsd(settlement, 'DTE')).toEqual([])
+    const marked = settlement.replace('<NmbItem>', '<Retenedor><IndAgente>R</IndAgente></Retenedor><NmbItem>')
+    expect(await validateAgainstXsd(marked, 'DTE')).toEqual([
+      expect.stringContaining(`Element '${ns('Retenedor')}': This element is not expected.`),
     ])
   })
 

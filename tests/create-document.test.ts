@@ -486,6 +486,55 @@ describe('the lines of a document that withholds the whole VAT', () => {
   })
 })
 
+describe('the line of a withholding agent', () => {
+  const purchase = (items: DocumentInput['items'], type: DocumentInput['type'] = 46) =>
+    createDocument({ type, folio: 7, issueDate: '2026-11-15', issuer, receiver, items })
+
+  test('an empty mark writes the indicator alone, between the exemption and the name', () => {
+    const doc = purchase([{ name: 'Chatarra', quantity: 2, unitPrice: 1000, withholdingAgent: {} }])
+    expect(doc.items[0].withholdingAgent).toEqual({})
+    const line = toSiiDocument(doc).Detalle[0]
+    expect(line.Retenedor).toEqual({ IndAgente: 'R' })
+    expect(Object.keys(line).slice(0, 3)).toEqual(['NroLinDet', 'Retenedor', 'NmbItem'])
+    expect(fromSiiDocument(toSiiDocument(doc))).toEqual(doc)
+  })
+
+  test('the bases it declares travel with it, zero included, in the order of the schema', () => {
+    const withholdingAgent = { finalConsumerPrice: 2500, slaughterBase: 0, marginBase: 150 }
+    const doc = purchase(
+      [
+        { name: 'Flete', unitPrice: 500 },
+        { name: 'Carne', unitPrice: 1000, exempt: true, withholdingAgent },
+      ],
+      33,
+    )
+    expect(doc.items[1].withholdingAgent).toEqual({ slaughterBase: 0, marginBase: 150, finalConsumerPrice: 2500 })
+    const line = toSiiDocument(doc).Detalle[1]
+    expect(line.Retenedor).toEqual({ IndAgente: 'R', MntBaseFaena: 0, MntMargComer: 150, PrcConsFinal: 2500 })
+    expect(Object.keys(line.Retenedor!)).toEqual(['IndAgente', 'MntBaseFaena', 'MntMargComer', 'PrcConsFinal'])
+    expect(Object.keys(line).slice(0, 4)).toEqual(['NroLinDet', 'IndExe', 'Retenedor', 'NmbItem'])
+    expect(fromSiiDocument(toSiiDocument(doc))).toEqual(doc)
+  })
+
+  test('a line without the mark has no such element', () => {
+    const doc = purchase([{ name: 'Chatarra', unitPrice: 1000 }])
+    expect(doc.items[0]).not.toHaveProperty('withholdingAgent')
+    expect(toSiiDocument(doc).Detalle[0]).not.toHaveProperty('Retenedor')
+  })
+
+  test.each([
+    ['slaughterBase', -1],
+    ['marginBase', 10.5],
+    ['finalConsumerPrice', Number.NaN],
+  ])('%s is a whole amount from zero up', (field, value) => {
+    expectError(
+      () => purchase([{ name: 'Carne', unitPrice: 1000, withholdingAgent: { [field]: value } }]),
+      'INVALID_AMOUNT',
+      { field: `items[0].withholdingAgent.${field}` },
+    )
+  })
+})
+
 describe('the decimals of a line price', () => {
   const priced = (
     unitPriceDecimals: number | undefined,
@@ -879,6 +928,7 @@ describe('what the schema admits on a settlement invoice (43)', () => {
     ['items[0].discountPercent', { items: [{ ...line, discountPercent: 10 }] }],
     ['items[1].surchargePercent', { items: [line, { ...line, surchargePercent: 10 }] }],
     ['items[0].discountPercent', { items: [{ ...line, discountPercent: 0 }] }],
+    ['items[1].withholdingAgent', { items: [line, { ...line, withholdingAgent: {} }] }],
     [
       'references[1].otherRut',
       {
@@ -1008,6 +1058,7 @@ describe('what the schema admits on a receipt (39, 41)', () => {
     ['items[1].referenceUnit', { items: [coffee, { ...coffee, referenceUnit: 'KG' }] }],
     ['items[0].referencePrice', { items: [{ ...coffee, referencePrice: 0 }] }],
     ['items[0].additionalTaxCodes', { items: [{ ...coffee, additionalTaxCodes: [27] }] }],
+    ['items[0].withholdingAgent', { items: [{ ...coffee, withholdingAgent: {} }] }],
   ])('%s is refused: a receipt does not declare what it writes', (field, overrides) => {
     expectError(() => receipt(overrides), 'INVALID_OPTION', { field })
     expectError(() => receipt(overrides, 41), 'INVALID_OPTION', { field })
