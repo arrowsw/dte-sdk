@@ -463,6 +463,8 @@ describe('unstable_downloadRegisterFile', () => {
     const error = await failure(unstable_downloadRegisterFile(harness.portal, { period: '2026-10', operation: 'sale' }))
     expect(error.code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
     expect(error.details).toMatchObject({ step: 'getDetalleVentaExport' })
+    // What the SII answered travels in the error, for whoever has to work out what changed.
+    expect(String(error.details.body)).toContain('"detalles"')
   })
 
   test.each([

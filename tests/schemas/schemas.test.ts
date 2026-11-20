@@ -76,6 +76,33 @@ describe('schemaOf', () => {
     expect(schemaOf('no es xml')).toBeNull()
     expect(schemaOf('')).toBeNull()
   })
+
+  test('a receipt on its own has no schema: only its envelope declares its DTE', () => {
+    const document = (type: string): string =>
+      `<DTE version="1.0"><Documento ID="D"><Encabezado><IdDoc><TipoDTE>${type}</TipoDTE><Folio>1</Folio>`
+    // `DTE_v10.xsd` admits 33, 34, 46, 52, 56 and 61 under `Documento`, and would speak against a valid receipt.
+    expect(schemaOf(document('39'))).toBeNull()
+    expect(schemaOf(document(' 41\n'))).toBeNull()
+    expect(schemaOf(new TextEncoder().encode(document('39')))).toBeNull()
+    expect(schemaOf(document('33'))).toBe('DTE')
+    expect(schemaOf(`<EnvioBOLETA><SetDTE ID="S">${document('39')}`)).toBe('EnvioBOLETA')
+  })
+
+  test('the bytes of a file are read in ISO-8859-1 or in UTF-8, and any other charset is refused', () => {
+    const file = (encoding: string): Uint8Array =>
+      Buffer.from(`<?xml version="1.0" encoding="${encoding}"?>\n<EnvioDTE><!-- se\xf1al -->`, 'latin1')
+    expect(schemaOf(file('ISO-8859-1'))).toBe('EnvioDTE')
+    expect(schemaOf(file('iso-8859-1'))).toBe('EnvioDTE')
+    expect(schemaOf(Buffer.from('<?xml version="1.0" encoding="utf-8"?><EnvioDTE>'))).toBe('EnvioDTE')
+    // Read as either of the two, an accent of another charset would be another character.
+    for (const encoding of ['windows-1252', 'ISO-8859-15', 'latin1', 'UTF-16', '']) {
+      expect(() => schemaOf(file(encoding))).toThrow(
+        expect.objectContaining({ code: 'INVALID_OPTION', details: { field: 'encoding', encoding: encoding.toUpperCase() } }),
+      )
+    }
+    // A text is already decoded: what its declaration says does not matter.
+    expect(schemaOf('<?xml version="1.0" encoding="windows-1252"?><EnvioDTE>')).toBe('EnvioDTE')
+  })
 })
 
 describe('validateAgainstSchema', () => {
@@ -134,6 +161,8 @@ describe('validateAgainstSchema', () => {
     const load = jest.fn()
     for (const call of [
       validateAgainstSchema('<Cesion/>', { load }),
+      // A receipt outside its envelope: the schema of a `DTE` does not declare it.
+      validateAgainstSchema('<DTE version="1.0"><Documento ID="B"><Encabezado><IdDoc><TipoDTE>39</TipoDTE>', { load }),
       validateAgainstSchema(envelope, { schema: 'Cesion' as never, load }),
       validateAgainstSchema(envelope, { schema: 'toString' as never, load }),
     ]) {

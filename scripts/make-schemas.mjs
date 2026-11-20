@@ -1,7 +1,7 @@
 // Writes `src/schemas/sources.ts` from the SII's schema files in `tests/fixtures/xsd`, so the package carries them as
 // text and needs no file system to validate. The files are ISO-8859-1: each is decoded, its line ends are made `\n`,
 // and its declaration is made to say UTF-8, which is what the text is once it is a string. Run with `npm run schemas`
-// after a schema changes; `tests/schemas/sources.test.ts` fails when the two drift apart.
+// after a schema changes; `tests/schemas/schemas.test.ts` fails when the two drift apart.
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
