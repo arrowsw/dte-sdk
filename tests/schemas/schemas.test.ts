@@ -94,8 +94,13 @@ describe('schemaOf', () => {
     expect(schemaOf(file('ISO-8859-1'))).toBe('EnvioDTE')
     expect(schemaOf(file('iso-8859-1'))).toBe('EnvioDTE')
     expect(schemaOf(Buffer.from('<?xml version="1.0" encoding="utf-8"?><EnvioDTE>'))).toBe('EnvioDTE')
+    // The other names a declaration gives the same two charsets, and US-ASCII, which is part of both.
+    for (const encoding of ['ISO8859-1', 'ISO_8859-1', 'latin1', 'l1'])
+      expect(schemaOf(file(encoding))).toBe('EnvioDTE')
+    for (const encoding of ['UTF8', 'utf8', 'US-ASCII', 'ASCII'])
+      expect(schemaOf(Buffer.from(`<?xml version="1.0" encoding="${encoding}"?><EnvioDTE>`))).toBe('EnvioDTE')
     // Read as either of the two, an accent of another charset would be another character.
-    for (const encoding of ['windows-1252', 'ISO-8859-15', 'latin1', 'UTF-16', '']) {
+    for (const encoding of ['windows-1252', 'ISO-8859-15', 'UTF-16', '']) {
       expect(() => schemaOf(file(encoding))).toThrow(
         expect.objectContaining({
           code: 'INVALID_OPTION',

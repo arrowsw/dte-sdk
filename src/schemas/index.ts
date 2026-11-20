@@ -128,6 +128,10 @@ export const loadSchemaValidator = async (): Promise<SchemaValidatorModule> => {
 const DECLARATION = /^\s*<\?xml\b[^?]*\?>/
 const DECLARED_ENCODING = /\bencoding\s*=\s*(["'])([^"']*)\1/i
 
+// The names a declaration gives the two charsets read here, in capitals. US-ASCII is the part both have in common.
+const LATIN1_NAMES: readonly string[] = ['ISO-8859-1', 'ISO8859-1', 'ISO_8859-1', 'LATIN1', 'L1']
+const UTF8_NAMES: readonly string[] = ['UTF-8', 'UTF8', 'US-ASCII', 'ASCII']
+
 // The bytes of a file as text, in the charset its declaration names: ISO-8859-1, as every file the SII takes is, or
 // UTF-8, which is also what a file that names none is. The declaration is ASCII in both, so it reads the same before
 // the choice is made. Any other charset is refused: read as one of these two, its accents would come out as other
@@ -136,8 +140,8 @@ const textOf = (xml: string | Uint8Array): string => {
   if (typeof xml === 'string') return xml
   const head = decodeLatin1(xml.subarray(0, 200))
   const encoding = (DECLARED_ENCODING.exec(DECLARATION.exec(head)?.[0] ?? '')?.[2] ?? 'UTF-8').toUpperCase()
-  if (encoding === 'ISO-8859-1') return decodeLatin1(xml)
-  if (encoding === 'UTF-8') return new TextDecoder('utf-8').decode(xml)
+  if (LATIN1_NAMES.includes(encoding)) return decodeLatin1(xml)
+  if (UTF8_NAMES.includes(encoding)) return new TextDecoder('utf-8').decode(xml)
   throw new DteError('INVALID_OPTION', { field: 'encoding', encoding })
 }
 
