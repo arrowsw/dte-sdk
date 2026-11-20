@@ -571,6 +571,20 @@ describe('createReassignment', () => {
     expect(full).toMatchObject({ code: 'INVALID_OPTION', details: { field: 'SeqCesion' } })
   }, 300_000)
 
+  test('a later file is handed back only when every signature of it verifies, as the first is', () => {
+    // The ID the second file takes is the document's own: the first file has no such clash, and every signature of it
+    // verifies.
+    const clashing = resignedDocument(invoice.xml, (unsigned) =>
+      unsigned.replace(/<Documento ID="[^"]*"/, '<Documento ID="AEC_T33F7_2"'),
+    )
+    const previous = createAssignment(firstAssignment({ document: clashing }))
+    expect(verifyAssignment(previous).valid).toBe(true)
+    expect(caught(() => createReassignment(laterAssignment(previous, financier, secondFinancier)))).toMatchObject({
+      code: 'SIGNATURE_INVALID',
+      details: { field: 'DocumentoAEC' },
+    })
+  })
+
   test('refuses a previous file with a signature that does not verify, naming its zone', () => {
     const tampered = first.replace('<MontoCesion>254363</MontoCesion>', '<MontoCesion>1</MontoCesion>')
     expect(caught(() => createReassignment(laterAssignment(tampered, financier, secondFinancier)))).toMatchObject({
