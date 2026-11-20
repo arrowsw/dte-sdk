@@ -593,7 +593,7 @@ describe('what is refused before any request', () => {
     ['MISSING_FIELD', 'items.name', { ...INVOICE, items: [{ name: ' ', unitPrice: 10 }] }],
     ['MISSING_FIELD', 'items.description', { ...INVOICE, items: [{ name: 'X', unitPrice: 10, description: 7 }] }],
     ['MISSING_FIELD', 'receiver', { ...INVOICE, receiver: undefined }],
-    ['INVALID_RUT', 'receiver.rut', { ...INVOICE, receiver: { ...RECEIVER, rut: '12345678-0' } }],
+    ['INVALID_RUT', 'receiver.rut', { ...INVOICE, receiver: { ...RECEIVER, rut: '12345678-9' } }],
     ['MISSING_FIELD', 'receiver.businessName', { ...INVOICE, receiver: { ...RECEIVER, businessName: '' } }],
     ['MISSING_FIELD', 'receiver.city', { ...INVOICE, receiver: { ...RECEIVER, city: undefined } }],
     ['ENCODING_UNSUPPORTED_CHAR', 'receiver.address', { ...INVOICE, receiver: { ...RECEIVER, address: 'Calle – 5' } }],
