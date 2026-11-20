@@ -48,7 +48,10 @@
 <TotMntExe>0</TotMntExe>
 <TotMntNeto>20000</TotMntNeto>
 <TotMntIVA>3800</TotMntIVA>
-<TotIVARetTotal>3800</TotIVARetTotal>
+<TotOtrosImp>
+<CodImp>15</CodImp>
+<TotMntImp>3800</TotMntImp>
+</TotOtrosImp>
 <TotMntTotal>20000</TotMntTotal>
 </TotalesPeriodo>
 </ResumenPeriodo>
@@ -113,7 +116,11 @@
 <RznSoc>Hortalizas del Maule Ltda</RznSoc>
 <MntNeto>20000</MntNeto>
 <MntIVA>3800</MntIVA>
-<IVARetTotal>3800</IVARetTotal>
+<OtrosImp>
+<CodImp>15</CodImp>
+<TasaImp>19</TasaImp>
+<MntImp>3800</MntImp>
+</OtrosImp>
 <MntTotal>20000</MntTotal>
 </Detalle>
 <TmstFirma>2026-11-15T15:30:00</TmstFirma>

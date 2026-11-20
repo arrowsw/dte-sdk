@@ -1,11 +1,32 @@
 import {
   classifyUploadStatus,
   uploadStatusMessage,
+  uploadVerdict,
   classifyDocumentStatus,
   documentStatusMessage,
   isRetryableStatus,
   isTokenErrorStatus,
 } from '../src/catalogs/upload-status'
+
+describe('the verdict of an upload', () => {
+  const counts = (accepted: number, rejected: number, objections: number) => ({ accepted, rejected, objections })
+
+  test('counts only ever lower an acceptance', () => {
+    expect(uploadVerdict('accepted', counts(3, 0, 0))).toBe('accepted')
+    expect(uploadVerdict('accepted', counts(2, 0, 1))).toBe('acceptedWithObjections')
+    expect(uploadVerdict('accepted', counts(2, 1, 0))).toBe('partiallyRejected')
+    expect(uploadVerdict('accepted', counts(0, 1, 1))).toBe('partiallyRejected')
+    expect(uploadVerdict('accepted', counts(0, 3, 0))).toBe('rejected')
+    expect(uploadVerdict('acceptedWithObjections', counts(0, 0, 0))).toBe('acceptedWithObjections')
+    expect(uploadVerdict('acceptedWithObjections', counts(1, 2, 0))).toBe('partiallyRejected')
+  })
+
+  test('no counts, or a class that is not an acceptance, leaves the class of the code', () => {
+    expect(uploadVerdict('accepted', null)).toBe('accepted')
+    for (const cls of ['pending', 'rejected', 'queryError', 'unknown', 'partiallyRejected'] as const)
+      expect(uploadVerdict(cls, counts(5, 0, 0))).toBe(cls)
+  })
+})
 
 describe('upload status (QueryEstUp / REST)', () => {
   test.each([

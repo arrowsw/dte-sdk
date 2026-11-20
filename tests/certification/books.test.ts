@@ -139,8 +139,9 @@ describe('the purchase books', () => {
         taxRate: 19,
         netAmount: 9000,
         vatAmount: 1710,
-        otherTaxes: [{ code: 15, rate: 0.19, amount: 1710 }],
-        totalVatWithheld: 1710,
+        // The whole VAT withheld: under code 15 with the rate of the tax, and off the total. No `IVARetTotal`, which is
+        // a field of the sales detail.
+        otherTaxes: [{ code: 15, rate: 19, amount: 1710 }],
         totalAmount: 9000,
       },
       {
@@ -385,10 +386,8 @@ describe('the purchase books', () => {
       [46, undefined, 19, 0, 0, 0],
       [33, undefined, 0, 0, 0, 0],
     ])
-    expect(normalBook.entries[3]).toMatchObject({
-      otherTaxes: [{ code: 15, rate: 0.19, amount: 0 }],
-      totalVatWithheld: 0,
-    })
+    expect(normalBook.entries[3]).toMatchObject({ otherTaxes: [{ code: 15, rate: 19, amount: 0 }] })
+    expect(normalBook.entries[3].totalVatWithheld).toBeUndefined()
     expect(normalBook.entries[4]).toMatchObject({ nonRecoverableVat: [{ code: 4, amount: 0 }] })
     const unreferenced = createCertificationPurchaseBook(
       { kind: 'exemptPurchaseBook', attentionNumber: '1', documents: [documents[3]], proportionalityFactor: 0.6 },
@@ -710,7 +709,8 @@ describe('the purchase book summaries, as the field writes them', () => {
       { kind: 'purchaseBook', attentionNumber: '1', documents: flagged, proportionalityFactor: 0.6 },
       bookInput,
     )
-    expect(regular.entries[0]).toMatchObject({ totalVatWithheld: 190, totalAmount: 1000 })
+    expect(regular.entries[0]).toMatchObject({ otherTaxes: [{ code: 15, rate: 19, amount: 190 }], totalAmount: 1000 })
+    expect(regular.entries[0].totalVatWithheld).toBeUndefined()
     expect(regular.entries[1]).toMatchObject({ commonUseVat: 190, taxKind: 'vat' })
   })
 

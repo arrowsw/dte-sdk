@@ -1,10 +1,16 @@
 /**
- * EN: Outcome class of an envelope status code (`QueryEstUp` ESTADO or the receipts REST `estado`).
- * ES: Clase de resultado de un código de estado de envío: aceptado, aceptado con reparos, intermedio, rechazado, error de consulta o desconocido.
+ * EN: Outcome class of an upload: accepted, accepted with objections, partially rejected, pending, rejected, query
+ * error or unknown. `classifyUploadStatus` gives the class of a status code alone (`QueryEstUp` ESTADO or the receipts
+ * REST `estado`) and never answers `partiallyRejected`; `uploadVerdict` settles it with the document counts.
+ * ES: Clase de resultado de un envío: aceptado, aceptado con reparos, rechazado en parte, intermedio, rechazado, error
+ * de consulta o desconocido. `classifyUploadStatus` da la clase de un código de estado solo (`ESTADO` de `QueryEstUp` o
+ * `estado` del REST de boletas) y nunca responde `partiallyRejected`; `uploadVerdict` la zanja con las cantidades de
+ * documentos.
  */
 export type UploadStatusClass =
   | 'accepted'
   | 'acceptedWithObjections'
+  | 'partiallyRejected'
   | 'pending'
   | 'rejected'
   | 'queryError'
@@ -74,6 +80,42 @@ const lookup = (code: string, channel: UploadChannel): StatusEntry | undefined =
  */
 export const classifyUploadStatus = (code: string, channel: UploadChannel = 'soap'): UploadStatusClass =>
   lookup(code, channel)?.cls ?? 'unknown'
+
+/**
+ * EN: The document counts a verdict is settled with.
+ * ES: Las cantidades de documentos con que se zanja un veredicto.
+ */
+export type UploadVerdictCounts = {
+  /** EN: Documents accepted. ES: `ACEPTADOS` / `aceptados` — Documentos aceptados. */
+  readonly accepted: number
+  /** EN: Documents rejected. ES: `RECHAZADOS` / `rechazados` — Documentos rechazados. */
+  readonly rejected: number
+  /** EN: Documents accepted with objections. ES: `REPAROS` / `reparos` — Documentos aceptados con reparos. */
+  readonly objections: number
+}
+
+/**
+ * EN: The verdict of an upload: the class of its status code, settled with the counts of its documents. A code that
+ * says the envelope was processed (`EPR`) says nothing of the documents inside, which the SII accepts or rejects one by
+ * one, so the counts only ever lower an accepted class: with rejected documents it is `rejected` when none was accepted
+ * and `partiallyRejected` otherwise, and with objections and no rejection it is `acceptedWithObjections`. Without
+ * counts, or with a class that is not an acceptance, the class of the code stands: counts never raise a pending or a
+ * rejected envelope.
+ * ES: El veredicto de un envío: la clase de su código de estado, zanjada con las cantidades de sus documentos. Un
+ * código que dice que el sobre se procesó (`EPR`) no dice nada de los documentos que trae, que el SII acepta o rechaza
+ * uno por uno, así que las cantidades solo bajan una clase de aceptación: con documentos rechazados es `rejected` si
+ * ninguno se aceptó y `partiallyRejected` si alguno sí, y con reparos y sin rechazos es `acceptedWithObjections`. Sin
+ * cantidades, o con una clase que no es de aceptación, queda la clase del código: las cantidades nunca suben un envío
+ * pendiente o rechazado.
+ * @param cls EN: class of the status code, from `classifyUploadStatus`. ES: clase del código de estado, de `classifyUploadStatus`.
+ * @param counts EN: document counts, or null when the SII reported none. ES: cantidades de documentos, o null si el SII no las informó.
+ * @returns EN: the settled class. ES: la clase zanjada.
+ */
+export const uploadVerdict = (cls: UploadStatusClass, counts: UploadVerdictCounts | null): UploadStatusClass => {
+  if (counts === null || (cls !== 'accepted' && cls !== 'acceptedWithObjections')) return cls
+  if (counts.rejected > 0) return counts.accepted + counts.objections > 0 ? 'partiallyRejected' : 'rejected'
+  return counts.objections > 0 ? 'acceptedWithObjections' : cls
+}
 
 /**
  * EN: Spanish gloss of an envelope status code.

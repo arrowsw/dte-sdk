@@ -190,6 +190,14 @@ npm install pdf-lib bwip-js
 Jest in its default CommonJS mode cannot `require()` an ES module. Run it in ESM mode, or let it transform this package
 with `transformIgnorePatterns`.
 
+Signatures are RSA-SHA1 with PKCS#1 v1.5, which is deterministic: the same key and bytes give the same signature
+whoever works it out. On Node, Bun and Deno the runtime's own RSA signs, an order of magnitude faster than the
+JavaScript engine on a 2048-bit key, which is what an envelope of hundreds of receipts costs. The runtime is not taken
+at its word: the first signature of the process is worked out both ways and compared, the runtime signs the ones that
+follow only when they agree, and a key it refuses is signed by the JavaScript engine. In a browser the JavaScript
+engine signs, as before. `rsaSigningEngine()` says which one is in charge (`native`, `portable`, or null before the
+first signature).
+
 ## Quick start
 
 ```typescript
@@ -279,7 +287,11 @@ decimals, and a percentage, the value of a global adjustment and the rate of a c
 computed: `0.1 + 0.2` is written `0.3`, and every amount is the one of the numbers written. A number too large for its
 type is refused with `INVALID_AMOUNT`. A line with a price and no quantity is written with the quantity it is computed
 with, 1, and so is every line of a dispatch guide (52) that brings none. On a purchase invoice (46), or any document with `withholdVat: true`, each VAT-affected line carries
-additional tax code 15, the one the withholding is summed over, unless it brings codes of its own.
+additional tax code 15, the one the withholding is summed over, unless it brings codes of its own. A line's
+`withholdingAgent` writes `Retenedor`, the element of a transaction of a withholding agent: `{}` marks the line
+(`IndAgente` R), and `slaughterBase`, `marginBase` and `finalConsumerPrice` are the bases it may declare (`MntBaseFaena`,
+`MntMargComer`, `PrcConsFinal`). No type gets it by default, and a receipt and a settlement invoice refuse it, since
+their lines have no such element.
 
 ### What the SII would reject, caught before stamping
 
@@ -518,6 +530,12 @@ record is refused with `INVALID_OPTION` (`details.key` names the key) when one o
 mistyped key never drops its decision, and for an envelope where two documents share a type and a folio, a repeated
 document among them: decide those with the function, which receives each document's position.
 
+The answers go to the mailbox the issuer registered with the SII for the exchange, which is not the sender of the
+message a document arrived in. `unstable_fetchExchangeMailbox(portal, { rut })`, from `dte-sdk/portal`, asks the
+registry of authorized issuers for it with a portal session, and answers the issuer's name, resolution and document
+types with `exchangeEmail`, null when the issuer registered none. It is unstable: the page it reads has not been read
+against the SII by dte-sdk yet, so its shape may change in any version. Sending the e-mail stays with the application.
+
 ## Received documents
 
 ```typescript
@@ -592,12 +610,23 @@ const sii = createSiiClient({ environment: 'certification', certificate, company
 
 const receipt = await uploadEnvelope(sii, { envelope }) // EnvioDTE → DTEUpload; EnvioBOLETA → REST in production
 const status = await waitForUploadStatus(sii, { trackId: receipt.trackId })
-status.status // 'accepted' | 'acceptedWithObjections' | 'rejected' | …
+status.status // 'accepted' | 'acceptedWithObjections' | 'partiallyRejected' | 'rejected' | …
+status.counts // { reported, accepted, rejected, objections }, added up over every document type
 status.message // Spanish gloss from the SII
 
 const claim = await registerClaim(sii, { issuerRut: '10000004-0', type: 33, folio: 1234, action: 'acceptContent' })
 if (!claim.ok) console.log(claimResponseMessage(claim.code)) // business answers are codes, not errors
 ```
+
+`status.status` is the verdict of the upload, not the class of its code alone. The SII answers `EPR` ("Envío
+Procesado") once it has processed the envelope, whatever it did with each document inside, so the code by itself is not
+an acceptance: the counts of the answer are. An `EPR` with rejected documents is `partiallyRejected`, or `rejected`
+when none was accepted, and one with objections and no rejection is `acceptedWithObjections`. Counts never raise a
+pending or a rejected envelope, and an answer without counts keeps the class of its code. `status.countsByType` has
+the counts of each document type of the envelope, which `QueryEstUp` answers one block per type, and `status.counts`
+adds them up. `uploadVerdict(cls, counts)` is the same rule for an answer kept elsewhere. For an invoice the SII says
+which documents it rejected, and why, in the e-mail it sends the company; the receipts REST status lists them in
+`status.documents`.
 
 Uploads send the XML as ISO-8859-1 bytes, so it must open with an XML declaration naming
 ISO-8859-1 (the envelopes and books this SDK builds do); anything else is refused with
@@ -628,7 +657,9 @@ there is nothing to answer. It also gives `claimDeadline`, the last day to claim
 may issue. The registry asks for no certificate and no session, so any object with
 `environment`, `transport`, `capture`, `logger`, `now`, `retry` and `sleep` will do as well as a
 client. A RUT that is not an authorized issuer throws `SII_PORTAL_REJECTED` with
-`rejection: 'companyNotAuthorized'`.
+`rejection: 'companyNotAuthorized'`. The public registry does not show the mailbox an issuer registered for the
+exchange; `unstable_fetchExchangeMailbox`, from `dte-sdk/portal`, reads it with a session
+([Answering a received envelope](#answering-a-received-envelope)).
 
 Options worth knowing:
 
@@ -694,6 +725,13 @@ cover every submission kind of their schemas (`total`, `partial`, `final`, `adju
 you can store and pass back. The report has no submission kinds: to correct one, send it whole again
 with a higher `sequence`. `bookEntryFromDocument`, `guideEntryFromDocument` and
 `folioConsumptionEntryFromDocument` derive the lines from documents issued with this SDK.
+
+The VAT a purchase invoice (45, 46) withholds comes off the line total on both sides of the book, and each side
+carries it in its own fields (the format of the book, sections 2.4 and 3.4). The sales detail of who received the
+invoice has `totalVatWithheld` and `partialVatWithheld` (`IVARetTotal`, `IVARetParcial`). The purchase detail of who
+issued it has neither: there the withheld VAT goes in `otherTaxes` under a withholding code, 15 with the rate of the
+tax when the whole VAT was withheld, and that amount is what the formula takes off. `bookEntryFromDocument` follows
+the `operation` it is given.
 
 Their use today is narrow. The RCV replaced the purchase and sales book in production from period
 2017-08, and the guide book is sent only when the SII asks for it; both are still part of the
@@ -1405,7 +1443,10 @@ the certification samples are always the sheet. `stamp: false` leaves the electr
 receipt (39 or 41), whose printed stamp is optional from 1 January 2026 (Res. Ex. SII N° 207 of 2025; the XML keeps its
 `TED`), on the sheet or on the roll; on any other type it throws `INVALID_OPTION`. Delivering the receipt virtually
 instead of printing it (Res. Ex. SII N° 53 of 2025) stays with the application. The stamp encodes the signed bytes exactly (`renderTedBarcode` gives the PNG
-alone). It needs Node and the optional peers `pdf-lib` and `bwip-js`, which are loaded on first use: without them
+alone), always at error correction level 5, the one the SII's instructions ask for. A stamp with a byte above ASCII,
+as the document of another issuer may carry in a name, is written in byte compaction alone when it fits, so no reader
+has to follow a shift in the middle of text to get the byte that was signed; a stamp of plain ASCII, as every one
+dte-sdk issues, keeps the compaction the barcode library picks. It needs Node and the optional peers `pdf-lib` and `bwip-js`, which are loaded on first use: without them
 the render functions throw `DEPENDENCY_UNAVAILABLE`. Failures of a batch come back as data (`failures[].code`), never as thrown errors; a folio that is not a run
 of digits is an `INVALID_FOLIO` failure, since it would name the file. A stamp raster above 300 DPI is not printed
 yet: see the
@@ -1477,6 +1518,8 @@ redacted) lives in `details`, never in the message. Transport errors carry `deta
 
 `classifyUploadStatus('EPR')` → `'accepted'`, `classifyUploadStatus('RCT')` → `'rejected'`,
 `classifyUploadStatus('-11')` → `'queryError'` (retry). `classifyDocumentStatus('FAU')` → `'notReceived'`.
+`classifyUploadStatus` reads a code alone; `uploadVerdict('accepted', { accepted: 3, rejected: 1, objections: 0 })` →
+`'partiallyRejected'` settles it with the counts of the documents, as `queryUploadStatus` does.
 Spanish glosses via `uploadStatusMessage` and `documentStatusMessage`. The same pattern covers the
 `DTEUpload` reception statuses (`classifyReceptionStatus`, `receptionStatusMessage`) and the acceptance/claim
 registry (`claimResponseMessage`, `transferabilityMessage`, `CLAIM_ACTIONS`).

@@ -48,7 +48,9 @@ guarded('live: maullin', () => {
     async () => {
       const status = await queryUploadStatus(sii(), { trackId: env.SII_LIVE_TRACK_ID! })
       expect(status.code.length).toBeGreaterThan(0)
-      expect(['accepted', 'acceptedWithObjections', 'pending', 'rejected', 'unknown']).toContain(status.status)
+      expect(['accepted', 'acceptedWithObjections', 'partiallyRejected', 'pending', 'rejected', 'unknown']).toContain(
+        status.status,
+      )
     },
     60000,
   )

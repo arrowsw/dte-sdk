@@ -65,16 +65,74 @@ describe('queryUploadStatus (SOAP)', () => {
       ['TrackId', '9876543210'],
       ['Token', SOAP_TOKEN],
     ])
+    // The envelope was processed and one of its two documents rejected: `EPR` alone is not an acceptance.
     expect(status).toEqual({
       code: 'EPR',
-      status: 'accepted',
+      status: 'partiallyRejected',
       message: 'Envio Procesado',
       trackId: '9876543210',
       channel: 'soap',
       counts: { reported: 2, accepted: 1, rejected: 1, objections: 0 },
+      countsByType: [{ documentType: '33', reported: 2, accepted: 1, rejected: 1, objections: 0 }],
       documentType: '33',
       documents: [],
       raw: expect.stringContaining('<ESTADO>EPR</ESTADO>'),
+    })
+  })
+
+  const COUNTS = '<ACEPTADOS>1</ACEPTADOS><RECHAZADOS>1</RECHAZADOS><REPAROS>0</REPAROS>'
+  const eprWith = (counts: string): FakeReply => edited('soap-estup-epr.xml', COUNTS, counts)
+
+  test.each([
+    ['every document accepted', '<ACEPTADOS>2</ACEPTADOS><RECHAZADOS>0</RECHAZADOS><REPAROS>0</REPAROS>', 'accepted'],
+    [
+      'objections and no rejection',
+      '<ACEPTADOS>1</ACEPTADOS><RECHAZADOS>0</RECHAZADOS><REPAROS>1</REPAROS>',
+      'acceptedWithObjections',
+    ],
+    [
+      'a rejection beside an objection',
+      '<ACEPTADOS>0</ACEPTADOS><RECHAZADOS>1</RECHAZADOS><REPAROS>1</REPAROS>',
+      'partiallyRejected',
+    ],
+    ['every document rejected', '<ACEPTADOS>0</ACEPTADOS><RECHAZADOS>2</RECHAZADOS><REPAROS>0</REPAROS>', 'rejected'],
+  ])('an EPR with %s is %s', async (_name, counts, expected) => {
+    const { sii } = cachedSii(route(EST_UP, eprWith(counts)))
+    expect(await queryUploadStatus(sii, { trackId: '9876543210' })).toMatchObject({ code: 'EPR', status: expected })
+  })
+
+  test('an envelope of several document types reports each one, and the counts add them up', async () => {
+    const second = '<TIPO_DOCTO>61</TIPO_DOCTO><INFORMADOS>3</INFORMADOS><ACEPTADOS>3</ACEPTADOS>'
+    const { sii } = cachedSii(route(EST_UP, eprWith(`<ACEPTADOS>2</ACEPTADOS>${second}`)))
+    const status = await queryUploadStatus(sii, { trackId: '9876543210' })
+    expect(status.countsByType).toEqual([
+      { documentType: '33', reported: 2, accepted: 2, rejected: 0, objections: 0 },
+      { documentType: '61', reported: 3, accepted: 3, rejected: 0, objections: 0 },
+    ])
+    expect(status.counts).toEqual({ reported: 5, accepted: 5, rejected: 0, objections: 0 })
+    expect(status).toMatchObject({ status: 'accepted', documentType: '33' })
+    // A rejection in the second type is not hidden by the first one.
+    const refused = second.replace('<ACEPTADOS>3</ACEPTADOS>', '<RECHAZADOS>3</RECHAZADOS>')
+    const rejected = cachedSii(route(EST_UP, eprWith(`<ACEPTADOS>2</ACEPTADOS>${refused}`)))
+    expect(await queryUploadStatus(rejected.sii, { trackId: '9876543210' })).toMatchObject({
+      status: 'partiallyRejected',
+      counts: { reported: 5, accepted: 2, rejected: 3, objections: 0 },
+    })
+  })
+
+  test('counts without a document type are of the whole answer; a type without counts is not counts', async () => {
+    const untyped = cachedSii(route(EST_UP, edited('soap-estup-epr.xml', '<TIPO_DOCTO>33</TIPO_DOCTO>', '')))
+    expect(await queryUploadStatus(untyped.sii, { trackId: '9876543210' })).toMatchObject({
+      countsByType: [{ documentType: '', reported: 2, accepted: 1, rejected: 1, objections: 0 }],
+      documentType: null,
+      status: 'partiallyRejected',
+    })
+    const bare = cachedSii(route(EST_UP, edited('soap-estup-epr.xml', '<INFORMADOS>2</INFORMADOS>', '')))
+    expect(await queryUploadStatus(bare.sii, { trackId: '9876543210' })).toMatchObject({
+      status: 'accepted',
+      counts: null,
+      countsByType: [],
+      documentType: '33',
     })
   })
 
@@ -260,6 +318,10 @@ describe('queryUploadStatus (REST)', () => {
       trackId: '1234567890',
       channel: 'rest',
       counts: { reported: 4, accepted: 2, rejected: 1, objections: 0 },
+      countsByType: [
+        { documentType: '39', reported: 3, accepted: 2, rejected: 1, objections: 0 },
+        { documentType: '41', reported: 1, accepted: 0, rejected: 0, objections: 0 },
+      ],
       documentType: null,
       documents: [
         {
@@ -281,6 +343,17 @@ describe('queryUploadStatus (REST)', () => {
         { type: '41', folio: null, code: 'RLV', description: 'Aceptado con reparos leves', errors: [] },
       ],
       raw: siiFixture('rest-envelope-status.json'),
+    })
+  })
+
+  test('a processed envelope of receipts with a rejected one is not accepted', async () => {
+    const body =
+      '{"estado":"EPR","estadistica":[{"tipo":39,"informados":61,"aceptados":60,"rechazados":1,"reparos":0}]}'
+    const { sii } = cachedSii(route(REST_STATUS, restBody(body)))
+    expect(await queryUploadStatus(sii, { trackId: '1234567890', channel: 'rest' })).toMatchObject({
+      code: 'EPR',
+      status: 'partiallyRejected',
+      counts: { reported: 61, accepted: 60, rejected: 1, objections: 0 },
     })
   })
 
@@ -306,6 +379,8 @@ describe('queryUploadStatus (REST)', () => {
     const { sii } = cachedSii(route(REST_STATUS, restBody(body)))
     const status = await queryUploadStatus(sii, { trackId: '1234567890', channel: 'rest' })
     expect(status.counts).toEqual({ reported: 0, accepted: 2, rejected: 0, objections: 0 })
+    expect(status.countsByType.map((entry) => entry.documentType)).toEqual(['', '', ''])
+    expect(status.status).toBe('accepted')
     expect(status.documents).toEqual([
       { type: '', folio: null, code: '', description: '', errors: [] },
       { type: '', folio: null, code: '', description: '', errors: [] },

@@ -103,7 +103,13 @@ const NOT_IN_SETTLEMENT = [
 // declare, so those are refused here instead of being dropped without a word.
 const RECEIPT_OPTIONS = ['serviceIndicator', 'netAmountsIndicator', 'billingPeriod', 'dueDate', 'paymentMedium']
 const NOT_IN_RECEIPT_TOTALS = ['vatRate', 'ownVatAmount', 'thirdPartyVatAmount', 'withholdings', 'commissions'] as const
-const NOT_IN_RECEIPT_LINE = ['referenceQuantity', 'referenceUnit', 'referencePrice', 'additionalTaxCodes'] as const
+const NOT_IN_RECEIPT_LINE = [
+  'referenceQuantity',
+  'referenceUnit',
+  'referencePrice',
+  'additionalTaxCodes',
+  'withholdingAgent',
+] as const
 // A receipt's `IndExe` is 1, 2 or 6, and its `IndMntNeto` is 2.
 const RECEIPT_EXEMPT_INDICATORS: readonly unknown[] = [undefined, 1, 2, 6]
 
@@ -199,6 +205,7 @@ const assertSettlement = (input: DocumentInput): void => {
   input.items.forEach((item, index) => {
     if (item.discountPercent !== undefined) refuse(`items[${index}].discountPercent`)
     if (item.surchargePercent !== undefined) refuse(`items[${index}].surchargePercent`)
+    if (item.withholdingAgent !== undefined) refuse(`items[${index}].withholdingAgent`)
   })
   ;(input.references ?? []).forEach((reference, index) => {
     if (reference.otherRut !== undefined) refuse(`references[${index}].otherRut`)
@@ -297,6 +304,23 @@ const normalizeReceiver = (input: ReceiverInput | undefined, type: DocumentType)
   })
 }
 
+// `MntBaseFaena`, `MntMargComer` and `PrcConsFinal` are of the schema's `MontoType`: whole, from zero up.
+const WITHHOLDING_AGENT_FIELDS = ['slaughterBase', 'marginBase', 'finalConsumerPrice'] as const
+
+const withholdingAgentOf = (input: LineItemInput['withholdingAgent'], path: string): LineItem['withholdingAgent'] => {
+  if (input === undefined) return undefined
+  for (const field of WITHHOLDING_AGENT_FIELDS) {
+    const value = input[field]
+    if (value !== undefined && !(Number.isSafeInteger(value) && value >= 0))
+      throw new DteError('INVALID_AMOUNT', { field: `${path}.withholdingAgent.${field}` })
+  }
+  return compact({
+    slaughterBase: input.slaughterBase,
+    marginBase: input.marginBase,
+    finalConsumerPrice: input.finalConsumerPrice,
+  })
+}
+
 const normalizeItem = (input: LineItemInput, index: number, type: DocumentType): LineItem => {
   const path = `items[${index}]`
   const unitPrice = decimal(input.unitPrice, 'quantity', `${path}.unitPrice`)
@@ -326,6 +350,7 @@ const normalizeItem = (input: LineItemInput, index: number, type: DocumentType):
     codes: input.codes,
     settledDocumentType,
     exemptIndicator,
+    withholdingAgent: withholdingAgentOf(input.withholdingAgent, path),
     name: requiredText(input.name, 'NmbItem', `${path}.name`),
     description: text(input.description, 'DscItem'),
     referenceQuantity: decimal(input.referenceQuantity, 'quantity', `${path}.referenceQuantity`),

@@ -64,12 +64,85 @@ export const rsaPublicKeyPartsFromCertificatePem = (certificatePem: string): Rsa
 }
 
 /**
- * EN: SHA1withRSA (PKCS#1 v1.5) signature of `data`, base64. Deterministic: same key and bytes, same signature.
- * ES: Firma SHA1withRSA (PKCS#1 v1.5) de `data`, en base64. Determinista: misma clave y bytes, misma firma.
+ * EN: Which code signs: the runtime's own RSA (`native`) or the JavaScript one (`portable`).
+ * ES: Qué código firma: el RSA del propio runtime (`native`) o el de JavaScript (`portable`).
+ */
+export type RsaSigningEngine = 'native' | 'portable'
+
+// The part of `node:crypto` the signature uses.
+type NativeCrypto = {
+  readonly sign: (algorithm: string, data: Uint8Array, key: string) => { toString(encoding: 'base64'): string }
+}
+
+type Runtime = { readonly process?: { readonly getBuiltinModule?: (id: string) => unknown } }
+
+// Node, Bun and Deno hand over their crypto module without an import, so a bundle for the browser never names it and
+// no entry loads it at import time. Anything else, a browser among them, has none.
+const nativeCrypto = (): NativeCrypto | null => {
+  try {
+    const builtin = (globalThis as Runtime).process?.getBuiltinModule?.('node:crypto') as NativeCrypto | undefined
+    return typeof builtin?.sign === 'function' ? builtin : null
+  } catch {
+    return null
+  }
+}
+
+const binaryBytes = (binary: string): Uint8Array => Uint8Array.from(binary, (char) => char.charCodeAt(0))
+
+const portableSign = (privateKeyPem: string, data: string, encoding: TextEncoding): string =>
+  forge.util.encode64(forge.pki.privateKeyFromPem(privateKeyPem).sign(sha1Of(data, encoding)))
+
+const nativeSign = (crypto: NativeCrypto, privateKeyPem: string, data: string, encoding: TextEncoding): string =>
+  crypto.sign('RSA-SHA1', binaryBytes(toBinaryString(data, encoding)), privateKeyPem).toString('base64')
+
+// Undefined until the first signature settles it; null when the runtime has no RSA of its own or it was set aside.
+let trusted: NativeCrypto | null | undefined
+
+// PKCS#1 v1.5 is deterministic, so both engines must write the same signature. The first one of the process is worked
+// out with both: equal, the runtime's signs from then on; different, or refused, the portable one does. The runtime is
+// never taken at its word.
+const settle = (privateKeyPem: string, data: string, encoding: TextEncoding): string => {
+  const portable = portableSign(privateKeyPem, data, encoding)
+  const crypto = nativeCrypto()
+  trusted = null
+  if (crypto === null) return portable
+  try {
+    if (nativeSign(crypto, privateKeyPem, data, encoding) === portable) trusted = crypto
+  } catch {
+    // A runtime that refuses SHA-1 or the key leaves the portable engine in charge.
+  }
+  return portable
+}
+
+/**
+ * EN: The engine the next signature uses, or null before the first one settles it. `native` is the RSA of the runtime
+ * (Node, Bun, Deno), an order of magnitude faster on a 2048-bit key; `portable` is the JavaScript one, the only one in
+ * a browser.
+ * ES: El motor que usa la próxima firma, o null antes de que la primera lo zanje. `native` es el RSA del runtime (Node,
+ * Bun, Deno), un orden de magnitud más rápido con una llave de 2048 bits; `portable` es el de JavaScript, el único en
+ * un navegador.
+ */
+export const rsaSigningEngine = (): RsaSigningEngine | null =>
+  trusted === undefined ? null : trusted === null ? 'portable' : 'native'
+
+/**
+ * EN: SHA1withRSA (PKCS#1 v1.5) signature of `data`, base64. Deterministic: same key and bytes, same signature, which
+ * is what lets the runtime's own RSA sign when there is one. The first signature of the process is worked out by the
+ * runtime and by the JavaScript engine and compared; only when they agree does the runtime sign the ones that follow,
+ * and a key it refuses is still signed by the JavaScript engine. The bytes written are the same either way.
+ * ES: Firma SHA1withRSA (PKCS#1 v1.5) de `data`, en base64. Determinista: misma clave y bytes, misma firma, y eso es lo
+ * que deja firmar al RSA del propio runtime cuando lo hay. La primera firma del proceso la calculan el runtime y el
+ * motor de JavaScript y se comparan; solo si coinciden firma el runtime las que siguen, y una llave que el runtime
+ * rechaza la firma igual el motor de JavaScript. Los bytes escritos son los mismos de cualquier modo.
  */
 export const rsaSha1SignBase64 = (privateKeyPem: string, data: string, encoding: TextEncoding = 'utf8'): string => {
-  const key = forge.pki.privateKeyFromPem(privateKeyPem)
-  return forge.util.encode64(key.sign(sha1Of(data, encoding)))
+  if (trusted === undefined) return settle(privateKeyPem, data, encoding)
+  if (trusted === null) return portableSign(privateKeyPem, data, encoding)
+  try {
+    return nativeSign(trusted, privateKeyPem, data, encoding)
+  } catch {
+    return portableSign(privateKeyPem, data, encoding)
+  }
 }
 
 /**

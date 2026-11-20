@@ -27,12 +27,15 @@ export type BookEntryFromDocumentOptions = {
 
 /**
  * EN: Derives a book line from a phase 1 document. The counterparty is the receiver when the book owner issued the
- * document and the issuer otherwise, which covers sales, purchases received and purchase invoices (46) on either side. The
+ * document and the issuer otherwise, which covers sales, purchases received and purchase invoices (46) on either side.
+ * The whole VAT a purchase invoice withholds goes where each side carries it: `totalVatWithheld` on a sale line, and
+ * `otherTaxes` under code 15 on a purchase line. The
  * name is truncated to 50 because the document admits 100 and the book field is optional on electronic documents. `Emisor`,
  * `IndFactCompra` and the voided-document reference are not inferred: spread them into the result when the case needs them.
  * ES: Deriva una línea del libro desde un documento de la fase 1. La contraparte es el receptor si el dueño del libro
  * emitió el documento y el emisor en caso contrario, lo que cubre ventas, compras recibidas y facturas de compra (46) en
- * cualquier lado. El nombre se trunca a 50 porque el documento admite 100 y el campo del libro es opcional en documentos
+ * cualquier lado. El IVA completo que retiene una factura de compra va donde lo lleva cada lado: `totalVatWithheld` en
+ * una línea de venta, y `otherTaxes` bajo el código 15 en una línea de compra. El nombre se trunca a 50 porque el documento admite 100 y el campo del libro es opcional en documentos
  * electrónicos. `Emisor`, `IndFactCompra` y la referencia al documento anulado no se infieren: se agregan al resultado si
  * el caso los necesita.
  * @throws {DteError} EN: `INVALID_RUT`. ES: `INVALID_RUT`.
@@ -45,11 +48,13 @@ export const bookEntryFromDocument = (document: Document, options: BookEntryFrom
   // Zero amounts stay absent: the sale defaults put them back, and purchase books omit them.
   const amount = (value: number | undefined): number | undefined => (value ? signed(value) : undefined)
   const withholdings = totals.withholdings ?? []
-  const withheld = withholdings
-    .filter((item) => item.taxCode === WITHHOLDING_TAX_CODES.totalVatWithholding)
-    .reduce((total, item) => total + item.amount, 0)
+  // The whole VAT withheld travels in `IVARetTotal` on a sale line and, on a purchase line, in `OtrosImp` with its code
+  // (15) and the rate of the tax, as every other withholding does (the format, sections 2.4 and 3.4).
+  const ownField = (taxCode: number): boolean =>
+    options.operation === 'sale' && taxCode === WITHHOLDING_TAX_CODES.totalVatWithholding
+  const withheld = withholdings.filter((item) => ownField(item.taxCode)).reduce((total, item) => total + item.amount, 0)
   const otherTaxes = withholdings
-    .filter((item) => item.taxCode !== WITHHOLDING_TAX_CODES.totalVatWithholding)
+    .filter((item) => !ownField(item.taxCode))
     .map((item) => ({ code: item.taxCode, rate: item.rate, amount: item.amount }))
   return compact({
     type,

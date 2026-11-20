@@ -3,7 +3,7 @@ import type { BookEntryInput, PurchaseSalesBook, PurchaseSalesBookInput } from '
 import { BOOK_ID, creditNote, exemptInvoice, invoice, purchaseCover, saleCover, SUPPLIER_RUT } from './book-fixtures'
 import { FIXED_NOW } from './fixtures'
 
-const purchaseInvoice: BookEntryInput = {
+const purchaseInvoiceAmounts = {
   type: 46,
   folio: 6,
   date: '2026-10-08',
@@ -11,7 +11,14 @@ const purchaseInvoice: BookEntryInput = {
   counterpartyName: 'Hortalizas del Maule Ltda',
   netAmount: 20000,
   vatAmount: 3800,
-  totalVatWithheld: 3800,
+}
+
+// A purchase invoice withholds the whole VAT, and each side of the book carries it in its own fields: the sales detail
+// in `IVARetTotal`, the purchase detail under code 15 with the rate of the tax.
+const purchaseInvoiceReceived: BookEntryInput = { ...purchaseInvoiceAmounts, totalVatWithheld: 3800 }
+const purchaseInvoiceIssued: BookEntryInput = {
+  ...purchaseInvoiceAmounts,
+  otherTaxes: [{ code: 15, rate: 19, amount: 3800 }],
 }
 
 const purchases: readonly BookEntryInput[] = [
@@ -42,7 +49,7 @@ const purchases: readonly BookEntryInput[] = [
     vatAmount: 19000,
     otherTaxes: [{ code: 28, rate: 1.5, amount: 1500 }],
   },
-  purchaseInvoice,
+  purchaseInvoiceIssued,
 ]
 
 const previousTotals = [
@@ -63,7 +70,7 @@ const sample = (input: PurchaseSalesBookInput): Sample => {
 export const PURCHASE_SALES_SAMPLES = {
   'sale-total': sample({
     cover: saleCover,
-    entries: [invoice, exemptInvoice, creditNote, { type: 46, folio: 5, voided: true }, purchaseInvoice],
+    entries: [invoice, exemptInvoice, creditNote, { type: 46, folio: 5, voided: true }, purchaseInvoiceReceived],
     summaryOnlyTotals: [receiptTotals],
   }),
   'purchase-special': sample({

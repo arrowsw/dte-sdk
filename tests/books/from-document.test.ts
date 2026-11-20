@@ -68,13 +68,32 @@ describe('bookEntryFromDocument', () => {
       type: 46,
       receiver: { ...receiver, rut: SUPPLIER_RUT, businessName: 'Hortalizas del Maule Ltda' },
     })
-    expect(bookEntryFromDocument(document, { bookRut: ISSUER_RUT, operation: 'purchase' })).toMatchObject({
+    const issued = bookEntryFromDocument(document, { bookRut: ISSUER_RUT, operation: 'purchase' })
+    expect(issued).toMatchObject({
       counterpartyRut: SUPPLIER_RUT,
       netAmount: 100000,
       vatAmount: 19000,
-      totalVatWithheld: 19000,
+      otherTaxes: [{ code: 15, rate: 19, amount: 19000 }],
       totalAmount: 100000,
     })
+    // `IVARetTotal` is a field of the sales detail: the purchase line of who issued the invoice does not carry it.
+    expect(issued.totalVatWithheld).toBeUndefined()
+    expect(createPurchaseSalesBook({ cover: purchaseCover, entries: [issued] }).totalMismatches).toEqual([])
+  })
+
+  test('the supplier who receives a purchase invoice reports the withheld VAT in the field of the sales detail', () => {
+    const document = createDocument({
+      ...base,
+      type: 46,
+      receiver: { ...receiver, rut: SUPPLIER_RUT, businessName: 'Hortalizas del Maule Ltda' },
+    })
+    const received = bookEntryFromDocument(document, { bookRut: SUPPLIER_RUT, operation: 'sale' })
+    expect(received).toMatchObject({ counterpartyRut: ISSUER_RUT, totalVatWithheld: 19000, totalAmount: 100000 })
+    expect(received.otherTaxes).toBeUndefined()
+    expect(
+      createPurchaseSalesBook({ cover: { ...saleCover, issuerRut: SUPPLIER_RUT }, entries: [received] })
+        .totalMismatches,
+    ).toEqual([])
   })
 
   test('the book RUT is compared normalized', () => {

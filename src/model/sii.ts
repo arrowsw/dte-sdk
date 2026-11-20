@@ -243,6 +243,18 @@ export type SiiCdgItem = {
   readonly VlrCodigo: string
 }
 
+/** EN: `Retenedor`, SII shape. ES: `Retenedor` en forma SII. */
+export type SiiRetenedor = {
+  /** EN: Withholding agent indicator, always `R`. ES: `IndAgente` — Indicador de agente retenedor, siempre `R`. */
+  readonly IndAgente: 'R'
+  /** EN: Base of the slaughter of meat. ES: `MntBaseFaena` — Monto base faenamiento. */
+  readonly MntBaseFaena?: number
+  /** EN: Base of the margins of trade. ES: `MntMargComer` — Márgenes de comercialización. */
+  readonly MntMargComer?: number
+  /** EN: Net unit price to the final consumer. ES: `PrcConsFinal` — Precio unitario neto consumidor final. */
+  readonly PrcConsFinal?: number
+}
+
 /** EN: `Detalle`, SII shape, schema order. ES: `Detalle` en forma SII, orden del esquema. */
 export type SiiDetalle = {
   /** EN: Line number. ES: `NroLinDet` — Número de línea de detalle. */
@@ -253,6 +265,8 @@ export type SiiDetalle = {
   readonly TpoDocLiq?: string
   /** EN: Exemption indicator (1 exempt, 2–6 non-billable variants). ES: `IndExe` — Indicador de exención. */
   readonly IndExe?: number
+  /** EN: Only on transactions of withholding agents. ES: `Retenedor` — Solo en transacciones de agentes retenedores. */
+  readonly Retenedor?: SiiRetenedor
   /** EN: Item name. ES: `NmbItem` — Nombre del ítem. */
   readonly NmbItem: string
   /** EN: Item description. ES: `DscItem` — Descripción del ítem. */

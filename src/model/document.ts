@@ -95,6 +95,19 @@ export type ItemCode = {
 }
 
 /**
+ * EN: What a line of a withholding agent declares (`Retenedor`). An empty object marks the line alone.
+ * ES: `Retenedor` — Lo que declara una línea de un agente retenedor. Un objeto vacío solo marca la línea.
+ */
+export type WithholdingAgentLine = {
+  /** EN: Base of the slaughter of meat, a whole amount. ES: `MntBaseFaena` — Monto base faenamiento, un monto entero. */
+  readonly slaughterBase?: number
+  /** EN: Base of the margins of trade, a whole amount. ES: `MntMargComer` — Monto base márgenes de comercialización, un monto entero. */
+  readonly marginBase?: number
+  /** EN: Net unit price to the final consumer, a whole amount. ES: `PrcConsFinal` — Precio unitario neto al consumidor final, un monto entero. */
+  readonly finalConsumerPrice?: number
+}
+
+/**
  * EN: A detail line as the caller provides it; amounts are computed unless `amount` is given.
  * ES: Línea de detalle tal como la entrega el llamador; los montos se calculan salvo que venga `amount`.
  */
@@ -115,6 +128,8 @@ export type LineItemInput = {
   readonly exempt?: boolean
   /** EN: Explicit exemption indicator; a receipt admits 1, 2 and 6, and any other is refused there. ES: `IndExe` — Indicador de exención explícito (1 a 6); una boleta admite 1, 2 y 6, y cualquier otro se rechaza en ella. */
   readonly exemptIndicator?: ExemptIndicator
+  /** EN: Marks the line as a transaction of a withholding agent (`IndAgente` R), with the bases it declares; refused on a receipt and on a settlement invoice (43), whose lines have no such element. ES: `Retenedor` — Marca la línea como transacción de un agente retenedor (`IndAgente` R), con las bases que declara; se rechaza en una boleta y en una liquidación factura (43), cuyas líneas no tienen ese elemento. */
+  readonly withholdingAgent?: WithholdingAgentLine
   /** EN: Line discount percent, rounded to two decimals; refused on a settlement invoice (43). ES: `DescuentoPct` — Porcentaje de descuento de la línea, redondeado a dos decimales; se rechaza en una liquidación factura (43). */
   readonly discountPercent?: number
   /** EN: Line surcharge percent, rounded to two decimals; refused on a settlement invoice (43). ES: `RecargoPct` — Porcentaje de recargo de la línea, redondeado a dos decimales; se rechaza en una liquidación factura (43). */
@@ -148,6 +163,8 @@ export type LineItem = {
   readonly settledDocumentType?: string
   /** EN: Exemption indicator; absent on VAT-affected lines. ES: `IndExe` — Indicador de exención; ausente en líneas afectas. */
   readonly exemptIndicator?: ExemptIndicator
+  /** EN: Present on a line of a withholding agent, with the bases it declares. ES: `Retenedor` — Presente en una línea de un agente retenedor, con las bases que declara. */
+  readonly withholdingAgent?: WithholdingAgentLine
   /** EN: Item name. ES: `NmbItem` — Nombre del ítem. */
   readonly name: string
   /** EN: Description. ES: `DscItem` — Descripción. */

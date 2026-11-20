@@ -161,6 +161,7 @@ const ROOT_EXPORTS = [
   'rsaPublicKeyPartsFromCertificatePem',
   'rsaSha1SignBase64',
   'rsaSha1VerifyBase64',
+  'rsaSigningEngine',
   'sanitizeText',
   'sha1Base64',
   'signDocument',
@@ -189,6 +190,7 @@ const ROOT_EXPORTS = [
   'uploadEnvelope',
   'uploadFolioConsumption',
   'uploadStatusMessage',
+  'uploadVerdict',
   'verifyCafSignature',
   'cafEnvironment',
   'verifyDocumentSignature',
@@ -350,6 +352,7 @@ const PORTAL_EXPORTS = [
   'requestCafExact',
   'requestCafInBatches',
   'unstable_fetchActivityVerification',
+  'unstable_fetchExchangeMailbox',
   'unstable_replenishFolios',
 ] as const
 

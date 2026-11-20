@@ -1,4 +1,10 @@
-import { fetchCompanyResolution, fetchIssuerProfile, fetchTaxpayerData } from '../../src/portal/company'
+import {
+  fetchCompanyResolution,
+  fetchIssuerProfile,
+  fetchTaxpayerData,
+  unstable_fetchExchangeMailbox,
+} from '../../src/portal/company'
+import { parseExchangeEmail } from '../../src/portal/pages/issuer-registry'
 import type { Logger } from '../../src/sii/logger'
 import { failure, MAULLIN, PALENA, portalWith, seedSession, signedIn } from '../support/portal'
 import {
@@ -6,7 +12,10 @@ import {
   companyResolutionPage,
   NOT_AUTHORIZED_COMPANY,
   page,
+  REGISTRY_FORM,
+  registryPage,
   taxpayerPage,
+  UNLISTED_ISSUER,
 } from '../support/portal-pages'
 
 const resolutionRoutes = (base: string, html = companyResolutionPage()) => [
@@ -40,6 +49,103 @@ describe('fetchCompanyResolution', () => {
     expect(error.details).toMatchObject({ step: 'ad_empresa2', portalMessage: 'SII Actualización de Datos' })
     expect(harness.posted('ad_empresa2')).toHaveLength(2)
     expect(harness.fake.requests[2].headers['cookie']).toBeUndefined()
+  })
+})
+
+const registryRoutes = (base: string, html = registryPage()) => [
+  { url: `${base}/ce_consulta_rut`, reply: { body: REGISTRY_FORM } },
+  { url: `${base}/ce_consulta_e`, method: 'POST' as const, reply: { body: html } },
+]
+
+describe('unstable_fetchExchangeMailbox', () => {
+  test('asks the registry with the session for another taxpayer and reads its mailbox', async () => {
+    const harness = await signedIn(registryRoutes(MAULLIN))
+    const entry = await unstable_fetchExchangeMailbox(harness.portal, { rut: '10.000.004-0' })
+    expect(entry).toEqual({
+      rut: '10000004-0',
+      businessName: 'COMERCIAL ANDINA SPA',
+      resolutionNumber: 80,
+      resolutionDate: '2026-09-21',
+      regionalOffice: null,
+      documents: [
+        { type: 33, description: 'FACTURA ELECTRONICA', authorizedFrom: '2026-10-01', deauthorizedOn: null },
+        {
+          type: 52,
+          description: 'GUIA DE DESPACHO ELECTRONICA',
+          authorizedFrom: '2026-10-01',
+          deauthorizedOn: '2026-10-15',
+        },
+      ],
+      exchangeEmail: 'dte@andina.example',
+    })
+    // The RUT asked about is the other taxpayer's, never the client's company.
+    expect(harness.posted('ce_consulta_e')).toEqual([{ RUT_EMP: '10000004', DV_EMP: '0', ACEPTAR: 'Consultar' }])
+  })
+
+  test('it reads the environment of the client', async () => {
+    const harness = await signedIn(registryRoutes(PALENA), { environment: 'production' })
+    await expect(unstable_fetchExchangeMailbox(harness.portal, { rut: '10000004-0' })).resolves.toMatchObject({
+      exchangeEmail: 'dte@andina.example',
+    })
+  })
+
+  test('an issuer with no mailbox registered has none, and the rest of its entry is still read', async () => {
+    const harness = await signedIn(registryRoutes(MAULLIN, registryPage('<td>Mail de contacto</td><td>&nbsp;</td>')))
+    await expect(unstable_fetchExchangeMailbox(harness.portal, { rut: '10000004-0' })).resolves.toMatchObject({
+      businessName: 'COMERCIAL ANDINA SPA',
+      exchangeEmail: null,
+    })
+  })
+
+  test('a RUT that is not an authorized issuer is a rejection, and a page with no issuer in it is unexpected', async () => {
+    const unlisted = await signedIn(registryRoutes(MAULLIN, UNLISTED_ISSUER))
+    const error = await failure(unstable_fetchExchangeMailbox(unlisted.portal, { rut: '10000004-0' }))
+    expect(error.code).toBe('SII_PORTAL_REJECTED')
+    expect(error.details).toMatchObject({ rejection: 'companyNotAuthorized', operation: 'fetchExchangeMailbox' })
+    const empty = await signedIn(registryRoutes(MAULLIN, page('hola')))
+    expect((await failure(unstable_fetchExchangeMailbox(empty.portal, { rut: '10000004-0' }))).code).toBe(
+      'SII_PORTAL_UNEXPECTED_PAGE',
+    )
+  })
+
+  test('a page with the document types alone still counts', async () => {
+    const html = page('<table><tr><td>33</td><td>FACTURA ELECTRONICA</td><td>01-10-2026</td><td></td></tr></table>')
+    const harness = await signedIn(registryRoutes(MAULLIN, html))
+    await expect(unstable_fetchExchangeMailbox(harness.portal, { rut: '10000004-0' })).resolves.toMatchObject({
+      businessName: null,
+      exchangeEmail: null,
+      documents: [{ type: 33 }],
+    })
+  })
+
+  test('the RUT is validated before anything is asked', async () => {
+    const harness = await signedIn(registryRoutes(MAULLIN))
+    const error = await failure(unstable_fetchExchangeMailbox(harness.portal, { rut: 'nope' }))
+    expect(error.code).toBe('INVALID_RUT')
+    expect(harness.posted('ce_consulta_e')).toEqual([])
+  })
+})
+
+describe('parseExchangeEmail', () => {
+  const row = (label: string, value: string): string => `<table><tr><td>${label}</td><td>${value}</td></tr></table>`
+
+  test.each([
+    ['Mail de contacto', 'dte@andina.example'],
+    ['MAIL INTERCAMBIO', '&nbsp; Recepcion.DTE@andina.example &nbsp;'],
+    ['Correo de intercambio', 'dte@andina.example'],
+  ])('reads the address beside %s', (label, value) => {
+    expect(parseExchangeEmail(row(label, value))).toBe(value.replace(/&nbsp;/g, '').trim())
+  })
+
+  test('a label with no address beside it, or no label at all, is no mailbox', () => {
+    expect(parseExchangeEmail(row('Mail de contacto', 'no informado'))).toBeNull()
+    expect(parseExchangeEmail(row('Mail de contacto', 'dos@a.example otro@b.example'))).toBeNull()
+    expect(parseExchangeEmail('<table><tr><td>Mail de contacto</td></tr></table>')).toBeNull()
+    expect(parseExchangeEmail(row('Rut', '10000004-0'))).toBeNull()
+  })
+
+  test('an address in a cell is a value, not the label of the next one', () => {
+    expect(parseExchangeEmail(row('correo@andina.example', 'otra cosa'))).toBeNull()
   })
 })
 

@@ -8,10 +8,10 @@ by Hans on 2026-11-14.
 
 | Entry | Holds | Size | Reaches `node:` |
 |---|---|---|---|
-| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 39.52 kB | No |
+| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 40.08 kB | Not by import: it asks the runtime for `node:crypto` at the first signature |
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.38 kB | Yes, on first use |
-| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 80.32 kB | Yes, on first use |
-| `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 19.04 kB | Yes, on first use |
+| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 81.32 kB | Yes, on first use |
+| `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 19.59 kB | Yes, on first use |
 | `dte-sdk/catalogs` | The SII's large code tables: the business activities | 10.65 kB | No |
 
 Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
@@ -101,6 +101,17 @@ in place of the bound the printed stamp carried, and took `dte-sdk` from 39.46 k
 their limits; `dte-sdk/catalogs` did not move.
 Reading a code's name among the own entries of its table, so that a received document whose code is `constructor`
 prints, took `dte-sdk/pdf` from 19.07 kB to 19.04 kB, under its limit; the other entries did not move.
+The verdict of an upload settled with its counts per document type, the runtime's own RSA beside the JavaScript engine,
+the line of a withholding agent, the withheld VAT of a purchase book where the format puts it, the mailbox of the
+exchange and the stamp in bytes at a fixed level, after 0.14.0, took `dte-sdk` from 39.51 kB to 40.08 kB, over its
+40 kB limit, which went to 42 kB, `dte-sdk/portal` from 80.41 kB to 81.32 kB and `dte-sdk/pdf` from 19.33 kB to
+19.59 kB, both under their limits; `dte-sdk/node` and `dte-sdk/catalogs` did not move.
+
+The runtime's own RSA is the one place where the root names a `node:` module, and it does so without importing it. The
+first signature of a process asks `process.getBuiltinModule('node:crypto')`, a call Node, Bun and Deno answer and a
+browser does not have, so the root still bundles for the browser with no configuration, loading it still evaluates no
+`node:` module, and nothing is resolved by a bundler. An entry that had to be imported for the faster signature would
+have left it off for whoever signs with the root alone.
 
 ## Why
 
@@ -143,7 +154,8 @@ The last column leaves out `pdf-lib` and `bwip-js`, which load on first use and 
 ## What guards it
 
 `tests/public-api.test.ts` holds one list per entry. `tests/dist.smoke.test.ts` loads each entry, checks that loading
-evaluates no `node:` module, that the root reaches none, that only `dte-sdk/pdf` names the optional peers, that only
+evaluates no `node:` module, that the root imports none and names only `node:crypto`, in the call that asks the runtime
+for it, that only `dte-sdk/pdf` names the optional peers, that only
 `dte-sdk/catalogs` reaches the table of business activities, that errors cross the entries, that the root and
 `dte-sdk/catalogs` bundle for the browser, and that consumers on nodenext, bundler and node10 resolution get real types.
 The CI imports every entry on Bun and Deno.

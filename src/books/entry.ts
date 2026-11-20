@@ -48,8 +48,10 @@ const UNSIGNED_AMOUNTS = [
   'vehicleTax',
 ] as const
 
-// Their amount travels in `IVARetTotal` and `IVARetParcial`, so on a purchase book they do not add to the total. Code 35
-// is the gasoline tax, despite the "30 to 41" range the format mentions.
+// The codes of withheld VAT (the format's table 7): 15 for a whole withholding that follows no change of subject, and
+// the codes by product with their whole-withholding pairs. On a purchase book the withheld VAT travels under them in
+// `OtrosImp` and the total leaves it out (section 3.4, fields 21 to 25). Code 35 is the gasoline tax, despite the
+// "30 to 41" range the format mentions.
 const RETENTION_TAX_CODES: readonly number[] = [
   15, 30, 31, 32, 33, 34, 36, 37, 38, 39, 41, 47, 48, 49, 301, 321, 331, 341, 361, 371, 481,
 ]
@@ -58,25 +60,26 @@ const INITIAL_INVOICE_RETENTION = 60
 const sum = (values: readonly number[]): number => values.reduce((total, value) => total + value, 0)
 
 /**
- * EN: The SII formula for a line total, per book side (sections 2.4 and 3.4 of the format).
- * ES: La fórmula del SII para el total de una línea, según el lado del libro (secciones 2.4 y 3.4 del formato).
+ * EN: The SII formula for a line total, per book side (sections 2.4 and 3.4 of the format). The withheld VAT of a
+ * purchase invoice comes off the total on both sides, and each side carries it in its own fields: a sale line in
+ * `totalVatWithheld` and `partialVatWithheld` (`IVARetTotal`, `IVARetParcial`, fields of the sales detail alone), and a
+ * purchase line in `otherTaxes` under a withholding code, 15 when the whole VAT was withheld.
+ * ES: La fórmula del SII para el total de una línea, según el lado del libro (secciones 2.4 y 3.4 del formato). El IVA
+ * retenido de una factura de compra se resta del total en ambos lados, y cada lado lo lleva en sus propios campos: una
+ * línea de venta en `totalVatWithheld` y `partialVatWithheld` (`IVARetTotal`, `IVARetParcial`, campos solo del detalle
+ * de ventas), y una línea de compra en `otherTaxes` bajo un código de retención, 15 cuando se retuvo todo el IVA.
  */
 export const expectedBookEntryTotal = (entry: BookEntryInput, operation: BookOperation): number => {
-  const otherTaxes = (entry.otherTaxes ?? []).filter(
-    (tax) => operation === 'sale' || !RETENTION_TAX_CODES.includes(tax.code),
-  )
-  const taxes = sum(otherTaxes.map((tax) => (tax.code === INITIAL_INVOICE_RETENTION ? -tax.amount : tax.amount)))
+  const subtracts = (code: number): boolean =>
+    code === INITIAL_INVOICE_RETENTION || (operation === 'purchase' && RETENTION_TAX_CODES.includes(code))
+  const taxes = sum((entry.otherTaxes ?? []).map((tax) => (subtracts(tax.code) ? -tax.amount : tax.amount)))
   const base =
-    (entry.netAmount ?? 0) +
-    (entry.exemptAmount ?? 0) +
-    (entry.vatAmount ?? 0) +
-    taxes +
-    (entry.containerDeposit ?? 0) -
-    (entry.partialVatWithheld ?? 0) -
-    (entry.totalVatWithheld ?? 0)
+    (entry.netAmount ?? 0) + (entry.exemptAmount ?? 0) + (entry.vatAmount ?? 0) + taxes + (entry.containerDeposit ?? 0)
   if (operation === 'sale')
     return (
       base -
+      (entry.partialVatWithheld ?? 0) -
+      (entry.totalVatWithheld ?? 0) -
       (entry.constructionCredit ?? 0) -
       (entry.settlement?.exemptValue ?? 0) -
       (entry.settlement?.netValue ?? 0) -

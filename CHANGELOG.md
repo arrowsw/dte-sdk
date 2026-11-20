@@ -7,8 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The status of an upload is its verdict, not the class of its code.** The SII answers `EPR` ("Envío Procesado")
+  once it has processed an envelope, whatever it did with each document inside, and `queryUploadStatus` and
+  `waitForUploadStatus` read that code as `accepted` while the counts of the same answer reported rejected documents.
+  Now `status` is settled with the counts: an accepted code with rejected documents is the new class
+  `partiallyRejected`, or `rejected` when none was accepted, and one with objections and no rejection is
+  `acceptedWithObjections`. Counts only lower an acceptance: a pending or a rejected envelope stays as its code says,
+  and so does an answer without counts. `QueryEstUp` answers one block of counts per document type of the envelope, and
+  only the first was read: `counts` now adds up every type and the new `countsByType` has each one, on both channels.
+  `uploadVerdict(cls, counts)` is the rule as a pure function, and `classifyUploadStatus` still reads a code alone,
+  without ever answering the new class. The certification runner reads the codes, as before.
+  - **What to change:** a caller that takes `status === 'accepted'` as "every document went in" needs nothing more.
+    One that compares against the list of classes, or switches over `UploadStatusClass`, has a new member,
+    `partiallyRejected`: the envelope went in and some of its documents did not, so only those are to be corrected
+    and sent again.
+- **A purchase book reports the VAT a purchase invoice withholds where the format puts it.** The format of the book
+  (Información Electrónica de Compras y Ventas 3.0, sections 2.4 and 3.4) gives each side its own fields: the sales
+  detail has `IVARetTotal` and `IVARetParcial`, which the schema itself marks "(LV)", and the purchase detail has
+  neither, and takes the withheld VAT in `OtrosImp` under a withholding code, 15 with the rate of the tax when the
+  whole VAT was withheld, and off `MntTotal`. Three things followed the sales side on a purchase book and now follow
+  the format. The line total of a purchase line takes off the amount of `otherTaxes` under a withholding code, and
+  `totalVatWithheld` and `partialVatWithheld` take no part in it; a sale line is as before. `bookEntryFromDocument`
+  with `operation: 'purchase'` puts the withholding of code 15 in `otherTaxes`, with the rate the document gives it,
+  and keeps `totalVatWithheld` for `operation: 'sale'`. And the certification purchase book writes the withholding of
+  a purchase invoice as `OtrosImp` with code 15 and rate 19, where it wrote the rate as 0.19 and `IVARetTotal` beside
+  it; the line total is still the net amount.
+  - **What to change:** nothing for a sales book. On a purchase book, a line that brought `totalVatWithheld` and no
+    explicit `totalAmount` now totals net plus VAT: give the withheld VAT in `otherTaxes` with code 15 instead. A line
+    with an explicit `totalAmount` keeps it, and a difference with the formula is reported in `totalMismatches`, as
+    always.
+- **The stamp is always printed at error correction level 5.** The level was left to the barcode library, which picks
+  it by the size of the data and lowers or raises it to fill the symbol: 5 for a stamp of the usual size, and nothing
+  held it there. It is now fixed at 5, the level the SII's instructions ask for (section A.2.5). And a stamp with a
+  byte above ASCII, as the document of another issuer may carry in the name of its receiver or of its first item, is
+  written in byte compaction alone when it fits in the symbol, where it was mixed with text compaction and the byte
+  travelled behind a shift. A stamp of plain ASCII, as every document dte-sdk issues has, is encoded as before.
+  - **What to change:** nothing. A `BarcodeModule` written for a test receives `eclevel` and `fixedeclevel`, and
+    `raw: true` with the codewords as its text for a stamp in bytes.
+
 ### Added
 
+- **The runtime's own RSA signs, checked against the JavaScript engine.** Every signature is RSA-SHA1 with PKCS#1
+  v1.5, which is deterministic, and it was worked out in JavaScript: about 12 ms for a 2048-bit key on a current
+  laptop, against 0.35 ms for the RSA of Node, so the signatures of an envelope of 500 receipts took about 6 seconds.
+  On a runtime that offers its crypto module without an import (Node, Bun, Deno), the first signature of the process
+  is worked out both ways and compared, and when they agree the runtime signs the ones that follow; if they differ, if
+  the runtime has no such module (a browser) or refuses SHA-1, the JavaScript engine stays in charge, and a key the
+  runtime refuses later is signed by it too. The bytes are the same either way, and no entry loads `node:crypto` at
+  import time. `rsaSigningEngine()` answers `native`, `portable`, or null before the first signature. With the rest
+  of this release's changes to the root entry, `dte-sdk` grows from 39.51 kB to 40.08 kB, over its 40 kB limit, which
+  goes to 42 kB.
+  - **What to change:** nothing.
+- **A line can be marked as a transaction of a withholding agent.** `Retenedor` is an element of a line of
+  `Documento` in `DTE_v10.xsd` that dte-sdk read when printing and could not write. A line's `withholdingAgent` writes
+  it, between `IndExe` and `NmbItem`: `{}` marks the line (`IndAgente` R), and `slaughterBase`, `marginBase` and
+  `finalConsumerPrice` are the bases it may declare (`MntBaseFaena`, `MntMargComer`, `PrcConsFinal`), whole amounts
+  from zero up or `INVALID_AMOUNT`. No document gets it by default. A receipt and a settlement invoice (43) refuse it
+  with `INVALID_OPTION`, since their lines declare no such element. New types `WithholdingAgentLine` and
+  `SiiRetenedor`.
+  - **What to change:** nothing.
+- **The mailbox an issuer registered for the exchange, from `dte-sdk/portal`.** The answers to a received document
+  (the reception answer, the commercial result and the receipt of goods) go to the mailbox the issuer registered with
+  the SII, which is not the sender of the message the document arrived in, and which the public registry
+  `queryAuthorizedIssuer` reads does not show. `unstable_fetchExchangeMailbox(portal, { rut })` asks the registry with
+  a portal session (`ce_consulta_e`), in the client's environment, and answers the issuer's name, resolution and
+  document types with `exchangeEmail`, null when the issuer registered none. A RUT that is not an authorized issuer
+  throws `SII_PORTAL_REJECTED` with `rejection: 'companyNotAuthorized'`. It carries the `unstable_` prefix because
+  dte-sdk has not read that page against the SII yet: its tests use a page written by hand on the markup of the public
+  registry. New type `ExchangeMailbox`.
+  - **What to change:** nothing.
 - **The printed sample takes the company's resolution as data.** `PrintedSampleOptions.resolution`, beside the string
   it has always taken, accepts `{ number, date }` (`NroResol`, and `FchResol` as `YYYY-MM-DD`) and prints the line in
   the wording of the default, `Res. Ex. SII N° {number} del {year}`, with the year of the date, on the sheet and on the

@@ -208,9 +208,13 @@ guarded('dist smoke (ES modules)', () => {
     expect(probeLoad(entryFile(name))).toEqual({ ok: true, output: 'loaded\n' })
   })
 
-  test('the root entry reaches no node: module', () => {
+  test('the root entry imports no node: module, and names only the one it asks the runtime for', () => {
     const code = [...closure(entryFile('index'))].map((file) => readFileSync(file, 'utf8')).join('\n')
-    expect(code).not.toMatch(/"node:/)
+    // The runtime's own RSA is asked for with `process.getBuiltinModule`, which is a call and not an import: no
+    // bundler resolves it, and a runtime without it (a browser) signs with the JavaScript engine.
+    expect(code.match(/"node:[^"]*"/g)).toEqual(['"node:crypto"'])
+    expect(code).toContain('getBuiltinModule?.("node:crypto")')
+    expect(code).not.toMatch(/(?:import|require)\s*\(\s*"node:|from\s*"node:/)
   })
 
   // `pdf-lib` and `bwip-js` are optional peers: only `dte-sdk/pdf` may name them.

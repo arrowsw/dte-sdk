@@ -41,7 +41,7 @@ describe('expectedBookEntryTotal', () => {
     ).toBe(1000 + 100 + 190 + 50 - 7 + 20 - 30 - 2 - 3 - 4 - 5 - 6)
   })
 
-  test('purchase: common-use, non-recoverable and non-creditable add; retention codes do not', () => {
+  test('purchase: common-use, non-recoverable and non-creditable add; the withheld VAT comes off under its code', () => {
     expect(
       expectedBookEntryTotal(
         {
@@ -62,18 +62,44 @@ describe('expectedBookEntryTotal', () => {
           ],
           containerDeposit: 17,
           nonCreditableTax: 18,
-          partialVatWithheld: 2,
-          totalVatWithheld: 3,
         },
         'purchase',
       ),
-    ).toBe(1000 + 100 + 190 + 11 + 12 + 13 + 14 + 15 - 16 + 17 + 18 - 2 - 3)
+    ).toBe(1000 + 100 + 190 + 11 + 12 + 13 + 14 - 190 + 15 - 16 + 17 + 18)
   })
 
-  test('a purchase invoice with full withholding totals the net', () => {
-    expect(expectedBookEntryTotal({ ...line, netAmount: 100, vatAmount: 19, totalVatWithheld: 19 }, 'purchase')).toBe(
-      100,
-    )
+  test('a purchase invoice that withholds the whole VAT totals the net, on either side of the book', () => {
+    const purchaseInvoice = { ...line, type: 46, netAmount: 100, vatAmount: 19 }
+    // On the book of who issued it, the withheld VAT travels in `OtrosImp` under code 15.
+    expect(
+      expectedBookEntryTotal({ ...purchaseInvoice, otherTaxes: [{ code: 15, rate: 19, amount: 19 }] }, 'purchase'),
+    ).toBe(100)
+    // On the book of who received it, in `IVARetTotal`.
+    expect(expectedBookEntryTotal({ ...purchaseInvoice, totalVatWithheld: 19 }, 'sale')).toBe(100)
+  })
+
+  test('a partial withholding by product comes off a purchase line by the part withheld', () => {
+    expect(
+      expectedBookEntryTotal(
+        { ...line, type: 46, netAmount: 1000, vatAmount: 190, otherTaxes: [{ code: 33, rate: 8, amount: 80 }] },
+        'purchase',
+      ),
+    ).toBe(1000 + 190 - 80)
+  })
+
+  test('the withholding fields of the sales detail take no part in a purchase line, and a code no part off a sale', () => {
+    expect(
+      expectedBookEntryTotal(
+        { ...line, netAmount: 100, vatAmount: 19, totalVatWithheld: 19, partialVatWithheld: 5 },
+        'purchase',
+      ),
+    ).toBe(119)
+    expect(
+      expectedBookEntryTotal(
+        { ...line, netAmount: 100, vatAmount: 19, otherTaxes: [{ code: 15, rate: 19, amount: 19 }] },
+        'sale',
+      ),
+    ).toBe(138)
   })
 
   test('an empty line totals 0 on either side', () => {
