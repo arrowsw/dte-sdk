@@ -130,7 +130,7 @@ jobs:
       # Proves the README "runs in Deno" claim against the real build, entry by entry.
       - name: Deno imports every entry
         run: |
-          deno eval "const [root, node, portal, pdf, catalogs] = await Promise.all(['index', 'node', 'portal', 'pdf', 'catalogs'].map((name) => import('./dist/' + name + '.min.js'))); if (typeof root.createDocument !== 'function' || typeof root.createSiiClient !== 'function' || typeof node.createNodeHttpsTransport !== 'function' || typeof portal.createPortalClient !== 'function' || typeof pdf.renderPrintedSample !== 'function' || typeof catalogs.businessActivity !== 'function') { console.error('Deno smoke FAILED'); Deno.exit(1); } console.log('Deno smoke ok');"
+          deno eval "const [root, node, portal, pdf, catalogs, schemas] = await Promise.all(['index', 'node', 'portal', 'pdf', 'catalogs', 'schemas'].map((name) => import('./dist/' + name + '.min.js'))); if (typeof root.createDocument !== 'function' || typeof root.createSiiClient !== 'function' || typeof node.createNodeHttpsTransport !== 'function' || typeof portal.createPortalClient !== 'function' || typeof pdf.renderPrintedSample !== 'function' || typeof catalogs.businessActivity !== 'function' || typeof schemas.validateAgainstSchema !== 'function') { console.error('Deno smoke FAILED'); Deno.exit(1); } console.log('Deno smoke ok');"
 
   smoke-bun:
     name: smoke (Bun)
@@ -155,7 +155,7 @@ jobs:
       # Proves the README "runs in Bun" claim against the real build, entry by entry.
       - name: Bun imports every entry
         run: |
-          bun -e "const [root, node, portal, pdf, catalogs] = await Promise.all(['index', 'node', 'portal', 'pdf', 'catalogs'].map((name) => import('./dist/' + name + '.min.js'))); if (typeof root.createDocument !== 'function' || typeof root.createSiiClient !== 'function' || typeof node.createNodeHttpsTransport !== 'function' || typeof portal.createPortalClient !== 'function' || typeof pdf.renderPrintedSample !== 'function' || typeof catalogs.businessActivity !== 'function') { console.error('Bun smoke FAILED'); process.exit(1); } console.log('Bun smoke ok');"
+          bun -e "const [root, node, portal, pdf, catalogs, schemas] = await Promise.all(['index', 'node', 'portal', 'pdf', 'catalogs', 'schemas'].map((name) => import('./dist/' + name + '.min.js'))); if (typeof root.createDocument !== 'function' || typeof root.createSiiClient !== 'function' || typeof node.createNodeHttpsTransport !== 'function' || typeof portal.createPortalClient !== 'function' || typeof pdf.renderPrintedSample !== 'function' || typeof catalogs.businessActivity !== 'function' || typeof schemas.validateAgainstSchema !== 'function') { console.error('Bun smoke FAILED'); process.exit(1); } console.log('Bun smoke ok');"
 
   package:
     name: package (pack once, test the tarball)

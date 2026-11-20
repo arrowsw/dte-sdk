@@ -49,6 +49,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A new entry point, `dte-sdk/schemas`: validation against the SII's schemas, as an option.** The tests validated
+  what dte-sdk issues against the SII's schemas, and nothing did at run time; the README listed it as planned.
+  `validateAgainstSchema(xml, { schema })` validates a document against the SII's own schema and returns what the
+  schema says against it, `{ message, line }` each, and an empty list when the document is valid. It is the check the
+  SII runs first on an upload, where one document that fails takes the whole envelope with it, so running it before
+  costs no folio. The schema is the one of the document element (`schemaOf(xml)`) unless `schema` names another, and
+  `SII_SCHEMAS` lists the eight it has: `DTE`, `EnvioDTE`, `EnvioBOLETA`, `LibroCV`, `LibroGuia`, `ConsumoFolio`,
+  `RespuestaEnvioDTE` and `EnvioRecibos`. The document can be its text or the bytes of its file, read in the charset
+  its declaration names. The schemas come inside the package, as text (`SCHEMA_SOURCES`): the SII's 14 files, whole,
+  decoded from ISO-8859-1, and a test holds them to the files the tests already validated against, which now validate
+  through this entry. The validator, `xmllint-wasm`, is a new optional peer dependency, loaded on first use; without it
+  the call throws `DEPENDENCY_UNAVAILABLE`. Nothing else in the package calls the entry, and no other entry reaches the
+  schemas. `npm run schemas` writes them again after a schema of the SII changes. The entry measures 23.59 kB against a
+  limit of 24 kB.
+  - **What to change:** nothing. To validate, install `xmllint-wasm` and import from `dte-sdk/schemas`.
 - **The purchase and sales register as a file, from `dte-sdk/portal`.** The register was read page by page, and the
   README listed its file as planned. `unstable_downloadRegisterFile(portal, { period, operation, accountingStatus })`
   asks the register's service for what its "Descargar Detalles" gives: every document of the operation in the period,

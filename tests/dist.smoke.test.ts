@@ -112,6 +112,7 @@ const EXPECTED_FUNCTIONS: Record<string, readonly string[]> = {
     'siiOfficeForCommune',
   ],
   catalogs: ['businessActivity', 'isBusinessActivityCode'],
+  schemas: ['validateAgainstSchema', 'schemaOf', 'loadSchemaValidator'],
 }
 const ENTRIES = Object.keys(EXPECTED_FUNCTIONS)
 
@@ -132,12 +133,12 @@ const probeLoad = (entry: string): ProbeResult => {
   return runNode(['--input-type=module', '-e', script])
 }
 
-/** Runs `body`, in a fresh process, with every entry loaded as `root`, `node`, `portal`, `pdf` and `catalogs`. */
+/** Runs `body`, in a fresh process, with every entry loaded as `root`, `node`, `portal`, `pdf`, `catalogs` and `schemas`. */
 const withEntries = (body: string): ProbeResult => {
   const script = `
 const fs = require('node:fs')
 const fixtures = ${JSON.stringify(fixtures)}
-Promise.all(${JSON.stringify(ENTRIES.map((name) => href(entryFile(name))))}.map((file) => import(file))).then(async ([root, node, portal, pdf, catalogs]) => {
+Promise.all(${JSON.stringify(ENTRIES.map((name) => href(entryFile(name))))}.map((file) => import(file))).then(async ([root, node, portal, pdf, catalogs, schemas]) => {
 ${body}
 }).catch((error) => { console.error(error); process.exit(1) })`
   return runNode(['-e', script])
@@ -217,17 +218,31 @@ guarded('dist smoke (ES modules)', () => {
     expect(code).not.toMatch(/(?:import|require)\s*\(\s*"node:|from\s*"node:/)
   })
 
-  // `pdf-lib` and `bwip-js` are optional peers: only `dte-sdk/pdf` may name them.
-  test.each(['index', 'node', 'portal', 'catalogs'])('%s reaches no optional peer, in code or in types', (name) => {
-    const code = [...closure(entryFile(name))].map((file) => readFileSync(file, 'utf8')).join('\n')
-    expect(code).not.toMatch(/"(pdf-lib|bwip-js)"/)
-    const declarations = readdirSync(distRoot, { recursive: true, encoding: 'utf8' }).filter(
-      (file) => file.endsWith('.d.ts') && !file.startsWith('pdf'),
-    )
-    const named = declarations.filter((file) =>
-      /['"](pdf-lib|bwip-js)['"]/.test(readFileSync(join(distRoot, file), 'utf8')),
-    )
-    expect(named).toEqual([])
+  // `pdf-lib`, `bwip-js` and `xmllint-wasm` are optional peers: only `dte-sdk/pdf` may name the first two, and only
+  // `dte-sdk/schemas` the third. No declaration file names any of them, so the types need none installed.
+  test.each(['index', 'node', 'portal', 'catalogs', 'schemas'])(
+    '%s reaches no optional peer of another entry, in code or in types',
+    (name) => {
+      const code = [...closure(entryFile(name))].map((file) => readFileSync(file, 'utf8')).join('\n')
+      expect(code).not.toMatch(/"(pdf-lib|bwip-js)"/)
+      if (name !== 'schemas') expect(code).not.toContain('"xmllint-wasm"')
+      // Outside the declarations of the entry that owns a peer, no declaration names it, in a comment either.
+      const naming = (owner: string, peers: RegExp): string[] =>
+        readdirSync(distRoot, { recursive: true, encoding: 'utf8' })
+          .filter((file) => file.endsWith('.d.ts') && !file.startsWith(owner))
+          .filter((file) => peers.test(readFileSync(join(distRoot, file), 'utf8')))
+      expect(naming('pdf', /['"](pdf-lib|bwip-js)['"]/)).toEqual([])
+      expect(naming('schemas', /['"]xmllint-wasm['"]/)).toEqual([])
+    },
+  )
+
+  // The schemas are about 475 kB of text: only `dte-sdk/schemas` may reach them, and `dte-sdk/pdf` not its validator.
+  test.each(['index', 'node', 'portal', 'pdf', 'catalogs'])('%s does not reach the schemas', (name) => {
+    const code = (entry: string) => [...closure(entryFile(entry))].map((file) => readFileSync(file, 'utf8')).join('\n')
+    expect(code('schemas')).toContain('xs:schema')
+    expect(code('schemas')).toContain('"xmllint-wasm"')
+    expect(code(name)).not.toContain('xs:schema')
+    expect(code(name)).not.toContain('"xmllint-wasm"')
   })
 
   test('the closure walk does find what an entry reaches', () => {
@@ -349,6 +364,14 @@ guarded('dist smoke (ES modules)', () => {
     })
   })
 
+  test('dte-sdk/schemas loads its validator on first use and validates what the root issues', () => {
+    const result = withEntries(`${ISSUE_DOCUMENT}
+  const valid = await schemas.validateAgainstSchema(signed.xml)
+  const broken = await schemas.validateAgainstSchema(signed.xml.replace('<TipoDTE>33</TipoDTE>', '<TipoDTE>999</TipoDTE>'))
+  console.log(JSON.stringify([schemas.schemaOf(signed.xml), valid.length, broken.length > 0]))`)
+    expect(result).toEqual({ ok: true, output: '["DTE",0,true]\n' })
+  })
+
   test('dte-sdk/pdf loads pdf-lib and bwip-js on first use and renders a printed sample', () => {
     const result = withEntries(`${ISSUE_DOCUMENT}
   const [doc] = pdf.parsePrintableDocuments(signed.xml)
@@ -365,6 +388,7 @@ import { createNodeHttpsTransport } from 'dte-sdk/node'
 import { createPortalClient } from 'dte-sdk/portal'
 import { parsePrintableDocuments } from 'dte-sdk/pdf'
 import { businessActivity } from 'dte-sdk/catalogs'
+import { validateAgainstSchema } from 'dte-sdk/schemas'
 
 // @ts-expect-error
 export const root: number = createDocument
@@ -376,6 +400,8 @@ export const portal: number = createPortalClient
 export const pdf: number = parsePrintableDocuments
 // @ts-expect-error
 export const catalogs: number = businessActivity
+// @ts-expect-error
+export const schemas: number = validateAgainstSchema
 `
 
 const TYPE_CONSUMERS: ReadonlyArray<readonly [string, string, Record<string, string>]> = [
