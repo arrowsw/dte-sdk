@@ -279,10 +279,9 @@ const whole = (value: number | undefined, digits: number, path: string): number 
   return value
 }
 
-// An amount of `Exportaciones` is a decimal with four decimals. A number holds fifteen significant digits exactly, so
-// eleven before the point: past that an amount would not be written as it was given, and it is refused, though the
-// schema admits fourteen.
-const MAX_EXPORT_AMOUNT = 1e11
+// An amount of `Exportaciones` is a decimal from zero up to 99999999999999.9999, with four decimals. One that is given
+// is taken as the number says it; one worked out with more digits than a number holds is refused by the arithmetic.
+const MAX_EXPORT_AMOUNT = 1e14
 
 // `Liquidacion` declares less than `Documento`: no transport, no global or line discounts and surcharges, no `RUTOtr`
 // in a reference, no `MontoNF`. Each of these would be written under it and fail the schema.

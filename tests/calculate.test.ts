@@ -418,6 +418,32 @@ describe('calculateExportLineAmount', () => {
   })
 })
 
+describe('an amount with more digits than a number holds', () => {
+  const unheld = (value: string) => expect.objectContaining({ code: 'INVALID_AMOUNT', details: { value } })
+
+  test('is refused with its digits where it would be handed back as another amount', () => {
+    expect(() => calculateExportLineAmount({ quantity: 1_000_001, unitPrice: 3_000_000.0001 })).toThrow(
+      unheld('3000003000100.0001'),
+    )
+    expect(() => calculateExportTotals([{ amount: 3_000_003_000_100 }, { amount: 0.0001 }] as never)).toThrow(
+      unheld('3000003000100.0001'),
+    )
+    expect(() => calculateExportTotals([{ amount: -3_000_003_000_100 }, { amount: -0.0001 }] as never)).toThrow(
+      unheld('-3000003000100.0001'),
+    )
+  })
+
+  test('is taken when its number writes it back, sixteen digits and all', () => {
+    expect(calculateExportLineAmount({ quantity: 1, unitPrice: 123_456_789_012.3456 }).amount).toBe(
+      123_456_789_012.3456,
+    )
+    expect(calculateExportTotals([{ amount: 150_000_000_000 }, { amount: 0.5 }] as never)).toEqual({
+      exemptAmount: 150_000_000_000.5,
+      totalAmount: 150_000_000_000.5,
+    })
+  })
+})
+
 describe('calculateExportTotals', () => {
   const adjustment = (kind: 'discount' | 'surcharge', valueType: 'percent' | 'amount', value: number) => ({
     lineNumber: 1,

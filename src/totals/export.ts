@@ -37,12 +37,24 @@ const divide = (numerator: bigint, denominator: bigint): bigint => {
   return negative ? ZERO - quotient : quotient
 }
 
-// The number a scaled amount writes, read from its decimal digits, so it is the one the same literal gives.
-const toNumber = (units: bigint, decimals: number): number => {
+// A scaled amount in decimal digits.
+const digitsOf = (units: bigint, decimals: number): string => {
   const negative = units < ZERO
   const digits = String(negative ? ZERO - units : units).padStart(decimals + 1, '0')
   const cut = digits.length - decimals
-  return Number(`${negative ? '-' : ''}${digits.slice(0, cut)}.${digits.slice(cut)}`)
+  return `${negative ? '-' : ''}${digits.slice(0, cut)}.${digits.slice(cut)}`
+}
+
+// The number a scaled amount writes, read from its decimal digits, so it is the one the same literal gives.
+const toNumber = (units: bigint, decimals: number): number => Number(digitsOf(units, decimals))
+
+// The number an amount worked out here is handed back as. A number holds some fifteen significant digits: an amount
+// with more may have no number of its own, and the number it gets is written as another amount. That one is refused,
+// with its digits; an amount whose number writes it back is taken, however many digits it has.
+const held = (units: bigint, decimals: number): number => {
+  const amount = toNumber(units, decimals)
+  if (unitsOf(amount, decimals) !== units) throw new DteError('INVALID_AMOUNT', { value: digitsOf(units, decimals) })
+  return amount
 }
 
 /**
@@ -100,7 +112,7 @@ export type ExportLineAmount = {
  * `RecargoMonto`.
  * @param input EN: the quantity, the price and the percentages. ES: la cantidad, el precio y los porcentajes.
  * @returns EN: the base, the discount, the surcharge and the amount. ES: la base, el descuento, el recargo y el monto.
- * @throws {DteError} EN: `INVALID_AMOUNT` for an input that is not finite or is 10^21 or more. ES: `INVALID_AMOUNT` ante una entrada que no es finita o es 10^21 o más.
+ * @throws {DteError} EN: `INVALID_AMOUNT` for an input that is not finite or is 10^21 or more, and for a base or an amount with more digits than a number holds, which would be written as another one, with it in `details.value`. ES: `INVALID_AMOUNT` ante una entrada que no es finita o es 10^21 o más, y ante una base o un monto con más dígitos de los que guarda un número, que se escribiría como otro, con él en `details.value`.
  */
 export const calculateExportLineAmount = ({
   quantity = 1,
@@ -117,10 +129,10 @@ export const calculateExportLineAmount = ({
   const surcharge = share(surchargePercent)
   const scale = pow10(AMOUNT_DECIMALS)
   return {
-    base: toNumber(base, AMOUNT_DECIMALS),
+    base: held(base, AMOUNT_DECIMALS),
     discountAmount: Number(discount),
     surchargeAmount: Number(surcharge),
-    amount: toNumber(base - discount * scale + surcharge * scale, AMOUNT_DECIMALS),
+    amount: held(base - discount * scale + surcharge * scale, AMOUNT_DECIMALS),
   }
 }
 
@@ -151,7 +163,7 @@ export type ExportTotalsOptions = {
  * @param items EN: the lines, with their amounts. ES: las líneas, con sus montos.
  * @param options EN: the global adjustments and whether the export is without payment. ES: los ajustes globales y si la exportación es sin pago.
  * @returns EN: the exempt amount and the total. ES: el monto exento y el total.
- * @throws {DteError} EN: `INVALID_AMOUNT` for an amount that is not finite or is 10^21 or more. ES: `INVALID_AMOUNT` ante un monto que no es finito o es 10^21 o más.
+ * @throws {DteError} EN: `INVALID_AMOUNT` for an amount that is not finite or is 10^21 or more, and for an exempt amount with more digits than a number holds, which would be written as another one, with it in `details.value`. ES: `INVALID_AMOUNT` ante un monto que no es finito o es 10^21 o más, y ante un monto exento con más dígitos de los que guarda un número, que se escribiría como otro, con él en `details.value`.
  */
 export const calculateExportTotals = (
   items: readonly Pick<LineItem, 'amount' | 'exemptIndicator'>[],
@@ -167,7 +179,7 @@ export const calculateExportTotals = (
         : unitsOf(adjustment.value, 2) * pow10(AMOUNT_DECIMALS - 2)
     return adjustment.kind === 'discount' ? running - delta : running + delta
   }, lines)
-  const exemptAmount = toNumber(exempt, AMOUNT_DECIMALS)
+  const exemptAmount = held(exempt, AMOUNT_DECIMALS)
   return { exemptAmount, totalAmount: options.withoutPayment ? 0 : exemptAmount }
 }
 

@@ -1281,18 +1281,34 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
     expectError(() => exportOf({ items: [item] }), 'INVALID_AMOUNT', { field: 'items[0].amount' })
   })
 
-  test.each<[string, LineItemInput]>([
-    ['eleven digits before the point', { name: 'Ajuste', quantity: 1, unit: 'U', amount: 1e11 }],
-    ['a number too large to be written in digits', { name: 'Ajuste', quantity: 1, unit: 'U', amount: 1e21 }],
-  ])('an amount of %s is refused: a number does not hold it to its fourth decimal', (_label, item) => {
+  test('an amount of a number too large to be written in digits is refused', () => {
+    const item = { name: 'Ajuste', quantity: 1, unit: 'U', amount: 1e21 }
     expectError(() => exportOf({ items: [item] }), 'INVALID_AMOUNT', { field: 'items[0].amount' })
   })
 
-  test('the largest amount is written as it is given, to its last decimal', () => {
-    const doc = exportOf({ items: [{ name: 'Granel', quantity: 1, unit: 'KN', amount: 99999999999.9999 }] })
-    expect(doc.items[0].amount).toBe(99999999999.9999)
-    expect(doc.header.totals).toEqual({ exemptAmount: 99999999999.9999, totalAmount: 99999999999.9999 })
-    expectError(() => exportOf({ totals: { totalAmount: 1e11 } }), 'INVALID_AMOUNT', { field: 'totals.totalAmount' })
+  // 150 000 000 000 guaranies and 120 000 000 000 pesos are exports of some twenty and some hundred million dollars.
+  test.each([
+    ['eleven digits and four decimals', 99999999999.9999],
+    ['a whole amount of twelve digits', 150_000_000_000],
+    ['twelve digits and a decimal', 123_456_789_012.5],
+    ['the largest whole amount of the schema', 99_999_999_999_999],
+  ])('an amount of %s is written as it is given, up to what the schema admits', (_label, amount) => {
+    const doc = exportOf({ items: [{ name: 'Granel', quantity: 1, unit: 'KN', amount }] })
+    expect(doc.items[0].amount).toBe(amount)
+    expect(doc.header.totals).toEqual({ exemptAmount: amount, totalAmount: amount })
+    expectError(() => exportOf({ totals: { totalAmount: 1e14 } }), 'INVALID_AMOUNT', { field: 'totals.totalAmount' })
+  })
+
+  test('an amount worked out with more digits than a number holds is refused, and not written as another', () => {
+    // 1 000 001 by 3 000 000.0001 is 3 000 003 000 100.0001, and the nearest number is 3 000 003 000 100.
+    const line = { name: 'Granel', quantity: 1_000_001, unit: 'KN', unitPrice: 3_000_000.0001 }
+    expectError(() => exportOf({ items: [line] }), 'INVALID_AMOUNT', { value: '3000003000100.0001' })
+    // Two amounts a number holds, and a sum it does not.
+    const lines = [
+      { name: 'Granel', quantity: 1, unit: 'KN', amount: 3_000_003_000_100 },
+      { name: 'Ajuste', quantity: 1, unit: 'U', amount: 0.0001 },
+    ]
+    expectError(() => exportOf({ items: lines }), 'INVALID_AMOUNT', { value: '3000003000100.0001' })
   })
 
   test.each<[string, LineItemInput, string]>([
