@@ -65,6 +65,7 @@ every field.
 - [Step by step](#step-by-step)
 - [Validating against the SII's schemas](#validating-against-the-siis-schemas)
 - [Answering a received envelope](#answering-a-received-envelope)
+- [Assigning an invoice](#assigning-an-invoice)
 - [Received documents](#received-documents)
 - [SII web services](#sii-web-services)
 - [SII books](#sii-books)
@@ -127,6 +128,7 @@ the SII offers it in the other environment only.
 | Web services: acceptance and claim registry                    | `dte-sdk`        | Yes, 2026-11-09 and 10, on one received invoice (type 33): `registerClaim` answered 0 for `ERM` and then for `ACD`; `listClaimEvents` answered 16 (no events) before and 15 (both events) after; `queryReceptionDate` gave the reception date and `receiverAnswer` the deadline. On 2026-11-11, `registerClaim` answered 27 for `ACD` on an invoice paid in cash, whose events listed `PAG` alone. The claims (`RCD`, `RFP`, `RFT`) and `queryTransferable` not run yet | Not run yet ([issue 8](https://github.com/arrowsw/dte-sdk/issues/8))                                                                                                            |
 | Public registry of authorized issuers                          | `dte-sdk`        | Not recorded                                                                                                                                                                                                                                                                                                                                                          | Not recorded                                                                                                                                                                    |
 | SII books                                                      | `dte-sdk`        | Not sent yet; they validate against the official schemas in the tests                                                                                                                                                                                                                                                                                                 | Not sent yet                                                                                                                                                                    |
+| Assignment of invoices (AEC)                                   | `dte-sdk`        | Not sent yet; the files validate against the official schema in the tests                                                                                                                                                                                                                                                                                             | Not sent yet                                                                                                                                                                    |
 | Portal session                                                 | `dte-sdk/portal` | Yes, 2026-11-09 and 10: certificate login and the session reused between reads, for a company not enrolled as an issuer                                                                                                                                                                                                                                               | Not recorded                                                                                                                                                                    |
 | Company data and the refusal pages                             | `dte-sdk/portal` | Not recorded                                                                                                                                                                                                                                                                                                                                                          | Not recorded                                                                                                                                                                    |
 | Folios and CAF requests                                        | `dte-sdk/portal` | Not run yet: they need an enrolled company                                                                                                                                                                                                                                                                                                                            | Not run yet: they need an enrolled company; the tests replay the pages this environment served to one                                                                           |
@@ -148,7 +150,7 @@ to be compared against real answers ([issue 14](https://github.com/arrowsw/dte-s
 the certification runner set aside to keep it to field behaviour, to be weighed after the first real certification
 ([issue 29](https://github.com/arrowsw/dte-sdk/issues/29)).
 
-Planned, after the first certification: export documents (110, 111 and 112) and the assignment of invoices (AEC).
+Planned, after the first certification: export documents (110, 111 and 112).
 
 Planned, with no date:
 
@@ -182,7 +184,7 @@ npm install xmllint-wasm
 
 | Import from        | What it holds                                                                                                                                                                                                             | Runs on                                                        |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `dte-sdk`          | Documents, stamps, signatures, envelopes, books, the verification of received documents and the SII web services client over `fetch`                                                                                      | Node, Bun, Deno; bundles for the browser with no configuration |
+| `dte-sdk`          | Documents, stamps, signatures, envelopes, books, the assignment of invoices, the verification of received documents and the SII web services client over `fetch`                                                          | Node, Bun, Deno; bundles for the browser with no configuration |
 | `dte-sdk/node`     | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope`  | Node                                                           |
 | `dte-sdk/portal`   | SII portal, folios and CAF requests, the folio registry, purchase and sales register, MIPYME backup, activity verification, and certification: sets, runner, exchange, upload of the samples and the receipts application | Node                                                           |
 | `dte-sdk/pdf`      | Printed samples and the SII office of each commune (`SII_OFFICES`, `siiOfficeForCommune`)                                                                                                                                 | Node, with `pdf-lib` and `bwip-js` installed                   |
@@ -489,8 +491,8 @@ if (issues.length > 0) throw new Error(issues.map((issue) => `line ${issue.line}
 
 It is an option, and nothing else in dte-sdk calls it. The schemas come inside the package: the SII's own files, in the
 versions in force, for every document dte-sdk sends in an `EnvioDTE` or an `EnvioBOLETA`, the three books and the
-answers to a received envelope (`DTE`, `EnvioDTE`, `EnvioBOLETA`, `LibroCV`, `LibroGuia`, `ConsumoFolio`,
-`RespuestaEnvioDTE` and `EnvioRecibos`; `SII_SCHEMAS` lists them). The schema is the one of the document element unless
+answers to a received envelope and the assignment file (`DTE`, `EnvioDTE`, `EnvioBOLETA`, `LibroCV`, `LibroGuia`,
+`ConsumoFolio`, `RespuestaEnvioDTE`, `EnvioRecibos` and `AEC`; `SII_SCHEMAS` lists them). The schema is the one of the document element unless
 `schema` names another, and `schemaOf(xml)` says which that is. The document can be its text or the bytes of its file,
 read in the charset its declaration names. The validator, `xmllint-wasm`, is an optional peer loaded on first use:
 without it the call throws `DEPENDENCY_UNAVAILABLE`. The messages are the validator's, in English, and name each
@@ -565,6 +567,76 @@ message a document arrived in. `unstable_fetchExchangeMailbox(portal, { rut })`,
 registry of authorized issuers for it with a portal session, and answers the issuer's name, resolution and document
 types with `exchangeEmail`, null when the issuer registered none. It is unstable: the page it reads has not been read
 against the SII by dte-sdk yet, so its shape may change in any version. Sending the e-mail stays with the application.
+
+## Assigning an invoice
+
+The holder of an invoice assigns its credit to a financier, under Ley 19.983, with an electronic assignment file
+(Archivo Electrónico de Cesión, AEC) registered in the SII's public registry of credit transfers (RPETC).
+`createAssignment` builds and signs that file from the signed document, as it was sent, with no network:
+
+```typescript
+import { createAssignment, verifyAssignment } from 'dte-sdk'
+import { validateAgainstSchema } from 'dte-sdk/schemas'
+
+const aec = createAssignment({
+  document: signed.xml, // the DTE as it was sent: 33, 34, 46 or 43
+  assignor: {
+    rut: '76543210-3',
+    businessName: 'Comercial Andina SpA',
+    address: 'Av. Los Aromos 1540',
+    email: 'pagos@andina.example',
+    signers: [{ rut: '12345678-5', name: 'Carolina Valdés Rojas', certificate }], // one to three
+  },
+  assignee: {
+    rut: '10000004-0',
+    businessName: 'Factoring Austral SpA',
+    address: 'Av. Apoquindo 3000',
+    email: 'ops@austral.example',
+  },
+  amount: 254363, // MontoCesion, up to the document's total
+  lastDueDate: '2026-12-15', // UltimoVencimiento
+  certificate, // signs the assigned document's zone and the whole file
+})
+await validateAgainstSchema(aec) // [] — by AEC_v10.xsd
+verifyAssignment(aec).valid // true: the document's own signature and the file's four zones
+```
+
+The file follows Formato Archivo Electrónico de Cesión 1.1 and `AEC_v10.xsd`: the document embedded byte for byte,
+so its own signature still verifies, in a signed `DocumentoDTECedido`; the assignment, `DocumentoCesion` with
+`SeqCesion` 1, signed once by each authorized signer with their own certificate, in their order; and the whole file
+signed as `DocumentoAEC`. The result is ISO-8859-1 text with its declaration. Before anything is signed it refuses
+what the format rules out: a type other than 33, 34, 46 and 43 (`ASSIGNABLE_DOCUMENT_TYPES`), a document whose
+signature does not verify (`SIGNATURE_INVALID`), a first assignment by anyone but the creditor (the issuer of an
+invoice, the receiver of a purchase or settlement invoice), no signers or more than three, a signer whose certificate
+names another RUT, an amount that is not a whole number from 1 to the document's total, dates outside 2003-04-01 to
+2050-12-31 and texts past the stricter of the format's and the schema's lengths. The file carries no electronic receipt
+of the goods, so it carries the sworn statement the format words for that case (`DeclaracionJurada`), naming the
+assignor, the assignee and the document's debtor. `otherTerms`, `debtorEmail` and `contact` are optional.
+
+`createReassignment({ previous, ...terms })` builds a later assignment on top of an earlier file: every signature of
+that file must verify, its zones are carried over as they were signed, and the new assignment, made by the previous
+assignee, gets the next `SeqCesion`, up to 40 (`MAX_ASSIGNMENTS`). `verifyAssignment(xml)` checks every signature of a
+file where it stands in it, and says which one fails.
+
+Registering the file is a call to the SII, and it is unstable: neither function has been run against the SII yet, and
+the format does not describe the registry's services, so their shape may change in any release.
+
+```typescript
+import { unstable_queryAssignmentUploadStatus, unstable_uploadAssignment } from 'dte-sdk'
+
+const sii = createSiiClient({ environment: 'certification', certificate, companyRut: '76543210-3' })
+const receipt = await unstable_uploadAssignment(sii, { xml: aec, notificationEmail: 'cesiones@andina.example' })
+const state = await unstable_queryAssignmentUploadStatus(sii, { trackId: receipt.trackId })
+state.code // the SII's ESTADO, as sent; its codes are not documented, so it is not classified
+```
+
+`unstable_uploadAssignment` posts the file to `RTCAnotEnvio.cgi` with the SOAP token, the assignor's RUT, which must
+be the `RutCedente` of the file's cover, and the address the SII notifies; it is retried only while no answer has
+arrived, never sent again after one, and every answer goes to the `archive` port as kind `assignment`. `STATUS` 0 with
+a TrackID is a received file, not a registered assignment; any other `STATUS` is `SII_UPLOAD_REJECTED`.
+`unstable_queryAssignmentUploadStatus` asks `getEstEnvio` of `wsRPETCConsulta` for the TrackID. Not covered yet: the
+PDF image of the document (`ImagenDTE`), the electronic receipts (`Recibo`) and the image of a manual one
+(`ImagenAR`), and the state of a document's assignments in the registry.
 
 ## Received documents
 
@@ -698,7 +770,7 @@ Options worth knowing:
   you must, `rejectUnauthorized: false` / `legacyRenegotiation: true`. TLS verification is on
   by default and the SII hosts verify with the system trust store, so the defaults just work.
 - `retry`: 6 attempts with exponential backoff by default; `false` disables it. An upload
-  (`uploadEnvelope`, `uploadBook`, `uploadFolioConsumption`) and `registerClaim` change state at
+  (`uploadEnvelope`, `uploadBook`, `uploadFolioConsumption`, `unstable_uploadAssignment`) and `registerClaim` change state at
   the SII, so they are sent again only while no SII response has arrived (connection failure,
   timeout before the response headers). Once the SII answered, whatever it said, and even if the
   reply was cut off halfway, they are never re-sent, except once with a fresh token when the SII

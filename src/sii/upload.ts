@@ -114,7 +114,11 @@ const TRACK_ID_PATTERN = /^\d{1,20}$/
 const TRACK_ID_ELEMENT = /<TRACKID>(\d+)<\/TRACKID>/i
 const TRACK_ID_IN_TEXT = /\btrackid\b\s*[:=]?\s*(\S+)/i
 
-const invalidResponse = (operation: string, text: string): DteError =>
+/**
+ * EN: `SII_RESPONSE_INVALID` for an answer that cannot be read, with an excerpt of it.
+ * ES: `SII_RESPONSE_INVALID` ante una respuesta que no se puede leer, con un extracto de ella.
+ */
+export const invalidResponse = (operation: string, text: string): DteError =>
   new DteError('SII_RESPONSE_INVALID', { operation, body: bodyExcerpt(text) })
 
 // The word after "Trackid" in the first error line that has one, without the punctuation that may follow it.
@@ -167,15 +171,33 @@ export const parseReceptionResponse = (text: string, operation = 'upload'): Rece
   return { ...base, outcome: 'rejected', trackId: null }
 }
 
-type UploadJob = {
+/**
+ * EN: One file to upload, as the upload of every kind runs it: where it goes, the form's fields and the reader of the
+ * answer.
+ * ES: Un archivo a subir, como corre la subida de cada tipo: adónde va, los campos del formulario y el lector de la
+ * respuesta.
+ */
+export type UploadJob = {
+  /** EN: What is uploaded. ES: Qué se sube. */
   readonly kind: UploadKind
+  /** EN: Operation name for the capture, logs and errors. ES: Nombre de la operación para la captura, los logs y los errores. */
   readonly operation: string
+  /** EN: Name of the multipart file. ES: `filename` — Nombre del archivo del multipart. */
   readonly fileName: string
+  /** EN: The file's ISO-8859-1 bytes. ES: Los bytes ISO-8859-1 del archivo. */
   readonly bytes: Uint8Array
+  /** EN: Company RUT, for the archive. ES: `rutCompany` — RUT de la empresa, para el archivo de envíos. */
   readonly companyRut: SiiRut
+  /** EN: Sender RUT, for the archive. ES: `rutSender` — RUT de quien envía, para el archivo de envíos. */
   readonly senderRut: SiiRut
+  /** EN: Channel of the token. ES: Canal del token. */
   readonly channel: TokenChannel
+  /** EN: Where the file is posted. ES: Adónde se envía el archivo. */
   readonly url: string
+  /** EN: The form's fields before the file. ES: Los campos del formulario antes del archivo. */
+  readonly fields: readonly MultipartField[]
+  /** EN: Reads the answer; throws for one that cannot be read. ES: Lee la respuesta; lanza ante una que no se puede leer. */
+  readonly read: (job: UploadJob, response: HttpResponse, text: string) => UploadVerdict
 }
 
 const FILE_NAMES: Readonly<Record<UploadKind, string>> = {
@@ -183,6 +205,7 @@ const FILE_NAMES: Readonly<Record<UploadKind, string>> = {
   receipt: 'EnvioBOLETA.xml',
   book: 'LibroCV.xml',
   folioConsumption: 'ConsumoFolios.xml',
+  assignment: 'AEC.xml',
 }
 const MAX_REST_RECEIPTS = 500
 const GUIDE_BOOK_FILE_NAME = 'LibroGuia.xml'
@@ -190,7 +213,12 @@ const GUIDE_BOOK_ROOT = /<LibroGuia[\s>]/
 // It travels in the multipart `filename`, so it cannot be free text.
 const SAFE_FILE_NAME = /^[\w.-]+\.xml$/
 
-const resolveFileName = (kind: UploadKind, xml: string, fileName: string | undefined): string => {
+/**
+ * EN: The multipart file name: the caller's, when it is a safe one, or the default of the kind.
+ * ES: El nombre del archivo del multipart: el de quien llama, si es seguro, o el por defecto del tipo.
+ * @throws {DteError} EN: `INVALID_OPTION { field: 'fileName' }`. ES: `INVALID_OPTION { field: 'fileName' }`.
+ */
+export const resolveFileName = (kind: UploadKind, xml: string, fileName: string | undefined): string => {
   if (fileName !== undefined && !SAFE_FILE_NAME.test(fileName))
     throw new DteError('INVALID_OPTION', { field: 'fileName' })
   if (fileName !== undefined) return fileName
@@ -202,7 +230,12 @@ const resolveFileName = (kind: UploadKind, xml: string, fileName: string | undef
 // reads first, so it must be the first thing in the file; whitespace before it is a fatal XML error.
 const LATIN1_DECLARATION = /^<\?xml\s[^?]*?\sencoding\s*=\s*(?:"iso-8859-1"|'iso-8859-1')[^?]*\?>/i
 
-const latin1Xml = (xml: string): string => {
+/**
+ * EN: The XML with leading whitespace dropped, when it opens with a declaration naming ISO-8859-1.
+ * ES: El XML sin el espacio inicial, cuando abre con una declaración que nombra ISO-8859-1.
+ * @throws {DteError} EN: `INVALID_OPTION { field: 'xml' }`. ES: `INVALID_OPTION { field: 'xml' }`.
+ */
+export const latin1Xml = (xml: string): string => {
   const trimmed = xml.trimStart()
   if (!LATIN1_DECLARATION.test(trimmed)) throw new DteError('INVALID_OPTION', { field: 'xml' })
   return trimmed
@@ -212,8 +245,16 @@ const latin1Xml = (xml: string): string => {
 // The form names them too, apart from the file, and one that contradicts its file is a file the SII takes for another
 // company's or another sender's. So the form is held to the cover before anything is sent; a file with no cover to
 // read is left to the SII. A cover's RUT that is not one matches nothing.
-const COVER = /<Caratula[\s>][\s\S]*?<\/Caratula>/
-const assertCoverRut = (
+/** EN: The first cover of a file. ES: La primera carátula de un archivo. */
+export const COVER = /<Caratula[\s>][\s\S]*?<\/Caratula>/
+/**
+ * EN: Holds a RUT of the form to the one the cover writes in the first of `tags` it has; a cover without any is left to
+ * the SII.
+ * ES: Atiene un RUT del formulario al que la carátula escribe en la primera de `tags` que trae; una carátula sin
+ * ninguna se deja al SII.
+ * @throws {DteError} EN: `INVALID_OPTION { field, operation }`. ES: `INVALID_OPTION { field, operation }`.
+ */
+export const assertCoverRut = (
   cover: string,
   tags: readonly string[],
   rut: SiiRut,
@@ -250,6 +291,8 @@ const buildJob = (
     senderRut,
     channel,
     url: channel === 'rest' ? sii.endpoints.rest.upload : sii.endpoints.soap.upload,
+    fields: rutFields(senderRut, companyRut),
+    read: channel === 'rest' ? readRestAnswer : readCgiAnswer,
   }
 }
 
@@ -271,30 +314,50 @@ const buildForm = (job: UploadJob): Form => {
   return {
     body: buildMultipartBody({
       boundary,
-      fields: rutFields(job.senderRut, job.companyRut),
+      fields: job.fields,
       file: { name: 'archivo', fileName: job.fileName, contentType: 'text/xml', bytes: job.bytes },
     }),
     contentType: multipartContentType(boundary),
   }
 }
 
-// What the SII's answer means for the caller and for the archive. `code` is the SII's own code (`STATUS`, `estado`),
-// empty when the answer carried none (HTTP error, unreadable body).
-type Verdict =
+/**
+ * EN: What the SII's answer means for the caller and for the archive. `code` is the SII's own code (`STATUS`,
+ * `estado`), empty when the answer carried none (HTTP error, unreadable body).
+ * ES: Lo que significa la respuesta del SII para quien llama y para el archivo de envíos. `code` es el código del propio
+ * SII (`STATUS`, `estado`), vacío si la respuesta no traía ninguno (error HTTP, cuerpo ilegible).
+ */
+export type UploadVerdict =
   | {
+      /** EN: The SII took the file. ES: El SII recibió el archivo. */
       readonly ok: true
+      /** EN: The SII's code. ES: `STATUS` / `estado` — El código del SII. */
       readonly code: string
+      /** EN: TrackID of the upload. ES: `TRACKID` — Identificador del envío. */
       readonly trackId: string
+      /** EN: The SII reported the file as already uploaded. ES: El SII reportó el archivo como ya enviado. */
       readonly duplicate: boolean
+      /** EN: Reception time, or null. ES: `TIMESTAMP` — Hora de recepción, o null. */
       readonly receivedAt: string | null
     }
-  | { readonly ok: false; readonly code: string; readonly failure: unknown }
+  | {
+      /** EN: The SII did not take the file, or its answer could not be read. ES: El SII no recibió el archivo, o su respuesta no se pudo leer. */
+      readonly ok: false
+      /** EN: The SII's code, or empty. ES: `STATUS` / `estado` — El código del SII, o vacío. */
+      readonly code: string
+      /** EN: The error the upload throws. ES: El error que lanza la subida. */
+      readonly failure: unknown
+    }
 
-const refuse = (failure: unknown, code = ''): Verdict => ({ ok: false, code, failure })
+/**
+ * EN: A verdict of an upload the SII did not take.
+ * ES: Un veredicto de una subida que el SII no recibió.
+ */
+export const refuse = (failure: unknown, code = ''): UploadVerdict => ({ ok: false, code, failure })
 
 // Throws for an answer that cannot be read (HTTP error status, body that is not what the channel returns); returns
 // a verdict for one that can.
-const readCgiAnswer = (job: UploadJob, response: HttpResponse, text: string): Verdict => {
+const readCgiAnswer = (job: UploadJob, response: HttpResponse, text: string): UploadVerdict => {
   if (!isSuccess(response.status)) throw httpError(response, text, job.operation, 'soap', job.url)
   const reception = parseReceptionResponse(text, job.operation)
   // Only `received` and `duplicate` carry a TrackID; the other two are the SII refusing the token or the file.
@@ -327,7 +390,7 @@ const restTrackId = (value: unknown): string | null => {
   return typeof text === 'string' && TRACK_ID_PATTERN.test(text) ? text : null
 }
 
-const readRestAnswer = (job: UploadJob, response: HttpResponse, text: string): Verdict => {
+const readRestAnswer = (job: UploadJob, response: HttpResponse, text: string): UploadVerdict => {
   if (response.status === 401)
     return refuse(new DteError('SII_TOKEN_INVALID', { operation: job.operation, channel: 'rest', httpStatus: 401 }))
   if (!isSuccess(response.status)) throw httpError(response, text, job.operation, 'rest', job.url)
@@ -343,9 +406,9 @@ const readRestAnswer = (job: UploadJob, response: HttpResponse, text: string): V
   }
 }
 
-const readAnswer = (job: UploadJob, response: HttpResponse, text: string): Verdict => {
+const readAnswer = (job: UploadJob, response: HttpResponse, text: string): UploadVerdict => {
   try {
-    return job.channel === 'rest' ? readRestAnswer(job, response, text) : readCgiAnswer(job, response, text)
+    return job.read(job, response, text)
   } catch (error) {
     return refuse(error)
   }
@@ -356,7 +419,12 @@ const readAnswer = (job: UploadJob, response: HttpResponse, text: string): Verdi
 const archiveUpload = async (
   sii: SiiClient,
   job: UploadJob,
-  answer: { readonly sentAt: Date; readonly response: HttpResponse; readonly raw: string; readonly verdict: Verdict },
+  answer: {
+    readonly sentAt: Date
+    readonly response: HttpResponse
+    readonly raw: string
+    readonly verdict: UploadVerdict
+  },
 ): Promise<void> => {
   if (sii.archive === null) return
   const { verdict } = answer
@@ -423,11 +491,20 @@ const attemptUpload = async (
   }
 }
 
-// An upload is sent again only while no SII response has arrived (`isNoAnswer`): once the SII answered, whatever the
-// HTTP status or `STATUS`, the file may be in already, and a second copy is exactly the duplicate upload this client has
-// to recover from. The one exception to "never re-send after an answer" lives in `withToken`: when the SII refuses the
-// token (`STATUS` 5, HTTP 401) it did not take the file, so the call runs once more with a fresh token.
-const performUpload = (sii: SiiClient, job: UploadJob, overrides?: CallOverrides): Promise<UploadReceipt> => {
+/**
+ * EN: Runs one upload: the token, the form, the retries and the archive, shared by every kind. An upload is sent again
+ * only while no SII response has arrived (`isNoAnswer`): once the SII answered, whatever the HTTP status or `STATUS`,
+ * the file may be in already, and a second copy is exactly the duplicate upload this client has to recover from. The
+ * one exception to "never re-send after an answer" lives in `withToken`: when the SII refuses the token (`STATUS` 5,
+ * HTTP 401) it did not take the file, so the call runs once more with a fresh token.
+ * ES: Corre una subida: el token, el formulario, los reintentos y el archivo de envíos, comunes a todo tipo. Una subida
+ * se vuelve a enviar solo mientras no haya llegado respuesta del SII (`isNoAnswer`): una vez que el SII respondió, sea
+ * cual sea el estado HTTP o el `STATUS`, el archivo puede estar dentro, y una segunda copia es justo el envío duplicado
+ * del que este cliente tendría que recuperarse. La única excepción a "nunca reenviar tras una respuesta" vive en
+ * `withToken`: cuando el SII rechaza el token (`STATUS` 5, HTTP 401) no recibió el archivo, así que la llamada corre
+ * una vez más con un token nuevo.
+ */
+export const performUpload = (sii: SiiClient, job: UploadJob, overrides?: CallOverrides): Promise<UploadReceipt> => {
   const form = buildForm(job)
   return withToken(sii, job.channel, overrides, (token) =>
     withRetry(retryFor(sii, overrides), (attempt) => attemptUpload(sii, job, form, token, attempt, overrides), {

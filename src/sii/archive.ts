@@ -3,10 +3,12 @@ import type { SiiRut } from '../model/rut'
 import type { TokenChannel } from './token-cache'
 
 /**
- * EN: What was uploaded: `EnvioDTE`, `EnvioBOLETA`, a book (IECV / guides) or the folio consumption report (RCOF).
- * ES: Qué se subió: `EnvioDTE` (`dte`), `EnvioBOLETA` (`receipt`), un libro (`book`) o el Reporte de Consumo de Folios (`folioConsumption`).
+ * EN: What was uploaded: `EnvioDTE`, `EnvioBOLETA`, a book (IECV / guides), the folio consumption report (RCOF) or an
+ * assignment file (AEC).
+ * ES: Qué se subió: `EnvioDTE` (`dte`), `EnvioBOLETA` (`receipt`), un libro (`book`), el Reporte de Consumo de Folios
+ * (`folioConsumption`) o un Archivo Electrónico de Cesión (`assignment`).
  */
-export type UploadKind = 'dte' | 'receipt' | 'book' | 'folioConsumption'
+export type UploadKind = 'dte' | 'receipt' | 'book' | 'folioConsumption' | 'assignment'
 
 /**
  * EN: One upload that got an SII answer, as handed to the `archive` port.
@@ -15,7 +17,7 @@ export type UploadKind = 'dte' | 'receipt' | 'book' | 'folioConsumption'
 export type UploadRecord = {
   /** EN: Environment the upload went to. ES: Ambiente al que se subió el envío. */
   readonly environment: Environment
-  /** EN: What was uploaded. ES: Qué se subió: `dte`, `receipt`, `book` o `folioConsumption`. */
+  /** EN: What was uploaded. ES: Qué se subió: `dte`, `receipt`, `book`, `folioConsumption` o `assignment`. */
   readonly kind: UploadKind
   /** EN: Channel used for the upload. ES: Canal usado para la subida. */
   readonly channel: TokenChannel

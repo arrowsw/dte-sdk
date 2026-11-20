@@ -44,6 +44,33 @@ export const SOAP_ENDPOINTS: Readonly<Record<Environment, SoapEndpoints>> = {
 }
 
 /**
+ * EN: Endpoints of the SII's public registry of credit transfers (RPETC), where an assignment file (AEC) is registered,
+ * for one environment.
+ * ES: Endpoints del Registro Público Electrónico de Transferencia de Créditos (RPETC) del SII, donde se anota un
+ * Archivo Electrónico de Cesión (AEC), de un ambiente.
+ */
+export type AssignmentEndpoints = {
+  /** EN: `RTCAnotEnvio.cgi`, multipart upload of an AEC. ES: Subida multipart de un AEC. */
+  readonly upload: string
+  /** EN: `wsRPETCConsulta`, state of an AEC upload by TrackID. ES: Estado de un envío de AEC por TrackID. */
+  readonly uploadStatus: string
+}
+
+const assignmentsFor = (host: string): AssignmentEndpoints => ({
+  upload: `https://${host}/cgi_rtc/RTC/RTCAnotEnvio.cgi`,
+  uploadStatus: `https://${host}/DTEWS/services/wsRPETCConsulta`,
+})
+
+/**
+ * EN: Endpoints of the registry of credit transfers per environment, on the same hosts as the DTE web services.
+ * ES: Endpoints del registro de transferencias de créditos por ambiente, en los mismos hosts que los web services DTE.
+ */
+export const ASSIGNMENT_ENDPOINTS: Readonly<Record<Environment, AssignmentEndpoints>> = {
+  certification: assignmentsFor(SII_HOSTS.certification),
+  production: assignmentsFor(SII_HOSTS.production),
+}
+
+/**
  * EN: REST endpoints of the receipts API for one environment.
  * ES: Endpoints REST de la API de boletas de un ambiente.
  */

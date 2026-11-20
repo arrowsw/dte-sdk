@@ -236,7 +236,7 @@ const _typecheck = () => {
   expectTypeOf<ReceiverAnswer>().toEqualTypeOf<
     'annulled' | 'claimed' | 'accepted' | 'paidInCash' | 'tacitlyAccepted' | 'goodsReceived' | 'pending' | 'unknown'
   >()
-  expectTypeOf<UploadKind>().toEqualTypeOf<'dte' | 'receipt' | 'book' | 'folioConsumption'>()
+  expectTypeOf<UploadKind>().toEqualTypeOf<'dte' | 'receipt' | 'book' | 'folioConsumption' | 'assignment'>()
   expectTypeOf<TokenChannel>().toEqualTypeOf<'soap' | 'rest'>()
   expectTypeOf(createPurchaseSalesBook).returns.toEqualTypeOf<PurchaseSalesBook>()
   expectTypeOf(signPurchaseSalesBook).returns.toEqualTypeOf<SignedPurchaseSalesBook>()

@@ -1,4 +1,4 @@
-import { CLAIM_WS_ENDPOINTS, REST_ENDPOINTS, SOAP_ENDPOINTS } from '../../src/catalogs/endpoints'
+import { ASSIGNMENT_ENDPOINTS, CLAIM_WS_ENDPOINTS, REST_ENDPOINTS, SOAP_ENDPOINTS } from '../../src/catalogs/endpoints'
 import { loadCertificateFromPem } from '../../src/certificate/pem'
 import { DteError } from '../../src/errors'
 import {
@@ -62,6 +62,7 @@ describe('createSiiClient', () => {
       soap: SOAP_ENDPOINTS.certification,
       rest: REST_ENDPOINTS.certification,
       claims: CLAIM_WS_ENDPOINTS.certification,
+      assignments: ASSIGNMENT_ENDPOINTS.certification,
     })
     expect(typeof sii.transport).toBe('function')
     expect(typeof sii.tokenCache.get).toBe('function')
@@ -97,6 +98,7 @@ describe('createSiiClient', () => {
         soap: { ...SOAP_ENDPOINTS.production, seed: 'https://proxy.test/seed' },
         rest: REST_ENDPOINTS.production,
         claims: 'https://proxy.test/claims',
+        assignments: { ...ASSIGNMENT_ENDPOINTS.production, upload: 'https://proxy.test/aec' },
       },
       now,
       sleep,
@@ -115,6 +117,7 @@ describe('createSiiClient', () => {
     expect(sii.endpoints.soap.seed).toBe('https://proxy.test/seed')
     expect(sii.endpoints.rest).toBe(REST_ENDPOINTS.production)
     expect(sii.endpoints.claims).toBe('https://proxy.test/claims')
+    expect(sii.endpoints.assignments.upload).toBe('https://proxy.test/aec')
     expect(sii.now).toBe(now)
     expect(sii.sleep).toBe(sleep)
     expect(createSiiClient({ ...base, retry: false }).retry).toBe(false)

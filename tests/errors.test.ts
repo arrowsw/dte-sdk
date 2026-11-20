@@ -27,6 +27,12 @@ describe('DteError', () => {
     expect(new DteError(code).message.length).toBeGreaterThan(5)
   })
 
+  test('a signature that does not verify has its own code', () => {
+    expect(new DteError('SIGNATURE_INVALID', { field: 'DTE' }).message).toBe(
+      'XML signature does not verify (field=DTE)',
+    )
+  })
+
   test('phase 2 codes exist with generic messages', () => {
     expect(new DteError('TRANSPORT_FAILED').message).toBe('HTTP request failed before a response arrived')
     expect(new DteError('TRANSPORT_TLS').message).toBe('TLS handshake or certificate verification failed')

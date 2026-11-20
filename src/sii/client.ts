@@ -1,8 +1,10 @@
 import { isEnvironment, type Environment } from '../catalogs/codes'
 import {
+  ASSIGNMENT_ENDPOINTS,
   CLAIM_WS_ENDPOINTS,
   REST_ENDPOINTS,
   SOAP_ENDPOINTS,
+  type AssignmentEndpoints,
   type RestEndpoints,
   type SoapEndpoints,
 } from '../catalogs/endpoints'
@@ -40,6 +42,8 @@ export type SiiEndpoints = {
   readonly rest: RestEndpoints
   /** EN: WSRECLAMO service URL. ES: URL del servicio WSRECLAMO. */
   readonly claims: string
+  /** EN: Registry of credit transfers (RPETC) URLs. ES: URLs del registro de transferencias de créditos (RPETC). */
+  readonly assignments: AssignmentEndpoints
 }
 
 /**
@@ -234,6 +238,7 @@ export const createSiiClient = (options: SiiClientOptions): SiiClient => {
       soap: options.endpoints?.soap ?? SOAP_ENDPOINTS[environment],
       rest: options.endpoints?.rest ?? REST_ENDPOINTS[environment],
       claims: options.endpoints?.claims ?? CLAIM_WS_ENDPOINTS[environment],
+      assignments: options.endpoints?.assignments ?? ASSIGNMENT_ENDPOINTS[environment],
     }),
     now: options.now ?? (() => new Date()),
     sleep: options.sleep ?? defaultSleep,

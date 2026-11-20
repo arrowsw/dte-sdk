@@ -17,6 +17,7 @@ export type SiiSchemaName =
   | 'ConsumoFolio'
   | 'RespuestaEnvioDTE'
   | 'EnvioRecibos'
+  | 'AEC'
 
 type SchemaFile = keyof typeof SCHEMA_SOURCES
 
@@ -35,9 +36,9 @@ export type SiiSchema = {
 
 /**
  * EN: The schemas dte-sdk carries, the versions in force at the SII: every document it sends in an `EnvioDTE` or an
- * `EnvioBOLETA`, the three books and the answers to a received envelope.
+ * `EnvioBOLETA`, the three books, the answers to a received envelope and the assignment file (`AEC`).
  * ES: Los esquemas que trae dte-sdk, en las versiones vigentes en el SII: todo documento que envía en un `EnvioDTE` o
- * un `EnvioBOLETA`, los tres libros y las respuestas a un sobre recibido.
+ * un `EnvioBOLETA`, los tres libros, las respuestas a un sobre recibido y el archivo de cesión (`AEC`).
  */
 export const SII_SCHEMAS: Readonly<Record<SiiSchemaName, SiiSchema>> = {
   DTE: { root: 'DTE', main: 'DTE_v10.xsd', imports: ['SiiTypes_v10.xsd', 'xmldsignature_v10.xsd'] },
@@ -67,6 +68,18 @@ export const SII_SCHEMAS: Readonly<Record<SiiSchemaName, SiiSchema>> = {
     root: 'EnvioRecibos',
     main: 'EnvioRecibos_v10.xsd',
     imports: ['Recibos_v10.xsd', 'SiiTypes_v10.xsd', 'xmldsignature_v10.xsd'],
+  },
+  AEC: {
+    root: 'AEC',
+    main: 'AEC_v10.xsd',
+    imports: [
+      'Cesion_v10.xsd',
+      'DTECedido_v10.xsd',
+      'DTE_v10.xsd',
+      'Recibos_v10.xsd',
+      'SiiTypes_v10.xsd',
+      'xmldsignature_v10.xsd',
+    ],
   },
 }
 
