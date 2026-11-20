@@ -203,7 +203,8 @@ JavaScript engine on a 2048-bit key, which is what an envelope of hundreds of re
 at its word: the first signature of the process is worked out both ways and compared, the runtime signs the ones that
 follow only when they agree, and a key it refuses is signed by the JavaScript engine. In a browser the JavaScript
 engine signs, as before. `rsaSigningEngine()` says which one is in charge (`native`, `portable`, or null before the
-first signature).
+first signature). The runtime signs with an RSA key alone: any other key is left to the JavaScript engine, which
+throws on it.
 
 ## Quick start
 
@@ -497,7 +498,10 @@ exportInvoice.header.otherCurrency
   exemption indicator or with 1 and the global adjustments, and the total, the same amount, or zero on an export
   without payment (`exportPaymentTerms: '21'`, Formato DTE 2.5, field 124) (`calculateExportTotals`, which
   `calculateTotals` calls for these types). Each is worked out exactly, over the decimal digits as written, and rounded
-  half away from zero. With `exchangeRate`, `OtraMoneda` carries the exempt amount and the total in Chilean pesos, as
+  half away from zero. An amount goes up to 99 999 999 999.9999, the fifteen digits a number holds exactly, though the
+  schema admits three more, and a line discount or surcharge in percent whose whole amount is zero is refused with
+  `INVALID_AMOUNT`, since the format writes a percent with its amount (fields 30 and 33 of the detail): give the line
+  its amount, or use a global adjustment. With `exchangeRate`, `OtraMoneda` carries the exempt amount and the total in Chilean pesos, as
   field 129 asks: each the amount by the rate, rounded half away from zero to a whole peso (`convertToPesos`). The
   stamp carries the total as the document writes it, decimals and all.
 - **What it refuses.** What `Exportaciones` does not declare: `pricesIncludeVat`, `withholdVat`, `commissions`, the
@@ -580,8 +584,10 @@ It is an option, and nothing else in dte-sdk calls it. The schemas come inside t
 versions in force, for every document dte-sdk sends in an `EnvioDTE` or an `EnvioBOLETA`, the three books and the
 answers to a received envelope and the assignment file (`DTE`, `EnvioDTE`, `EnvioBOLETA`, `LibroCV`, `LibroGuia`,
 `ConsumoFolio`, `RespuestaEnvioDTE`, `EnvioRecibos` and `AEC`; `SII_SCHEMAS` lists them). The schema is the one of the document element unless
-`schema` names another, and `schemaOf(xml)` says which that is. The document can be its text or the bytes of its file,
-read in the charset its declaration names. The validator, `xmllint-wasm`, is an optional peer loaded on first use:
+`schema` names another, and `schemaOf(xml)` says which that is. A receipt (39, 41) on its own has none, since only
+`EnvioBOLETA_v11.xsd` declares its `DTE`: validate it inside its envelope. The document can be its text or the bytes
+of its file, read in the charset its declaration names, ISO-8859-1 or UTF-8; bytes that name another are refused with
+`INVALID_OPTION`. The validator, `xmllint-wasm`, is an optional peer loaded on first use:
 without it the call throws `DEPENDENCY_UNAVAILABLE`. The messages are the validator's, in English, and name each
 element with its namespace.
 
@@ -703,7 +709,10 @@ assignor, the assignee and the document's debtor. `otherTerms`, `debtorEmail` an
 `createReassignment({ previous, ...terms })` builds a later assignment on top of an earlier file: every signature of
 that file must verify, its zones are carried over as they were signed, and the new assignment, made by the previous
 assignee, gets the next `SeqCesion`, up to 40 (`MAX_ASSIGNMENTS`). `verifyAssignment(xml)` checks every signature of a
-file where it stands in it, and says which one fails.
+file where it stands in it, and says which one fails. Both builders run it on the file they built and hand back none
+that does not verify. That a previous file verifies says nobody changed it after it was signed, not who signed it: its
+earlier assignments are not compared with the document nor with each other, beyond their numbering and the last
+assignee. A `DTE` cut from an envelope must declare the SII's namespace itself, as the ones dte-sdk writes do.
 
 Registering the file is a call to the SII, and it is unstable: neither function has been run against the SII yet, and
 the format does not describe the registry's services, so their shape may change in any release.
@@ -1650,7 +1659,8 @@ surcharge, the bases and the price to the final consumer of a withholding agent,
 and a global discount or surcharge with its description. Every amount is the one the document carries.
 `parsePrintableDocuments` reads them into the optional fields of `PrintableDocument` named after them (`payments` is a
 list of `PrintablePayment`, the receiver a `PrintableReceiver` and `otherCurrency` a `PrintableOtherCurrency`). The
-customs area (`Aduana`) and the fields of export documents (110 to 112) are not printed yet.
+An export document (110 to 112) is not printed yet: its amounts are in a foreign currency, with decimals and a
+customs area, and `renderPrintedSample` refuses it with `INVALID_DOCUMENT_TYPE` instead of printing them as pesos.
 A document with no `TED` prints `SIN TIMBRE ELECTRÓNICO` in a box where the stamp goes, with the legend `Documento sin
 validez tributaria`, so its print never passes for that of a stamped one.
 `parsePrintableDocuments` takes the XML as text or as the bytes of its file, read as UTF-8 when they are UTF-8 and as
