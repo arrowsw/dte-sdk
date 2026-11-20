@@ -185,6 +185,32 @@ export const BACKUP_ORIGINS: Readonly<Record<DocumentDirection, string>> = { iss
 export const REGISTER_OPERATIONS: Readonly<Record<RegisterOperation, string>> = { purchase: 'COMPRA', sale: 'VENTA' }
 
 /**
+ * EN: The method of the register's facade that answers the detail of a period as a file, per operation.
+ * ES: El método de la fachada del registro que responde el detalle de un período como archivo, según la operación.
+ */
+export const REGISTER_FILE_METHODS: Readonly<Record<RegisterOperation, string>> = {
+  purchase: 'getDetalleCompraExport',
+  sale: 'getDetalleVentaExport',
+}
+
+/**
+ * EN: `accionRecaptcha` the register's page sends with the request of its file, per operation.
+ * ES: `accionRecaptcha` que la página del registro envía con la solicitud de su archivo, según la operación.
+ */
+export const REGISTER_FILE_ACTIONS: Readonly<Record<RegisterOperation, string>> = {
+  purchase: 'RCV_DDETC',
+  sale: 'RCV_DDETV',
+}
+
+/**
+ * EN: `tokenRecaptcha` of that request: the constant the register's own page sends in the field. It is no answer to a
+ * challenge, and dte-sdk solves none: if the SII comes to ask for one, the request is refused and that is the end of it.
+ * ES: `tokenRecaptcha` de esa solicitud: la constante que la propia página del registro envía en el campo. No responde
+ * ningún desafío, y dte-sdk no resuelve ninguno: si el SII llega a pedir uno, la solicitud se rechaza y ahí termina.
+ */
+export const REGISTER_FILE_TOKEN = 't-o-k-e-n-web'
+
+/**
  * EN: `estadoContab` of the register.
  * ES: `estadoContab` del registro: REGISTRO, PENDIENTE, NO_INCLUIR o RECLAMADO.
  */
@@ -231,6 +257,7 @@ export type PortalRejection =
   | 'backupDayOverLimit'
   | 'backupDayUnknownTypes'
   | 'purchaseChangeNotConfirmed'
+  | 'registerFileRefused'
   | 'exchangeUploadRefused'
   | 'samplesReviewRefused'
   | 'sampleUploadRefused'
@@ -292,6 +319,8 @@ export const PORTAL_REJECTIONS: Readonly<Record<PortalRejection, string>> = {
     'Un solo día supera los 20 documentos por descarga y tiene documentos de tipos que no se saben separar: no se pudo cubrir completo, y por eso no se descargó nada.',
   purchaseChangeNotConfirmed:
     'El SII no confirmó el cambio en el registro de compras, pero pudo haberse aplicado: hay que releer el documento antes de reintentar.',
+  registerFileRefused:
+    'El SII no entregó el archivo del registro de compras y ventas para ese período: respondió un código que no es el de un período sin documentos.',
   notEnrolled:
     'La empresa no está inscrita en la Postulación a Factura Electrónica: el representante legal debe inscribirla en el ambiente de certificación antes de descargar el set de pruebas.',
   advanceRefused:

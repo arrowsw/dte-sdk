@@ -154,7 +154,6 @@ Planned, with no date:
 - **Validation against the SII's schemas at run time, as an option.** Today the tests validate what dte-sdk issues
   against those schemas, and nothing does at run time. It will be opt-in: the validator as an optional peer dependency,
   as the PDF's are, and the schemas shipped in the package.
-- **The purchase and sales register as a file.** Today its summary and its detail are read page by page.
 - **A received document checked against its schema and its content,** besides its signature, its stamp and its CAF.
 - **The backup's two-day range,** which today downloads only its first day when it holds more than 20 documents.
 - **A lock for the directory folio registry that holds across processes.** Today it is for a single process.
@@ -944,6 +943,7 @@ These run on the same session as the rest of the portal.
 import {
   listPeriodDocuments,
   fetchRegisterSummary,
+  unstable_downloadRegisterFile,
   listPurchaseTypes,
   changePurchaseType,
   fetchPurchaseDocument,
@@ -953,6 +953,8 @@ import {
 
 const { summary, documents } = await listPeriodDocuments(portal, { period: '2026-10', direction: 'received' })
 const { rows, header } = await fetchRegisterSummary(portal, { period: '2026-10', operation: 'purchase' })
+const file = await unstable_downloadRegisterFile(portal, { period: '2026-10', operation: 'purchase' })
+await writeFile('compras-2026-10.csv', file.csv) // or file.columns and file.rows, the same lines split
 
 const types = await listPurchaseTypes(portal)
 const key = { type: 33, folio: 1234, period: '2026-10', counterpartyRut: '12345678-5' }
@@ -972,6 +974,7 @@ await downloadMipymeBackup(portal, {
 | --------------------------------------------------------------------------------- | -------------------------------------- | ------------------------ |
 | Each document of a period (folio, date, amounts), with no receipts and no XML     | `listPeriodDocuments`                  | `consemitidosinternetui` |
 | Official totals per document type and accounting status, with receipts aggregated | `fetchRegisterSummary`                 | `consdcvinternetui`      |
+| The official detail of a period as a file, one line per document                  | `unstable_downloadRegisterFile`        | `consdcvinternetui`      |
 | How a purchase is classified, and changing it                                     | `fetchPurchaseDocument` and the writes | `complementoscvui`       |
 | The full XML of a document                                                        | `downloadMipymeBackup`                 | MIPYME backup            |
 
@@ -979,8 +982,15 @@ await downloadMipymeBackup(portal, {
   of the 49 document codes, which sides of the register show it, whether it is a DTE, its sign in the totals, whether
   it is listed per document and whether the buyer withholds the VAT. `REGISTER_ACCOUNTING_STATUSES` gives the accounting
   statuses of each side: four for purchases, only `registered` for sales.
-- **The register is read, not downloaded.** The summary and the detail come page by page; asking the portal for the
-  register as a file is planned.
+- **The register as a file.** `unstable_downloadRegisterFile` asks for what the register's "Descargar Detalles" gives:
+  every document of the operation in the period, one line each, with `;` between values and the SII's column names
+  first. `csv` is the text to save; `columns` and `rows` are the same lines split, every value as the text the SII
+  wrote. Purchases are asked by accounting status, `registered` by default, and sales have one. A period with no
+  documents is an empty file. Unlike the reads above, it looks at the SII's response code: a period the SII refuses to
+  show throws `SII_PORTAL_REJECTED` with `rejection: 'registerFileRefused'`, its `code` and the SII's message, and
+  never reads as empty. The request carries, in its two reCAPTCHA fields, the constant the register's own page sends
+  there; dte-sdk solves no challenge, and if the SII comes to ask for one the call is refused. It is unstable: dte-sdk
+  has not run it against the SII yet.
 - **A refused month reads as empty.** Response codes are not looked at, so `listPeriodDocuments` and
   `fetchRegisterSummary` cannot tell a month the SII refuses to show from one with no movement. `raw` holds each row as the
   SII sent it. The row names come from the SII's client code and have not been seen with real documents: an absent field is

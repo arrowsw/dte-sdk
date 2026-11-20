@@ -71,6 +71,7 @@ export {
   listPurchaseTypes,
   moveVatToCommonUse,
   moveVatToRecoverable,
+  unstable_downloadRegisterFile,
 } from './rcv'
 export type {
   ChangePurchaseTypeInput,
@@ -86,6 +87,7 @@ export type {
   PurchaseDocument,
   PurchaseType,
   RcvObject,
+  RegisterFile,
   RegisterHeader,
   RegisterSummary,
   RegisterSummaryRow,

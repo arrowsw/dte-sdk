@@ -2,6 +2,10 @@ import {
   ACCOUNTING_STATES,
   DOCUMENT_OPERATIONS,
   RCV_SERVICES,
+  REGISTER_ACCOUNTING_STATUSES,
+  REGISTER_FILE_ACTIONS,
+  REGISTER_FILE_METHODS,
+  REGISTER_FILE_TOKEN,
   REGISTER_OPERATIONS,
   type AccountingStatus,
   type DocumentDirection,
@@ -19,14 +23,16 @@ import {
   periodSummaryOf,
   purchaseDocumentOf,
   purchaseTypesOf,
+  registerFileOf,
   registerSummaryOf,
   type PeriodDocuments,
   type PurchaseDocument,
   type PurchaseType,
   type RcvObject,
+  type RegisterFile,
   type RegisterSummary,
 } from './pages/rcv'
-import { rejected, withPortalSession, type PortalContext } from './session'
+import { rejected, unexpectedPage, withPortalSession, type PortalContext } from './session'
 
 /**
  * EN: What `listPeriodDocuments` needs.
@@ -211,6 +217,65 @@ export const fetchRegisterSummary = (
         }),
       ),
     )
+  })
+
+/**
+ * EN: **Unstable**: its shape may change in any version, a patch included. The request is the one the register's page
+ * sends for its "Descargar Detalles" and has not been run by this library against the SII yet; once it has, it becomes
+ * `downloadRegisterFile`.
+ *
+ * The detail of a period of the purchase and sales register as a file: every document of the operation, one line each,
+ * with the columns the SII gives it. `csv` is the text to save, and `columns` and `rows` are the same lines split, with
+ * nothing converted. Purchases are asked by accounting status, registered by default; sales have one. A period with no
+ * documents is an empty file, and a period the SII refuses to show throws instead of reading as empty. The request
+ * carries, in its two reCAPTCHA fields, the constant the page itself sends; nothing is solved, and if the SII asks for
+ * a real answer the call is refused.
+ * ES: **Inestable**: su forma puede cambiar en cualquier versión, incluso un patch. La solicitud es la que envía la
+ * página del registro para su "Descargar Detalles" y aún no la ha corrido esta librería contra el SII; cuando lo haya
+ * hecho, pasa a llamarse `downloadRegisterFile`.
+ *
+ * El detalle de un período del registro de compras y ventas como archivo: todos los documentos de la operación, una
+ * línea cada uno, con las columnas que le da el SII. `csv` es el texto para guardar, y `columns` y `rows` son las mismas
+ * líneas separadas, sin convertir nada. Las compras se piden por estado contable, registrado por defecto; las ventas
+ * tienen uno solo. Un período sin documentos es un archivo vacío, y un período que el SII se niega a mostrar lanza en
+ * vez de leerse como vacío. La solicitud lleva, en sus dos campos de reCAPTCHA, la constante que envía la propia
+ * página; no se resuelve nada, y si el SII pide una respuesta real la llamada se rechaza.
+ * @param portal EN: the client. ES: el cliente.
+ * @param input EN: the period, the operation and, for purchases, the status. ES: el período, la operación y, en compras, el estado.
+ * @param overrides EN: per-call overrides; `retry` opts into repeating the call. ES: ajustes de la llamada; `retry` activa la repetición de la llamada.
+ * @returns EN: the file. ES: el archivo.
+ * @throws {DteError} EN: `INVALID_DATE`, `INVALID_OPTION` (also for a status a sale does not have), `MISSING_FIELD`, `INVALID_RUT`, `SII_PORTAL_REJECTED { rejection: 'registerFileRefused', code }`, `SII_PORTAL_UNEXPECTED_PAGE`, session and transport codes. ES: `INVALID_DATE`, `INVALID_OPTION` (también ante un estado que una venta no tiene), `MISSING_FIELD`, `INVALID_RUT`, `SII_PORTAL_REJECTED { rejection: 'registerFileRefused', code }`, `SII_PORTAL_UNEXPECTED_PAGE`, códigos de sesión y de transporte.
+ */
+export const unstable_downloadRegisterFile = (
+  portal: PortalClient,
+  input: RegisterSummaryInput,
+  overrides?: CallOverrides,
+): Promise<RegisterFile> =>
+  withPortalSession(portal, 'downloadRegisterFile', overrides, async (context) => {
+    assertPeriod(input.period)
+    const operacion = siiCodeOf(REGISTER_OPERATIONS, input.operation, 'operation')
+    const status = input.accountingStatus ?? 'registered'
+    if (!REGISTER_ACCOUNTING_STATUSES[input.operation].includes(status))
+      throw new DteError('INVALID_OPTION', { field: 'accountingStatus' })
+    const { body, verifier } = companyOf(portal, input.companyRut)
+    const method = REGISTER_FILE_METHODS[input.operation]
+    return readService(context, RCV_SERVICES.register, async (call) => {
+      const answer = await call(method, {
+        rutEmisor: body,
+        dvEmisor: verifier,
+        ptributario: periodDigits(input.period),
+        codTipoDoc: 0,
+        operacion,
+        // The page asks for the sales of a period with no status, and for its purchases by status.
+        estadoContab: input.operation === 'sale' ? '' : ACCOUNTING_STATES[status],
+        accionRecaptcha: REGISTER_FILE_ACTIONS[input.operation],
+        tokenRecaptcha: REGISTER_FILE_TOKEN,
+      })
+      const file = registerFileOf(answer)
+      if (file === null) throw unexpectedPage(context, method, '')
+      if ('csv' in file) return file
+      throw rejected(context, 'registerFileRefused', { code: file.code, portalMessage: file.message })
+    })
   })
 
 /**

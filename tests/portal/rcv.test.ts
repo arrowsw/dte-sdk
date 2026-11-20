@@ -7,6 +7,7 @@ import {
   listPurchaseTypes,
   moveVatToCommonUse,
   moveVatToRecoverable,
+  unstable_downloadRegisterFile,
 } from '../../src/portal/rcv'
 import { createMemoryCapture } from '../../src/sii/capture'
 import { DteError } from '../../src/errors'
@@ -359,6 +360,120 @@ describe('fetchRegisterSummary', () => {
   ])('a bad %s is refused before any request', async (field, input, code) => {
     const harness = await signedIn(routes(json({})), options)
     const error = await failure(fetchRegisterSummary(harness.portal, input as never))
+    expect(error).toMatchObject({ code, details: { field } })
+    expect(harness.fake.requests).toHaveLength(0)
+  })
+})
+
+describe('unstable_downloadRegisterFile', () => {
+  const SALES = [
+    'Nro;Tipo Doc;Tipo Venta;Rut cliente;Razon Social;Folio;Fecha Docto;Monto Exento;Monto Neto;Monto IVA;Monto total',
+    '1;33;Del Giro;10000004-0;COMERCIAL ÑUÑOA SPA;12;15/10/2026;0;100000;19000;119000',
+    '2;61;Del Giro;10000004-0;COMERCIAL ÑUÑOA SPA;7;25/10/2026;0;20000;3800;23800',
+  ]
+  const routes = (method: string, reply: FakeRoute['reply']) => [
+    app('consdcvinternetui'),
+    api(`${REGISTER_API}/${method}`, reply),
+  ]
+
+  test('asks for the sales of a period as the page does, and gives the file with its lines split', async () => {
+    // A name with an `Ñ` reads right in the charset the service declares.
+    const answer = { ...json({ data: SALES }), headers: { 'Content-Type': 'application/json;charset=UTF-8' } }
+    const harness = await signedIn(routes('getDetalleVentaExport', answer), options)
+    const file = await unstable_downloadRegisterFile(harness.portal, { period: '2026-10', operation: 'sale' })
+    const [post] = posts(harness)
+    expect(harness.urls()[0]).toBe(`${CERTIFICATION}/consdcvinternetui/`)
+    expect(sent(post)).toEqual({
+      metaData: {
+        namespace: `${RCV_SERVICES.register.namespace}/getDetalleVentaExport`,
+        conversationId: TOKEN,
+        transactionId: 'tx-1',
+        page: null,
+      },
+      data: {
+        rutEmisor: '76543210',
+        dvEmisor: '3',
+        ptributario: '202610',
+        codTipoDoc: 0,
+        operacion: 'VENTA',
+        estadoContab: '',
+        accionRecaptcha: 'RCV_DDETV',
+        tokenRecaptcha: 't-o-k-e-n-web',
+      },
+    })
+    expect(file.columns).toEqual(SALES[0].split(';'))
+    expect(file.rows).toEqual([SALES[1].split(';'), SALES[2].split(';')])
+    expect(file.rows[0][4]).toBe('COMERCIAL ÑUÑOA SPA')
+    expect(file.csv).toBe(`${SALES.join('\n')}\n`)
+  })
+
+  test.each([
+    [undefined, 'REGISTRO'],
+    ['pending', 'PENDIENTE'],
+    ['notIncluded', 'NO_INCLUIR'],
+    ['claimed', 'RECLAMADO'],
+  ] as const)('purchases are asked by status: %s is %s', async (accountingStatus, code) => {
+    const harness = await signedIn(routes('getDetalleCompraExport', json({ data: ['Nro;Tipo Doc'] })), options)
+    const file = await unstable_downloadRegisterFile(harness.portal, {
+      period: '2026-10',
+      operation: 'purchase',
+      companyRut: RECEIVER_RUT,
+      ...(accountingStatus === undefined ? {} : { accountingStatus }),
+    })
+    expect(sent(posts(harness)[0]).data).toMatchObject({
+      operacion: 'COMPRA',
+      estadoContab: code,
+      accionRecaptcha: 'RCV_DDETC',
+      rutEmisor: RECEIVER_RUT.split('-')[0],
+    })
+    // The columns alone are a file with no documents.
+    expect(file).toEqual({ columns: ['Nro', 'Tipo Doc'], rows: [], csv: 'Nro;Tipo Doc\n' })
+  })
+
+  test.each([
+    ['no code', { data: null }],
+    ['code 0', { data: [], respEstado: { codRespuesta: 0 } }],
+    ['the code of a period that holds nothing', { data: null, respEstado: { codRespuesta: 3 } }],
+  ])('a period with no documents is an empty file: %s', async (_name, answer) => {
+    const harness = await signedIn(routes('getDetalleVentaExport', json(answer)), options)
+    await expect(
+      unstable_downloadRegisterFile(harness.portal, { period: '2026-10', operation: 'sale' }),
+    ).resolves.toEqual({ columns: [], rows: [], csv: '' })
+  })
+
+  test('a period the SII refuses to show is a rejection with its code and message, never an empty file', async () => {
+    const refusal = { data: null, respEstado: { codRespuesta: 99, msgeRespuesta: 'Usuario no autorizado' } }
+    const harness = await signedIn(routes('getDetalleCompraExport', json(refusal)), options)
+    const error = await failure(
+      unstable_downloadRegisterFile(harness.portal, { period: '2026-10', operation: 'purchase' }),
+    )
+    expect(error.code).toBe('SII_PORTAL_REJECTED')
+    expect(error.details).toEqual({
+      rejection: 'registerFileRefused',
+      operation: 'downloadRegisterFile',
+      code: 99,
+      portalMessage: 'Usuario no autorizado',
+    })
+    // One request: a refusal is not repeated.
+    expect(posts(harness)).toHaveLength(1)
+  })
+
+  test('an answer whose data is not a list of lines is a page it cannot read', async () => {
+    const harness = await signedIn(routes('getDetalleVentaExport', json({ data: { detalles: [] } })), options)
+    const error = await failure(unstable_downloadRegisterFile(harness.portal, { period: '2026-10', operation: 'sale' }))
+    expect(error.code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
+    expect(error.details).toMatchObject({ step: 'getDetalleVentaExport' })
+  })
+
+  test.each([
+    ['operation', { period: '2026-10', operation: 'gift' }, 'INVALID_OPTION'],
+    ['accountingStatus', { period: '2026-10', operation: 'purchase', accountingStatus: 'lost' }, 'INVALID_OPTION'],
+    // A sale has one status: its file is asked for with none.
+    ['accountingStatus', { period: '2026-10', operation: 'sale', accountingStatus: 'pending' }, 'INVALID_OPTION'],
+    ['period', { period: '2026-13', operation: 'sale' }, 'INVALID_DATE'],
+  ])('a bad %s is refused before any request', async (field, input, code) => {
+    const harness = await signedIn(routes('getDetalleVentaExport', json({})), options)
+    const error = await failure(unstable_downloadRegisterFile(harness.portal, input as never))
     expect(error).toMatchObject({ code, details: { field } })
     expect(harness.fake.requests).toHaveLength(0)
   })
