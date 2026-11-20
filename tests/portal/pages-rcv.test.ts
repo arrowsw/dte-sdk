@@ -5,6 +5,7 @@ import {
   periodSummaryOf,
   purchaseDocumentOf,
   purchaseTypesOf,
+  registerFileOf,
   registerSummaryOf,
 } from '../../src/portal/pages/rcv'
 
@@ -273,5 +274,51 @@ describe('changeMessageOf', () => {
     ['no metadata', {}],
   ])('%s', (_name, answer) => {
     expect(changeMessageOf(answer)).toBeNull()
+  })
+})
+
+describe('registerFileOf', () => {
+  test('the lines are split on `;`, the columns first, and the file keeps every line as it came', () => {
+    expect(registerFileOf({ data: ['a;b;c', '1;;x y', '2;ñ;'] })).toEqual({
+      columns: ['a', 'b', 'c'],
+      rows: [
+        ['1', '', 'x y'],
+        ['2', 'ñ', ''],
+      ],
+      csv: 'a;b;c\n1;;x y\n2;ñ;\n',
+    })
+  })
+
+  test('what is not a line of text is left out, a blank line included', () => {
+    expect(registerFileOf({ data: ['a;b', null, 7, '  ', { x: 1 }, '1;2'] })).toEqual({
+      columns: ['a', 'b'],
+      rows: [['1', '2']],
+      csv: 'a;b\n1;2\n',
+    })
+  })
+
+  test('no lines is an empty file when the code says the period holds nothing, or there is none', () => {
+    const empty = { columns: [], rows: [], csv: '' }
+    expect(registerFileOf({})).toEqual(empty)
+    expect(registerFileOf({ data: null })).toEqual(empty)
+    expect(registerFileOf({ data: [], respEstado: { codRespuesta: 0 } })).toEqual(empty)
+    expect(registerFileOf({ data: [''], respEstado: { codRespuesta: '3' } })).toEqual(empty)
+    expect(registerFileOf({ data: [], respEstado: 'x' })).toEqual(empty)
+  })
+
+  test('no lines with any other code is a refusal, with the message when there is one', () => {
+    expect(
+      registerFileOf({ data: [], respEstado: { codRespuesta: 99, msgeRespuesta: 'Usuario no autorizado' } }),
+    ).toEqual({ code: 99, message: 'Usuario no autorizado' })
+    expect(registerFileOf({ data: null, respEstado: { codRespuesta: 2 } })).toEqual({ code: 2, message: null })
+  })
+
+  test('lines win over a code: a file that came is a file', () => {
+    expect(registerFileOf({ data: ['a'], respEstado: { codRespuesta: 99 } })).toMatchObject({ columns: ['a'] })
+  })
+
+  test('data that is neither a list nor absent cannot be read', () => {
+    expect(registerFileOf({ data: 'a;b' })).toBeNull()
+    expect(registerFileOf({ data: { detalles: [] } })).toBeNull()
   })
 })

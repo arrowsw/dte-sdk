@@ -49,6 +49,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The purchase and sales register as a file, from `dte-sdk/portal`.** The register was read page by page, and the
+  README listed its file as planned. `unstable_downloadRegisterFile(portal, { period, operation, accountingStatus })`
+  asks the register's service for what its "Descargar Detalles" gives: every document of the operation in the period,
+  one line each, `;` between values, the SII's column names first. `csv` is the text to save, and `columns` and `rows`
+  are the same lines split, every value as the text the SII wrote. Purchases are asked by accounting status,
+  `registered` by default; sales have one, and any other is refused with `INVALID_OPTION`. A period with no documents
+  is an empty file. A period the SII refuses to show throws `SII_PORTAL_REJECTED` with the new rejection
+  `registerFileRefused`, the SII's `code` and its message, instead of reading as empty as the other reads of the
+  register still do. The request carries, in its two reCAPTCHA fields, the constant the register's own page sends
+  there; dte-sdk solves no challenge, and if the SII comes to ask for one the call is refused. It carries the
+  `unstable_` prefix because dte-sdk has not run it against the SII yet. New type `RegisterFile`. `dte-sdk/portal`
+  grows from 81.68 kB to 82.03 kB, over its 82 kB limit, which goes to 84 kB.
+  - **What to change:** nothing.
 - **A portal client that signs in with a tax password, from `dte-sdk/portal`.** The portal took a certificate alone.
   `unstable_createPasswordPortalClient({ environment, userRut, password, companyRut })` makes a client that signs in
   with the RUT and the tax password of a person (the SII's "Clave Tributaria"), posted to the same CGI the certificate

@@ -322,6 +322,59 @@ export const purchaseDocumentOf = (answer: RcvObject): PurchaseDocument | null =
 }
 
 /**
+ * EN: The detail of a period of the register as the SII's "Descargar Detalles" gives it: a text of lines with `;`
+ * between values, the names of the columns first.
+ * ES: El detalle de un período del registro tal como lo entrega "Descargar Detalles" del SII: un texto de líneas con
+ * `;` entre valores, con los nombres de las columnas primero.
+ */
+export type RegisterFile = {
+  /** EN: The names of the columns, as the SII writes them. ES: Los nombres de las columnas, tal como los escribe el SII. */
+  readonly columns: readonly string[]
+  /** EN: One row per document: a text per value, in the order of the line, nothing converted. ES: Una fila por documento: un texto por valor, en el orden de la línea, sin convertir nada. */
+  readonly rows: readonly (readonly string[])[]
+  /** EN: The file: every line as the SII answered it, ended by a line feed; empty for a period with no documents. ES: El archivo: cada línea tal como la respondió el SII, terminada en un salto de línea; vacío para un período sin documentos. */
+  readonly csv: string
+}
+
+/**
+ * EN: What the SII said instead of a file.
+ * ES: Lo que dijo el SII en vez de un archivo.
+ */
+export type RegisterFileRefusal = {
+  /** EN: The SII's response code. ES: `codRespuesta` — Código de respuesta del SII. */
+  readonly code: number | null
+  /** EN: The SII's message, or null. ES: `msgeRespuesta` — Mensaje del SII, o null. */
+  readonly message: string | null
+}
+
+// The SII answers 3 for a period that holds nothing, as measured on the summary of the register; 0 is a plain answer.
+const EMPTY_PERIOD_CODES: readonly (number | null)[] = [null, 0, 3]
+
+/**
+ * EN: Reads the answer of the register's file: `data` is the list of its lines. An answer with no lines is an empty file
+ * when the SII's code says the period holds nothing (or gives none), and a refusal with any other code, so a month the
+ * SII would not show never reads as an empty one. Null when `data` is neither a list nor absent.
+ * ES: Lee la respuesta del archivo del registro: `data` es la lista de sus líneas. Una respuesta sin líneas es un
+ * archivo vacío cuando el código del SII dice que el período no tiene nada (o no trae código), y un rechazo con
+ * cualquier otro código, así un mes que el SII no quiso mostrar nunca se lee como uno vacío. Null si `data` no es una
+ * lista ni está ausente.
+ */
+export const registerFileOf = (answer: RcvObject): RegisterFile | RegisterFileRefusal | null => {
+  const { data } = answer
+  if (data !== null && data !== undefined && !Array.isArray(data)) return null
+  const lines = (data ?? []).filter((line): line is string => typeof line === 'string' && line.trim() !== '')
+  if (lines.length === 0) {
+    const state = childOf(answer, 'respEstado')
+    const code = numberOf(state.codRespuesta)
+    return EMPTY_PERIOD_CODES.includes(code)
+      ? { columns: [], rows: [], csv: '' }
+      : { code, message: textOf(state.msgeRespuesta) }
+  }
+  const [columns, ...rows] = lines.map((line) => line.split(';'))
+  return { columns, rows, csv: `${lines.join('\n')}\n` }
+}
+
+/**
  * EN: What the SII said about a change: the first of `metaData.errors`, when there is one.
  * ES: Lo que dijo el SII sobre un cambio: el primero de `metaData.errors`, si lo hay.
  */
