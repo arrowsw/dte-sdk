@@ -43,6 +43,16 @@ export const certificateFingerprint = (certificate: Pick<Certificate, 'certifica
 }
 
 /**
+ * EN: SHA-1 of a text, hex. Names something in a cache key without writing it.
+ * ES: SHA-1 de un texto, en hexadecimal. Nombra algo en una clave de caché sin escribirlo.
+ */
+export const textFingerprint = (text: string): string => {
+  const md = forge.md.sha1.create()
+  md.update(text, 'utf8')
+  return md.digest().toHex()
+}
+
+/**
  * EN: Cache key `${environment}:${channel}:${fingerprint}`: two companies, two environments or two channels never share a token.
  * ES: Clave de caché `${ambiente}:${canal}:${huella}`: dos empresas, dos ambientes o dos canales nunca comparten token.
  */

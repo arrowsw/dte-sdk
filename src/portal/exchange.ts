@@ -54,7 +54,9 @@ const partyOf = (rut: Parameters<typeof splitSiiRut>[0]): Party => {
 const companyOf = (portal: PortalClient, companyRut?: string): Party =>
   partyOf(resolvePortalCompany(portal, companyRut))
 
+// Who the session belongs to: the holder of the certificate, or the person who signs in with a tax password.
 const holderOf = (portal: PortalClient): Party => {
+  if (portal.certificate === null) return partyOf(portal.passwordSignIn.rut)
   if (portal.certificate.rut === null) throw new DteError('MISSING_FIELD', { field: 'certificate.rut' })
   return partyOf(portal.certificate.rut)
 }

@@ -1,5 +1,10 @@
 import { loadCertificateFromPem } from '../../src/certificate/pem'
-import { certificateFingerprint, createMemoryTokenCache, tokenCacheKey } from '../../src/sii/token-cache'
+import {
+  certificateFingerprint,
+  createMemoryTokenCache,
+  textFingerprint,
+  tokenCacheKey,
+} from '../../src/sii/token-cache'
 import { fixtureText, FIXED_NOW } from '../support/fixtures'
 
 const certificate = loadCertificateFromPem(
@@ -40,4 +45,10 @@ describe('createMemoryTokenCache', () => {
     await a.set('k', { token: 'A', expiresAt: 1 })
     expect(await b.get('k')).toBeNull()
   })
+})
+
+test('the fingerprint of a text is its SHA-1 in hex: the same for the same text, and nothing of the text in it', () => {
+  expect(textFingerprint('abc')).toBe('a9993e364706816aba3e25717850c26c9cd0d89d')
+  expect(textFingerprint('12345678-5')).toMatch(/^[0-9a-f]{40}$/)
+  expect(textFingerprint('12345678-5')).not.toBe(textFingerprint('76543210-3'))
 })

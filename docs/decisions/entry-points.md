@@ -8,9 +8,9 @@ by Hans on 2026-11-14.
 
 | Entry | Holds | Size | Reaches `node:` |
 |---|---|---|---|
-| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 40.08 kB | Not by import: it asks the runtime for `node:crypto` at the first signature |
+| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 40.15 kB | Not by import: it asks the runtime for `node:crypto` at the first signature |
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.38 kB | Yes, on first use |
-| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 81.32 kB | Yes, on first use |
+| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 81.68 kB | Yes, on first use |
 | `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 19.59 kB | Yes, on first use |
 | `dte-sdk/catalogs` | The SII's large code tables: the business activities | 10.65 kB | No |
 
@@ -112,6 +112,9 @@ first signature of a process asks `process.getBuiltinModule('node:crypto')`, a c
 browser does not have, so the root still bundles for the browser with no configuration, loading it still evaluates no
 `node:` module, and nothing is resolved by a bundler. An entry that had to be imported for the faster signature would
 have left it off for whoever signs with the root alone.
+The portal client that signs in with a tax password, also after 0.14.0, took `dte-sdk/portal` from 81.32 kB to
+81.68 kB, under its limit, and the password taken out of a captured login form took `dte-sdk` from 40.08 kB to
+40.15 kB, under its limit; the other entries did not move.
 
 ## Why
 
