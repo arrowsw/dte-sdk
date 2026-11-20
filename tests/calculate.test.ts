@@ -361,6 +361,21 @@ describe('roundHalfAwayFromZero', () => {
   ])('%p to %p decimals is %p', (value, decimals, expected) => {
     expect(roundHalfAwayFromZero(value, decimals)).toBe(expected)
   })
+
+  const refused = (value: number) =>
+    expect.objectContaining({ code: 'INVALID_AMOUNT', details: { value: String(value) } })
+
+  test.each([NaN, Infinity, -Infinity, 1e21, -1e21])('%p has no digits to round, and is refused', (value) => {
+    expect(() => roundHalfAwayFromZero(value, 4)).toThrow(refused(value))
+  })
+
+  test('the largest number written in digits still rounds, and what is built on the rounding refuses the same', () => {
+    expect(roundHalfAwayFromZero(999999999999999900000, 0)).toBe(999999999999999900000)
+    expect(() => convertToPesos(NaN, 950)).toThrow(refused(NaN))
+    expect(() => convertToPesos(100, Infinity)).toThrow(refused(Infinity))
+    expect(() => calculateExportLineAmount({ quantity: Infinity, unitPrice: 1 })).toThrow(refused(Infinity))
+    expect(() => calculateExportTotals([{ amount: 1e21 }] as never)).toThrow(refused(1e21))
+  })
 })
 
 describe('calculateExportLineAmount', () => {

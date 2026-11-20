@@ -1,6 +1,6 @@
 import { FINAL_CONSUMER_RUT } from '../catalogs/codes'
 import { UPLOAD_USER_AGENT } from '../catalogs/endpoints'
-import { isDocumentType, isReceipt, type DocumentType } from '../catalogs/document-types'
+import { isDocumentType, isExport, isReceipt, type DocumentType } from '../catalogs/document-types'
 import {
   classifyDocumentStatus,
   classifyUploadStatus,
@@ -554,7 +554,10 @@ const dateParts = (isoDate: string): { readonly day: string; readonly month: str
 }
 
 const buildDocumentQuery = (sii: SiiClient, input: QueryDocumentStatusInput): DocumentQuery => {
-  if (!isDocumentType(input.type)) throw new DteError('INVALID_DOCUMENT_TYPE', { field: 'type' })
+  // The query carries the total as a whole number, and an export document's is in a foreign currency with decimals:
+  // what the SII takes there has not been seen, so it is not asked with a rounded one.
+  if (!isDocumentType(input.type) || isExport(input.type))
+    throw new DteError('INVALID_DOCUMENT_TYPE', { field: 'type' })
   const companyRut = resolveCompanyRut(sii, input.companyRut)
   const receiverRut = toSiiRut(input.receiverRut, 'receiverRut')
   const issueDate = toIsoDate(input.issueDate, 'issueDate')

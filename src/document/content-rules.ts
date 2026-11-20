@@ -102,8 +102,10 @@ export const totalsWarnings = (type: DocumentType, totals: Totals): readonly Doc
   ]
 }
 
-// `MntExe` and `MntTotal` of `Exportaciones` are decimals from zero up to 99999999999999.9999, with four decimals.
-const MAX_EXPORT_AMOUNT = 1e14
+// `MntExe` and `MntTotal` of `Exportaciones` are decimals from zero up, with four decimals. A number holds fifteen
+// significant digits exactly, so eleven before the point: past that an amount would not be written as it was given,
+// and it is not taken, though the schema admits fourteen.
+const MAX_EXPORT_AMOUNT = 1e11
 const EXPORT_AMOUNTS = ['exemptAmount', 'totalAmount'] as const
 
 const isExportAmount = (amount: number): boolean =>

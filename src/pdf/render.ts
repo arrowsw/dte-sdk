@@ -1,5 +1,5 @@
 import type { PDFDocument, PDFImage } from 'pdf-lib'
-import { isDocumentType, isReceipt, isTransferable } from '../catalogs/document-types'
+import { isDocumentType, isExport, isReceipt, isTransferable } from '../catalogs/document-types'
 import { siiOfficeForCommune } from '../catalogs/sii-offices'
 import { DteError, errorMessage, isDteError } from '../errors'
 import {
@@ -1093,7 +1093,7 @@ const checkPaperAndStamp = (doc: PrintableDocument, { paper, stamp }: RenderPrin
  * @param options EN: office, resolution, logo, clock, `transferable`, `paper` and `stamp`. ES: oficina, resolución, logo, reloj, `transferable`, `paper` y `stamp`.
  * @param load EN: loader of the two libraries, for tests. ES: cargador de las dos librerías, para tests.
  * @returns EN: the PDF bytes. ES: los bytes del PDF.
- * @throws {DteError} EN: `MISSING_FIELD` (field `TipoDTE`) when the type is 0, `INVALID_OPTION` (`paper` when it is neither `'sheet'` nor `'roll'`; `stamp` when it is not a boolean, or is `false` on a document that is not a receipt; `resolution.number` when a resolution given as data has a number that is not a whole number from 0), `INVALID_DATE` (field `resolution.date`) when its date is not a real `YYYY-MM-DD`, `ENCODING_UNSUPPORTED_CHAR` for a TED with a code point above U+00FF, `DEPENDENCY_UNAVAILABLE` when a library cannot be loaded, `PDF_RENDER_FAILED` (with `type` and `folio`) when a library throws while drawing, for example on a character outside WinAnsi. ES: `MISSING_FIELD` (campo `TipoDTE`) cuando el tipo es 0, `INVALID_OPTION` (`paper` si no es `'sheet'` ni `'roll'`; `stamp` si no es booleano, o es `false` en un documento que no es boleta; `resolution.number` si una resolución dada como dato trae un número que no es un entero desde 0), `INVALID_DATE` (campo `resolution.date`) si su fecha no es una `AAAA-MM-DD` real, `ENCODING_UNSUPPORTED_CHAR` ante un TED con un code point mayor a U+00FF, `DEPENDENCY_UNAVAILABLE` si una librería no se puede cargar, `PDF_RENDER_FAILED` (con `type` y `folio`) si una librería lanza al dibujar, por ejemplo ante un carácter fuera de WinAnsi.
+ * @throws {DteError} EN: `MISSING_FIELD` (field `TipoDTE`) when the type is 0, `INVALID_DOCUMENT_TYPE` (field `TipoDTE`) for an export document (110, 111, 112), whose sample is not drawn yet, `INVALID_OPTION` (`paper` when it is neither `'sheet'` nor `'roll'`; `stamp` when it is not a boolean, or is `false` on a document that is not a receipt; `resolution.number` when a resolution given as data has a number that is not a whole number from 0), `INVALID_DATE` (field `resolution.date`) when its date is not a real `YYYY-MM-DD`, `ENCODING_UNSUPPORTED_CHAR` for a TED with a code point above U+00FF, `DEPENDENCY_UNAVAILABLE` when a library cannot be loaded, `PDF_RENDER_FAILED` (with `type` and `folio`) when a library throws while drawing, for example on a character outside WinAnsi. ES: `MISSING_FIELD` (campo `TipoDTE`) cuando el tipo es 0, `INVALID_DOCUMENT_TYPE` (campo `TipoDTE`) ante un documento de exportación (110, 111, 112), cuya muestra aún no se dibuja, `INVALID_OPTION` (`paper` si no es `'sheet'` ni `'roll'`; `stamp` si no es booleano, o es `false` en un documento que no es boleta; `resolution.number` si una resolución dada como dato trae un número que no es un entero desde 0), `INVALID_DATE` (campo `resolution.date`) si su fecha no es una `AAAA-MM-DD` real, `ENCODING_UNSUPPORTED_CHAR` ante un TED con un code point mayor a U+00FF, `DEPENDENCY_UNAVAILABLE` si una librería no se puede cargar, `PDF_RENDER_FAILED` (con `type` y `folio`) si una librería lanza al dibujar, por ejemplo ante un carácter fuera de WinAnsi.
  */
 export const renderPrintedSample = async (
   doc: PrintableDocument,
@@ -1101,6 +1101,10 @@ export const renderPrintedSample = async (
   load: () => Promise<PdfModules> = loadPdfModules,
 ): Promise<Uint8Array> => {
   if (!doc.type) throw new DteError('MISSING_FIELD', { field: 'TipoDTE' })
+  // An export document is in a foreign currency, with decimals and a customs area. The sample draws none of it, and
+  // would print its amounts as pesos, in figures and in words.
+  if (isDocumentType(doc.type) && isExport(doc.type))
+    throw new DteError('INVALID_DOCUMENT_TYPE', { field: 'TipoDTE', type: doc.type })
   checkPaperAndStamp(doc, options)
   const resolution = resolutionOf(options)
   const modules = await load()

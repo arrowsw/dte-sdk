@@ -125,6 +125,19 @@ describe('signDocument / issueDocument', () => {
     expect(verifyDocumentSignature(defaultClock.xml).valid).toBe(true)
   })
 
+  test('the signed element is read from the elements of the DTE, whatever its text names', () => {
+    const { xml } = signDocument(stampDocument(createDocument(invoiceInput), caf33, { now: FIXED_NOW }), certificate, {
+      now: FIXED_NOW,
+    })
+    // A comment is no part of what the signature covers: one added after signing leaves it valid, whatever it says.
+    for (const named of ['<Exportaciones ID="x">', '<Liquidacion ID="x">', 'hola'])
+      expect(verifyDocumentSignature(xml.replace('<Encabezado>', `<!-- ${named} --><Encabezado>`)).valid).toBe(true)
+    // A DTE with none of its three roots has no signed element to look for.
+    expect(() =>
+      verifyDocumentSignature('<DTE xmlns="http://www.sii.cl/SiiDte" version="1.0"><Otro ID="A"/></DTE>'),
+    ).toThrow(expect.objectContaining({ code: 'SIGNATURE_NOT_FOUND' }))
+  })
+
   test('an item name with $-patterns survives the TED insertion untouched', () => {
     const signed = issueDocument({
       document: { ...invoiceInput, items: [{ name: 'Precio $1 $& $$', unitPrice: 1000 }] },

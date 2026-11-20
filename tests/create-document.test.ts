@@ -1281,6 +1281,42 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
     expectError(() => exportOf({ items: [item] }), 'INVALID_AMOUNT', { field: 'items[0].amount' })
   })
 
+  test.each<[string, LineItemInput]>([
+    ['eleven digits before the point', { name: 'Ajuste', quantity: 1, unit: 'U', amount: 1e11 }],
+    ['a number too large to be written in digits', { name: 'Ajuste', quantity: 1, unit: 'U', amount: 1e21 }],
+  ])('an amount of %s is refused: a number does not hold it to its fourth decimal', (_label, item) => {
+    expectError(() => exportOf({ items: [item] }), 'INVALID_AMOUNT', { field: 'items[0].amount' })
+  })
+
+  test('the largest amount is written as it is given, to its last decimal', () => {
+    const doc = exportOf({ items: [{ name: 'Granel', quantity: 1, unit: 'KN', amount: 99999999999.9999 }] })
+    expect(doc.items[0].amount).toBe(99999999999.9999)
+    expect(doc.header.totals).toEqual({ exemptAmount: 99999999999.9999, totalAmount: 99999999999.9999 })
+    expectError(() => exportOf({ totals: { totalAmount: 1e11 } }), 'INVALID_AMOUNT', { field: 'totals.totalAmount' })
+  })
+
+  test.each<[string, LineItemInput, string]>([
+    [
+      'a discount',
+      { name: 'Muestra', quantity: 1, unit: 'U', unitPrice: 4.99, discountPercent: 10 },
+      'discountPercent',
+    ],
+    [
+      'a surcharge',
+      { name: 'Muestra', quantity: 1, unit: 'U', unitPrice: 4.99, surchargePercent: 10 },
+      'surchargePercent',
+    ],
+    [
+      'a discount on a line with an amount and no price',
+      { name: 'Ajuste', quantity: 1, unit: 'U', amount: 100, discountPercent: 5 },
+      'discountPercent',
+    ],
+  ])('%s in percent whose whole amount is zero is refused: a percent goes with its amount', (_label, item, field) => {
+    // Formato DTE 2.5, fields 30 and 33 of the detail. On an export line the amount is a whole number of a currency
+    // whose unit is worth much, so 10 % of 4.99 rounds to none, and the percent would be written alone.
+    expectError(() => exportOf({ items: [item] }), 'INVALID_AMOUNT', { field: `items[0].${field}` })
+  })
+
   test('the global adjustments apply to the exempt amount, in order', () => {
     const doc = exportOf({
       globalAdjustments: [
