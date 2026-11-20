@@ -16,7 +16,14 @@ import {
   TAX_PASSWORD,
   ZEUS_LOGIN,
 } from '../support/portal'
-import { AUTH_PAGE, COMPANY_FORM, NOT_ENABLED_PAGE, page, SESSION_LIMIT_PAGE } from '../support/portal-pages'
+import {
+  AUTH_PAGE,
+  COMPANY_FORM,
+  NOT_ENABLED_PAGE,
+  page,
+  REPRESENTATION_REFUSED,
+  SESSION_LIMIT_PAGE,
+} from '../support/portal-pages'
 
 const ENTRY = 'https://zeusr.sii.cl/AUT2000/InicioAutenticacion/IngresoRutClave.html*'
 const LANDING = 'https://misiir.sii.cl/cgi_misii/siihome.cgi'
@@ -253,6 +260,56 @@ describe('a password the SII refuses', () => {
     await expect(openPortalSession(harness.portal)).resolves.toMatchObject({ reused: false })
     expect(harness.posted('CAutInicio')).toHaveLength(2)
     expect(harness.asked()).toBe(2)
+  })
+
+  test('after the session limit, a refusal is read from the second login and not from what the limit page left', async () => {
+    // The SII took the password, said the user has too many sessions, and set the cookies of a session on that page.
+    const limit = {
+      body: page(
+        '<p>Ha superado el m&aacute;ximo de sesiones autenticadas</p><a href="/cgi_AUT2000/CierraAnt.cgi?x=1">cerrar</a>',
+      ),
+      headers: { 'Set-Cookie': 'NETSCAPE_LIVEWIRE.rut=12345678; Path=/, NETSCAPE_LIVEWIRE.dv=5; Path=/' },
+    }
+    const harness = passwordPortalWith([
+      entry,
+      { url: ZEUS_LOGIN, reply: [limit, REFUSED] },
+      { url: 'https://zeusr.sii.cl/cgi_AUT2000/CierraAnt.cgi*', reply: { body: page('ok') } },
+      HOME,
+    ])
+    const error = await failure(openPortalSession(harness.portal))
+    expect(error.code).toBe('SII_PORTAL_LOGIN_FAILED')
+    expect(String(error.details.portalMessage)).toContain('La clave ingresada no es correcta')
+    // The one case in which a password is posted twice: the SII had taken it the first time. The second post goes
+    // with the load balancer's cookie and none of a session, as the first.
+    const logins = harness.fake.requests.filter((request) => request.url === ZEUS_LOGIN)
+    expect(logins.map((request) => request.headers['cookie'])).toEqual(['TS01=abc', 'TS01=abc'])
+    // It is marked as refused: the next call posts nothing.
+    expect((await failure(openPortalSession(harness.portal))).details).toMatchObject({ refusedBefore: true })
+    expect(harness.posted('CAutInicio')).toHaveLength(2)
+    expect(harness.asked()).toBe(1)
+  })
+
+  test('once refused, the page where stale cookies end is not answered with a visit to the entry page', async () => {
+    const target = `${MAULLIN}/ad_empresa1`
+    const harness = passwordPortalWith([
+      entry,
+      { url: ZEUS_LOGIN, reply: REFUSED },
+      { url: target, reply: { body: REPRESENTATION_REFUSED } },
+    ])
+    expect((await failure(openPortalSession(harness.portal))).code).toBe('SII_PORTAL_LOGIN_FAILED')
+    // The cookies of a session the SII dropped come back from the cache.
+    await harness.portal.sessionCache.set(PASSWORD_SESSION_KEY, {
+      token: JSON.stringify({ 'NETSCAPE_LIVEWIRE.rut': '12345678', 'NETSCAPE_LIVEWIRE.dv': '5', TS01: 'abc' }),
+      expiresAt: FIXED_NOW.getTime() + 60000,
+    })
+    const before = harness.fake.requests.length
+    const error = await failure(
+      withPortalSession(harness.portal, 'test', undefined, (context) => ensurePage(context, 'x', target)),
+    )
+    expect(error.details).toMatchObject({ refusedBefore: true })
+    // The page was asked for and nothing after it: neither the entry page nor the login.
+    expect(harness.fake.requests.slice(before).map((request) => request.url)).toEqual([target])
+    expect(harness.posted('CAutInicio')).toHaveLength(1)
   })
 
   test('another client starts clean', async () => {

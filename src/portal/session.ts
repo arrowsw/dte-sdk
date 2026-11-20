@@ -458,15 +458,19 @@ const loginRequest = async (
 const login = async (context: PortalContext, referencia: string): Promise<PortalPage> => {
   const { url, form } = await loginRequest(context, referencia)
   const byPassword = context.portal.passwordSignIn !== null
-  // Whether the SII took a password is read from the session cookies below, so the ones a dead session left in the jar
-  // go first: with them there, a refused password would pass for a good one and be posted again on every call.
-  if (byPassword) context.state.cookies = withoutSessionCookies(context.state.cookies)
   // Each time a password is posted counts towards the lock, so its request is never repeated: a timeout or a gateway
-  // error after the SII read it would post it again.
+  // error after the SII read it would post it again. It is posted a second time in one case alone, after the SII took
+  // it, said the user has too many sessions and closed the earlier ones.
   const posting: PortalContext = byPassword
     ? { ...context, overrides: { ...context.overrides, retry: false } }
     : context
-  const post = (): Promise<PortalPage> => navigate(posting, 'login', 'POST', url, { form, referer: url })
+  const post = (): Promise<PortalPage> => {
+    // Whether the SII took a password is read from the session cookies below, so the ones in the jar go before each
+    // post, whether a dead session left them or the page of the session limit did: with them there, a refused
+    // password would pass for a good one and be posted again on every call.
+    if (byPassword) context.state.cookies = withoutSessionCookies(context.state.cookies)
+    return navigate(posting, 'login', 'POST', url, { form, referer: url })
+  }
   context.state.loggedIn = true
   const page = await settleSessionLimit(context, 'login', await post(), post)
   if (context.portal.passwordSignIn === null && isCertificateNotEnabledPage(page.html))
