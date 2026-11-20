@@ -24,6 +24,7 @@ import {
   parseCookies,
   serializeCookies,
   sessionRut,
+  withoutSessionCookies,
   type CookieJar,
 } from './cookies'
 import {
@@ -431,14 +432,20 @@ const refusedPasswords = new WeakSet<object>()
 // The request that signs in. With a certificate the TLS handshake is the credential and the form only says where to go
 // next. With a password the form carries the RUT whole and in its two parts, the password and where to go next, as the
 // SII's own page posts them; the password is asked for here, used once and kept nowhere.
+// Thrown before a login asks anything of the SII, its entry page included.
+const assertNotRefused = (context: PortalContext): void => {
+  const signIn = context.portal.passwordSignIn
+  if (signIn !== null && refusedPasswords.has(signIn))
+    throw new DteError('SII_PORTAL_LOGIN_FAILED', { operation: context.operation, refusedBefore: true })
+}
+
 const loginRequest = async (
   context: PortalContext,
   referencia: string,
 ): Promise<{ readonly url: string; readonly form: Readonly<Record<string, string>> }> => {
   const signIn = context.portal.passwordSignIn
   if (signIn === null) return { url: `${CERTIFICATE_LOGIN_URL}?${referencia}`, form: { referencia } }
-  if (refusedPasswords.has(signIn))
-    throw new DteError('SII_PORTAL_LOGIN_FAILED', { operation: context.operation, refusedBefore: true })
+  assertNotRefused(context)
   const { body, verifier } = splitSiiRut(signIn.rut)
   const password = await signIn.password()
   if (typeof password !== 'string' || password === '') throw new DteError('MISSING_FIELD', { field: 'password' })
@@ -450,7 +457,20 @@ const loginRequest = async (
 
 const login = async (context: PortalContext, referencia: string): Promise<PortalPage> => {
   const { url, form } = await loginRequest(context, referencia)
-  const post = (): Promise<PortalPage> => navigate(context, 'login', 'POST', url, { form, referer: url })
+  const byPassword = context.portal.passwordSignIn !== null
+  // Each time a password is posted counts towards the lock, so its request is never repeated: a timeout or a gateway
+  // error after the SII read it would post it again. It is posted a second time in one case alone, after the SII took
+  // it, said the user has too many sessions and closed the earlier ones.
+  const posting: PortalContext = byPassword
+    ? { ...context, overrides: { ...context.overrides, retry: false } }
+    : context
+  const post = (): Promise<PortalPage> => {
+    // Whether the SII took a password is read from the session cookies below, so the ones in the jar go before each
+    // post, whether a dead session left them or the page of the session limit did: with them there, a refused
+    // password would pass for a good one and be posted again on every call.
+    if (byPassword) context.state.cookies = withoutSessionCookies(context.state.cookies)
+    return navigate(posting, 'login', 'POST', url, { form, referer: url })
+  }
   context.state.loggedIn = true
   const page = await settleSessionLimit(context, 'login', await post(), post)
   if (context.portal.passwordSignIn === null && isCertificateNotEnabledPage(page.html))
@@ -491,6 +511,7 @@ const authenticateIfAsked = async (
   page: PortalPage,
 ): Promise<PortalPage> => {
   if (isRepresentationRefused(page.html) && !context.state.loggedIn) {
+    assertNotRefused(context)
     forgetSession(context)
     await portalRequest(context, 'entry', 'GET', `${entryUrl(context.portal)}?${url}`)
     return login(context, url)
@@ -661,6 +682,7 @@ const cachedSessionAlive = async (context: PortalContext): Promise<boolean> => {
  */
 export const ensureSession = async (context: PortalContext): Promise<void> => {
   if (hasSessionCookie(context.state.cookies)) return
+  assertNotRefused(context)
   await portalRequest(context, 'entry', 'GET', `${entryUrl(context.portal)}?${PORTAL_LANDING_URL}`)
   await login(context, PORTAL_LANDING_URL)
 }

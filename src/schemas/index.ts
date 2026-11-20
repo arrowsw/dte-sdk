@@ -128,13 +128,21 @@ export const loadSchemaValidator = async (): Promise<SchemaValidatorModule> => {
 const DECLARATION = /^\s*<\?xml\b[^?]*\?>/
 const DECLARED_ENCODING = /\bencoding\s*=\s*(["'])([^"']*)\1/i
 
-// The bytes of a file as text: in the charset its declaration names when that is ISO-8859-1, as every file the SII
-// takes is, and in UTF-8 otherwise. The declaration is ASCII in both, so it reads the same before the choice is made.
+// The names a declaration gives the two charsets read here, in capitals. US-ASCII is the part both have in common.
+const LATIN1_NAMES: readonly string[] = ['ISO-8859-1', 'ISO8859-1', 'ISO_8859-1', 'LATIN1', 'L1']
+const UTF8_NAMES: readonly string[] = ['UTF-8', 'UTF8', 'US-ASCII', 'ASCII']
+
+// The bytes of a file as text, in the charset its declaration names: ISO-8859-1, as every file the SII takes is, or
+// UTF-8, which is also what a file that names none is. The declaration is ASCII in both, so it reads the same before
+// the choice is made. Any other charset is refused: read as one of these two, its accents would come out as other
+// characters and the schema would speak against a text the file does not have.
 const textOf = (xml: string | Uint8Array): string => {
   if (typeof xml === 'string') return xml
   const head = decodeLatin1(xml.subarray(0, 200))
-  const encoding = DECLARED_ENCODING.exec(DECLARATION.exec(head)?.[0] ?? '')?.[2] ?? ''
-  return /^iso-8859-1$/i.test(encoding) ? decodeLatin1(xml) : new TextDecoder('utf-8').decode(xml)
+  const encoding = (DECLARED_ENCODING.exec(DECLARATION.exec(head)?.[0] ?? '')?.[2] ?? 'UTF-8').toUpperCase()
+  if (LATIN1_NAMES.includes(encoding)) return decodeLatin1(xml)
+  if (UTF8_NAMES.includes(encoding)) return new TextDecoder('utf-8').decode(xml)
+  throw new DteError('INVALID_OPTION', { field: 'encoding', encoding })
 }
 
 // The validator reads UTF-8 alone, and the text reaches it as UTF-8: a declaration that names another charset is made
@@ -143,14 +151,20 @@ const asUtf8 = (text: string): string =>
   text.replace(DECLARATION, (declaration) => declaration.replace(DECLARED_ENCODING, 'encoding="UTF-8"'))
 
 const ROOT_ELEMENT = /<(?:[A-Za-z_][\w.-]*:)?([A-Za-z_][\w.-]*)[\s/>]/
+const RECEIPT_TYPE = /<TipoDTE>\s*(?:39|41)\s*<\/TipoDTE>/
 
 /**
  * EN: The schema of a document, by the name of its document element, or null when dte-sdk carries none for it. It reads
- * the first element after the declaration, the comments and the processing instructions; it validates nothing.
+ * the first element after the declaration, the comments and the processing instructions; it validates nothing. A
+ * receipt (39, 41) on its own has none: `DTE_v10.xsd` does not declare its `DTE`, which only `EnvioBOLETA_v11.xsd`
+ * does, so a receipt is validated inside its `EnvioBOLETA`.
  * ES: El esquema de un documento, según el nombre de su elemento raíz, o null si dte-sdk no trae ninguno para él. Lee
  * el primer elemento después de la declaración, los comentarios y las instrucciones de procesamiento; no valida nada.
+ * Una boleta (39, 41) sola no tiene ninguno: `DTE_v10.xsd` no declara su `DTE`, que solo declara
+ * `EnvioBOLETA_v11.xsd`, así que una boleta se valida dentro de su `EnvioBOLETA`.
  * @param xml EN: the document, as text or as the bytes of its file. ES: el documento, como texto o como los bytes de su archivo.
  * @returns EN: the name of its schema, or null. ES: el nombre de su esquema, o null.
+ * @throws {DteError} EN: `INVALID_OPTION` with `field: 'encoding'` for bytes whose declaration names a charset other than ISO-8859-1 or UTF-8. ES: `INVALID_OPTION` con `field: 'encoding'` ante bytes cuya declaración nombra un charset que no es ISO-8859-1 ni UTF-8.
  */
 export const schemaOf = (xml: string | Uint8Array): SiiSchemaName | null => {
   const body = textOf(xml)
@@ -158,6 +172,7 @@ export const schemaOf = (xml: string | Uint8Array): SiiSchemaName | null => {
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/<!DOCTYPE[^>]*>/gi, '')
   const root = ROOT_ELEMENT.exec(body)?.[1]
+  if (root === SII_SCHEMAS.DTE.root && RECEIPT_TYPE.test(body)) return null
   const names = Object.keys(SII_SCHEMAS) as SiiSchemaName[]
   return names.find((name) => SII_SCHEMAS[name].root === root) ?? null
 }
@@ -192,7 +207,7 @@ const fileOf = (fileName: SchemaFile): { readonly fileName: string; readonly con
  * @param xml EN: the document, as text or as the bytes of its file (read in the charset its declaration names). ES: el documento, como texto o como los bytes de su archivo (leídos en el charset que nombra su declaración).
  * @param options EN: the schema, when it is not the one of the document element. ES: el esquema, si no es el del elemento raíz.
  * @returns EN: the issues, none when the document is valid. ES: los problemas, ninguno cuando el documento es válido.
- * @throws {DteError} EN: `INVALID_OPTION` with `field: 'schema'` for a schema dte-sdk does not carry, or a document whose element has none and none was given; `DEPENDENCY_UNAVAILABLE` when the validator cannot be loaded. ES: `INVALID_OPTION` con `field: 'schema'` ante un esquema que dte-sdk no trae, o un documento cuyo elemento no tiene ninguno sin que se haya dado uno; `DEPENDENCY_UNAVAILABLE` si el validador no se puede cargar.
+ * @throws {DteError} EN: `INVALID_OPTION` with `field: 'schema'` for a schema dte-sdk does not carry, or a document whose element has none and none was given, a receipt (39, 41) outside its `EnvioBOLETA` among them; `INVALID_OPTION` with `field: 'encoding'` for bytes whose declaration names a charset other than ISO-8859-1 or UTF-8; `DEPENDENCY_UNAVAILABLE` when the validator cannot be loaded. ES: `INVALID_OPTION` con `field: 'schema'` ante un esquema que dte-sdk no trae, o un documento cuyo elemento no tiene ninguno sin que se haya dado uno, entre ellos una boleta (39, 41) fuera de su `EnvioBOLETA`; `INVALID_OPTION` con `field: 'encoding'` ante bytes cuya declaración nombra un charset que no es ISO-8859-1 ni UTF-8; `DEPENDENCY_UNAVAILABLE` si el validador no se puede cargar.
  */
 export const validateAgainstSchema = async (
   xml: string | Uint8Array,

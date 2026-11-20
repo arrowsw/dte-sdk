@@ -1,22 +1,26 @@
 import { DteError } from '../errors'
+import { dropForbiddenControls } from '../xml/escape'
 
 /**
  * EN: Normalizes free text for a DTE field: drops apostrophes and double quotes (they break the SII signature
  * checks), maps typographic dashes and ellipsis to ASCII, removes anything outside ISO-8859-1 (emoji, curly quotes)
+ * and the control characters XML 1.0 forbids (U+0000 to U+001F but the tab, the line feed and the carriage return),
  * and trims. `null`/`undefined` become `''`.
  * ES: Normaliza texto libre para un campo del DTE: quita apóstrofes y comillas dobles (rompen la validación de firma
  * del SII), pasa guiones y puntos suspensivos tipográficos a ASCII, elimina todo lo que no es ISO-8859-1 (emoji,
- * comillas curvas) y recorta espacios. `null`/`undefined` quedan en `''`.
+ * comillas curvas) y los caracteres de control que XML 1.0 prohíbe (U+0000 a U+001F salvo el tabulador, el salto de
+ * línea y el retorno de carro), y recorta espacios. `null`/`undefined` quedan en `''`.
  */
 export const sanitizeText = (text: string | null | undefined): string => {
   if (text === undefined || text === null) return ''
-  return String(text)
-    .replace(/['´`]/g, '')
-    .replace(/"/g, '')
-    .replace(/[—–]/g, '-')
-    .replace(/…/g, '...')
-    .replace(/[\u0100-\uFFFF]/g, '')
-    .trim()
+  return dropForbiddenControls(
+    String(text)
+      .replace(/['´`]/g, '')
+      .replace(/"/g, '')
+      .replace(/[—–]/g, '-')
+      .replace(/…/g, '...')
+      .replace(/[\u0100-\uFFFF]/g, ''),
+  ).trim()
 }
 
 const LIGATURES: Readonly<Record<string, string>> = {

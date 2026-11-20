@@ -3,10 +3,15 @@ import { sha1Base64 } from '../crypto/digest'
 import { rsaPublicKeyPartsFromCertificatePem, rsaSha1SignBase64, rsaSha1VerifyBase64 } from '../crypto/rsa'
 import { DteError } from '../errors'
 import { canonicalizeElement, findElement } from '../xml/c14n'
+import { unreadTexts } from '../xml/elements'
 import { wrapBase64 } from '../xml/format'
-import { parseXmlDom } from '../xml/parse'
+import { parseXmlDom, type XmlDocument } from '../xml/parse'
 
-const XMLDSIG_NS = 'http://www.w3.org/2000/09/xmldsig#'
+/**
+ * EN: The XMLDSig namespace, which every `Signature` is in.
+ * ES: El namespace de XMLDSig, en el que está toda `Signature`.
+ */
+export const XMLDSIG_NS = 'http://www.w3.org/2000/09/xmldsig#'
 const XSI_NS = 'http://www.w3.org/2001/XMLSchema-instance'
 const C14N_ALGORITHM = 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315'
 const RSA_SHA1_ALGORITHM = 'http://www.w3.org/2000/09/xmldsig#rsa-sha1'
@@ -78,11 +83,36 @@ export type SignEnvelopedInput = {
   readonly includeXsiInStoredSignedInfo?: boolean
 }
 
+// Where a text can hold the tags that close the root and close nothing with them: a comment, a CDATA section or a
+// processing instruction, the XML declaration aside.
+const MAY_HOLD_TAGS = /<!--|<!\[CDATA\[|<\?(?!xml[\s?])/
+
+// How many times those places hold `closing` before the root closes.
+const heldBeforeRootCloses = (dom: XmlDocument, closing: string): number => {
+  const nodes: readonly Node[] = Array.from(dom.childNodes)
+  return nodes
+    .slice(0, nodes.indexOf(dom.documentElement as Node) + 1)
+    .flatMap(unreadTexts)
+    .reduce((count, text) => count + text.split(closing).length - 1, 0)
+}
+
+// The place of the pair that closes the root: the first in the text that no comment, CDATA section or processing
+// instruction holds. One of those may hold the same pair before it, in a document the text embeds, or after the root,
+// and a signature put there would be no signature at all. -1 when the root is not closed by the pair.
+const closingAt = (xml: string, closing: string, dom: XmlDocument): number => {
+  const held = MAY_HOLD_TAGS.test(xml) ? heldBeforeRootCloses(dom, closing) : 0
+  let at = xml.indexOf(closing)
+  for (let skipped = 0; skipped < held && at !== -1; skipped += 1) at = xml.indexOf(closing, at + closing.length)
+  return at
+}
+
 /**
  * EN: Signs `elementTag` with an enveloped XMLDSig signature (C14N 1.0, RSA-SHA1) and returns the XML with the
- * `Signature` inserted right before `</rootTag>`.
+ * `Signature` inserted right before `</rootTag>`, the one that closes the root: the same tags inside a comment, a
+ * CDATA section or a processing instruction, before or after it, are left alone.
  * ES: Firma `elementTag` con una firma XMLDSig envuelta (C14N 1.0, RSA-SHA1) y devuelve el XML con la `Signature`
- * insertada justo antes de `</rootTag>`.
+ * insertada justo antes de `</rootTag>`, el que cierra el raíz: las mismas etiquetas dentro de un comentario, una
+ * sección CDATA o una instrucción de procesamiento, antes o después, no se tocan.
  * @throws {DteError} EN: `XML_PARSE_FAILED` when the element, its `ID` or the adjacent closing tags are missing. ES: `XML_PARSE_FAILED` si faltan el elemento, su `ID` o los cierres adyacentes.
  */
 export const signEnveloped = ({
@@ -92,11 +122,13 @@ export const signEnveloped = ({
   certificate,
   includeXsiInStoredSignedInfo = true,
 }: SignEnvelopedInput): { readonly xml: string; readonly signature: XmlSignature } => {
-  const element = findElement(parseXmlDom(xml), elementTag)
+  const dom = parseXmlDom(xml)
+  const element = findElement(dom, elementTag)
   const id = element.getAttribute('ID')
   if (!id) throw new DteError('XML_PARSE_FAILED', { field: elementTag, reason: 'missing ID attribute' })
   const closing = `</${elementTag}></${rootTag}>`
-  if (!xml.includes(closing)) throw new DteError('XML_PARSE_FAILED', { field: rootTag, reason: `expected ${closing}` })
+  const at = closingAt(xml, closing, dom)
+  if (at === -1) throw new DteError('XML_PARSE_FAILED', { field: rootTag, reason: `expected ${closing}` })
   const digestValue = sha1Base64(canonicalizeElement(element), 'utf8')
   const signedInfoToSign = buildSignedInfo(id, digestValue, { expandTags: true, includeXsi: true })
   const signedInfoToStore = buildSignedInfo(id, digestValue, {
@@ -110,8 +142,7 @@ export const signEnveloped = ({
     certificate: wrapBase64(certificate.certificateBase64),
   })
   return {
-    // A replacer function keeps `$`-patterns in the inserted content literal.
-    xml: xml.replace(closing, () => `</${elementTag}>${signatureXml}</${rootTag}>`),
+    xml: `${xml.slice(0, at)}</${elementTag}>${signatureXml}</${rootTag}>${xml.slice(at + closing.length)}`,
     signature: { digestValue, signatureValue },
   }
 }

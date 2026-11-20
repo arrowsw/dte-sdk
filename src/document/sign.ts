@@ -2,6 +2,8 @@ import type { Certificate } from '../certificate/certificate'
 import { signEnveloped, verifyEnveloped, type SignatureVerification, type XmlSignature } from '../signature/xmldsig'
 import type { StampedDocument } from '../ted/build'
 import { chileTimestamp } from '../time/chile'
+import { childElements } from '../xml/elements'
+import { parseXmlDom } from '../xml/parse'
 import { buildDocumentXml, documentElementName } from './build-xml'
 
 /**
@@ -40,9 +42,13 @@ export const signDocument = (
   return { ...doc, xml, signedAt, signature }
 }
 
-// The signed element a `<DTE>` holds, by the first of the three roots it names.
+const SIGNED_ELEMENTS: readonly string[] = ['Documento', 'Liquidacion', 'Exportaciones']
+
+// The signed element a `<DTE>` holds: the child that is one of its three roots. It is read from the elements and not
+// from the text, where a comment or a value may spell the name of any of them.
 const signedElementOf = (xml: string): string =>
-  xml.includes('<Liquidacion') ? 'Liquidacion' : xml.includes('<Exportaciones') ? 'Exportaciones' : 'Documento'
+  childElements(parseXmlDom(xml).documentElement).find((element) => SIGNED_ELEMENTS.includes(element.tagName))
+    ?.tagName ?? 'Documento'
 
 /**
  * EN: Verifies the signature of a `<DTE>` XML (own or received), over its `Documento`, `Liquidacion` or

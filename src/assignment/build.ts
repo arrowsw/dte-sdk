@@ -8,7 +8,7 @@ import { assertMaxLength, sanitizeText } from '../text/sanitize'
 import { chileTimestamp, toIsoDate } from '../time/chile'
 import { child, textAt } from '../xml/elements'
 import { escapeXmlText } from '../xml/escape'
-import { readAssignmentFile, SII_NS, verifyAssignment } from './read'
+import { readAssignmentFile, SII_NS, unstable_verifyAssignment } from './read'
 
 /**
  * EN: The document types that can be assigned (Formato Archivo Electrónico de Cesión 1.1, C.1 field 2): invoice (33),
@@ -121,8 +121,8 @@ export type AssignmentTerms = {
 }
 
 /**
- * EN: Input of `createAssignment`: the terms and the signed document.
- * ES: Entrada de `createAssignment`: las condiciones y el documento firmado.
+ * EN: Input of `unstable_createAssignment`: the terms and the signed document.
+ * ES: Entrada de `unstable_createAssignment`: las condiciones y el documento firmado.
  */
 export type AssignmentInput = AssignmentTerms & {
   /** EN: The signed `DTE`, exactly as it was sent; an XML declaration before it is dropped. ES: `DTE` — El `DTE` firmado, tal como se envió; se descarta una declaración XML antes de él. */
@@ -130,8 +130,8 @@ export type AssignmentInput = AssignmentTerms & {
 }
 
 /**
- * EN: Input of `createReassignment`: the terms and the file of the previous assignment.
- * ES: Entrada de `createReassignment`: las condiciones y el archivo de la cesión anterior.
+ * EN: Input of `unstable_createReassignment`: the terms and the file of the previous assignment.
+ * ES: Entrada de `unstable_createReassignment`: las condiciones y el archivo de la cesión anterior.
  */
 export type ReassignmentInput = AssignmentTerms & {
   /** EN: The signed `AEC` of the previous assignment, as text. ES: `AEC` — El `AEC` firmado de la cesión anterior, como texto. */
@@ -282,7 +282,7 @@ const swornStatement = (assignor: Party, assignee: Party, document: AssignedDocu
     `Se declara bajo juramento que ${assignor.businessName}, RUT ${assignor.rut} ha puesto a disposición del ` +
     `cesionario ${assignee.businessName}, RUT ${assignee.rut}, el o los documentos donde constan los recibos de las ` +
     `mercaderías entregadas o servicios prestados, entregados por parte del deudor de la factura ` +
-    `${document.debtorName}, RUT ${document.debtorRut}, de acuerdo a lo establecido en la Ley N° 19.983.`
+    `${document.debtorName}, RUT ${document.debtorRut}, de acuerdo a lo establecido en la Ley N° 19.983`
   assertMaxLength(statement, LONG_MAX, 'DeclaracionJurada')
   return statement
 }
@@ -354,8 +354,31 @@ const signedFile = (
   return signEnveloped({ xml, elementTag: 'DocumentoAEC', rootTag: 'AEC', certificate: terms.certificate }).xml
 }
 
+const failedZone = (verification: ReturnType<typeof unstable_verifyAssignment>): string | null => {
+  const checks: readonly (readonly [string, SignatureVerification])[] = [
+    ['DTE', verification.document],
+    ['DocumentoDTECedido', verification.assignedDocument],
+    ...verification.assignments.flatMap((signatures) =>
+      signatures.map((signature) => ['DocumentoCesion', signature] as const),
+    ),
+    ['DocumentoAEC', verification.file],
+  ]
+  return checks.find(([, check]) => !check.valid)?.[0] ?? null
+}
+
+// What is handed back verifies, or nothing is. Every signature of the file is checked where it stands, as the reader of
+// whoever receives it will: a zone whose ID an embedded document also uses, which leaves two elements for one
+// reference, is found here and not at the SII.
+const verified = (file: string): string => {
+  const failed = failedZone(unstable_verifyAssignment(file))
+  if (failed !== null) throw new DteError('SIGNATURE_INVALID', { field: failed })
+  return file
+}
+
 /**
- * EN: Builds and signs the electronic assignment file (Archivo Electrónico de Cesión, AEC) of a first assignment, with
+ * EN: **Unstable**: no file it built has been registered at the SII yet, so its shape may change in any release, a
+ * patch included.
+ * Builds and signs the electronic assignment file (Archivo Electrónico de Cesión, AEC) of a first assignment, with
  * which the holder of an invoice assigns its credit to a financier under Ley 19.983, as Formato Archivo Electrónico de
  * Cesión 1.1 and `AEC_v10.xsd` define it: the signed document embedded verbatim, so its own signature still verifies,
  * with its zone signed (`DocumentoDTECedido`); the assignment (`DocumentoCesion`, `SeqCesion` 1) signed once by each
@@ -365,8 +388,13 @@ const signedFile = (
  * sworn statement the format words for that case (`DeclaracionJurada`), naming the assignor, the assignee and the
  * debtor. The texts are sanitized as a document's are and held to the stricter of the format's and the schema's lengths.
  * Pure: no network; the clock is `now`. ISO-8859-1 XML text with its declaration, ready for
- * `unstable_uploadAssignment`.
- * ES: Arma y firma el Archivo Electrónico de Cesión (AEC) de una primera cesión, con el que el tenedor de una factura
+ * `unstable_uploadAssignment`. The file is verified before it is handed back, every signature where it stands, and one
+ * that does not verify is an error and no file. Three limits: the `DTE` must declare the SII's namespace itself, so one
+ * cut from an envelope that left the declaration to the envelope is refused; the three names must leave the sworn
+ * statement within its 512 characters; and a signer's certificate that names no RUT is not compared with the signer's.
+ * ES: **Inestable**: ningún archivo que haya armado se ha registrado aún en el SII, así que su forma puede cambiar en
+ * cualquier versión, incluso un patch.
+ * Arma y firma el Archivo Electrónico de Cesión (AEC) de una primera cesión, con el que el tenedor de una factura
  * cede su crédito a un financista según la Ley 19.983, como lo definen el Formato Archivo Electrónico de Cesión 1.1 y
  * `AEC_v10.xsd`: el documento firmado embebido tal cual, así su propia firma sigue verificando, con su área firmada
  * (`DocumentoDTECedido`); la cesión (`DocumentoCesion`, `SeqCesion` 1) firmada una vez por cada persona autorizada,
@@ -376,12 +404,15 @@ const signedFile = (
  * la declaración jurada que el formato redacta para ese caso (`DeclaracionJurada`), con el cedente, el cesionario y el
  * deudor. Los textos se sanitizan como los de un documento y se atienen al más estricto de los largos del formato y del
  * esquema. Pura: sin red; el reloj es `now`. Texto XML ISO-8859-1 con su declaración, listo para
- * `unstable_uploadAssignment`.
+ * `unstable_uploadAssignment`. El archivo se verifica antes de entregarlo, cada firma donde está, y uno que no verifica
+ * es un error y no un archivo. Tres límites: el `DTE` debe declarar él mismo el namespace del SII, así que uno cortado
+ * de un sobre que le dejó la declaración al sobre se rechaza; los tres nombres deben dejar la declaración jurada dentro
+ * de sus 512 caracteres; y el certificado de un firmante que no nombra ningún RUT no se compara con el del firmante.
  * @param input EN: the signed document, the parties, the amount, the last due date and the certificates. ES: el documento firmado, las partes, el monto, el último vencimiento y los certificados.
  * @returns EN: the signed `AEC`. ES: el `AEC` firmado.
- * @throws {DteError} EN: `XML_PARSE_FAILED` for a document that is not one signed `DTE` declaring the SII namespace; `SIGNATURE_INVALID` when its signature does not verify; `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `INVALID_AMOUNT` (`MntTotal`, `amount`), `MISSING_FIELD` and `FIELD_TOO_LONG` with the field in `details.field`; `INVALID_OPTION` for an assignor that is not the creditor (`assignor.rut`), no signers or more than three, a signer's certificate of another RUT (`assignor.signers`) and a text shorter than the schema allows. ES: los mismos códigos.
+ * @throws {DteError} EN: `XML_PARSE_FAILED` for a document that is not one signed `DTE` declaring the SII namespace; `SIGNATURE_INVALID` when its signature does not verify; `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `INVALID_AMOUNT` (`MntTotal`, `amount`), `MISSING_FIELD` and `FIELD_TOO_LONG` with the field in `details.field`; `INVALID_OPTION` for an assignor that is not the creditor (`assignor.rut`), no signers or more than three, a signer's certificate of another RUT (`assignor.signers`) and a text shorter than the schema allows; and for the file built, `SIGNATURE_INVALID` with the zone in `details.field` when one of its signatures does not verify, or `XML_PARSE_FAILED` when it cannot be read back. ES: los mismos códigos.
  */
-export const createAssignment = (input: AssignmentInput): string => {
+export const unstable_createAssignment = (input: AssignmentInput): string => {
   const dte = String(input.document).replace(PROLOG, '').trim()
   const document = readDocument(dte)
   if (toSiiRut(input.assignor.rut, 'assignor.rut') !== document.creditorRut)
@@ -395,39 +426,35 @@ export const createAssignment = (input: AssignmentInput): string => {
     certificate: input.certificate,
   }).xml
   const assignment = signedAssignment(input, document, 1, stamp)
-  return signedFile(input, assignment, `${assignedDocument}${assignment.xml}`, id.file, stamp)
-}
-
-const failedZone = (verification: ReturnType<typeof verifyAssignment>): string | null => {
-  const checks: readonly (readonly [string, SignatureVerification])[] = [
-    ['DTE', verification.document],
-    ['DocumentoDTECedido', verification.assignedDocument],
-    ...verification.assignments.flatMap((signatures) =>
-      signatures.map((signature) => ['DocumentoCesion', signature] as const),
-    ),
-    ['DocumentoAEC', verification.file],
-  ]
-  return checks.find(([, check]) => !check.valid)?.[0] ?? null
+  return verified(signedFile(input, assignment, `${assignedDocument}${assignment.xml}`, id.file, stamp))
 }
 
 /**
- * EN: Builds and signs the file of a later assignment: the previous file's assigned document and assignments carried
+ * EN: **Unstable**: no file it built has been registered at the SII yet, so its shape may change in any release, a
+ * patch included.
+ * Builds and signs the file of a later assignment: the previous file's assigned document and assignments carried
  * over as they were signed, and one more assignment, with the next `SeqCesion`, by the previous assignment's assignee.
  * Every signature of the previous file must verify first. The new assignment and the whole file are signed as in
- * `createAssignment`, and the same rules hold, with the sworn statement naming the new parties; the zone of the
- * assigned document is the previous file's and is not signed again. A file holds up to 40 assignments.
- * ES: Arma y firma el archivo de una cesión posterior: el documento cedido y las cesiones del archivo anterior tal como
+ * `unstable_createAssignment`, and the same rules hold, with the sworn statement naming the new parties; the zone of the
+ * assigned document is the previous file's and is not signed again. A file holds up to 40 assignments. That the
+ * previous file verifies says nobody changed it after it was signed, not who signed it: beyond their numbering and the
+ * last assignee, the earlier assignments are not compared with the document nor with each other.
+ * ES: **Inestable**: ningún archivo que haya armado se ha registrado aún en el SII, así que su forma puede cambiar en
+ * cualquier versión, incluso un patch.
+ * Arma y firma el archivo de una cesión posterior: el documento cedido y las cesiones del archivo anterior tal como
  * se firmaron, y una cesión más, con el `SeqCesion` siguiente, hecha por el cesionario de la cesión anterior. Antes
  * debe verificar cada firma del archivo anterior. La nueva cesión y todo el archivo se firman como en
- * `createAssignment`, y rigen las mismas reglas, con la declaración jurada nombrando a las nuevas partes; el área del
- * documento cedido es la del archivo anterior y no se vuelve a firmar. Un archivo lleva hasta 40 cesiones.
+ * `unstable_createAssignment`, y rigen las mismas reglas, con la declaración jurada nombrando a las nuevas partes; el área del
+ * documento cedido es la del archivo anterior y no se vuelve a firmar. Un archivo lleva hasta 40 cesiones. Que el
+ * archivo anterior verifique dice que nadie lo cambió después de firmado, no quién lo firmó: fuera de su numeración y
+ * del último cesionario, las cesiones anteriores no se comparan con el documento ni entre sí.
  * @param input EN: the previous file, the parties, the amount, the last due date and the certificates. ES: el archivo anterior, las partes, el monto, el último vencimiento y los certificados.
  * @returns EN: the signed `AEC`. ES: el `AEC` firmado.
- * @throws {DteError} EN: `XML_PARSE_FAILED` for a previous file that is not an `AEC` (see `readAssignmentFile`), `SIGNATURE_NOT_FOUND` for a zone of it without a signature; `SIGNATURE_INVALID` with the zone in `details.field` when one of its signatures does not verify; `INVALID_OPTION` (`SeqCesion` when the previous file is out of sequence or already holds 40, `assignor.rut` when the assignor is not the previous assignee) and the codes of `createAssignment`. ES: los mismos códigos.
+ * @throws {DteError} EN: `XML_PARSE_FAILED` for a previous file that is not an `AEC` (see `readAssignmentFile`), `SIGNATURE_NOT_FOUND` for a zone of it without a signature; `SIGNATURE_INVALID` with the zone in `details.field` when one of its signatures does not verify; `INVALID_OPTION` (`SeqCesion` when the previous file is out of sequence or already holds 40, `assignor.rut` when the assignor is not the previous assignee) and the codes of `unstable_createAssignment`. ES: los mismos códigos.
  */
-export const createReassignment = (input: ReassignmentInput): string => {
+export const unstable_createReassignment = (input: ReassignmentInput): string => {
   const previous = String(input.previous)
-  const failed = failedZone(verifyAssignment(previous))
+  const failed = failedZone(unstable_verifyAssignment(previous))
   if (failed !== null) throw new DteError('SIGNATURE_INVALID', { field: failed })
   const file = readAssignmentFile(previous)
   const document = readDocument(file.document.text)
@@ -442,5 +469,5 @@ export const createReassignment = (input: ReassignmentInput): string => {
   const stamp = chileTimestamp(input.now)
   const assignment = signedAssignment(input, document, sequence, stamp)
   const carried = [file.assignedDocument, ...file.assignments].map((zone) => zone.text).join('')
-  return signedFile(input, assignment, `${carried}${assignment.xml}`, ids(document, sequence).file, stamp)
+  return verified(signedFile(input, assignment, `${carried}${assignment.xml}`, ids(document, sequence).file, stamp))
 }

@@ -361,6 +361,21 @@ describe('roundHalfAwayFromZero', () => {
   ])('%p to %p decimals is %p', (value, decimals, expected) => {
     expect(roundHalfAwayFromZero(value, decimals)).toBe(expected)
   })
+
+  const refused = (value: number) =>
+    expect.objectContaining({ code: 'INVALID_AMOUNT', details: { value: String(value) } })
+
+  test.each([NaN, Infinity, -Infinity, 1e21, -1e21])('%p has no digits to round, and is refused', (value) => {
+    expect(() => roundHalfAwayFromZero(value, 4)).toThrow(refused(value))
+  })
+
+  test('the largest number written in digits still rounds, and what is built on the rounding refuses the same', () => {
+    expect(roundHalfAwayFromZero(999999999999999900000, 0)).toBe(999999999999999900000)
+    expect(() => convertToPesos(NaN, 950)).toThrow(refused(NaN))
+    expect(() => convertToPesos(100, Infinity)).toThrow(refused(Infinity))
+    expect(() => calculateExportLineAmount({ quantity: Infinity, unitPrice: 1 })).toThrow(refused(Infinity))
+    expect(() => calculateExportTotals([{ amount: 1e21 }] as never)).toThrow(refused(1e21))
+  })
 })
 
 describe('calculateExportLineAmount', () => {
@@ -400,6 +415,32 @@ describe('calculateExportLineAmount', () => {
     [{ unitPrice: 0.1 + 0.2 }, { base: 0.3, discountAmount: 0, surchargeAmount: 0, amount: 0.3 }],
   ])('%p → %p', (input, expected) => {
     expect(calculateExportLineAmount(input)).toEqual(expected)
+  })
+})
+
+describe('an amount with more digits than a number holds', () => {
+  const unheld = (value: string) => expect.objectContaining({ code: 'INVALID_AMOUNT', details: { value } })
+
+  test('is refused with its digits where it would be handed back as another amount', () => {
+    expect(() => calculateExportLineAmount({ quantity: 1_000_001, unitPrice: 3_000_000.0001 })).toThrow(
+      unheld('3000003000100.0001'),
+    )
+    expect(() => calculateExportTotals([{ amount: 3_000_003_000_100 }, { amount: 0.0001 }] as never)).toThrow(
+      unheld('3000003000100.0001'),
+    )
+    expect(() => calculateExportTotals([{ amount: -3_000_003_000_100 }, { amount: -0.0001 }] as never)).toThrow(
+      unheld('-3000003000100.0001'),
+    )
+  })
+
+  test('is taken when its number writes it back, sixteen digits and all', () => {
+    expect(calculateExportLineAmount({ quantity: 1, unitPrice: 123_456_789_012.3456 }).amount).toBe(
+      123_456_789_012.3456,
+    )
+    expect(calculateExportTotals([{ amount: 150_000_000_000 }, { amount: 0.5 }] as never)).toEqual({
+      exemptAmount: 150_000_000_000.5,
+      totalAmount: 150_000_000_000.5,
+    })
   })
 })
 

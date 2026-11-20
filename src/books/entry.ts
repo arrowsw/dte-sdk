@@ -52,10 +52,15 @@ const UNSIGNED_AMOUNTS = [
 // the codes by product with their whole-withholding pairs. On a purchase book the withheld VAT travels under them in
 // `OtrosImp` and the total leaves it out (section 3.4, fields 21 to 25). Code 35 is the gasoline tax, despite the
 // "30 to 41" range the format mentions.
-const RETENTION_TAX_CODES: readonly number[] = [
+export const RETENTION_TAX_CODES: readonly number[] = [
   15, 30, 31, 32, 33, 34, 36, 37, 38, 39, 41, 47, 48, 49, 301, 321, 331, 341, 361, 371, 481,
 ]
 const INITIAL_INVOICE_RETENTION = 60
+
+// `IVARetTotal` and `IVARetParcial` are fields of the sales detail alone (the format, sections 2.4 and 3.4). A purchase
+// line carries the withheld VAT in `otherTaxes`, under its code, and its total takes it off from there: one of these
+// two on it would be written and leave the total as if nothing had been withheld.
+const SALE_WITHHOLDINGS = ['totalVatWithheld', 'partialVatWithheld'] as const
 
 const sum = (values: readonly number[]): number => values.reduce((total, value) => total + value, 0)
 
@@ -63,11 +68,14 @@ const sum = (values: readonly number[]): number => values.reduce((total, value) 
  * EN: The SII formula for a line total, per book side (sections 2.4 and 3.4 of the format). The withheld VAT of a
  * purchase invoice comes off the total on both sides, and each side carries it in its own fields: a sale line in
  * `totalVatWithheld` and `partialVatWithheld` (`IVARetTotal`, `IVARetParcial`, fields of the sales detail alone), and a
- * purchase line in `otherTaxes` under a withholding code, 15 when the whole VAT was withheld.
+ * purchase line in `otherTaxes` under a withholding code, 15 when the whole VAT was withheld. The sales detail takes no
+ * withholding code in `otherTaxes`, so one left there on a sale line is added like any other tax.
  * ES: La fórmula del SII para el total de una línea, según el lado del libro (secciones 2.4 y 3.4 del formato). El IVA
  * retenido de una factura de compra se resta del total en ambos lados, y cada lado lo lleva en sus propios campos: una
  * línea de venta en `totalVatWithheld` y `partialVatWithheld` (`IVARetTotal`, `IVARetParcial`, campos solo del detalle
- * de ventas), y una línea de compra en `otherTaxes` bajo un código de retención, 15 cuando se retuvo todo el IVA.
+ * de ventas), y una línea de compra en `otherTaxes` bajo un código de retención, 15 cuando se retuvo todo el IVA. El
+ * detalle de ventas no admite códigos de retención en `otherTaxes`, así que uno dejado ahí en una línea de venta se
+ * suma como cualquier otro impuesto.
  */
 export const expectedBookEntryTotal = (entry: BookEntryInput, operation: BookOperation): number => {
   const subtracts = (code: number): boolean =>
@@ -168,7 +176,7 @@ export type NormalizedBookEntry = {
  * the total apply to the rest.
  * ES: Valida y normaliza una línea: las anuladas conservan solo tipo y folio, y al resto se le aplican los valores por
  * defecto de cada lado del libro y el total.
- * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_AMOUNT`, `INVALID_DATE`, `INVALID_RUT`, `INVALID_OPTION`, `FIELD_TOO_LONG`. ES: los mismos códigos.
+ * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_AMOUNT`, `INVALID_DATE`, `INVALID_RUT`, `INVALID_OPTION` (among others, a purchase line that brings `totalVatWithheld` or `partialVatWithheld`, with it in `details.field`), `FIELD_TOO_LONG`. ES: los mismos códigos; `INVALID_OPTION`, entre otros casos, ante una línea de compra que trae `totalVatWithheld` o `partialVatWithheld`, con él en `details.field`.
  */
 export const normalizeBookEntry = (
   input: BookEntryInput,
@@ -176,6 +184,9 @@ export const normalizeBookEntry = (
 ): NormalizedBookEntry => {
   const { operation, submission, index } = options
   validate(input, index)
+  if (operation === 'purchase')
+    for (const field of SALE_WITHHOLDINGS)
+      if (input[field] !== undefined) throw new DteError('INVALID_OPTION', { field, index })
   const adjustment = input.adjustment ?? (submission === 'adjustment' ? 'add' : undefined)
   if (input.voided)
     return {

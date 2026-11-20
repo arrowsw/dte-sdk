@@ -26,7 +26,7 @@ import type { HttpResponse } from './transport'
  * ES: Entrada de `unstable_uploadAssignment`.
  */
 export type AssignmentUploadInput = {
-  /** EN: The signed assignment file, opening with an XML declaration naming ISO-8859-1, as `createAssignment` writes it. ES: `AEC` — El archivo de cesión firmado, que abre con una declaración XML que nombra ISO-8859-1, como lo escribe `createAssignment`. */
+  /** EN: The signed assignment file, opening with an XML declaration naming ISO-8859-1, as `unstable_createAssignment` writes it. ES: `AEC` — El archivo de cesión firmado, que abre con una declaración XML que nombra ISO-8859-1, como lo escribe `unstable_createAssignment`. */
   readonly xml: string
   /** EN: The address where the SII sends the result of the registration. ES: `emailNotif` — La dirección a la que el SII envía el resultado de la anotación. */
   readonly notificationEmail: string

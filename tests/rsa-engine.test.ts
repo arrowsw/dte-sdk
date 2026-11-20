@@ -25,7 +25,9 @@ const withRuntime = async (builtin: Builtin | undefined, run: (rsa: Rsa) => void
 }
 
 const real = process.getBuiltinModule('node:crypto')
-const sign = (bytes: Uint8Array, key: string) => real.sign('RSA-SHA1', bytes, key)
+type Key = ReturnType<typeof real.createPrivateKey>
+const createPrivateKey = (pem: string): Key => real.createPrivateKey(pem)
+const sign = (bytes: Uint8Array, key: Key) => real.sign('RSA-SHA1', bytes, key)
 
 describe('the engine that signs', () => {
   test('nothing is settled before the first signature', async () => {
@@ -36,7 +38,7 @@ describe('the engine that signs', () => {
     const calls: string[] = []
     const builtin: Builtin = (id) => {
       calls.push(id)
-      return { sign: (_algorithm: string, bytes: Uint8Array, key: string) => sign(bytes, key) }
+      return { createPrivateKey, sign: (_algorithm: string, bytes: Uint8Array, key: Key) => sign(bytes, key) }
     }
     await withRuntime(builtin, (rsa) => {
       expect(rsa.rsaSha1SignBase64(keyPem, 'first ñ')).toBe(expected(keyPem, 'first ñ'))
@@ -69,13 +71,22 @@ describe('the engine that signs', () => {
         throw new Error('no builtin modules here')
       },
     ],
-    ['signs something else', () => ({ sign: () => ({ toString: () => 'AAAA' }) })],
+    ['has one that signs and reads no key', () => ({ sign: () => ({ toString: () => 'AAAA' }) })],
+    ['signs something else', () => ({ createPrivateKey, sign: () => ({ toString: () => 'AAAA' }) })],
     [
       'refuses the signature',
       () => ({
+        createPrivateKey,
         sign: () => {
           throw new Error('digital envelope routines::invalid digest')
         },
+      }),
+    ],
+    [
+      'reads the key as one that is not RSA',
+      () => ({
+        createPrivateKey: () => ({ asymmetricKeyType: 'ec' }),
+        sign: (_algorithm: string, bytes: Uint8Array) => sign(bytes, createPrivateKey(keyPem)),
       }),
     ],
   ])('a runtime that %s leaves the JavaScript engine in charge', async (_name, builtin) => {
@@ -89,7 +100,8 @@ describe('the engine that signs', () => {
   test('a key the trusted runtime refuses is still signed, and the runtime keeps signing the others', async () => {
     let refuse = false
     const builtin: Builtin = () => ({
-      sign: (_algorithm: string, bytes: Uint8Array, key: string) => {
+      createPrivateKey,
+      sign: (_algorithm: string, bytes: Uint8Array, key: Key) => {
         if (refuse) throw new Error('key too small')
         return sign(bytes, key)
       },
@@ -101,6 +113,30 @@ describe('the engine that signs', () => {
       expect(rsa.rsaSigningEngine()).toBe('native')
       refuse = false
       expect(rsa.rsaSha1SignBase64(keyPem, 'after')).toBe(expected(keyPem, 'after'))
+    })
+  })
+
+  test('a key that is not RSA is never handed to the runtime, which would sign with it as what it is', async () => {
+    const curve = real
+      .generateKeyPairSync('ec', { namedCurve: 'P-256' })
+      .privateKey.export({ type: 'pkcs8', format: 'pem' }) as string
+    // The runtime, asked for RSA-SHA1 with this key, answers an ECDSA signature and no error.
+    expect(real.sign('RSA-SHA1', new Uint8Array([1]), curve).length).toBeLessThan(80)
+    const signedWith: (string | undefined)[] = []
+    const builtin: Builtin = () => ({
+      createPrivateKey,
+      sign: (_algorithm: string, bytes: Uint8Array, key: Key) => {
+        signedWith.push(key.asymmetricKeyType)
+        return sign(bytes, key)
+      },
+    })
+    await withRuntime(builtin, (rsa) => {
+      rsa.rsaSha1SignBase64(keyPem, 'settle')
+      expect(rsa.rsaSigningEngine()).toBe('native')
+      expect(() => rsa.rsaSha1SignBase64(curve, 'abc')).toThrow(/RSAPrivateKey/)
+      expect(signedWith).toEqual(['rsa'])
+      expect(rsa.rsaSha1SignBase64(keyPem, 'after')).toBe(expected(keyPem, 'after'))
+      expect(rsa.rsaSigningEngine()).toBe('native')
     })
   })
 

@@ -222,8 +222,8 @@ export {
   ASSIGNABLE_DOCUMENT_TYPES,
   MAX_ASSIGNMENTS,
   isAssignableDocumentType,
-  createAssignment,
-  createReassignment,
+  unstable_createAssignment,
+  unstable_createReassignment,
 } from './assignment/build'
 export type {
   AssignableDocumentType,
@@ -236,7 +236,7 @@ export type {
   AssignmentInput,
   ReassignmentInput,
 } from './assignment/build'
-export { verifyAssignment } from './assignment/read'
+export { unstable_verifyAssignment } from './assignment/read'
 export type { AssignmentVerification } from './assignment/read'
 export type {
   VerifyReceivedDocumentsOptions,

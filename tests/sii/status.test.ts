@@ -1008,6 +1008,9 @@ describe('queryDocumentStatus', () => {
     await expectCode(queryDocumentStatus(sii, { ...document, type: 99 as unknown as 33 }), 'INVALID_DOCUMENT_TYPE', {
       field: 'type',
     })
+    // The query carries the total as a whole number, and an export document's has decimals: it is not asked for.
+    for (const type of [110, 111, 112] as const)
+      await expectCode(queryDocumentStatus(sii, { ...document, type }), 'INVALID_DOCUMENT_TYPE', { field: 'type' })
     await expectCode(
       queryDocumentStatus(sii, { ...document, type: '39/../x' as unknown as 39 }),
       'INVALID_DOCUMENT_TYPE',

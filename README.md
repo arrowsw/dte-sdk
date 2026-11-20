@@ -203,7 +203,8 @@ JavaScript engine on a 2048-bit key, which is what an envelope of hundreds of re
 at its word: the first signature of the process is worked out both ways and compared, the runtime signs the ones that
 follow only when they agree, and a key it refuses is signed by the JavaScript engine. In a browser the JavaScript
 engine signs, as before. `rsaSigningEngine()` says which one is in charge (`native`, `portable`, or null before the
-first signature).
+first signature). The runtime signs with an RSA key alone: any other key is left to the JavaScript engine, which
+throws on it.
 
 ## Quick start
 
@@ -497,7 +498,11 @@ exportInvoice.header.otherCurrency
   exemption indicator or with 1 and the global adjustments, and the total, the same amount, or zero on an export
   without payment (`exportPaymentTerms: '21'`, Formato DTE 2.5, field 124) (`calculateExportTotals`, which
   `calculateTotals` calls for these types). Each is worked out exactly, over the decimal digits as written, and rounded
-  half away from zero. With `exchangeRate`, `OtraMoneda` carries the exempt amount and the total in Chilean pesos, as
+  half away from zero. An amount goes up to the schema's 99 999 999 999 999.9999, and one worked out with more digits
+  than a number holds, which would be written as another amount, is refused with `INVALID_AMOUNT` and the amount in
+  `details.value`. A line discount or surcharge in percent whose whole amount is zero is refused with
+  `INVALID_AMOUNT`, since the format writes a percent with its amount (fields 30 and 33 of the detail): give the line
+  its amount, or use a global adjustment. With `exchangeRate`, `OtraMoneda` carries the exempt amount and the total in Chilean pesos, as
   field 129 asks: each the amount by the rate, rounded half away from zero to a whole peso (`convertToPesos`). The
   stamp carries the total as the document writes it, decimals and all.
 - **What it refuses.** What `Exportaciones` does not declare: `pricesIncludeVat`, `withholdVat`, `commissions`, the
@@ -580,8 +585,10 @@ It is an option, and nothing else in dte-sdk calls it. The schemas come inside t
 versions in force, for every document dte-sdk sends in an `EnvioDTE` or an `EnvioBOLETA`, the three books and the
 answers to a received envelope and the assignment file (`DTE`, `EnvioDTE`, `EnvioBOLETA`, `LibroCV`, `LibroGuia`,
 `ConsumoFolio`, `RespuestaEnvioDTE`, `EnvioRecibos` and `AEC`; `SII_SCHEMAS` lists them). The schema is the one of the document element unless
-`schema` names another, and `schemaOf(xml)` says which that is. The document can be its text or the bytes of its file,
-read in the charset its declaration names. The validator, `xmllint-wasm`, is an optional peer loaded on first use:
+`schema` names another, and `schemaOf(xml)` says which that is. A receipt (39, 41) on its own has none, since only
+`EnvioBOLETA_v11.xsd` declares its `DTE`: validate it inside its envelope. The document can be its text or the bytes
+of its file, read in the charset its declaration names, ISO-8859-1 or UTF-8 under any of their usual names (`latin1`,
+`UTF8`, `US-ASCII`); bytes that name another are refused with `INVALID_OPTION`. The validator, `xmllint-wasm`, is an optional peer loaded on first use:
 without it the call throws `DEPENDENCY_UNAVAILABLE`. The messages are the validator's, in English, and name each
 element with its namespace.
 
@@ -659,13 +666,13 @@ against the SII by dte-sdk yet, so its shape may change in any version. Sending 
 
 The holder of an invoice assigns its credit to a financier, under Ley 19.983, with an electronic assignment file
 (Archivo Electrónico de Cesión, AEC) registered in the SII's public registry of credit transfers (RPETC).
-`createAssignment` builds and signs that file from the signed document, as it was sent, with no network:
+`unstable_createAssignment` builds and signs that file from the signed document, as it was sent, with no network:
 
 ```typescript
-import { createAssignment, verifyAssignment } from 'dte-sdk'
+import { unstable_createAssignment, unstable_verifyAssignment } from 'dte-sdk'
 import { validateAgainstSchema } from 'dte-sdk/schemas'
 
-const aec = createAssignment({
+const aec = unstable_createAssignment({
   document: signed.xml, // the DTE as it was sent: 33, 34, 46 or 43
   assignor: {
     rut: '76543210-3',
@@ -685,7 +692,7 @@ const aec = createAssignment({
   certificate, // signs the assigned document's zone and the whole file
 })
 await validateAgainstSchema(aec) // [] — by AEC_v10.xsd
-verifyAssignment(aec).valid // true: the document's own signature and the file's four zones
+unstable_verifyAssignment(aec).valid // true: the document's own signature and the file's four zones
 ```
 
 The file follows Formato Archivo Electrónico de Cesión 1.1 and `AEC_v10.xsd`: the document embedded byte for byte,
@@ -700,13 +707,20 @@ names another RUT, an amount that is not a whole number from 1 to the document's
 of the goods, so it carries the sworn statement the format words for that case (`DeclaracionJurada`), naming the
 assignor, the assignee and the document's debtor. `otherTerms`, `debtorEmail` and `contact` are optional.
 
-`createReassignment({ previous, ...terms })` builds a later assignment on top of an earlier file: every signature of
-that file must verify, its zones are carried over as they were signed, and the new assignment, made by the previous
-assignee, gets the next `SeqCesion`, up to 40 (`MAX_ASSIGNMENTS`). `verifyAssignment(xml)` checks every signature of a
-file where it stands in it, and says which one fails.
+`unstable_createReassignment({ previous, ...terms })` builds a later assignment on top of an earlier file: every
+signature of that file must verify, its zones are carried over as they were signed, and the new assignment, made by
+the previous assignee, gets the next `SeqCesion`, up to 40 (`MAX_ASSIGNMENTS`). `unstable_verifyAssignment(xml)` checks
+every signature of a file where it stands in it, and says which one fails. Both builders run it on the file they built and hand back none
+that does not verify. That a previous file verifies says nobody changed it after it was signed, not who signed it: its
+earlier assignments are not compared with the document nor with each other, beyond their numbering and the last
+assignee. A `DTE` cut from an envelope must declare the SII's namespace itself, as the ones dte-sdk writes do.
 
-Registering the file is a call to the SII, and it is unstable: neither function has been run against the SII yet, and
-the format does not describe the registry's services, so their shape may change in any release.
+The two builders and the verifier are unstable: no file they built has been registered at the SII yet, and what the
+registry takes is the only judge of the choices in them (the wording of the sworn statement, the IDs of the zones,
+what the file declares above them), so they may change in any release.
+
+Registering the file is a call to the SII, and it is unstable as well: neither function has been run against the SII
+yet, and the format does not describe the registry's services, so their shape may change in any release.
 
 ```typescript
 import { unstable_queryAssignmentUploadStatus, unstable_uploadAssignment } from 'dte-sdk'
@@ -920,8 +934,9 @@ The VAT a purchase invoice (45, 46) withholds comes off the line total on both s
 carries it in its own fields (the format of the book, sections 2.4 and 3.4). The sales detail of who received the
 invoice has `totalVatWithheld` and `partialVatWithheld` (`IVARetTotal`, `IVARetParcial`). The purchase detail of who
 issued it has neither: there the withheld VAT goes in `otherTaxes` under a withholding code, 15 with the rate of the
-tax when the whole VAT was withheld, and that amount is what the formula takes off. `bookEntryFromDocument` follows
-the `operation` it is given.
+tax when the whole VAT was withheld, and that amount is what the formula takes off. A purchase line that brings
+`totalVatWithheld` or `partialVatWithheld` is refused with `INVALID_OPTION`. `bookEntryFromDocument` follows the
+`operation` it is given.
 
 Their use today is narrow. The RCV replaced the purchase and sales book in production from period
 2017-08, and the guide book is sent only when the SII asks for it; both are still part of the
@@ -963,14 +978,18 @@ const portal = unstable_createPasswordPortalClient({
 The password is a function on purpose. The client holds no password, so logging it or writing it to disk writes none;
 the capture port writes the login form as `clave=[redacted]`; and no error carries it. The SII locks a password after a
 few wrong attempts, so a password the SII refused is never sent again by the same client: the next login throws
-`SII_PORTAL_LOGIN_FAILED` with `refusedBefore: true` and makes no request, and trying another password takes a new
-client.
+`SII_PORTAL_LOGIN_FAILED` with `refusedBefore: true` before it asks the SII for anything, and trying another password
+takes a new client. The request that posts a password is never retried, whatever `retry` says: a timeout after the SII
+read a wrong password would otherwise count twice. It is posted a second time in one case alone: the SII took it, said
+the user has too many sessions open, and the client closed the earlier ones (`closePreviousSessions`).
 
 A session in the cache is used without the password, so who can find it can use it. The key of a password session is
 therefore random and of its client alone: in a `sessionCache` shared with other people, a client that merely names the
 same RUT finds nothing and has to sign in. To keep a session across restarts, pass `sessionKey`, a secret of that
 person, never a value another caller could supply, such as the RUT. The key written in the cache is a digest, so it
-names nobody. It is unstable: dte-sdk
+names nobody. That keeps a session from whoever asks the cache for it by key; whoever can read what the cache stores
+reads the session itself, a certificate's included, so a cache is shared only with whom a session may be. It is
+unstable: dte-sdk
 has not run this login against the SII yet, so its shape may change in any version. What needs a signature, such as
 the certification runner, still takes a certificate where it asks for one.
 
@@ -1647,7 +1666,8 @@ surcharge, the bases and the price to the final consumer of a withholding agent,
 and a global discount or surcharge with its description. Every amount is the one the document carries.
 `parsePrintableDocuments` reads them into the optional fields of `PrintableDocument` named after them (`payments` is a
 list of `PrintablePayment`, the receiver a `PrintableReceiver` and `otherCurrency` a `PrintableOtherCurrency`). The
-customs area (`Aduana`) and the fields of export documents (110 to 112) are not printed yet.
+An export document (110 to 112) is not printed yet: its amounts are in a foreign currency, with decimals and a
+customs area, and `renderPrintedSample` refuses it with `INVALID_DOCUMENT_TYPE` instead of printing them as pesos.
 A document with no `TED` prints `SIN TIMBRE ELECTRÓNICO` in a box where the stamp goes, with the legend `Documento sin
 validez tributaria`, so its print never passes for that of a stamped one.
 `parsePrintableDocuments` takes the XML as text or as the bytes of its file, read as UTF-8 when they are UTF-8 and as

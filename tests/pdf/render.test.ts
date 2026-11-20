@@ -384,6 +384,15 @@ describe('errors', () => {
     expect(error.details).toEqual({ field: 'TipoDTE' })
   })
 
+  test.each([110, 111, 112])('an export document (%p) is refused before a library loads', async (type) => {
+    // Its amounts are in a foreign currency, with decimals: the sample would print them as pesos.
+    const load = jest.fn()
+    const error = await failure(renderPrintedSample({ ...invoiceDoc, type }, {}, load))
+    expect(error.code).toBe('INVALID_DOCUMENT_TYPE')
+    expect(error.details).toEqual({ field: 'TipoDTE', type })
+    expect(load).not.toHaveBeenCalled()
+  })
+
   test('a character outside WinAnsi is PDF_RENDER_FAILED with the type and folio', async () => {
     const error = await failure(render({ ...invoiceDoc, items: [{ ...invoiceDoc.items[0], name: '你好' }] }))
     expect(error.code).toBe('PDF_RENDER_FAILED')

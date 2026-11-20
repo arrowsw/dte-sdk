@@ -84,6 +84,17 @@ const UNREAD_NODES: readonly number[] = [CDATA_NODE, PROCESSING_INSTRUCTION_NODE
 const nodesOf = (node: Node): readonly Node[] => [node, ...Array.from(node.childNodes ?? []).flatMap(nodesOf)]
 
 /**
+ * EN: The text of every comment, CDATA section and processing instruction of a node and of what it holds, in document
+ * order: the places where a text can hold tags that are no tags.
+ * ES: El texto de cada comentario, sección CDATA e instrucción de procesamiento de un nodo y de lo que contiene, en el
+ * orden del documento: los lugares donde un texto puede traer etiquetas que no son etiquetas.
+ */
+export const unreadTexts = (node: Node): readonly string[] =>
+  nodesOf(node)
+    .filter((inner) => UNREAD_NODES.includes(inner.nodeType))
+    .map((inner) => (inner as CharacterData).data)
+
+/**
  * EN: True when an element and everything in it is plain: no prefixed element, no namespace declaration, and no
  * comment, CDATA section or processing instruction. Its element names then mean the same to every reader, whether it
  * matches names by prefix or by namespace, and its text is all in text nodes.

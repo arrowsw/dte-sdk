@@ -12,6 +12,10 @@ describe('sanitizeText', () => {
     ['comillas “tipográficas” y ‘simples’', 'comillas tipográficas y simples'],
     ['  bordes  ', 'bordes'],
     ['ñandú Ü ç', 'ñandú Ü ç'],
+    // The control characters XML 1.0 forbids go; the tab, the line feed and the carriage return are text.
+    ['nulo\u0000 y campana\u0007 y escape\u001b', 'nulo y campana y escape'],
+    ['\u0001bordes\u001f', 'bordes'],
+    ['tab\ty\nlínea\r\nnueva', 'tab\ty\nlínea\r\nnueva'],
   ])('%p → %p', (input, expected) => {
     expect(sanitizeText(input)).toBe(expected)
   })

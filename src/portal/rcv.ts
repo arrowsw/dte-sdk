@@ -13,6 +13,7 @@ import {
 } from '../catalogs/portal'
 import { DteError } from '../errors'
 import { splitSiiRut, toSiiRut } from '../model/rut'
+import { redactText } from '../sii/capture'
 import type { CallOverrides } from '../sii/client'
 import { isPeriod } from '../time/chile'
 import { resolvePortalCompany, siiCodeOf, type PortalClient } from './client'
@@ -272,7 +273,7 @@ export const unstable_downloadRegisterFile = (
         tokenRecaptcha: REGISTER_FILE_TOKEN,
       })
       const file = registerFileOf(answer)
-      if (file === null) throw unexpectedPage(context, method, '')
+      if (file === null) throw unexpectedPage(context, method, redactText(JSON.stringify(answer)))
       if ('csv' in file) return file
       throw rejected(context, 'registerFileRefused', { code: file.code, portalMessage: file.message })
     })

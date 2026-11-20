@@ -1,4 +1,4 @@
-import { createAssignment } from '../../src/assignment/build'
+import { unstable_createAssignment } from '../../src/assignment/build'
 import { DteError } from '../../src/errors'
 import { createMemoryUploadArchive } from '../../src/sii/archive'
 import { unstable_queryAssignmentUploadStatus, unstable_uploadAssignment } from '../../src/sii/assignment'
@@ -12,7 +12,7 @@ import { cachedSii, expectCode, SOAP_TOKEN } from '../support/sii-client'
 const UPLOAD = 'https://maullin.sii.cl/cgi_rtc/RTC/RTCAnotEnvio.cgi'
 const STATUS = 'https://maullin.sii.cl/DTEWS/services/wsRPETCConsulta'
 const EMAIL = 'cesiones@andina.test'
-const aec = createAssignment(firstAssignment())
+const aec = unstable_createAssignment(firstAssignment())
 const input = { xml: aec, notificationEmail: EMAIL }
 
 // A reception answer of the registry's upload, as the tests write it: the elements the upload reads.

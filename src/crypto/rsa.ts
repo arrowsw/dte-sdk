@@ -70,8 +70,10 @@ export const rsaPublicKeyPartsFromCertificatePem = (certificatePem: string): Rsa
 export type RsaSigningEngine = 'native' | 'portable'
 
 // The part of `node:crypto` the signature uses.
+type NativeKey = { readonly asymmetricKeyType?: string }
 type NativeCrypto = {
-  readonly sign: (algorithm: string, data: Uint8Array, key: string) => { toString(encoding: 'base64'): string }
+  readonly createPrivateKey: (pem: string) => NativeKey
+  readonly sign: (algorithm: string, data: Uint8Array, key: NativeKey) => { toString(encoding: 'base64'): string }
 }
 
 type Runtime = { readonly process?: { readonly getBuiltinModule?: (id: string) => unknown } }
@@ -81,7 +83,7 @@ type Runtime = { readonly process?: { readonly getBuiltinModule?: (id: string) =
 const nativeCrypto = (): NativeCrypto | null => {
   try {
     const builtin = (globalThis as Runtime).process?.getBuiltinModule?.('node:crypto') as NativeCrypto | undefined
-    return typeof builtin?.sign === 'function' ? builtin : null
+    return typeof builtin?.sign === 'function' && typeof builtin.createPrivateKey === 'function' ? builtin : null
   } catch {
     return null
   }
@@ -92,8 +94,19 @@ const binaryBytes = (binary: string): Uint8Array => Uint8Array.from(binary, (cha
 const portableSign = (privateKeyPem: string, data: string, encoding: TextEncoding): string =>
   forge.util.encode64(forge.pki.privateKeyFromPem(privateKeyPem).sign(sha1Of(data, encoding)))
 
-const nativeSign = (crypto: NativeCrypto, privateKeyPem: string, data: string, encoding: TextEncoding): string =>
-  crypto.sign('RSA-SHA1', binaryBytes(toBinaryString(data, encoding)), privateKeyPem).toString('base64')
+// The runtime takes only the digest from the name it is given and signs with whatever key it is handed, an elliptic
+// curve one included. Only an RSA key writes the signature this module promises, so any other is not signed here: null
+// leaves it to the portable engine, which refuses it.
+const nativeSign = (
+  crypto: NativeCrypto,
+  privateKeyPem: string,
+  data: string,
+  encoding: TextEncoding,
+): string | null => {
+  const key = crypto.createPrivateKey(privateKeyPem)
+  if (key.asymmetricKeyType !== 'rsa') return null
+  return crypto.sign('RSA-SHA1', binaryBytes(toBinaryString(data, encoding)), key).toString('base64')
+}
 
 // Undefined until the first signature settles it; null when the runtime has no RSA of its own or it was set aside.
 let trusted: NativeCrypto | null | undefined
@@ -129,20 +142,24 @@ export const rsaSigningEngine = (): RsaSigningEngine | null =>
  * EN: SHA1withRSA (PKCS#1 v1.5) signature of `data`, base64. Deterministic: same key and bytes, same signature, which
  * is what lets the runtime's own RSA sign when there is one. The first signature of the process is worked out by the
  * runtime and by the JavaScript engine and compared; only when they agree does the runtime sign the ones that follow,
- * and a key it refuses is still signed by the JavaScript engine. The bytes written are the same either way.
+ * and a key it refuses is still signed by the JavaScript engine. The bytes written are the same either way. The runtime
+ * signs with an RSA key alone: any other key is left to the JavaScript engine, which throws on it.
  * ES: Firma SHA1withRSA (PKCS#1 v1.5) de `data`, en base64. Determinista: misma clave y bytes, misma firma, y eso es lo
  * que deja firmar al RSA del propio runtime cuando lo hay. La primera firma del proceso la calculan el runtime y el
  * motor de JavaScript y se comparan; solo si coinciden firma el runtime las que siguen, y una llave que el runtime
- * rechaza la firma igual el motor de JavaScript. Los bytes escritos son los mismos de cualquier modo.
+ * rechaza la firma igual el motor de JavaScript. Los bytes escritos son los mismos de cualquier modo. El runtime firma
+ * solo con una llave RSA: cualquier otra queda para el motor de JavaScript, que lanza un error con ella.
  */
 export const rsaSha1SignBase64 = (privateKeyPem: string, data: string, encoding: TextEncoding = 'utf8'): string => {
   if (trusted === undefined) return settle(privateKeyPem, data, encoding)
-  if (trusted === null) return portableSign(privateKeyPem, data, encoding)
-  try {
-    return nativeSign(trusted, privateKeyPem, data, encoding)
-  } catch {
-    return portableSign(privateKeyPem, data, encoding)
-  }
+  let signature: string | null = null
+  if (trusted !== null)
+    try {
+      signature = nativeSign(trusted, privateKeyPem, data, encoding)
+    } catch {
+      // A key the runtime refuses is still the portable engine's to sign.
+    }
+  return signature ?? portableSign(privateKeyPem, data, encoding)
 }
 
 /**
