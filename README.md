@@ -971,7 +971,9 @@ A session in the cache is used without the password, so who can find it can use 
 therefore random and of its client alone: in a `sessionCache` shared with other people, a client that merely names the
 same RUT finds nothing and has to sign in. To keep a session across restarts, pass `sessionKey`, a secret of that
 person, never a value another caller could supply, such as the RUT. The key written in the cache is a digest, so it
-names nobody. It is unstable: dte-sdk
+names nobody. That keeps a session from whoever asks the cache for it by key; whoever can read what the cache stores
+reads the session itself, a certificate's included, so a cache is shared only with whom a session may be. It is
+unstable: dte-sdk
 has not run this login against the SII yet, so its shape may change in any version. What needs a signature, such as
 the certification runner, still takes a certificate where it asks for one.
 

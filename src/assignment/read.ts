@@ -1,6 +1,6 @@
 import { verifyDocumentSignature } from '../document/sign'
 import { DteError } from '../errors'
-import { verifyEnveloped, type SignatureVerification } from '../signature/xmldsig'
+import { verifyEnveloped, XMLDSIG_NS, type SignatureVerification } from '../signature/xmldsig'
 import { childElements, declarationsOf } from '../xml/elements'
 import { escapeXmlAttribute } from '../xml/escape'
 import { parseXmlDom } from '../xml/parse'
@@ -149,7 +149,12 @@ const assignmentSignatures = (assignment: AssignmentZone): readonly SignatureVer
   if (end === -1) refuse('DocumentoCesion', 'expected a DocumentoCesion with its closing tag')
   const head = assignment.text.slice(0, end + DOCUMENT_END.length)
   const signatures = Array.from(assignment.text.slice(head.length).matchAll(SIGNATURE), (match) => match[0])
-  if (signatures.length !== childElements(assignment.element).length - 1)
+  // The schema admits nothing after `DocumentoCesion` but signatures, and they are its siblings: one found by its text
+  // inside another element is not a signature of this assignment.
+  const [, ...after] = childElements(assignment.element)
+  const isSignature = (element: Element): boolean =>
+    element.tagName === 'Signature' && element.namespaceURI === XMLDSIG_NS
+  if (signatures.length !== after.length || !after.every(isSignature))
     refuse('Signature', 'expected only unprefixed signatures after DocumentoCesion')
   if (signatures.length === 0) throw new DteError('SIGNATURE_NOT_FOUND', { field: 'Cesion' })
   return signatures.map((signature) =>

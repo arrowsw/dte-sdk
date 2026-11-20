@@ -1,9 +1,11 @@
 import { createAssignment } from '../../src/assignment/build'
 import { readAssignmentFile, standalone, verifyAssignment } from '../../src/assignment/read'
 import { DteError } from '../../src/errors'
+import { signEnveloped } from '../../src/signature/xmldsig'
 import { parseXmlDom } from '../../src/xml/parse'
 import { certificateOf, firstAssignment, issuerParty } from '../support/assignment-fixtures'
 import { ISSUER_RUT, RECEIVER_RUT } from '../support/fixtures'
+import { certificate } from '../support/printed-fixtures'
 import { validateAgainstXsd } from '../support/xsd'
 
 jest.setTimeout(60_000)
@@ -150,6 +152,45 @@ describe('verifyAssignment', () => {
     ],
   ])('refuses an assignment %s', (_name, edit, code, field) => {
     expect(caught(() => verifyAssignment(edit(file)))).toMatchObject({ code, details: { field } })
+  })
+})
+
+describe('the signatures of an assignment are its children', () => {
+  // The file signed again over an edited `Cesion`, so its own signature is no reason to refuse it.
+  const fileWith = (edit: (xml: string) => string): string => {
+    const edited = edit(file)
+    const at = edited.lastIndexOf('<Signature xmlns=')
+    return signEnveloped({
+      xml: `${edited.slice(0, at)}</AEC>`,
+      elementTag: 'DocumentoAEC',
+      rootTag: 'AEC',
+      certificate,
+    }).xml
+  }
+
+  test('one inside another element is not a signature of the assignment, and the schema says so too', async () => {
+    const wrapped = fileWith((xml) =>
+      replaced(xml, /(<\/DocumentoCesion>)(<Signature[\s\S]*?<\/Signature>)/, '$1<Extra>$2</Extra>'),
+    )
+    expect(caught(() => verifyAssignment(wrapped))).toMatchObject({
+      code: 'XML_PARSE_FAILED',
+      details: { field: 'Signature' },
+    })
+    expect((await validateAgainstXsd(wrapped, 'AEC')).join('\n')).toContain("Element '{http://www.sii.cl/SiiDte}Extra'")
+  })
+
+  test('nor is an element of that name in the namespace of the file', () => {
+    const renamed = fileWith((xml) =>
+      replaced(
+        xml,
+        /(<\/DocumentoCesion>)<Signature xmlns="http:\/\/www\.w3\.org\/2000\/09\/xmldsig#">/,
+        '$1<Signature>',
+      ),
+    )
+    expect(caught(() => verifyAssignment(renamed))).toMatchObject({
+      code: 'XML_PARSE_FAILED',
+      details: { field: 'Signature' },
+    })
   })
 })
 

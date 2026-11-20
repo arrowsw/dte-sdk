@@ -463,7 +463,9 @@ const login = async (context: PortalContext, referencia: string): Promise<Portal
   if (byPassword) context.state.cookies = withoutSessionCookies(context.state.cookies)
   // Each time a password is posted counts towards the lock, so its request is never repeated: a timeout or a gateway
   // error after the SII read it would post it again.
-  const posting: PortalContext = byPassword ? { ...context, overrides: { ...context.overrides, retry: false } } : context
+  const posting: PortalContext = byPassword
+    ? { ...context, overrides: { ...context.overrides, retry: false } }
+    : context
   const post = (): Promise<PortalPage> => navigate(posting, 'login', 'POST', url, { form, referer: url })
   context.state.loggedIn = true
   const page = await settleSessionLimit(context, 'login', await post(), post)

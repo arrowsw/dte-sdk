@@ -97,7 +97,10 @@ describe('schemaOf', () => {
     // Read as either of the two, an accent of another charset would be another character.
     for (const encoding of ['windows-1252', 'ISO-8859-15', 'latin1', 'UTF-16', '']) {
       expect(() => schemaOf(file(encoding))).toThrow(
-        expect.objectContaining({ code: 'INVALID_OPTION', details: { field: 'encoding', encoding: encoding.toUpperCase() } }),
+        expect.objectContaining({
+          code: 'INVALID_OPTION',
+          details: { field: 'encoding', encoding: encoding.toUpperCase() },
+        }),
       )
     }
     // A text is already decoded: what its declaration says does not matter.

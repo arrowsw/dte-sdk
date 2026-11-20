@@ -6,7 +6,11 @@ import { canonicalizeElement, findElement } from '../xml/c14n'
 import { wrapBase64 } from '../xml/format'
 import { parseXmlDom } from '../xml/parse'
 
-const XMLDSIG_NS = 'http://www.w3.org/2000/09/xmldsig#'
+/**
+ * EN: The XMLDSig namespace, which every `Signature` is in.
+ * ES: El namespace de XMLDSig, en el que está toda `Signature`.
+ */
+export const XMLDSIG_NS = 'http://www.w3.org/2000/09/xmldsig#'
 const XSI_NS = 'http://www.w3.org/2001/XMLSchema-instance'
 const C14N_ALGORITHM = 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315'
 const RSA_SHA1_ALGORITHM = 'http://www.w3.org/2000/09/xmldsig#rsa-sha1'
@@ -96,7 +100,10 @@ export const signEnveloped = ({
   const id = element.getAttribute('ID')
   if (!id) throw new DteError('XML_PARSE_FAILED', { field: elementTag, reason: 'missing ID attribute' })
   const closing = `</${elementTag}></${rootTag}>`
-  if (!xml.includes(closing)) throw new DteError('XML_PARSE_FAILED', { field: rootTag, reason: `expected ${closing}` })
+  // The pair that closes the root is the last one in the text. An earlier one can only stand inside a comment or a
+  // CDATA section of a document the text embeds, and a signature put there would be no signature at all.
+  const at = xml.lastIndexOf(closing)
+  if (at === -1) throw new DteError('XML_PARSE_FAILED', { field: rootTag, reason: `expected ${closing}` })
   const digestValue = sha1Base64(canonicalizeElement(element), 'utf8')
   const signedInfoToSign = buildSignedInfo(id, digestValue, { expandTags: true, includeXsi: true })
   const signedInfoToStore = buildSignedInfo(id, digestValue, {
@@ -110,8 +117,7 @@ export const signEnveloped = ({
     certificate: wrapBase64(certificate.certificateBase64),
   })
   return {
-    // A replacer function keeps `$`-patterns in the inserted content literal.
-    xml: xml.replace(closing, () => `</${elementTag}>${signatureXml}</${rootTag}>`),
+    xml: `${xml.slice(0, at)}</${elementTag}>${signatureXml}</${rootTag}>${xml.slice(at + closing.length)}`,
     signature: { digestValue, signatureValue },
   }
 }

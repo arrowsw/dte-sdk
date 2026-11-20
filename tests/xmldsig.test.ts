@@ -60,6 +60,16 @@ describe('signEnveloped', () => {
     })
   })
 
+  test('the signature goes before the tags that close the root, wherever else the text holds the same tags', () => {
+    // An embedded document may carry a comment or a CDATA section with any text in it, these tags included.
+    const embedding = xml.replace('<B/>', '<B><!--</Documento></DTE>--><![CDATA[</Documento></DTE>]]></B>')
+    const { xml: signed } = signEnveloped({ xml: embedding, elementTag: 'Documento', rootTag: 'DTE', certificate })
+    expect(signed.endsWith('</Signature></DTE>')).toBe(true)
+    expect(signed.match(/<Signature /g)).toHaveLength(1)
+    expect(signed).toContain('<!--</Documento></DTE>--><![CDATA[</Documento></DTE>]]>')
+    expect(verifyEnveloped(signed, { elementTag: 'Documento', rootTag: 'DTE' }).valid).toBe(true)
+  })
+
   test('stored SignedInfo with xmlns:xsi verifies too (envelopes and books)', () => {
     const envelope = `<EnvioDTE xmlns="${NS}" xmlns:xsi="${XSI}" version="1.0"><SetDTE ID="SET1"><Caratula version="1.0"><RutEmisor>76543210-3</RutEmisor></Caratula></SetDTE></EnvioDTE>`
     const { xml: signed } = signEnveloped({ xml: envelope, elementTag: 'SetDTE', rootTag: 'EnvioDTE', certificate })

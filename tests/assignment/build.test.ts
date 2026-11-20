@@ -166,7 +166,7 @@ describe('createAssignment', () => {
       'Se declara bajo juramento que Comercial Andina SpA, RUT 76543210-3 ha puesto a disposición del cesionario ' +
         'Factoring Austral SpA, RUT 10000004-0, el o los documentos donde constan los recibos de las mercaderías ' +
         'entregadas o servicios prestados, entregados por parte del deudor de la factura Comercializadora Rapel Ltda, ' +
-        'RUT 12345678-5, de acuerdo a lo establecido en la Ley N° 19.983.',
+        'RUT 12345678-5, de acuerdo a lo establecido en la Ley N° 19.983',
     ])
   })
 
@@ -206,6 +206,34 @@ describe('createAssignment', () => {
       firstAssignment({ document: `<?xml version="1.0" encoding="ISO-8859-1"?>\n  ${invoice.xml}\n` }),
     )
     expect(declared).toBe(xml)
+  })
+
+  test('markup inside a comment of the document never takes the place of a signature', async () => {
+    // A comment is no part of what a signature covers, so whoever handles a DTE can add one and its signature still
+    // verifies. One that holds the tags that close the file must not draw the file's signature into it.
+    const commented = invoice.xml.replace('</DTE>', '<!--</DocumentoAEC></AEC>--></DTE>')
+    expect(verifyDocumentSignature(commented).valid).toBe(true)
+    const file = createAssignment(firstAssignment({ document: commented }))
+    expect(file.endsWith('</Signature></AEC>')).toBe(true)
+    expect(verifyAssignment(file).valid).toBe(true)
+    expect(await validateAgainstXsd(file, 'AEC')).toEqual([])
+    // One that holds the tags that close a zone leaves a file its reader cannot cut: it is refused, not handed back.
+    const zone = invoice.xml.replace('</DTE>', '<!--</DocumentoDTECedido></DTECedido>--></DTE>')
+    expect(verifyDocumentSignature(zone).valid).toBe(true)
+    expect(caught(() => createAssignment(firstAssignment({ document: zone }))).code).toBe('XML_PARSE_FAILED')
+  })
+
+  test('a file is handed back only when every signature of it verifies', () => {
+    // A document whose own ID is the one the file gives a zone leaves two elements for one reference.
+    const clashing = resignedDocument(invoice.xml, (unsigned) =>
+      unsigned.replace(/<Documento ID="[^"]*"/, '<Documento ID="DTECedido_T33F7"'),
+    )
+    expect(clashing).toContain('<Documento ID="DTECedido_T33F7"')
+    expect(verifyDocumentSignature(clashing).valid).toBe(true)
+    expect(caught(() => createAssignment(firstAssignment({ document: clashing })))).toMatchObject({
+      code: 'SIGNATURE_INVALID',
+      details: { field: 'DocumentoDTECedido' },
+    })
   })
 
   test('the clock is the current time when none is given', () => {
