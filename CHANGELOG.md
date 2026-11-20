@@ -49,6 +49,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Issuing through the SII's free invoicing system, from `dte-sdk/portal`: production only, a real document and a
+  real folio on every complete run, and not run against the SII by dte-sdk.** A company in the SII's free invoicing
+  system (the "Sistema de facturación gratuito", or MIPYME portal) has no software of its own: the SII assigns the
+  folio, holds the CAF and signs with the certificate it keeps for the taxpayer, and dte-sdk could only download its
+  documents. `unstable_previewFreeSystemDocument(portal, input)` goes as far as the SII's own "Validar y visualizar"
+  and returns what the SII would issue, spending nothing: the folio is assigned at the next step, `mipeGenXMLFirma`,
+  which it never requests. `unstable_issueFreeSystemDocument(portal, { ...input, issueRealDocument: true,
+  centralSignaturePassword })` runs the whole chain: the folio step, the central signature and the post that sends
+  the document, each made once with no retry, and returns the folio, the SII's id of the document and the signed XML.
+  It covers only the two chains seen to complete against the SII, an exempt invoice (34) "same as the last one" with
+  one line and the credit note (61) that annuls such an invoice; every other type, a second line and a client of
+  another environment are refused before any request, and so is an issue without `issueRealDocument: true`. From the
+  folio step on, any failure throws `SII_PORTAL_REJECTED` with the new rejection `freeSystemIssueUncertain`, naming
+  the step and carrying the folio, the id and the signed XML when they are known, because a folio may have been spent.
+  Two more rejections are new: `freeSystemRefused`, a page before the folio that alerts, and `freeSystemFormChanged`,
+  an invoice preview with fields dte-sdk does not know, which stops the issue before the folio. The login takes a
+  certificate or a tax password; the central signature takes a second secret, the password of the certificate the SII
+  keeps, as a function asked for once at the signing step and kept nowhere, and neither password reaches an error, the
+  logger or the capture port. The firewall's rejection page throws `SII_PORTAL_BLOCKED` before the folio. The tests
+  answer with pages written by hand from the described markup: they prove the requests dte-sdk sends, not that the SII
+  accepts them. It took `dte-sdk/portal` from 84.82 kB to 89.3 kB, over its 86 kB limit, which went to 90 kB.
+  - **What to change:** nothing. Code that switches over `PortalRejection` has three new members:
+    `freeSystemRefused`, `freeSystemFormChanged` and `freeSystemIssueUncertain`.
 - **Export documents: the export invoice (110) and the export debit (111) and credit (112) notes.** The README listed
   them as planned after the first certification. They go through the same functions as the other types
   (`createDocument`, `stampDocument`, `signDocument`, `issueDocument`, `createEnvelope`, `calculateTotals`) and are

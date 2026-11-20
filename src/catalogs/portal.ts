@@ -264,6 +264,9 @@ export type PortalRejection =
   | 'receiptsNotEnrolled'
   | 'receiptsTrackIdRefused'
   | 'receiptsComplianceRefused'
+  | 'freeSystemRefused'
+  | 'freeSystemFormChanged'
+  | 'freeSystemIssueUncertain'
 
 /**
  * EN: What each rejection means and what to do about it, in Spanish, for the operator.
@@ -339,6 +342,12 @@ export const PORTAL_REJECTIONS: Readonly<Record<PortalRejection, string>> = {
     'El portal de boletas no aceptó el track id del set: lo que respondió va en `details.portalMessage`.',
   receiptsComplianceRefused:
     'El portal de boletas no aceptó la declaración de cumplimiento: revisa que el representante sea el dueño de la sesión y que el proveedor sea el real; lo que respondió va en `details.portalMessage`.',
+  freeSystemRefused:
+    'El sistema de facturación gratuito del SII rechazó un paso previo al folio: no se gastó ningún folio; lo que dijo la página va en `details.portalMessage` y el paso en `details.step`.',
+  freeSystemFormChanged:
+    'El formulario del sistema de facturación gratuito trae campos que dte-sdk no conoce: el SII cambió el formulario y no se emitió nada; los campos van en `details.unknownFields`.',
+  freeSystemIssueUncertain:
+    'El sistema de facturación gratuito pudo haber gastado un folio sin dejar el documento emitido: falló el paso `details.step` o el que le sigue. No se repitió nada. Antes de volver a emitir, busca el folio (`details.folio`) o el id del documento (`details.documentId`) en los documentos emitidos del portal.',
 }
 
 /**

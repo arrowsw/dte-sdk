@@ -374,6 +374,8 @@ const PORTAL_EXPORTS = [
   'unstable_downloadRegisterFile',
   'unstable_fetchActivityVerification',
   'unstable_fetchExchangeMailbox',
+  'unstable_issueFreeSystemDocument',
+  'unstable_previewFreeSystemDocument',
   'unstable_replenishFolios',
 ] as const
 

@@ -44,6 +44,8 @@ every field.
   quota, CAF requests, annulment and re-obtaining, and a local folio registry.
 - 🗂️ **Purchase and sales register and MIPYME backup** — the documents and official summaries of
   a period, purchase reclassification, and the XML of issued and received documents.
+- 🆓 **The SII's free invoicing system** — an exempt invoice, or the credit note that annuls one, issued where the SII
+  assigns the folio and signs, unstable and not run against the SII yet.
 - 🔎 **Activity verification** — the status of the verification the SII requires before issuing
   documents with VAT, unstable for now, and the documents it takes to accredit an activity.
 - 🎓 **Certification** — the SII test sets parsed and issued, their books, the simulation, the
@@ -73,6 +75,7 @@ every field.
 - [SII books](#sii-books)
 - [SII portal and folios](#sii-portal-and-folios)
 - [Purchase and sales register and MIPYME backup](#purchase-and-sales-register-and-mipyme-backup)
+- [Issuing through the SII's free invoicing system](#issuing-through-the-siis-free-invoicing-system)
 - [Activity verification](#activity-verification)
 - Certification: [test sets, simulation and books](#certification-test-sets-simulation-and-books),
   [the runner](#certification-the-runner),
@@ -112,7 +115,8 @@ sent to the SII. 0.14.0 prints on the printed sample the fields Formato DTE 2.5 
 the document in words; it reads a document received from a third party from the bytes of its file and prints its stamp
 as it was signed, and it bounds the key a received document names before a signature is checked with it. None of it has
 been sent to the SII. Every area this README describes ships in 0.14.0. The export documents (110, 111 and 112), not
-released yet, are checked against `DTE_v10.xsd`, and none has been sent to the SII.
+released yet, are checked against `DTE_v10.xsd`, and none has been sent to the SII. Issuing through the SII's free
+invoicing system, not released yet either, exists only in production and has not been run against the SII.
 Releases before 1.0.0 come out as the work lands, without waiting for the runs against the
 real SII; those runs come before 1.0.0, the first version recommended for production.
 
@@ -137,6 +141,7 @@ the SII offers it in the other environment only.
 | Folios and CAF requests                                        | `dte-sdk/portal` | Not run yet: they need an enrolled company                                                                                                                                                                                                                                                                                                                            | Not run yet: they need an enrolled company; the tests replay the pages this environment served to one                                                                           |
 | Purchase and sales register: reads                             | `dte-sdk/portal` | Yes, 2026-11-09 and 10, for a company with one received invoice: `fetchRegisterSummary`, `listPeriodDocuments`, `fetchPurchaseDocument` and `listPurchaseTypes` answered with its rows. `createdAt` (`det_fec_creacion`) comes as milliseconds since the epoch. Right after a claim, the listing's summary call answered HTTP 503 twice and answered on the next read | Not recorded                                                                                                                                                                    |
 | Purchase and sales register: writes, MIPYME backup             | `dte-sdk/portal` | Not run yet                                                                                                                                                                                                                                                                                                                                                           | Not run yet                                                                                                                                                                     |
+| Issuing through the SII's free invoicing system                | `dte-sdk/portal` | Not run yet: every complete run is a real document and spends a real folio                                                                                                                                                                                                                                                                                             | —                                                                                                                                                                               |
 | Activity verification                                          | `dte-sdk/portal` | Read on 2026-11-09 for a conditioned verification pending accreditation, as before for a pending one; an approved one not seen yet, so the read stays unstable                                                                                                                                                                                                        | —                                                                                                                                                                               |
 | Certification sets, runner, exchange and upload of the samples | `dte-sdk/portal` | —                                                                                                                                                                                                                                                                                                                                                                     | Not run yet; the exchange answers validate against the official schemas in the tests                                                                                            |
 | Certification of receipts (boletas)                            | `dte-sdk/portal` | —                                                                                                                                                                                                                                                                                                                                                                     | Not run yet: it needs a company enrolled in the receipts application; the receipts envelope and the folio consumption report validate against the official schemas in the tests |
@@ -187,7 +192,7 @@ npm install xmllint-wasm
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | `dte-sdk`          | Documents, stamps, signatures, envelopes, books, the assignment of invoices, the verification of received documents and the SII web services client over `fetch`                                                          | Node, Bun, Deno; bundles for the browser with no configuration |
 | `dte-sdk/node`     | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope`  | Node                                                           |
-| `dte-sdk/portal`   | SII portal, folios and CAF requests, the folio registry, purchase and sales register, MIPYME backup, activity verification, and certification: sets, runner, exchange, upload of the samples and the receipts application | Node                                                           |
+| `dte-sdk/portal`   | SII portal, folios and CAF requests, the folio registry, purchase and sales register, MIPYME backup, issuing through the SII's free invoicing system, activity verification, and certification: sets, runner, exchange, upload of the samples and the receipts application | Node                                                           |
 | `dte-sdk/pdf`      | Printed samples and the SII office of each commune (`SII_OFFICES`, `siiOfficeForCommune`)                                                                                                                                 | Node, with `pdf-lib` and `bwip-js` installed                   |
 | `dte-sdk/schemas`  | The SII's schemas, inside the package, and the validation of a document against them (`validateAgainstSchema`, `schemaOf`, `SII_SCHEMAS`)                                                                                 | Node, with `xmllint-wasm` installed |
 | `dte-sdk/catalogs` | The SII's large code tables: the business activities (`BUSINESS_ACTIVITIES`, `businessActivity`, `isBusinessActivityCode`)                                                                                                | Node, Bun, Deno; bundles for the browser with no configuration |
@@ -1198,6 +1203,82 @@ await downloadMipymeBackup(portal, {
 - **Known defect:** a two-day range with more than 20 documents downloads only its first day, while `total` counts both.
   The fix is planned.
 - **`backupNoData` is definitive.** `backupCaptcha` and `backupIndeterminate` mean try later, never in a loop.
+
+## Issuing through the SII's free invoicing system
+
+> **⚠️ Production only, a real document, a real folio.** The SII's free invoicing system (the "Sistema de facturación
+> gratuito", or MIPYME portal) exists only in production. Every complete run of `unstable_issueFreeSystemDocument`
+> issues a real tax document of a real company and spends a real folio, and a run that fails after the folio is
+> assigned may spend one with no document to show for it. dte-sdk has not run these calls against the SII: its tests
+> answer with pages written by hand from the described markup, so they prove the requests dte-sdk sends, not that the
+> SII accepts them. They cover two chains, the only ones seen to complete against the SII: an exempt invoice (34) "same
+> as the last one", with one line, and the credit note (61) that annuls such an invoice. Everything else is refused
+> before any request.
+
+In this system the SII assigns the folio, holds the CAF and signs with the certificate it keeps for the taxpayer (the
+"firma central"): the company has no software of its own and fills a form. The client may sign in with a certificate or
+with a tax password (`unstable_createPasswordPortalClient`); it must be a production client. The central signature
+needs a second secret, the password of the certificate the SII keeps, which is not the tax password.
+
+```typescript
+import { unstable_issueFreeSystemDocument, unstable_previewFreeSystemDocument } from 'dte-sdk/portal'
+
+const invoice = {
+  type: 34,
+  receiver: {
+    rut: '12345678-5',
+    businessName: 'COMERCIAL ANDINA SPA',
+    businessActivity: 'COMERCIO',
+    address: 'CALLE LAS ACACIAS 45',
+    commune: 'PROVIDENCIA',
+    city: 'SANTIAGO',
+  },
+  items: [{ name: 'ASESORIA', unitPrice: 75000, quantity: 2 }],
+} as const
+
+// Spends nothing: it stops at the SII's own "Validar y visualizar".
+const preview = await unstable_previewFreeSystemDocument(portal, invoice)
+console.log(preview.fields.EFXP_MNT_TOTAL, preview.unknownFields)
+
+// Issues a real document and spends a real folio.
+const issued = await unstable_issueFreeSystemDocument(portal, {
+  ...invoice,
+  issueRealDocument: true,
+  centralSignaturePassword: () => keychain.read('sii-central-signature'),
+})
+// issued: { type: 34, folio, documentId, signedXml }
+
+// The credit note that annuls it, by the id the portal gives the invoice.
+await unstable_issueFreeSystemDocument(portal, {
+  ...invoice,
+  type: 61,
+  items: [{ name: 'ASESORIA', unitPrice: 150000 }],
+  annuls: { documentId: issued.documentId!, type: 34, folio: issued.folio, issueDate: '2026-11-15' },
+  issueRealDocument: true,
+  centralSignaturePassword: () => keychain.read('sii-central-signature'),
+})
+```
+
+- **The preview spends nothing.** For an invoice it reads the form "same as the last one" and posts the SII's
+  "Validar y visualizar"; for a note it reads the note the portal builds from the invoice. The folio is assigned at the
+  next step, `mipeGenXMLFirma`, which the preview never requests. `fields` is what the SII's page shows, `issueFields`
+  what an issue would post at the folio step, and `unknownFields` the fields of the invoice's preview dte-sdk does not
+  know: with any, an issue is refused before the folio with `freeSystemFormChanged`, because the SII changed its form.
+- **Issuing demands `issueRealDocument: true` on every call.** Without it nothing is requested.
+- **From the folio step on, one attempt and nothing repeated.** The folio step, the central signature and the post that
+  sends the document are made once each, with no retry whatever the client's policy. Any failure there throws
+  `SII_PORTAL_REJECTED` with `rejection: 'freeSystemIssueUncertain'`, `step`, `reason` and, when known, `folio`,
+  `documentId` and `signedXml`: look for the document among the portal's issued documents before issuing again.
+- **The password of the central signature is asked for once, at the signing step,** after the folio is assigned, and
+  kept nowhere. A function that throws or returns nothing there leaves the folio spent. Neither password reaches an
+  error, the logger or the capture port, which writes `clave=[redacted]`.
+- **A note takes back the invoice's whole total,** with the same line: when the note the portal builds states a total,
+  a different one is refused before the folio, since the SII accepts it with the repair `REF-2-780`.
+- **The firewall is not worked around.** Its rejection page throws `SII_PORTAL_BLOCKED` before the folio, and is a
+  `freeSystemIssueUncertain` with `reason: 'blocked'` after it.
+- **Refused before any request:** another environment, any type but 34 and 61, a note that does more than annul an
+  exempt invoice, more than one line, a price or quantity that is not a whole number, and text outside ISO-8859-1.
+- **Close the session when done** with `closePortalSession`: the SII allows about ten per RUT.
 
 ## Activity verification
 

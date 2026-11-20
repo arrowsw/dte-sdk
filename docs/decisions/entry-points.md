@@ -11,14 +11,14 @@ on 2026-11-14 to ship inside the package with their validator as an optional pee
 |---|---|---|---|
 | `dte-sdk` | Documents (export documents included), stamps, signatures, envelopes, books, verification of received documents, the assignment of invoices, SII web services client over `fetch`, public registry of issuers | 46.24 kB | Not by import: it asks the runtime for `node:crypto` at the first signature |
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.4 kB | Yes, on first use |
-| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 84.82 kB | Yes, on first use |
+| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, issuing through the SII's free invoicing system, activity verification, certification sets and runner | 89.3 kB | Yes, on first use |
 | `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 19.68 kB | Yes, on first use |
 | `dte-sdk/catalogs` | The SII's large code tables: the business activities | 10.65 kB | No |
 | `dte-sdk/schemas` | The SII's schemas as text and the validation of a document against them; `xmllint-wasm` is an optional peer | 24.64 kB | No |
 
 Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
 it. The decision was taken at phase 5b-2, which took `dte-sdk/portal` from 39.35 kB to 55.86 kB; each limit was then the
-measure rounded up to the next 2 kB. The sizes above were measured again on 2026-11-20, with the export documents. `createDirectoryTokenCache` took
+measure rounded up to the next 2 kB. The sizes above were measured again on 2026-11-20, with the export documents and the free invoicing system. `createDirectoryTokenCache` took
 `dte-sdk/node` from 4.19 kB to 4.71 kB, and the CAF file search, which parses CAFs, took it to 6.30 kB, over its 6 kB
 limit, which went to 8 kB. The SII office table took `dte-sdk/pdf` from 8.49 kB to 10.45 kB. That table is about 1.9 kB
 of data that the renderer needs for its default office, so it fits neither the root (30.49 kB plus the table is
@@ -140,6 +140,10 @@ with the same code, from 82.11 kB to 84.82 kB, over its 84 kB limit, which went 
 `dte-sdk/pdf` from 19.59 kB to 19.68 kB, under its limit; `dte-sdk/node`, `dte-sdk/catalogs` and `dte-sdk/schemas` did
 not move. They stay in the root with the other document types: they are issued, stamped, signed and sent through the
 same functions.
+Issuing through the SII's free invoicing system, also after 0.14.0, measured before and after on the same machine: the
+preview and the issue, the fields of the portal's forms in their order, the reading of its pages and the three new
+rejections took `dte-sdk/portal` from 84.82 kB to 89.3 kB, over its 86 kB limit, which went to 90 kB; the other entries
+did not move. It stays in `dte-sdk/portal` beside the MIPYME backup, on the same portal and the same session.
 
 ## Why
 

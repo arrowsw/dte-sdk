@@ -234,6 +234,8 @@ const verbatimHeaders = (
  */
 export type PortalRequestOptions = {
   readonly form?: Readonly<Record<string, string>>
+  /** A form already encoded, sent with the headers of a form: for a page whose form repeats names, has an order of its own or is not in UTF-8. */
+  readonly encodedForm?: Uint8Array
   readonly json?: unknown
   readonly body?: Uint8Array
   readonly contentType?: string
@@ -308,7 +310,7 @@ export const portalRequest = async (
   const responseEncoding = encodingOf(context)
   const operation = `${context.operation}.${step}`
   const text = options.json === undefined ? options.form && formEncode(options.form) : JSON.stringify(options.json)
-  const body = options.body ?? (text === undefined ? undefined : encodeUtf8(text))
+  const body = options.body ?? options.encodedForm ?? (text === undefined ? undefined : encodeUtf8(text))
   const headersOf = (): Readonly<Record<string, string>> => {
     if (verbatim !== undefined) return verbatimHeaders(verbatim.headers, url, state.cookies, options)
     if (options.body !== undefined)
