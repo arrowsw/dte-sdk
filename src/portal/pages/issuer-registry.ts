@@ -86,17 +86,19 @@ const EXCHANGE_LABEL = /mail|correo/i
 const EMAIL = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/
 
 /**
- * EN: The exchange mailbox of an answer of `ce_consulta_e`, the page of the registry a session reads: the value beside
- * the label that names a mail, when it is an address. An issuer may have registered none, and then it is null.
- * ES: La casilla de intercambio de una respuesta de `ce_consulta_e`, la página del registro que lee una sesión: el
- * valor junto a la etiqueta que nombra un correo, cuando es una dirección. Un emisor puede no haber registrado ninguna,
- * y entonces es null.
+ * EN: The exchange mailbox of an answer of `ce_consulta_e`, the page of the registry a session reads: the address beside
+ * the first cell that names a mail. A cell that names one with no address beside it is passed over, as a business name
+ * with those letters in it is. An issuer may have registered none, and then it is null.
+ * ES: La casilla de intercambio de una respuesta de `ce_consulta_e`, la página del registro que lee una sesión: la
+ * dirección junto a la primera celda que nombra un correo. Una celda que lo nombra sin una dirección al lado se pasa por
+ * alto, como una razón social que traiga esas letras. Un emisor puede no haber registrado ninguna, y entonces es null.
  */
 export const parseExchangeEmail = (html: string): string | null => {
-  const cells = cellsOf(html)
-  const index = cells.findIndex((cell) => EXCHANGE_LABEL.test(cell) && !EMAIL.test(cell))
-  const value = index < 0 ? '' : (cells[index + 1] ?? '').trim()
-  return EMAIL.test(value) ? value : null
+  const cells = cellsOf(html).map((cell) => cell.trim())
+  const index = cells.findIndex(
+    (cell, at) => EXCHANGE_LABEL.test(cell) && !EMAIL.test(cell) && EMAIL.test(cells[at + 1] ?? ''),
+  )
+  return index < 0 ? null : cells[index + 1]
 }
 
 /**

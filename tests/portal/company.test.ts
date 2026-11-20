@@ -147,6 +147,15 @@ describe('parseExchangeEmail', () => {
   test('an address in a cell is a value, not the label of the next one', () => {
     expect(parseExchangeEmail(row('correo@andina.example', 'otra cosa'))).toBeNull()
   })
+
+  test('a business name with the letters of the label in it is not taken for the label', () => {
+    const registry = (name: string, mailbox: string): string =>
+      `<table><tr><td>Razón Social</td><td>${name}</td></tr><tr><td>N° Resolución</td><td>80</td></tr>${mailbox}</table>`
+    const mailbox = '<tr><td>Mail de contacto</td><td>dte@correos.example</td></tr>'
+    expect(parseExchangeEmail(registry('EMPRESA DE CORREOS DE CHILE', mailbox))).toBe('dte@correos.example')
+    expect(parseExchangeEmail(registry('MAILING SERVICES LTDA', mailbox))).toBe('dte@correos.example')
+    expect(parseExchangeEmail(registry('EMPRESA DE CORREOS DE CHILE', ''))).toBeNull()
+  })
 })
 
 describe('fetchTaxpayerData', () => {

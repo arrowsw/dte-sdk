@@ -72,8 +72,9 @@ describe('a stamp with a byte above ASCII', () => {
   })
 
   test('one too long to fit in bytes keeps it too, and still reads back', async () => {
-    // 864 codewords of data in bytes alone, one more than a symbol holds beside its error correction.
-    const long = `<TED>ñ${'A'.repeat(1028)}</TED>`
+    // 1 035 bytes are 864 codewords in bytes alone (the latch, 172 groups of five and three bytes over), one more than a
+    // symbol holds beside its error correction; the 1 034 bytes below are 863, and fit.
+    const long = `<TED>ñ${'A'.repeat(1023)}</TED>`
     const { load, calls } = await recording()
     expect(decodePdf417Png(await renderTedBarcode(long, load))).toBe(long)
     expect(calls[0]).not.toHaveProperty('raw')

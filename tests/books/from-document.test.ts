@@ -7,7 +7,7 @@ import {
 import { createGuideBook } from '../../src/books/guide'
 import { createPurchaseSalesBook } from '../../src/books/purchase-sales'
 import { createDocument } from '../../src/document/create'
-import type { DocumentInput } from '../../src/model/document'
+import type { DocumentInput, Withholding } from '../../src/model/document'
 import { guideCover, reportCover, saleCover, purchaseCover, SUPPLIER_RUT } from '../support/book-fixtures'
 import { ISSUER_RUT, RECEIVER_RUT } from '../support/fixtures'
 
@@ -94,6 +94,58 @@ describe('bookEntryFromDocument', () => {
       createPurchaseSalesBook({ cover: { ...saleCover, issuerRut: SUPPLIER_RUT }, entries: [received] })
         .totalMismatches,
     ).toEqual([])
+  })
+
+  test('on a sale line every withholding of VAT takes a field of the sales detail, and none stays in the other taxes', () => {
+    const invoice = (withholdings: readonly Withholding[], totalAmount: number) =>
+      createDocument({
+        ...base,
+        type: 46,
+        receiver: { ...receiver, rut: SUPPLIER_RUT, businessName: 'Hortalizas del Maule Ltda' },
+        totals: { netAmount: 100000, vatRate: 19, vatAmount: 19000, withholdings, totalAmount },
+      })
+    const supplierBook = { bookRut: SUPPLIER_RUT, operation: 'sale' } as const
+    const cover = { ...saleCover, issuerRut: SUPPLIER_RUT }
+
+    // Timber (code 33) withholds 8 points of the 19: the supplier is paid the total less that part.
+    const partial = invoice([{ taxCode: 33, rate: 8, amount: 8000 }], 111000)
+    const received = bookEntryFromDocument(partial, supplierBook)
+    expect(received).toMatchObject({ partialVatWithheld: 8000, totalAmount: 111000 })
+    expect(received.otherTaxes).toBeUndefined()
+    expect(received.totalVatWithheld).toBeUndefined()
+    expect(createPurchaseSalesBook({ cover, entries: [received] }).totalMismatches).toEqual([])
+
+    // Who issued it reports the same withholding under its code, and both books add up.
+    const issued = bookEntryFromDocument(partial, { bookRut: ISSUER_RUT, operation: 'purchase' })
+    expect(issued).toMatchObject({ otherTaxes: [{ code: 33, rate: 8, amount: 8000 }], totalAmount: 111000 })
+    expect(issued.partialVatWithheld).toBeUndefined()
+    expect(createPurchaseSalesBook({ cover: purchaseCover, entries: [issued] }).totalMismatches).toEqual([])
+
+    // The whole VAT withheld under a code by product is a whole withholding all the same.
+    const whole = bookEntryFromDocument(invoice([{ taxCode: 39, rate: 19, amount: 19000 }], 100000), supplierBook)
+    expect(whole).toMatchObject({ totalVatWithheld: 19000, totalAmount: 100000 })
+    expect(whole.partialVatWithheld).toBeUndefined()
+    expect(whole.otherTaxes).toBeUndefined()
+    expect(createPurchaseSalesBook({ cover, entries: [whole] }).totalMismatches).toEqual([])
+
+    // A tax that withholds no VAT stays in the other taxes beside it.
+    const mixed = bookEntryFromDocument(
+      invoice(
+        [
+          { taxCode: 33, rate: 8, amount: 8000 },
+          { taxCode: 24, rate: 31.5, amount: 500 },
+        ],
+        111500,
+      ),
+      supplierBook,
+    )
+    expect(mixed).toMatchObject({ partialVatWithheld: 8000, otherTaxes: [{ code: 24, rate: 31.5, amount: 500 }] })
+    expect(createPurchaseSalesBook({ cover, entries: [mixed] }).totalMismatches).toEqual([])
+
+    // A document read with no rate of the tax is measured against the rate in force.
+    const { header } = invoice([{ taxCode: 39, rate: 19, amount: 19000 }], 100000)
+    const bare = { ...partial, header: { ...header, totals: { ...header.totals, vatRate: undefined } } }
+    expect(bookEntryFromDocument(bare, supplierBook)).toMatchObject({ totalVatWithheld: 19000 })
   })
 
   test('the book RUT is compared normalized', () => {
