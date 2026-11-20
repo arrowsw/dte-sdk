@@ -241,7 +241,8 @@ export type PasswordPortalClientOptions = Omit<PortalClientOptions, 'certificate
  * `createPortalClient`. The password is a function, asked for when a login needs it and never kept: the client holds no
  * password, the capture port writes `clave=[redacted]`, and no message of an error or of the logger carries it. The SII
  * locks a password after a few wrong attempts, so a password the SII refused is never sent again by the same client:
- * the next login throws `SII_PORTAL_LOGIN_FAILED` with `refusedBefore: true` and no request. A cached session needs no
+ * the next login throws `SII_PORTAL_LOGIN_FAILED` with `refusedBefore: true` before it asks the SII for anything, and
+ * the request that posts a password is sent once, whatever `retry` says. A cached session needs no
  * password to be used, so its key in the cache is random and of this client alone: a cache shared with other people
  * never hands a session to who merely names the same RUT. `sessionKey` shares it on purpose. The default transport is
  * Node `https` on TLS 1.2 with no client certificate. What needs a signature, such as the certification runner, still
@@ -254,7 +255,8 @@ export type PasswordPortalClientOptions = Omit<PortalClientOptions, 'certificate
  * clave es una función, que se llama cuando un ingreso la necesita y nunca se guarda: el cliente no contiene ninguna
  * clave, el puerto de captura escribe `clave=[redacted]`, y ningún mensaje de error ni del logger la lleva. El SII
  * bloquea una clave tras unos pocos intentos fallidos, así que una clave que el SII rechazó nunca la vuelve a enviar el
- * mismo cliente: el ingreso siguiente lanza `SII_PORTAL_LOGIN_FAILED` con `refusedBefore: true` y sin petición. Una
+ * mismo cliente: el ingreso siguiente lanza `SII_PORTAL_LOGIN_FAILED` con `refusedBefore: true` antes de pedirle nada al
+ * SII, y la petición que envía una clave se manda una sola vez, diga lo que diga `retry`. Una
  * sesión en caché no necesita la clave para usarse, así que su llave en la caché es aleatoria y solo de este cliente:
  * una caché compartida con otras personas nunca entrega una sesión a quien solo nombra el mismo RUT. `sessionKey` la
  * comparte a propósito. El

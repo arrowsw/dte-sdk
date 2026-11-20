@@ -963,8 +963,9 @@ const portal = unstable_createPasswordPortalClient({
 The password is a function on purpose. The client holds no password, so logging it or writing it to disk writes none;
 the capture port writes the login form as `clave=[redacted]`; and no error carries it. The SII locks a password after a
 few wrong attempts, so a password the SII refused is never sent again by the same client: the next login throws
-`SII_PORTAL_LOGIN_FAILED` with `refusedBefore: true` and makes no request, and trying another password takes a new
-client.
+`SII_PORTAL_LOGIN_FAILED` with `refusedBefore: true` before it asks the SII for anything, and trying another password
+takes a new client. The request that posts a password is sent once, whatever `retry` says: a timeout after the SII read
+a wrong password would otherwise count twice.
 
 A session in the cache is used without the password, so who can find it can use it. The key of a password session is
 therefore random and of its client alone: in a `sessionCache` shared with other people, a client that merely names the

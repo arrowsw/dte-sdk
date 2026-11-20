@@ -46,6 +46,13 @@ export const hasSessionCookie = (jar: CookieJar): boolean =>
   Object.keys(jar).some((name) => name.startsWith('NETSCAPE_LIVEWIRE'))
 
 /**
+ * EN: The jar without the cookies of an authenticated session; the others, the load balancer's among them, stay.
+ * ES: La bolsa sin las cookies de una sesión autenticada; las demás, entre ellas las del balanceador, se quedan.
+ */
+export const withoutSessionCookies = (jar: CookieJar): CookieJar =>
+  Object.fromEntries(Object.entries(jar).filter(([name]) => !name.startsWith('NETSCAPE_LIVEWIRE')))
+
+/**
  * EN: The RUT the session belongs to, from `NETSCAPE_LIVEWIRE.rutm`/`.dvm` or `.rut`/`.dv`; null when absent or invalid.
  * ES: El RUT al que pertenece la sesión, desde `NETSCAPE_LIVEWIRE.rutm`/`.dvm` o `.rut`/`.dv`; null si falta o es inválido.
  */

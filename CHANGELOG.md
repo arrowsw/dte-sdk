@@ -153,7 +153,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   client holds no password and writing it down writes none. The capture port writes the login form as
   `clave=[redacted]`, and no error or log message carries the password. The SII locks a password after a few wrong
   attempts, so a password it refused is never sent again by the same client: the next login throws
-  `SII_PORTAL_LOGIN_FAILED` with `refusedBefore: true` and makes no request. A session in the cache is used without
+  `SII_PORTAL_LOGIN_FAILED` with `refusedBefore: true` before it asks the SII for anything. For the same reason the
+  request that posts a password is sent once, whatever the retry policy of the client says, and a refusal is read from
+  the cookies that login set, never from the ones an expired session left behind. A session in the cache is used without
   the password, so the key of a password session is random and of its client alone: in a cache shared with other
   people, a client that merely names the same RUT finds no session and has to sign in. `sessionKey`, a secret of that
   person, shares a session on purpose, across restarts for one. It carries the `unstable_` prefix because dte-sdk has
