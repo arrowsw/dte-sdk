@@ -1,6 +1,12 @@
 import { loadCertificateFromPem } from '../../src/certificate/pem'
-import { createPortalClient, type PortalClient, type PortalClientOptions } from '../../src/portal/client'
-import { certificateFingerprint } from '../../src/sii/token-cache'
+import {
+  createPortalClient,
+  unstable_createPasswordPortalClient,
+  type PasswordPortalClientOptions,
+  type PortalClient,
+  type PortalClientOptions,
+} from '../../src/portal/client'
+import { certificateFingerprint, textFingerprint } from '../../src/sii/token-cache'
 import { createFakeSii, type FakeRoute, type FakeSii } from './fake-sii'
 import { fixtureText, FIXED_NOW, ISSUER_RUT } from './fixtures'
 
@@ -13,6 +19,11 @@ export const MAULLIN = 'https://maullin.sii.cl/cvc_cgi/dte'
 export const PALENA = 'https://palena.sii.cl/cvc_cgi/dte'
 export const HERCULES = 'https://herculesr.sii.cl/cgi_AUT2000/CAutInicio.cgi'
 export const SESSION_KEY = `portal:${certificateFingerprint(certificate)}`
+export const ZEUS_LOGIN = 'https://zeusr.sii.cl/cgi_AUT2000/CAutInicio.cgi'
+export const PASSWORD_USER_RUT = '12345678-5'
+// A made-up password, with the characters a form has to escape.
+export const TAX_PASSWORD = 'S3creta&=ñ %'
+export const PASSWORD_SESSION_KEY = `portal:password:${textFingerprint(PASSWORD_USER_RUT)}`
 export const SESSION_COOKIES = {
   'NETSCAPE_LIVEWIRE.rut': '12345678',
   'NETSCAPE_LIVEWIRE.dv': '5',
@@ -71,6 +82,50 @@ export const portalWith = (routes: readonly FakeRoute[], options: Partial<Portal
         )
         .map((request) => parseForm(request.text)),
     urls: () => fake.requests.map((request) => request.url),
+  }
+}
+
+/** A client that signs in with a tax password, over the fake SII; `asked` counts the times the password was asked for. */
+export const passwordPortalWith = (
+  routes: readonly FakeRoute[],
+  options: Partial<PasswordPortalClientOptions> = {},
+): PortalHarness & { readonly asked: () => number } => {
+  const fake = createFakeSii(routes)
+  const sleeps: number[] = []
+  let asked = 0
+  const portal = unstable_createPasswordPortalClient({
+    environment: 'certification',
+    userRut: PASSWORD_USER_RUT,
+    password: () => {
+      asked += 1
+      return TAX_PASSWORD
+    },
+    companyRut: ISSUER_RUT,
+    transport: fake.transport,
+    now: () => FIXED_NOW,
+    sleep: async (ms) => {
+      sleeps.push(ms)
+    },
+    retry: false,
+    ...options,
+  })
+  return {
+    portal,
+    fake,
+    sleeps,
+    posted: (page) =>
+      fake.requests
+        .filter(
+          (request) =>
+            request.method === 'POST' &&
+            new URL(request.url).pathname
+              .split('/')
+              .pop()
+              ?.replace(/\.cgi$/, '') === page,
+        )
+        .map((request) => parseForm(request.text)),
+    urls: () => fake.requests.map((request) => request.url),
+    asked: () => asked,
   }
 }
 

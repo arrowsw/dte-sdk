@@ -756,6 +756,28 @@ method first, a manual step at sii.cl (_Cambiar Clave y datos de autenticación_
 Certificado Digital"); otherwise the login throws `SII_PORTAL_CERT_NOT_ENABLED`. It needs Node: `fetch` cannot
 present a client certificate.
 
+Whoever has no certificate at hand can sign in with the RUT and the tax password of a person, the SII's "Clave
+Tributaria", and every portal function takes that client as it takes the other:
+
+```typescript
+import { unstable_createPasswordPortalClient, fetchRegisterSummary } from 'dte-sdk/portal'
+
+const portal = unstable_createPasswordPortalClient({
+  environment: 'production',
+  userRut: '12345678-5', // the person who signs in: the taxpayer or a representative of the company
+  password: () => readFromKeychain('sii'), // asked for when a login needs it, and never kept
+  companyRut: '76543210-3',
+})
+```
+
+The password is a function on purpose. The client holds no password, so logging it or writing it to disk writes none;
+the capture port writes the login form as `clave=[redacted]`; and no error carries it. The SII locks a password after a
+few wrong attempts, so a password the SII refused is never sent again by the same client: the next login throws
+`SII_PORTAL_LOGIN_FAILED` with `refusedBefore: true` and makes no request, and trying another password takes a new
+client. A password session is kept apart from a certificate's, under a key that names nobody. It is unstable: dte-sdk
+has not run this login against the SII yet, so its shape may change in any version. What needs a signature, such as
+the certification runner, still takes a certificate where it asks for one.
+
 - **CAF XML is a secret.** `xml` holds the private key of the CAF. Where you keep it is up to you.
 - **One session per certificate.** The SII rations sessions per RUT, so `sessionCache` and `lock` are ports: several
   replicas need shared ones. Sessions are reused for 90 minutes and logged in on demand. In memory by default, so a

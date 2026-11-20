@@ -10,8 +10,19 @@ export { PORTAL_REJECTIONS, portalRejectionMessage, REGISTER_ACCOUNTING_STATUSES
 export { REGISTER_DOCUMENT_CODES, registerDocumentCode } from '../catalogs/register-codes'
 export type { RegisterDocumentCode } from '../catalogs/register-codes'
 export type { AccountingStatus, DocumentDirection, PortalRejection, RegisterOperation } from '../catalogs/portal'
-export { createPortalClient, DEFAULT_PORTAL_RETRY_POLICY, isRetryablePortalError } from './client'
-export type { PortalClient, PortalClientOptions } from './client'
+export {
+  createPortalClient,
+  unstable_createPasswordPortalClient,
+  DEFAULT_PORTAL_RETRY_POLICY,
+  isRetryablePortalError,
+} from './client'
+export type {
+  PortalClient,
+  PortalClientOptions,
+  PasswordPortalClientOptions,
+  PortalPasswordSignIn,
+  PortalSignIn,
+} from './client'
 export { createMemoryPortalLock } from './lock'
 export type { PortalLock } from './lock'
 export { openPortalSession, closePortalSession } from './session'

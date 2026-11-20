@@ -30,6 +30,17 @@ const exchange: HttpExchange = {
 }
 
 describe('redactText', () => {
+  test('the tax password of a login form is taken out, wherever the field sits', () => {
+    expect(redactText('rut=12345678&dv=5&rutcntr=12345678-5&clave=S3creta%26%3D&referencia=x&411=')).toBe(
+      'rut=12345678&dv=5&rutcntr=12345678-5&clave=[redacted]&referencia=x&411=',
+    )
+    expect(redactText('clave=abc')).toBe('clave=[redacted]')
+    expect(redactText('a=1&CLAVE=abc')).toBe('a=1&CLAVE=[redacted]')
+    expect(redactText('https://example.test/?clave=abc&x=1')).toBe('https://example.test/?clave=[redacted]&x=1')
+    // A field whose name only ends that way is another field.
+    expect(redactText('palabraclave=abc&x=1')).toBe('palabraclave=abc&x=1')
+  })
+
   test('hides the session token of an RCV envelope, in a request and in an answer', () => {
     expect(redactText('{"metaData":{"namespace":"x","conversationId":"TOKEN-ABC","page":null},"data":null}')).toBe(
       '{"metaData":{"namespace":"x","conversationId":"[redacted]","page":null},"data":null}',

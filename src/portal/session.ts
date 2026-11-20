@@ -1,6 +1,8 @@
 import {
   CERTIFICATE_ENTRY_URL,
   CERTIFICATE_LOGIN_URL,
+  PASSWORD_ENTRY_URL,
+  PASSWORD_LOGIN_URL,
   cgiUrl,
   PORTAL_LANDING_URL,
   PORTAL_LOGOUT_URL,
@@ -12,7 +14,7 @@ import type { CallOverrides } from '../sii/client'
 import { bodyExcerpt, httpError } from '../sii/operation'
 import { mergeRetryPolicy, withRetry } from '../sii/retry'
 import { send } from '../sii/send'
-import { certificateFingerprint } from '../sii/token-cache'
+import { certificateFingerprint, textFingerprint } from '../sii/token-cache'
 import { decodeBody, encodeUtf8, type BodyEncoding, type HttpMethod, type HttpResponse } from '../sii/transport'
 import type { PortalClient } from './client'
 import {
@@ -418,22 +420,51 @@ const settleSessionLimit = async (
   return next
 }
 
+// The page a login starts from, visited for the load balancer cookies: the one of the way this client signs in.
+const entryUrl = (portal: PortalClient): string =>
+  portal.passwordSignIn === null ? CERTIFICATE_ENTRY_URL : PASSWORD_ENTRY_URL
+
+// The sign-ins whose password the SII refused. The SII locks a password after a few wrong attempts, so one it refused
+// is not sent again by the same client, whatever asks for a login next.
+const refusedPasswords = new WeakSet<object>()
+
+// The request that signs in. With a certificate the TLS handshake is the credential and the form only says where to go
+// next. With a password the form carries the RUT whole and in its two parts, the password and where to go next, as the
+// SII's own page posts them; the password is asked for here, used once and kept nowhere.
+const loginRequest = async (
+  context: PortalContext,
+  referencia: string,
+): Promise<{ readonly url: string; readonly form: Readonly<Record<string, string>> }> => {
+  const signIn = context.portal.passwordSignIn
+  if (signIn === null) return { url: `${CERTIFICATE_LOGIN_URL}?${referencia}`, form: { referencia } }
+  if (refusedPasswords.has(signIn))
+    throw new DteError('SII_PORTAL_LOGIN_FAILED', { operation: context.operation, refusedBefore: true })
+  const { body, verifier } = splitSiiRut(signIn.rut)
+  const password = await signIn.password()
+  if (typeof password !== 'string' || password === '') throw new DteError('MISSING_FIELD', { field: 'password' })
+  return {
+    url: PASSWORD_LOGIN_URL,
+    form: { rut: body, dv: verifier, rutcntr: signIn.rut, clave: password, referencia, '411': '' },
+  }
+}
+
 const login = async (context: PortalContext, referencia: string): Promise<PortalPage> => {
-  const url = `${CERTIFICATE_LOGIN_URL}?${referencia}`
-  const post = (): Promise<PortalPage> =>
-    navigate(context, 'login', 'POST', url, { form: { referencia }, referer: url })
+  const { url, form } = await loginRequest(context, referencia)
+  const post = (): Promise<PortalPage> => navigate(context, 'login', 'POST', url, { form, referer: url })
   context.state.loggedIn = true
   const page = await settleSessionLimit(context, 'login', await post(), post)
-  if (isCertificateNotEnabledPage(page.html))
+  if (context.portal.passwordSignIn === null && isCertificateNotEnabledPage(page.html))
     throw new DteError('SII_PORTAL_CERT_NOT_ENABLED', {
       operation: context.operation,
       portalMessage: portalMessageOf(page.html),
     })
-  if (!hasSessionCookie(context.state.cookies))
+  if (!hasSessionCookie(context.state.cookies)) {
+    if (context.portal.passwordSignIn !== null) refusedPasswords.add(context.portal.passwordSignIn)
     throw new DteError('SII_PORTAL_LOGIN_FAILED', {
       operation: context.operation,
       portalMessage: portalMessageOf(page.html),
     })
+  }
   // A good login answers 200 with a script that goes on: no `Location`, so nothing has reached the target yet.
   const target = scriptRedirect(page.html)
   if (target === null || !isSiiUrl(target)) return page
@@ -461,7 +492,7 @@ const authenticateIfAsked = async (
 ): Promise<PortalPage> => {
   if (isRepresentationRefused(page.html) && !context.state.loggedIn) {
     forgetSession(context)
-    await portalRequest(context, 'entry', 'GET', `${CERTIFICATE_ENTRY_URL}?${url}`)
+    await portalRequest(context, 'entry', 'GET', `${entryUrl(context.portal)}?${url}`)
     return login(context, url)
   }
   if (!asksForAuthentication(page.html) || isRepresentationChoice(page.html) || page.lastLocation === null) return page
@@ -521,7 +552,12 @@ export const forgetSession = (context: PortalContext): void => {
   context.state.loggedIn = false
 }
 
-const cacheKey = (portal: PortalClient): string => `portal:${certificateFingerprint(portal.certificate)}`
+// One session per sign-in: the certificate's by its fingerprint, the password's by a digest of the RUT that signs in,
+// so the key names no person where a cache writes it.
+const cacheKey = (portal: PortalClient): string =>
+  portal.certificate === null
+    ? `portal:password:${textFingerprint(portal.passwordSignIn.rut)}`
+    : `portal:${certificateFingerprint(portal.certificate)}`
 
 const loadCookies = async (portal: PortalClient): Promise<CookieJar> => {
   try {
@@ -623,7 +659,7 @@ const cachedSessionAlive = async (context: PortalContext): Promise<boolean> => {
  */
 export const ensureSession = async (context: PortalContext): Promise<void> => {
   if (hasSessionCookie(context.state.cookies)) return
-  await portalRequest(context, 'entry', 'GET', `${CERTIFICATE_ENTRY_URL}?${PORTAL_LANDING_URL}`)
+  await portalRequest(context, 'entry', 'GET', `${entryUrl(context.portal)}?${PORTAL_LANDING_URL}`)
   await login(context, PORTAL_LANDING_URL)
 }
 

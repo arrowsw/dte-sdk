@@ -55,6 +55,19 @@ export const DEFAULT_PORTAL_SESSION_TTL_MS = 90 * 60 * 1000
 export const DEFAULT_PORTAL_TIMEOUT_MS = 20000
 
 /**
+ * EN: Who signs in with a tax password, and where the password comes from. The password is never data of the client:
+ * it is asked for when a login needs it, so it can come from a keychain and never reaches a log or a serialized client.
+ * ES: Quién ingresa con clave tributaria, y de dónde sale la clave. La clave nunca es un dato del cliente: se pide
+ * cuando un ingreso la necesita, así puede salir de un llavero y nunca llega a un log ni a un cliente serializado.
+ */
+export type PortalPasswordSignIn = {
+  /** EN: RUT of the person who signs in. ES: `rutcntr` — RUT de la persona que ingresa. */
+  readonly rut: SiiRut
+  /** EN: Gives the tax password, each time a login needs it. ES: `clave` — Entrega la clave tributaria, cada vez que un ingreso la necesita. */
+  readonly password: () => string | Promise<string>
+}
+
+/**
  * EN: Options of `createPortalClient`.
  * ES: Opciones de `createPortalClient`.
  */
@@ -92,14 +105,30 @@ export type PortalClientOptions = {
 }
 
 /**
+ * EN: How a portal client signs in: with a certificate or with a tax password, never both.
+ * ES: Cómo ingresa un cliente del portal: con un certificado o con clave tributaria, nunca ambos.
+ */
+export type PortalSignIn =
+  | {
+      /** EN: Certificate presented at login. ES: Certificado que se presenta al iniciar sesión. */
+      readonly certificate: Certificate
+      /** EN: Null on a client that presents a certificate. ES: Null en un cliente que presenta un certificado. */
+      readonly passwordSignIn: null
+    }
+  | {
+      /** EN: Null on a client that signs in with a tax password. ES: Null en un cliente que ingresa con clave tributaria. */
+      readonly certificate: null
+      /** EN: Who signs in with a tax password, and where it comes from. ES: Quién ingresa con clave tributaria, y de dónde sale. */
+      readonly passwordSignIn: PortalPasswordSignIn
+    }
+
+/**
  * EN: The portal client: plain frozen data, every field resolved. Pass it to the portal functions.
  * ES: El cliente del portal: datos planos congelados, con todos los campos resueltos. Se pasa a las funciones del portal.
  */
-export type PortalClient = {
+export type PortalClient = PortalSignIn & {
   /** EN: Target environment. ES: Ambiente. */
   readonly environment: Environment
-  /** EN: Certificate presented at login. ES: Certificado que se presenta al iniciar sesión. */
-  readonly certificate: Certificate
   /** EN: Default company RUT, or null. ES: `RUT_EMP` + `DV_EMP` — RUT de empresa por defecto, o null. */
   readonly companyRut: SiiRut | null
   /** EN: HTTP transport. ES: Transporte HTTP. */
@@ -128,30 +157,24 @@ export type PortalClient = {
   readonly randomId: () => string
 }
 
-/**
- * EN: Validates and completes the options into a frozen `PortalClient`. The default transport presents the certificate
- * through Node `https` (loaded on first use, so importing never touches `node:`), verifies the server, and stays on
- * TLS 1.2, the configuration proven for authenticated sessions. `fetch` cannot present a client certificate.
- * ES: Valida y completa las opciones en un `PortalClient` congelado. El transporte por defecto presenta el certificado por
- * `https` de Node (cargado en el primer uso, así que importar nunca toca `node:`), verifica el servidor y se queda en
- * TLS 1.2, la configuración probada para sesiones autenticadas. `fetch` no puede presentar un certificado cliente.
- * @param options EN: client options. ES: opciones del cliente.
- * @returns EN: the frozen client. ES: el cliente congelado.
- * @throws {DteError} EN: `INVALID_OPTION { field }`, `MISSING_FIELD { field }`, `INVALID_RUT { field }`. ES: los mismos códigos.
- */
-export const createPortalClient = (options: PortalClientOptions): PortalClient => {
-  if (!isEnvironment(options.environment)) throw new DteError('INVALID_OPTION', { field: 'environment' })
-  if (!options.certificate) throw new DteError('MISSING_FIELD', { field: 'certificate' })
+const assertEnvironment = (environment: unknown): void => {
+  if (!isEnvironment(environment)) throw new DteError('INVALID_OPTION', { field: 'environment' })
+}
+
+const buildClient = (options: Omit<PortalClientOptions, 'certificate'>, signIn: PortalSignIn): PortalClient => {
   assertPositive(options.sessionTtlMs, 'sessionTtlMs')
   assertPositive(options.timeoutMs, 'timeoutMs')
   const retry = mergeRetryPolicy(DEFAULT_PORTAL_RETRY_POLICY, options.retry)
+  const { certificate } = signIn
   return Object.freeze({
     environment: options.environment,
-    certificate: options.certificate,
+    ...signIn,
     companyRut: options.companyRut === undefined ? null : toSiiRut(options.companyRut, 'companyRut'),
     transport:
       options.transport ??
-      createNodeHttpsTransport({ tls: { clientCertificate: options.certificate, maxVersion: 'TLSv1.2' } }),
+      createNodeHttpsTransport({
+        tls: { ...(certificate === null ? {} : { clientCertificate: certificate }), maxVersion: 'TLSv1.2' },
+      }),
     sessionCache: options.sessionCache ?? createMemoryTokenCache(),
     sessionTtlMs: options.sessionTtlMs ?? DEFAULT_PORTAL_SESSION_TTL_MS,
     lock: options.lock ?? createMemoryPortalLock(),
@@ -164,6 +187,71 @@ export const createPortalClient = (options: PortalClientOptions): PortalClient =
     sleep: options.sleep ?? defaultSleep,
     randomId: options.randomId ?? (() => crypto.randomUUID()),
   })
+}
+
+/**
+ * EN: Validates and completes the options into a frozen `PortalClient`. The default transport presents the certificate
+ * through Node `https` (loaded on first use, so importing never touches `node:`), verifies the server, and stays on
+ * TLS 1.2, the configuration proven for authenticated sessions. `fetch` cannot present a client certificate.
+ * ES: Valida y completa las opciones en un `PortalClient` congelado. El transporte por defecto presenta el certificado por
+ * `https` de Node (cargado en el primer uso, así que importar nunca toca `node:`), verifica el servidor y se queda en
+ * TLS 1.2, la configuración probada para sesiones autenticadas. `fetch` no puede presentar un certificado cliente.
+ * @param options EN: client options. ES: opciones del cliente.
+ * @returns EN: the frozen client. ES: el cliente congelado.
+ * @throws {DteError} EN: `INVALID_OPTION { field }`, `MISSING_FIELD { field }`, `INVALID_RUT { field }`. ES: los mismos códigos.
+ */
+export const createPortalClient = (options: PortalClientOptions): PortalClient => {
+  assertEnvironment(options.environment)
+  if (!options.certificate) throw new DteError('MISSING_FIELD', { field: 'certificate' })
+  return buildClient(options, { certificate: options.certificate, passwordSignIn: null })
+}
+
+/**
+ * EN: Options of `unstable_createPasswordPortalClient`: those of `createPortalClient` without the certificate, with who
+ * signs in and the password.
+ * ES: Opciones de `unstable_createPasswordPortalClient`: las de `createPortalClient` sin el certificado, con quién
+ * ingresa y la clave.
+ */
+export type PasswordPortalClientOptions = Omit<PortalClientOptions, 'certificate'> & {
+  /** EN: RUT of the person who signs in: the taxpayer or a representative of the company. ES: `rutcntr` — RUT de la persona que ingresa: el contribuyente o un representante de la empresa. */
+  readonly userRut: string
+  /** EN: Gives the tax password each time a login needs it; it may read a keychain or ask its user. ES: `clave` — Entrega la clave tributaria cada vez que un ingreso la necesita; puede leer un llavero o pedírsela a su usuario. */
+  readonly password: () => string | Promise<string>
+}
+
+/**
+ * EN: **Unstable**: its shape may change in any version, a patch included. This login has not been run by this library
+ * against the SII yet; once it has, it becomes `createPasswordPortalClient`.
+ *
+ * A portal client that signs in with the RUT and the tax password of a person (the SII's "Clave Tributaria") instead of
+ * a certificate, for whoever has no certificate at hand. Every portal function takes it as it takes the client of
+ * `createPortalClient`. The password is a function, asked for when a login needs it and never kept: the client holds no
+ * password, the capture port writes `clave=[redacted]`, and no message of an error or of the logger carries it. The SII
+ * locks a password after a few wrong attempts, so a password the SII refused is never sent again by the same client:
+ * the next login throws `SII_PORTAL_LOGIN_FAILED` with `refusedBefore: true` and no request. The default transport is
+ * Node `https` on TLS 1.2 with no client certificate. What needs a signature, such as the certification runner, still
+ * takes a certificate where it asks for one.
+ * ES: **Inestable**: su forma puede cambiar en cualquier versión, incluso un patch. Este ingreso aún no lo ha corrido
+ * esta librería contra el SII; cuando lo haya hecho, pasa a llamarse `createPasswordPortalClient`.
+ *
+ * Un cliente del portal que ingresa con el RUT y la clave tributaria de una persona en vez de un certificado, para quien
+ * no tiene un certificado a mano. Toda función del portal lo recibe igual que al cliente de `createPortalClient`. La
+ * clave es una función, que se llama cuando un ingreso la necesita y nunca se guarda: el cliente no contiene ninguna
+ * clave, el puerto de captura escribe `clave=[redacted]`, y ningún mensaje de error ni del logger la lleva. El SII
+ * bloquea una clave tras unos pocos intentos fallidos, así que una clave que el SII rechazó nunca la vuelve a enviar el
+ * mismo cliente: el ingreso siguiente lanza `SII_PORTAL_LOGIN_FAILED` con `refusedBefore: true` y sin petición. El
+ * transporte por defecto es `https` de Node en TLS 1.2 sin certificado cliente. Lo que necesita una firma, como el
+ * runner de certificación, sigue recibiendo un certificado donde lo pide.
+ * @param options EN: client options. ES: opciones del cliente.
+ * @returns EN: the frozen client. ES: el cliente congelado.
+ * @throws {DteError} EN: `INVALID_OPTION { field }`, `MISSING_FIELD { field: 'password' }`, `INVALID_RUT { field }`. ES: los mismos códigos.
+ */
+export const unstable_createPasswordPortalClient = (options: PasswordPortalClientOptions): PortalClient => {
+  const { userRut, password, ...rest } = options
+  assertEnvironment(options.environment)
+  if (typeof password !== 'function') throw new DteError('MISSING_FIELD', { field: 'password' })
+  const passwordSignIn = Object.freeze({ rut: toSiiRut(userRut, 'userRut'), password })
+  return buildClient(rest, { certificate: null, passwordSignIn })
 }
 
 /**

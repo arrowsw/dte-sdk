@@ -351,6 +351,7 @@ const PORTAL_EXPORTS = [
   'requestCaf',
   'requestCafExact',
   'requestCafInBatches',
+  'unstable_createPasswordPortalClient',
   'unstable_fetchActivityVerification',
   'unstable_fetchExchangeMailbox',
   'unstable_replenishFolios',

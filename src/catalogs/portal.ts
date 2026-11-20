@@ -14,6 +14,20 @@ export const CERTIFICATE_LOGIN_URL = 'https://herculesr.sii.cl/cgi_AUT2000/CAutI
 export const CERTIFICATE_ENTRY_URL = 'https://zeusr.sii.cl/AUT2000/InicioAutenticacion/IngresoCertificado.html'
 
 /**
+ * EN: CGI that authenticates with the RUT and the tax password of a person. It is the certificate login's own CGI, on
+ * the host that asks for no client certificate.
+ * ES: CGI que autentica con el RUT y la clave tributaria de una persona. Es el mismo CGI del ingreso con certificado,
+ * en el host que no pide certificado cliente.
+ */
+export const PASSWORD_LOGIN_URL = 'https://zeusr.sii.cl/cgi_AUT2000/CAutInicio.cgi'
+
+/**
+ * EN: Entry page of the password login, visited first for the load balancer cookies.
+ * ES: Página de ingreso con RUT y clave, que se visita primero por las cookies del balanceador.
+ */
+export const PASSWORD_ENTRY_URL = 'https://zeusr.sii.cl/AUT2000/InicioAutenticacion/IngresoRutClave.html'
+
+/**
  * EN: Where an explicit login lands.
  * ES: Adónde llega un inicio de sesión explícito.
  */

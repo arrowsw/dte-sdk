@@ -49,6 +49,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A portal client that signs in with a tax password, from `dte-sdk/portal`.** The portal took a certificate alone.
+  `unstable_createPasswordPortalClient({ environment, userRut, password, companyRut })` makes a client that signs in
+  with the RUT and the tax password of a person (the SII's "Clave Tributaria"), posted to the same CGI the certificate
+  login uses, on the host that asks for no client certificate; every portal function takes it as it takes the client
+  of `createPortalClient`. `password` is a function, asked for each time a login needs it and never kept, so the
+  client holds no password and writing it down writes none. The capture port writes the login form as
+  `clave=[redacted]`, and no error or log message carries the password. The SII locks a password after a few wrong
+  attempts, so a password it refused is never sent again by the same client: the next login throws
+  `SII_PORTAL_LOGIN_FAILED` with `refusedBefore: true` and makes no request. The session is kept under a key of its
+  own, a digest of the RUT that signs in. It carries the `unstable_` prefix because dte-sdk has not run this login
+  against the SII yet. `PortalClient.certificate` is null on such a client and the new `passwordSignIn` is null on a
+  certificate's; new types `PasswordPortalClientOptions`, `PortalPasswordSignIn` and `PortalSignIn`.
+  - **What to change:** nothing for a client made with `createPortalClient`. Code that reads `portal.certificate` of
+    a `PortalClient` it did not make now gets `Certificate | null`.
 - **The runtime's own RSA signs, checked against the JavaScript engine.** Every signature is RSA-SHA1 with PKCS#1
   v1.5, which is deterministic, and it was worked out in JavaScript: about 12 ms for a 2048-bit key on a current
   laptop, against 0.35 ms for the RSA of Node, so the signatures of an envelope of 500 receipts took about 6 seconds.
