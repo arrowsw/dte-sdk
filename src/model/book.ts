@@ -195,9 +195,9 @@ export type BookEntryInput = {
   readonly otherTaxes?: readonly BookOtherTax[]
   /** EN: Tax without credit right, purchases. ES: `MntSinCred` — Impuesto sin derecho a crédito, compras. */
   readonly nonCreditableTax?: number
-  /** EN: Fully withheld VAT. ES: `IVARetTotal` — IVA retenido total. */
+  /** EN: Fully withheld VAT, on a sale line alone: a purchase line carries it in `otherTaxes` under code 15, and is refused with this field. ES: `IVARetTotal` — IVA retenido total, solo en una línea de venta: una línea de compra lo lleva en `otherTaxes` bajo el código 15, y se rechaza con este campo. */
   readonly totalVatWithheld?: number
-  /** EN: Partly withheld VAT. ES: `IVARetParcial` — IVA retenido parcial. */
+  /** EN: Partly withheld VAT, on a sale line alone: a purchase line carries it in `otherTaxes` under its withholding code, and is refused with this field. ES: `IVARetParcial` — IVA retenido parcial, solo en una línea de venta: una línea de compra lo lleva en `otherTaxes` bajo su código de retención, y se rechaza con este campo. */
   readonly partialVatWithheld?: number
   /** EN: 65 % credit of construction companies, sales. ES: `CredEC` — Crédito 65 % de empresas constructoras, ventas. */
   readonly constructionCredit?: number

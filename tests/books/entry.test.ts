@@ -188,6 +188,23 @@ describe('normalizeBookEntry on a sale book', () => {
 })
 
 describe('normalizeBookEntry on a purchase book', () => {
+  test.each(['totalVatWithheld', 'partialVatWithheld'] as const)(
+    '%s is refused: it is a field of the sales detail, and a purchase line carries the withholding under its code',
+    (field) => {
+      const purchaseInvoice = { ...line, type: 46, netAmount: 100, vatAmount: 19 }
+      expect(() => normalizeBookEntry({ ...purchaseInvoice, [field]: 19 }, { ...purchase, index: 3 })).toThrow(
+        expect.objectContaining({ code: 'INVALID_OPTION', details: { field, index: 3 } }),
+      )
+      // The same amount where each side takes it.
+      expect(normalizeBookEntry({ ...purchaseInvoice, [field]: 19 }, sale).entry).toMatchObject({
+        [field]: 19,
+        totalAmount: 100,
+      })
+      const underItsCode = { ...purchaseInvoice, otherTaxes: [{ code: 15, rate: 19, amount: 19 }] }
+      expect(normalizeBookEntry(underItsCode, purchase).entry.totalAmount).toBe(100)
+    },
+  )
+
   test('emits what was given, without zeros', () => {
     expect(normalizeBookEntry({ ...line, exemptAmount: 500 }, purchase).entry).toEqual({
       ...line,

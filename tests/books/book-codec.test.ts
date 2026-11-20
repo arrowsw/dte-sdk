@@ -37,8 +37,6 @@ const fullLine = {
   freeZoneTax: 11,
   otherTaxes: [{ code: 28, rate: 1, amount: 12 }],
   nonCreditableTax: 13,
-  totalVatWithheld: 14,
-  partialVatWithheld: 15,
   constructionCredit: 16,
   containerDeposit: 17,
   settlement: { issuerRut: SUPPLIER_RUT, netValue: 18, exemptValue: 19, vatValue: 20 },
@@ -97,8 +95,6 @@ describe('toSiiPurchaseSalesBook', () => {
       'Ley18211',
       'OtrosImp',
       'MntSinCred',
-      'IVARetTotal',
-      'IVARetParcial',
       'CredEC',
       'DepEnvase',
       'Liquidaciones',
@@ -147,8 +143,6 @@ describe('toSiiPurchaseSalesBook', () => {
       'TotLey18211',
       'TotOtrosImp',
       'TotImpSinCredito',
-      'TotIVARetTotal',
-      'TotIVARetParcial',
       'TotCredEC',
       'TotDepEnvase',
       'TotLiquidaciones',
@@ -174,6 +168,44 @@ describe('toSiiPurchaseSalesBook', () => {
 
   test('a line with every field validates against the official schema', async () => {
     expect(await validateAgainstXsd(signPurchaseSalesBook(book, certificate).xml, 'LibroCV')).toEqual([])
+  })
+
+  test('the withheld VAT of a sale line reaches its two tags, after the other taxes, and the summary with it', async () => {
+    // `IVARetTotal` and `IVARetParcial` are of the sales detail alone, so they have a sale line of their own here.
+    const sales = createPurchaseSalesBook({
+      cover: saleCover,
+      entries: [
+        {
+          type: 46,
+          folio: 6,
+          netAmount: 1000,
+          vatAmount: 190,
+          otherTaxes: [{ code: 24, rate: 31.5, amount: 12 }],
+          totalVatWithheld: 14,
+          partialVatWithheld: 15,
+          constructionCredit: 16,
+        },
+      ],
+      now: FIXED_NOW,
+      id: 'LIBRO_TEST',
+    })
+    const between = (keys: readonly string[], from: string, to: string): readonly string[] =>
+      keys.slice(keys.indexOf(from), keys.indexOf(to) + 1)
+    const written = toSiiPurchaseSalesBook(sales)
+    expect(between(Object.keys(written.Detalle?.[0] ?? {}), 'OtrosImp', 'CredEC')).toEqual([
+      'OtrosImp',
+      'IVARetTotal',
+      'IVARetParcial',
+      'CredEC',
+    ])
+    expect(written.Detalle?.[0]).toMatchObject({ IVARetTotal: 14, IVARetParcial: 15 })
+    expect(between(Object.keys(written.ResumenPeriodo?.TotalesPeriodo[0] ?? {}), 'TotOtrosImp', 'TotCredEC')).toEqual([
+      'TotOtrosImp',
+      'TotIVARetTotal',
+      'TotIVARetParcial',
+      'TotCredEC',
+    ])
+    expect(await validateAgainstXsd(signPurchaseSalesBook(sales, certificate).xml, 'LibroCV')).toEqual([])
   })
 
   test('zero counters and optional amounts are omitted, and the required ones stay', async () => {
