@@ -666,13 +666,13 @@ against the SII by dte-sdk yet, so its shape may change in any version. Sending 
 
 The holder of an invoice assigns its credit to a financier, under Ley 19.983, with an electronic assignment file
 (Archivo Electrónico de Cesión, AEC) registered in the SII's public registry of credit transfers (RPETC).
-`createAssignment` builds and signs that file from the signed document, as it was sent, with no network:
+`unstable_createAssignment` builds and signs that file from the signed document, as it was sent, with no network:
 
 ```typescript
-import { createAssignment, verifyAssignment } from 'dte-sdk'
+import { unstable_createAssignment, unstable_verifyAssignment } from 'dte-sdk'
 import { validateAgainstSchema } from 'dte-sdk/schemas'
 
-const aec = createAssignment({
+const aec = unstable_createAssignment({
   document: signed.xml, // the DTE as it was sent: 33, 34, 46 or 43
   assignor: {
     rut: '76543210-3',
@@ -692,7 +692,7 @@ const aec = createAssignment({
   certificate, // signs the assigned document's zone and the whole file
 })
 await validateAgainstSchema(aec) // [] — by AEC_v10.xsd
-verifyAssignment(aec).valid // true: the document's own signature and the file's four zones
+unstable_verifyAssignment(aec).valid // true: the document's own signature and the file's four zones
 ```
 
 The file follows Formato Archivo Electrónico de Cesión 1.1 and `AEC_v10.xsd`: the document embedded byte for byte,
@@ -707,16 +707,20 @@ names another RUT, an amount that is not a whole number from 1 to the document's
 of the goods, so it carries the sworn statement the format words for that case (`DeclaracionJurada`), naming the
 assignor, the assignee and the document's debtor. `otherTerms`, `debtorEmail` and `contact` are optional.
 
-`createReassignment({ previous, ...terms })` builds a later assignment on top of an earlier file: every signature of
-that file must verify, its zones are carried over as they were signed, and the new assignment, made by the previous
-assignee, gets the next `SeqCesion`, up to 40 (`MAX_ASSIGNMENTS`). `verifyAssignment(xml)` checks every signature of a
-file where it stands in it, and says which one fails. Both builders run it on the file they built and hand back none
+`unstable_createReassignment({ previous, ...terms })` builds a later assignment on top of an earlier file: every
+signature of that file must verify, its zones are carried over as they were signed, and the new assignment, made by
+the previous assignee, gets the next `SeqCesion`, up to 40 (`MAX_ASSIGNMENTS`). `unstable_verifyAssignment(xml)` checks
+every signature of a file where it stands in it, and says which one fails. Both builders run it on the file they built and hand back none
 that does not verify. That a previous file verifies says nobody changed it after it was signed, not who signed it: its
 earlier assignments are not compared with the document nor with each other, beyond their numbering and the last
 assignee. A `DTE` cut from an envelope must declare the SII's namespace itself, as the ones dte-sdk writes do.
 
-Registering the file is a call to the SII, and it is unstable: neither function has been run against the SII yet, and
-the format does not describe the registry's services, so their shape may change in any release.
+The two builders and the verifier are unstable: no file they built has been registered at the SII yet, and what the
+registry takes is the only judge of the choices in them (the wording of the sworn statement, the IDs of the zones,
+what the file declares above them), so they may change in any release.
+
+Registering the file is a call to the SII, and it is unstable as well: neither function has been run against the SII
+yet, and the format does not describe the registry's services, so their shape may change in any release.
 
 ```typescript
 import { unstable_queryAssignmentUploadStatus, unstable_uploadAssignment } from 'dte-sdk'
@@ -930,8 +934,9 @@ The VAT a purchase invoice (45, 46) withholds comes off the line total on both s
 carries it in its own fields (the format of the book, sections 2.4 and 3.4). The sales detail of who received the
 invoice has `totalVatWithheld` and `partialVatWithheld` (`IVARetTotal`, `IVARetParcial`). The purchase detail of who
 issued it has neither: there the withheld VAT goes in `otherTaxes` under a withholding code, 15 with the rate of the
-tax when the whole VAT was withheld, and that amount is what the formula takes off. `bookEntryFromDocument` follows
-the `operation` it is given.
+tax when the whole VAT was withheld, and that amount is what the formula takes off. A purchase line that brings
+`totalVatWithheld` or `partialVatWithheld` is refused with `INVALID_OPTION`. `bookEntryFromDocument` follows the
+`operation` it is given.
 
 Their use today is narrow. The RCV replaced the purchase and sales book in production from period
 2017-08, and the guide book is sent only when the SII asks for it; both are still part of the

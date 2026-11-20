@@ -26,18 +26,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A purchase book reports the VAT a purchase invoice withholds where the format puts it.** The format of the book
   (Información Electrónica de Compras y Ventas 3.0, sections 2.4 and 3.4) gives each side its own fields: the sales
   detail has `IVARetTotal` and `IVARetParcial`, which the schema itself marks "(LV)", and the purchase detail has
-  neither, and takes the withheld VAT in `OtrosImp` under a withholding code, 15 with the rate of the tax when the
-  whole VAT was withheld, and off `MntTotal`. Three things followed the sales side on a purchase book and now follow
-  the format. The line total of a purchase line takes off the amount of `otherTaxes` under a withholding code, and
-  `totalVatWithheld` and `partialVatWithheld` take no part in it; a sale line is as before. `bookEntryFromDocument`
-  with `operation: 'purchase'` puts the withholding of code 15 in `otherTaxes`, with the rate the document gives it,
-  and keeps `totalVatWithheld` for `operation: 'sale'`. And the certification purchase book writes the withholding of
-  a purchase invoice as `OtrosImp` with code 15 and rate 19, where it wrote the rate as 0.19 and `IVARetTotal` beside
-  it; the line total is still the net amount.
-  - **What to change:** nothing for a sales book. On a purchase book, a line that brought `totalVatWithheld` and no
-    explicit `totalAmount` now totals net plus VAT: give the withheld VAT in `otherTaxes` with code 15 instead. A line
-    with an explicit `totalAmount` keeps it, and a difference with the formula is reported in `totalMismatches`, as
-    always.
+  neither, and takes the withheld VAT in `OtrosImp` under a withholding code, 15 with the rate of the tax when the whole
+  VAT was withheld, and off `MntTotal`. Three things followed the sales side on a purchase book and now follow the
+  format. The line total of a purchase line takes off the amount of `otherTaxes` under a withholding code, and a
+  purchase line that brings `totalVatWithheld` or `partialVatWithheld`, which would be written and leave the total as if
+  nothing had been withheld, is refused with `INVALID_OPTION` and the field in `details.field`; a sale line is as
+  before. `bookEntryFromDocument` with `operation: 'purchase'` puts the withholding of code 15 in `otherTaxes`, with the
+  rate the document gives it, and keeps `totalVatWithheld` for `operation: 'sale'`. And the certification purchase book
+  writes the withholding of a purchase invoice as `OtrosImp` with code 15 and rate 19, where it wrote the rate as 0.19
+  and `IVARetTotal` beside it; the line total is still the net amount.
+  - **What to change:** nothing for a sales book. On a purchase book, a line that brought `totalVatWithheld` or
+    `partialVatWithheld` is now refused: give the withheld VAT in `otherTaxes` under its withholding code, 15 for the
+    whole tax, instead. A line with an explicit `totalAmount` keeps it, and a difference with the formula is reported in
+    `totalMismatches`, as always.
 - **The stamp is always printed at error correction level 5.** The level was left to the barcode library, which picks
   it by the size of the data and lowers or raises it to fill the symbol: 5 for a stamp of the usual size, and nothing
   held it there. It is now fixed at 5, the level the SII's instructions ask for (section A.2.5). And a stamp with a
@@ -93,37 +94,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **What to change:** nothing for the other types. Code that switches over `DocumentType`, or keeps a record keyed by
     it, has three new members; `HeaderOptions.serviceIndicator` also takes `ExportServiceIndicator`.
 - **The assignment of an invoice: the electronic assignment file (AEC), built and signed, and its registration.** The
-  README listed the assignment of invoices as planned after the first certification. `createAssignment(input)` builds
-  and signs, with no network, the file with which the creditor of a document assigns it to a financier under Ley
+  README listed the assignment of invoices as planned after the first certification. `unstable_createAssignment(input)`
+  builds and signs, with no network, the file with which the creditor of a document assigns it to a financier under Ley
   19.983, as Formato Archivo Electrónico de Cesión 1.1 and `AEC_v10.xsd` define it: the signed `DTE` embedded byte for
-  byte, so its own signature still verifies, in a signed `DocumentoDTECedido`; the `DocumentoCesion` with `SeqCesion`
-  1, signed by each of one to three authorized signers (`RUTAutorizado`) with their own certificate, in their order;
-  and the whole file signed as `DocumentoAEC`. Only the SII's namespace is declared above the zones, so nothing the
-  file declares changes what a zone's signature covers. The file carries no electronic receipt of the goods, so it
-  carries the sworn statement the format words for that case (`DeclaracionJurada`), with the assignor, the assignee
-  and the debtor filled in. Before signing it refuses a type other than 33, 34, 46 and 43 (`ASSIGNABLE_DOCUMENT_TYPES`,
+  byte, so its own signature still verifies, in a signed `DocumentoDTECedido`; the `DocumentoCesion` with `SeqCesion` 1,
+  signed by each of one to three authorized signers (`RUTAutorizado`) with their own certificate, in their order; and
+  the whole file signed as `DocumentoAEC`. Only the SII's namespace is declared above the zones, so nothing the file
+  declares changes what a zone's signature covers. The file carries no electronic receipt of the goods, so it carries
+  the sworn statement the format words for that case (`DeclaracionJurada`), with the assignor, the assignee and the
+  debtor filled in. Before signing it refuses a type other than 33, 34, 46 and 43 (`ASSIGNABLE_DOCUMENT_TYPES`,
   `isAssignableDocumentType`), a document whose signature does not verify, a first assignment by anyone but the
-  document's creditor (the issuer of a 33 or 34, the receiver of a 46 or 43), no signers or more than three, a
-  signer's certificate that names another RUT, an amount that is not a whole number from 1 to the document's total,
-  dates outside 2003-04-01 to 2050-12-31, and texts past the stricter of the format's and the schema's lengths.
-  `createReassignment({ previous, ...terms })` builds the next assignment on top of an earlier file, by its last
-  assignee, once every signature of that file verifies, up to 40 (`MAX_ASSIGNMENTS`). `verifyAssignment(xml)` checks
-  every signature of a file, the document's own included, where it stands in the file, and takes for an assignment's
-  signatures only its own children. Both builders run it on the file they built and return none that does not verify:
-  a file whose signatures do not stand, as with a zone ID the document also uses, is `SIGNATURE_INVALID`. Registering a
-  file in the SII's registry of credit transfers is `unstable_uploadAssignment(sii, { xml, notificationEmail })`, a
-  multipart upload to `RTCAnotEnvio.cgi` held to the `RutCedente` of the file's cover and never sent again after an
-  answer, and the state of the upload is `unstable_queryAssignmentUploadStatus(sii, { trackId })`, `getEstEnvio` of
-  `wsRPETCConsulta`, whose codes come back unclassified. Both are unstable: dte-sdk has not run them against the SII,
-  and the format does not describe these services. `SII_SCHEMAS` has a ninth schema, `AEC`, with its three files
-  (`AEC_v10.xsd`, `Cesion_v10.xsd`, `DTECedido_v10.xsd`), and every file the tests build validates against it. New error
-  code `SIGNATURE_INVALID`, new upload kind `assignment`, new endpoints `ASSIGNMENT_ENDPOINTS`
-  (`SiiEndpoints.assignments`) and new types `AssignableDocumentType`, `AssignmentCertificate`, `AssignmentParty`,
-  `AssignmentSigner`, `Assignor`, `AssignmentContact`, `AssignmentTerms`, `AssignmentInput`, `ReassignmentInput`,
-  `AssignmentVerification`, `AssignmentEndpoints`, `AssignmentUploadInput`, `AssignmentUploadStatusInput` and
-  `AssignmentUploadStatus`. Not written yet: the PDF image of the document, the electronic receipts and the image of a
-  manual one. `dte-sdk` grows from 40.12 kB to 43.06 kB, over its 42 kB limit, which goes to 44 kB, and
-  `dte-sdk/schemas` from 23.59 kB to 24.64 kB, over its 24 kB limit, which goes to 26 kB.
+  document's creditor (the issuer of a 33 or 34, the receiver of a 46 or 43), no signers or more than three, a signer's
+  certificate that names another RUT, an amount that is not a whole number from 1 to the document's total, dates outside
+  2003-04-01 to 2050-12-31, and texts past the stricter of the format's and the schema's lengths.
+  `unstable_createReassignment({ previous, ...terms })` builds the next assignment on top of an earlier file, by its
+  last assignee, once every signature of that file verifies, up to 40 (`MAX_ASSIGNMENTS`).
+  `unstable_verifyAssignment(xml)` checks every signature of a file, the document's own included, where it stands in the
+  file, and takes for an assignment's signatures only its own children. Both builders run it on the file they built and
+  return none that does not verify: a file whose signatures do not stand, as with a zone ID the document also uses, is
+  `SIGNATURE_INVALID`. The three carry the `unstable_` prefix because no file they built has been registered at the SII
+  yet, and what the registry takes is the only judge of the choices in them: the wording of the sworn statement, the IDs
+  of the zones and what the file declares above them. Registering a file in the SII's registry of credit transfers is
+  `unstable_uploadAssignment(sii, { xml, notificationEmail })`, a multipart upload to `RTCAnotEnvio.cgi` held to the
+  `RutCedente` of the file's cover and never sent again after an answer, and the state of the upload is
+  `unstable_queryAssignmentUploadStatus(sii, { trackId })`, `getEstEnvio` of `wsRPETCConsulta`, whose codes come back
+  unclassified. Both are unstable: dte-sdk has not run them against the SII, and the format does not describe these
+  services. `SII_SCHEMAS` has a ninth schema, `AEC`, with its three files (`AEC_v10.xsd`, `Cesion_v10.xsd`,
+  `DTECedido_v10.xsd`), and every file the tests build validates against it. New error code `SIGNATURE_INVALID`, new
+  upload kind `assignment`, new endpoints `ASSIGNMENT_ENDPOINTS` (`SiiEndpoints.assignments`) and new types
+  `AssignableDocumentType`, `AssignmentCertificate`, `AssignmentParty`, `AssignmentSigner`, `Assignor`,
+  `AssignmentContact`, `AssignmentTerms`, `AssignmentInput`, `ReassignmentInput`, `AssignmentVerification`,
+  `AssignmentEndpoints`, `AssignmentUploadInput`, `AssignmentUploadStatusInput` and `AssignmentUploadStatus`. Not
+  written yet: the PDF image of the document, the electronic receipts and the image of a manual one. `dte-sdk` grows
+  from 40.12 kB to 43.06 kB, over its 42 kB limit, which goes to 44 kB, and `dte-sdk/schemas` from 23.59 kB to 24.64 kB,
+  over its 24 kB limit, which goes to 26 kB.
   - **What to change:** nothing. Code that switches over `UploadKind` has a new member, `assignment`, and code that
     builds a whole `SiiEndpoints` by hand adds `assignments`.
 - **A new entry point, `dte-sdk/schemas`: validation against the SII's schemas, as an option.** The tests validated what
