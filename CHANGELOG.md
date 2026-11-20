@@ -49,6 +49,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The assignment of an invoice: the electronic assignment file (AEC), built and signed, and its registration.** The
+  README listed the assignment of invoices as planned after the first certification. `createAssignment(input)` builds
+  and signs, with no network, the file with which the creditor of a document assigns it to a financier under Ley
+  19.983, as Formato Archivo Electrónico de Cesión 1.1 and `AEC_v10.xsd` define it: the signed `DTE` embedded byte for
+  byte, so its own signature still verifies, in a signed `DocumentoDTECedido`; the `DocumentoCesion` with `SeqCesion`
+  1, signed by each of one to three authorized signers (`RUTAutorizado`) with their own certificate, in their order;
+  and the whole file signed as `DocumentoAEC`. Only the SII's namespace is declared above the zones, so nothing the
+  file declares changes what a zone's signature covers. The file carries no electronic receipt of the goods, so it
+  carries the sworn statement the format words for that case (`DeclaracionJurada`), with the assignor, the assignee
+  and the debtor filled in. Before signing it refuses a type other than 33, 34, 46 and 43 (`ASSIGNABLE_DOCUMENT_TYPES`,
+  `isAssignableDocumentType`), a document whose signature does not verify, a first assignment by anyone but the
+  document's creditor (the issuer of a 33 or 34, the receiver of a 46 or 43), no signers or more than three, a
+  signer's certificate that names another RUT, an amount that is not a whole number from 1 to the document's total,
+  dates outside 2003-04-01 to 2050-12-31, and texts past the stricter of the format's and the schema's lengths.
+  `createReassignment({ previous, ...terms })` builds the next assignment on top of an earlier file, by its last
+  assignee, once every signature of that file verifies, up to 40 (`MAX_ASSIGNMENTS`). `verifyAssignment(xml)` checks
+  every signature of a file, the document's own included, where it stands in the file. Registering a file in the SII's
+  registry of credit transfers is `unstable_uploadAssignment(sii, { xml, notificationEmail })`, a multipart upload to
+  `RTCAnotEnvio.cgi` held to the `RutCedente` of the file's cover and never sent again after an answer, and the state
+  of the upload is `unstable_queryAssignmentUploadStatus(sii, { trackId })`, `getEstEnvio` of `wsRPETCConsulta`, whose
+  codes come back unclassified. Both are unstable: dte-sdk has not run them against the SII, and the format does not
+  describe these services. `SII_SCHEMAS` has a ninth schema, `AEC`, with its three files (`AEC_v10.xsd`,
+  `Cesion_v10.xsd`, `DTECedido_v10.xsd`), and every file the tests build validates against it. New error code
+  `SIGNATURE_INVALID`, new upload kind `assignment`, new endpoints `ASSIGNMENT_ENDPOINTS` (`SiiEndpoints.assignments`)
+  and new types `AssignableDocumentType`, `AssignmentCertificate`, `AssignmentParty`, `AssignmentSigner`, `Assignor`,
+  `AssignmentContact`, `AssignmentTerms`, `AssignmentInput`, `ReassignmentInput`, `AssignmentVerification`,
+  `AssignmentEndpoints`, `AssignmentUploadInput`, `AssignmentUploadStatusInput` and `AssignmentUploadStatus`. Not
+  written yet: the PDF image of the document, the electronic receipts and the image of a manual one. `dte-sdk` grows
+  from 40.12 kB to 43.06 kB, over its 42 kB limit, which goes to 44 kB, and `dte-sdk/schemas` from 23.59 kB to
+  24.64 kB, over its 24 kB limit, which goes to 26 kB.
+  - **What to change:** nothing. Code that switches over `UploadKind` has a new member, `assignment`, and code that
+    builds a whole `SiiEndpoints` by hand adds `assignments`.
 - **A new entry point, `dte-sdk/schemas`: validation against the SII's schemas, as an option.** The tests validated
   what dte-sdk issues against the SII's schemas, and nothing did at run time; the README listed it as planned.
   `validateAgainstSchema(xml, { schema })` validates a document against the SII's own schema and returns what the

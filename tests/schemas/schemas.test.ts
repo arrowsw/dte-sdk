@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { createAssignment } from '../../src/assignment/build'
 import { signPurchaseSalesBook } from '../../src/books/purchase-sales'
 import {
   loadSchemaValidator,
@@ -10,6 +11,7 @@ import {
   type SchemaValidatorModule,
 } from '../../src/schemas'
 import { encodeLatin1 } from '../../src/text/latin1'
+import { firstAssignment } from '../support/assignment-fixtures'
 import { certificate } from '../support/book-fixtures'
 import { failure } from '../support/portal'
 import { envelopeXml, invoice } from '../support/printed-fixtures'
@@ -62,13 +64,14 @@ describe('schemaOf', () => {
     ['<ConsumoFolios>', 'ConsumoFolio'],
     ['<RespuestaDTE>', 'RespuestaEnvioDTE'],
     ['<EnvioRecibos>', 'EnvioRecibos'],
+    ['<AEC xmlns="http://www.sii.cl/SiiDte" version="1.0">', 'AEC'],
   ])('%s is %s', (xml, name) => {
     expect(schemaOf(xml)).toBe(name)
     expect(schemaOf(new TextEncoder().encode(xml))).toBe(name)
   })
 
   test('a document dte-sdk carries no schema for, or no document at all, is null', () => {
-    expect(schemaOf('<AEC/>')).toBeNull()
+    expect(schemaOf('<Cesion/>')).toBeNull()
     expect(schemaOf('<Documento ID="x"/>')).toBeNull()
     expect(schemaOf('no es xml')).toBeNull()
     expect(schemaOf('')).toBeNull()
@@ -101,6 +104,13 @@ describe('validateAgainstSchema', () => {
     expect(await validateAgainstSchema(book.xml)).toEqual([])
   })
 
+  test('an assignment file, by the schema of its element, from its text and from the bytes of its file', async () => {
+    const assignment = createAssignment(firstAssignment())
+    expect(schemaOf(assignment)).toBe('AEC')
+    expect(await validateAgainstSchema(assignment)).toEqual([])
+    expect(await validateAgainstSchema(encodeLatin1(assignment))).toEqual([])
+  })
+
   test('what the schema says against a document comes back as issues, with their line', async () => {
     const broken = envelope
       .replace('<TipoDTE>33</TipoDTE>', '<TipoDTE>999</TipoDTE>')
@@ -123,8 +133,8 @@ describe('validateAgainstSchema', () => {
   test('a document with no schema here, or a schema that is not one, is refused before the validator loads', async () => {
     const load = jest.fn()
     for (const call of [
-      validateAgainstSchema('<AEC/>', { load }),
-      validateAgainstSchema(envelope, { schema: 'AEC' as never, load }),
+      validateAgainstSchema('<Cesion/>', { load }),
+      validateAgainstSchema(envelope, { schema: 'Cesion' as never, load }),
       validateAgainstSchema(envelope, { schema: 'toString' as never, load }),
     ]) {
       const error = await failure(call)

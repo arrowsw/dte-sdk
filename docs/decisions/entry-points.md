@@ -9,16 +9,16 @@ on 2026-11-14 to ship inside the package with their validator as an optional pee
 
 | Entry | Holds | Size | Reaches `node:` |
 |---|---|---|---|
-| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, SII web services client over `fetch`, public registry of issuers | 40.15 kB | Not by import: it asks the runtime for `node:crypto` at the first signature |
-| `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.38 kB | Yes, on first use |
-| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 82.03 kB | Yes, on first use |
+| `dte-sdk` | Documents, stamps, signatures, envelopes, books, verification of received documents, the assignment of invoices, SII web services client over `fetch`, public registry of issuers | 43.06 kB | Not by import: it asks the runtime for `node:crypto` at the first signature |
+| `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.4 kB | Yes, on first use |
+| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 82.11 kB | Yes, on first use |
 | `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 19.59 kB | Yes, on first use |
 | `dte-sdk/catalogs` | The SII's large code tables: the business activities | 10.65 kB | No |
-| `dte-sdk/schemas` | The SII's schemas as text and the validation of a document against them; `xmllint-wasm` is an optional peer | 23.59 kB | No |
+| `dte-sdk/schemas` | The SII's schemas as text and the validation of a document against them; `xmllint-wasm` is an optional peer | 24.64 kB | No |
 
 Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
 it. The decision was taken at phase 5b-2, which took `dte-sdk/portal` from 39.35 kB to 55.86 kB; each limit was then the
-measure rounded up to the next 2 kB. The sizes above were measured again on 2026-11-16, for 0.14.0. `createDirectoryTokenCache` took
+measure rounded up to the next 2 kB. The sizes above were measured again on 2026-11-19, with the assignment of invoices. `createDirectoryTokenCache` took
 `dte-sdk/node` from 4.19 kB to 4.71 kB, and the CAF file search, which parses CAFs, took it to 6.30 kB, over its 6 kB
 limit, which went to 8 kB. The SII office table took `dte-sdk/pdf` from 8.49 kB to 10.45 kB. That table is about 1.9 kB
 of data that the renderer needs for its default office, so it fits neither the root (30.49 kB plus the table is
@@ -124,6 +124,14 @@ text, 23.59 kB compressed, which no other entry should carry for whoever never v
 entry and not files beside it, so the entry needs no file system and no way to find its own directory, which the
 tests, run from source, and the shipped ES modules do not share. Its limit is the measure rounded up to the next 2 kB,
 24 kB; the other entries did not move.
+The assignment of invoices, also after 0.14.0, measured before and after on the same machine: the builder, the reader
+and verifier of the file and the two unstable calls to the registry of credit transfers took `dte-sdk` from 40.12 kB to
+43.06 kB, over its 42 kB limit, which went to 44 kB; the three schema files of the assignment file took
+`dte-sdk/schemas` from 23.59 kB to 24.64 kB, over its 24 kB limit, which went to 26 kB. The registry's endpoints in the
+client, the upload kind and the new error code took `dte-sdk/node` from 7.38 kB to 7.4 kB, `dte-sdk/portal` from
+82.01 kB to 82.11 kB and `dte-sdk/pdf` from 19.58 kB to 19.59 kB, all under their limits; `dte-sdk/catalogs` did not
+move. The assignment stays in the root, beside the answers to a received envelope it resembles: it builds on the
+document's signature and the upload of the web services client, which the root already carries.
 
 ## Why
 

@@ -152,6 +152,8 @@ export type SoapCallInput = {
   readonly method: string
   /** EN: Parameters in the order the WSDL declares them (`pszXml`, `Token`…). ES: Parámetros en el orden que declara el WSDL (`pszXml`, `Token`…). */
   readonly params: readonly SoapParam[]
+  /** EN: Namespace of the operation, for a service that asks for one; none by default. ES: Namespace de la operación, para un servicio que lo pide; ninguno por defecto. */
+  readonly namespace?: string
   /** EN: Attempt number (1-based), for the capture and logs. ES: Número de intento (desde 1), para la captura y los logs. */
   readonly attempt: number
   /** EN: Per-call timeout and cancellation. ES: Timeout y cancelación de esta llamada. */
@@ -170,7 +172,7 @@ export const soapCall = async (sii: SiiClient, input: SoapCallInput): Promise<st
     method: 'POST',
     url: input.url,
     headers: SOAP_HEADERS,
-    body: encodeUtf8(buildSoapEnvelope({ method: input.method, params: input.params })),
+    body: encodeUtf8(buildSoapEnvelope({ method: input.method, params: input.params, namespace: input.namespace })),
     timeoutMs: timeoutFor(sii, 'soap', input.overrides),
     signal: input.overrides?.signal,
     attempt: input.attempt,

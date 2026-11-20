@@ -66,11 +66,12 @@ export {
   SII_HOSTS,
   SOAP_ENDPOINTS,
   REST_ENDPOINTS,
+  ASSIGNMENT_ENDPOINTS,
   CLAIM_WS_ENDPOINTS,
   CLAIM_WSDL_ENDPOINTS,
   UPLOAD_USER_AGENT,
 } from './catalogs/endpoints'
-export type { SoapEndpoints, RestEndpoints } from './catalogs/endpoints'
+export type { SoapEndpoints, RestEndpoints, AssignmentEndpoints } from './catalogs/endpoints'
 export {
   classifyUploadStatus,
   uploadVerdict,
@@ -198,6 +199,26 @@ export type {
   ResultAnswerInput,
   GoodsReceiptsInput,
 } from './document/answer'
+export {
+  ASSIGNABLE_DOCUMENT_TYPES,
+  MAX_ASSIGNMENTS,
+  isAssignableDocumentType,
+  createAssignment,
+  createReassignment,
+} from './assignment/build'
+export type {
+  AssignableDocumentType,
+  AssignmentCertificate,
+  AssignmentParty,
+  AssignmentSigner,
+  Assignor,
+  AssignmentContact,
+  AssignmentTerms,
+  AssignmentInput,
+  ReassignmentInput,
+} from './assignment/build'
+export { verifyAssignment } from './assignment/read'
+export type { AssignmentVerification } from './assignment/read'
 export type {
   VerifyReceivedDocumentsOptions,
   ReceivedDocumentsVerification,
@@ -430,6 +451,8 @@ export type {
   ReceiverAnswer,
   ReceiverAnswerResult,
 } from './sii/claims'
+export { unstable_uploadAssignment, unstable_queryAssignmentUploadStatus } from './sii/assignment'
+export type { AssignmentUploadInput, AssignmentUploadStatusInput, AssignmentUploadStatus } from './sii/assignment'
 export { queryAuthorizedIssuer } from './sii/issuer-registry'
 export type { AuthorizedIssuer, IssuerRegistryClient } from './sii/issuer-registry'
 export type { AuthorizedDocumentType, IssuerRegistryEntry } from './portal/pages/issuer-registry'
