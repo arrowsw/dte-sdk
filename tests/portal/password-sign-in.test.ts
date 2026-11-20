@@ -2,13 +2,14 @@ import { unstable_createPasswordPortalClient } from '../../src/portal/client'
 import { validateExchangeUser } from '../../src/portal/exchange'
 import { ensurePage, openPortalSession, withPortalSession } from '../../src/portal/session'
 import { createMemoryCapture } from '../../src/sii/capture'
-import { textFingerprint } from '../../src/sii/token-cache'
+import { createMemoryTokenCache, textFingerprint } from '../../src/sii/token-cache'
 import { FIXED_NOW } from '../support/fixtures'
 import {
   failure,
   HERCULES,
   MAULLIN,
   PASSWORD_SESSION_KEY,
+  PASSWORD_SESSION_NAME,
   PASSWORD_USER_RUT,
   passwordPortalWith,
   SESSION_KEY,
@@ -37,6 +38,12 @@ describe('unstable_createPasswordPortalClient', () => {
     expect(Object.isFrozen(portal)).toBe(true)
     expect(portal.certificate).toBeNull()
     expect(portal.passwordSignIn).toMatchObject({ rut: PASSWORD_USER_RUT })
+    // With no session key given, each client gets a random one of its own.
+    expect(portal.passwordSignIn?.sessionKey).toMatch(/^[0-9a-f-]{36}$/)
+    expect(unstable_createPasswordPortalClient(options).passwordSignIn?.sessionKey).not.toBe(
+      portal.passwordSignIn?.sessionKey,
+    )
+    expect(unstable_createPasswordPortalClient({ ...options, sessionKey: 'k' }).passwordSignIn?.sessionKey).toBe('k')
     expect(Object.isFrozen(portal.passwordSignIn)).toBe(true)
     expect(portal.timeoutMs).toBe(20000)
     expect(typeof portal.transport).toBe('function')
@@ -58,6 +65,8 @@ describe('unstable_createPasswordPortalClient', () => {
     invalid({ environment: 'nope', password: undefined }, 'INVALID_OPTION', 'environment')
     invalid({ companyRut: 'nope' }, 'INVALID_RUT', 'companyRut')
     invalid({ timeoutMs: 0 }, 'INVALID_OPTION', 'timeoutMs')
+    invalid({ sessionKey: '' }, 'INVALID_OPTION', 'sessionKey')
+    invalid({ sessionKey: 7 }, 'INVALID_OPTION', 'sessionKey')
   })
 })
 
@@ -81,8 +90,10 @@ describe('signing in with a tax password', () => {
     expect(login.headers['referer']).toBe(ZEUS_LOGIN)
     expect(login.headers['cookie']).toBe('TS01=abc')
     expect(harness.asked()).toBe(1)
-    // The session is kept under a key of its own, which names nobody.
-    expect(PASSWORD_SESSION_KEY).toBe(`portal:password:${textFingerprint(PASSWORD_USER_RUT)}`)
+    // The session is kept under a key of its own, which names nobody: a digest of the RUT and of the session key.
+    expect(PASSWORD_SESSION_KEY).toBe(
+      `portal:password:${textFingerprint(`${PASSWORD_USER_RUT}:${PASSWORD_SESSION_NAME}`)}`,
+    )
     expect(PASSWORD_SESSION_KEY).not.toContain('12345678')
     const stored = await harness.portal.sessionCache.get(PASSWORD_SESSION_KEY)
     expect(JSON.parse(stored!.token)).toMatchObject({ 'NETSCAPE_LIVEWIRE.rut': '12345678' })
@@ -138,6 +149,41 @@ describe('signing in with a tax password', () => {
     expect(error.code).toBe('MISSING_FIELD')
     expect(error.details).toEqual({ field: 'password' })
     expect(harness.posted('CAutInicio')).toEqual([])
+  })
+})
+
+describe('a cached session and who may use it', () => {
+  // A session found in the cache is checked against a page of the portal before it is used.
+  const alive = { url: `${MAULLIN}/ad_empresa1`, reply: { body: COMPANY_FORM } }
+  const login = [entry, { url: ZEUS_LOGIN, method: 'POST' as const, reply: LOGIN_OK }, HOME, alive]
+
+  test('in a cache others share, naming the same RUT does not find the session of who signed in', async () => {
+    const sessionCache = createMemoryTokenCache()
+    // Neither client is given a session key, so each has a random one.
+    const owner = passwordPortalWith(login, { sessionCache, sessionKey: undefined })
+    await openPortalSession(owner.portal)
+    const other = passwordPortalWith([entry, { url: ZEUS_LOGIN, reply: REFUSED }], {
+      sessionCache,
+      sessionKey: undefined,
+      password: () => 'otra-clave',
+    })
+    // The second client has the RUT and not the password: it has to sign in, and the SII refuses it.
+    expect((await failure(openPortalSession(other.portal))).code).toBe('SII_PORTAL_LOGIN_FAILED')
+    expect(other.posted('CAutInicio')).toHaveLength(1)
+    // The owner's session is still there, and still its own.
+    await expect(openPortalSession(owner.portal)).resolves.toMatchObject({ reused: true })
+  })
+
+  test('a session key given on purpose shares the session, and another key does not', async () => {
+    const sessionCache = createMemoryTokenCache()
+    const first = passwordPortalWith(login, { sessionCache, sessionKey: 'secreto-de-ana' })
+    await openPortalSession(first.portal)
+    const restarted = passwordPortalWith([alive], { sessionCache, sessionKey: 'secreto-de-ana' })
+    await expect(openPortalSession(restarted.portal)).resolves.toMatchObject({ reused: true })
+    expect(restarted.asked()).toBe(0)
+    const stranger = passwordPortalWith(login, { sessionCache, sessionKey: 'otro-secreto' })
+    await expect(openPortalSession(stranger.portal)).resolves.toMatchObject({ reused: false })
+    expect(stranger.asked()).toBe(1)
   })
 })
 

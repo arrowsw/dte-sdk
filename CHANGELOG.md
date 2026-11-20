@@ -57,8 +57,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   client holds no password and writing it down writes none. The capture port writes the login form as
   `clave=[redacted]`, and no error or log message carries the password. The SII locks a password after a few wrong
   attempts, so a password it refused is never sent again by the same client: the next login throws
-  `SII_PORTAL_LOGIN_FAILED` with `refusedBefore: true` and makes no request. The session is kept under a key of its
-  own, a digest of the RUT that signs in. It carries the `unstable_` prefix because dte-sdk has not run this login
+  `SII_PORTAL_LOGIN_FAILED` with `refusedBefore: true` and makes no request. A session in the cache is used without
+  the password, so the key of a password session is random and of its client alone: in a cache shared with other
+  people, a client that merely names the same RUT finds no session and has to sign in. `sessionKey`, a secret of that
+  person, shares a session on purpose, across restarts for one. It carries the `unstable_` prefix because dte-sdk has
+  not run this login
   against the SII yet. `PortalClient.certificate` is null on such a client and the new `passwordSignIn` is null on a
   certificate's; new types `PasswordPortalClientOptions`, `PortalPasswordSignIn` and `PortalSignIn`.
   - **What to change:** nothing for a client made with `createPortalClient`. Code that reads `portal.certificate` of

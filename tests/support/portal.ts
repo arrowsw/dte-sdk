@@ -23,7 +23,9 @@ export const ZEUS_LOGIN = 'https://zeusr.sii.cl/cgi_AUT2000/CAutInicio.cgi'
 export const PASSWORD_USER_RUT = '12345678-5'
 // A made-up password, with the characters a form has to escape.
 export const TAX_PASSWORD = 'S3creta&=ñ %'
-export const PASSWORD_SESSION_KEY = `portal:password:${textFingerprint(PASSWORD_USER_RUT)}`
+// The harness gives its clients a session key, so a test can find the session in the cache.
+export const PASSWORD_SESSION_NAME = 'secreto-de-la-sesion'
+export const PASSWORD_SESSION_KEY = `portal:password:${textFingerprint(`${PASSWORD_USER_RUT}:${PASSWORD_SESSION_NAME}`)}`
 export const SESSION_COOKIES = {
   'NETSCAPE_LIVEWIRE.rut': '12345678',
   'NETSCAPE_LIVEWIRE.dv': '5',
@@ -100,6 +102,7 @@ export const passwordPortalWith = (
       asked += 1
       return TAX_PASSWORD
     },
+    sessionKey: PASSWORD_SESSION_NAME,
     companyRut: ISSUER_RUT,
     transport: fake.transport,
     now: () => FIXED_NOW,

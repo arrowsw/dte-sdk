@@ -774,7 +774,13 @@ The password is a function on purpose. The client holds no password, so logging 
 the capture port writes the login form as `clave=[redacted]`; and no error carries it. The SII locks a password after a
 few wrong attempts, so a password the SII refused is never sent again by the same client: the next login throws
 `SII_PORTAL_LOGIN_FAILED` with `refusedBefore: true` and makes no request, and trying another password takes a new
-client. A password session is kept apart from a certificate's, under a key that names nobody. It is unstable: dte-sdk
+client.
+
+A session in the cache is used without the password, so who can find it can use it. The key of a password session is
+therefore random and of its client alone: in a `sessionCache` shared with other people, a client that merely names the
+same RUT finds nothing and has to sign in. To keep a session across restarts, pass `sessionKey`, a secret of that
+person, never a value another caller could supply, such as the RUT. The key written in the cache is a digest, so it
+names nobody. It is unstable: dte-sdk
 has not run this login against the SII yet, so its shape may change in any version. What needs a signature, such as
 the certification runner, still takes a certificate where it asks for one.
 

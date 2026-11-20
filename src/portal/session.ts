@@ -552,11 +552,13 @@ export const forgetSession = (context: PortalContext): void => {
   context.state.loggedIn = false
 }
 
-// One session per sign-in: the certificate's by its fingerprint, the password's by a digest of the RUT that signs in,
-// so the key names no person where a cache writes it.
+// One session per sign-in. A certificate's goes by its fingerprint. A password's goes by a digest of the RUT that signs
+// in and of the session key of its client, which is random unless the caller gave one: a cached session is used without
+// the password, so the RUT alone, which anyone can name, must never be enough to find it in a cache others share. The
+// digest also keeps the person out of where a cache writes its keys.
 const cacheKey = (portal: PortalClient): string =>
   portal.certificate === null
-    ? `portal:password:${textFingerprint(portal.passwordSignIn.rut)}`
+    ? `portal:password:${textFingerprint(`${portal.passwordSignIn.rut}:${portal.passwordSignIn.sessionKey}`)}`
     : `portal:${certificateFingerprint(portal.certificate)}`
 
 const loadCookies = async (portal: PortalClient): Promise<CookieJar> => {

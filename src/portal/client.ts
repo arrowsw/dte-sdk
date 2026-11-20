@@ -65,6 +65,8 @@ export type PortalPasswordSignIn = {
   readonly rut: SiiRut
   /** EN: Gives the tax password, each time a login needs it. ES: `clave` — Entrega la clave tributaria, cada vez que un ingreso la necesita. */
   readonly password: () => string | Promise<string>
+  /** EN: What names this sign-in's session in the cache, beside the RUT: random and of this client alone unless the caller gave one. ES: Lo que nombra la sesión de este ingreso en la caché, junto al RUT: aleatorio y solo de este cliente salvo que quien llama haya dado uno. */
+  readonly sessionKey: string
 }
 
 /**
@@ -217,6 +219,17 @@ export type PasswordPortalClientOptions = Omit<PortalClientOptions, 'certificate
   readonly userRut: string
   /** EN: Gives the tax password each time a login needs it; it may read a keychain or ask its user. ES: `clave` — Entrega la clave tributaria cada vez que un ingreso la necesita; puede leer un llavero o pedírsela a su usuario. */
   readonly password: () => string | Promise<string>
+  /**
+   * EN: Names this sign-in's session in `sessionCache`, so another client of the same person finds it, after a restart
+   * for one. A cached session is used without the password, so whoever can name the key of a session can use it: give
+   * a secret of that person, never a value another caller could supply, such as the RUT. Without it the key is random
+   * and the session is of this client alone.
+   * ES: Nombra la sesión de este ingreso en `sessionCache`, para que otro cliente de la misma persona la encuentre,
+   * tras un reinicio por ejemplo. Una sesión en caché se usa sin la clave, así que quien pueda nombrar la llave de una
+   * sesión puede usarla: entregue un secreto de esa persona, nunca un valor que otro pueda dar, como el RUT. Sin ella
+   * la llave es aleatoria y la sesión es solo de este cliente.
+   */
+  readonly sessionKey?: string
 }
 
 /**
@@ -228,7 +241,9 @@ export type PasswordPortalClientOptions = Omit<PortalClientOptions, 'certificate
  * `createPortalClient`. The password is a function, asked for when a login needs it and never kept: the client holds no
  * password, the capture port writes `clave=[redacted]`, and no message of an error or of the logger carries it. The SII
  * locks a password after a few wrong attempts, so a password the SII refused is never sent again by the same client:
- * the next login throws `SII_PORTAL_LOGIN_FAILED` with `refusedBefore: true` and no request. The default transport is
+ * the next login throws `SII_PORTAL_LOGIN_FAILED` with `refusedBefore: true` and no request. A cached session needs no
+ * password to be used, so its key in the cache is random and of this client alone: a cache shared with other people
+ * never hands a session to who merely names the same RUT. `sessionKey` shares it on purpose. The default transport is
  * Node `https` on TLS 1.2 with no client certificate. What needs a signature, such as the certification runner, still
  * takes a certificate where it asks for one.
  * ES: **Inestable**: su forma puede cambiar en cualquier versión, incluso un patch. Este ingreso aún no lo ha corrido
@@ -239,18 +254,27 @@ export type PasswordPortalClientOptions = Omit<PortalClientOptions, 'certificate
  * clave es una función, que se llama cuando un ingreso la necesita y nunca se guarda: el cliente no contiene ninguna
  * clave, el puerto de captura escribe `clave=[redacted]`, y ningún mensaje de error ni del logger la lleva. El SII
  * bloquea una clave tras unos pocos intentos fallidos, así que una clave que el SII rechazó nunca la vuelve a enviar el
- * mismo cliente: el ingreso siguiente lanza `SII_PORTAL_LOGIN_FAILED` con `refusedBefore: true` y sin petición. El
+ * mismo cliente: el ingreso siguiente lanza `SII_PORTAL_LOGIN_FAILED` con `refusedBefore: true` y sin petición. Una
+ * sesión en caché no necesita la clave para usarse, así que su llave en la caché es aleatoria y solo de este cliente:
+ * una caché compartida con otras personas nunca entrega una sesión a quien solo nombra el mismo RUT. `sessionKey` la
+ * comparte a propósito. El
  * transporte por defecto es `https` de Node en TLS 1.2 sin certificado cliente. Lo que necesita una firma, como el
  * runner de certificación, sigue recibiendo un certificado donde lo pide.
  * @param options EN: client options. ES: opciones del cliente.
  * @returns EN: the frozen client. ES: el cliente congelado.
- * @throws {DteError} EN: `INVALID_OPTION { field }`, `MISSING_FIELD { field: 'password' }`, `INVALID_RUT { field }`. ES: los mismos códigos.
+ * @throws {DteError} EN: `INVALID_OPTION { field }` (also for an empty `sessionKey`), `MISSING_FIELD { field: 'password' }`, `INVALID_RUT { field }`. ES: `INVALID_OPTION { field }` (también ante un `sessionKey` vacío), `MISSING_FIELD { field: 'password' }`, `INVALID_RUT { field }`.
  */
 export const unstable_createPasswordPortalClient = (options: PasswordPortalClientOptions): PortalClient => {
-  const { userRut, password, ...rest } = options
+  const { userRut, password, sessionKey, ...rest } = options
   assertEnvironment(options.environment)
   if (typeof password !== 'function') throw new DteError('MISSING_FIELD', { field: 'password' })
-  const passwordSignIn = Object.freeze({ rut: toSiiRut(userRut, 'userRut'), password })
+  if (sessionKey !== undefined && (typeof sessionKey !== 'string' || sessionKey === ''))
+    throw new DteError('INVALID_OPTION', { field: 'sessionKey' })
+  const passwordSignIn = Object.freeze({
+    rut: toSiiRut(userRut, 'userRut'),
+    password,
+    sessionKey: sessionKey ?? crypto.randomUUID(),
+  })
   return buildClient(rest, { certificate: null, passwordSignIn })
 }
 
