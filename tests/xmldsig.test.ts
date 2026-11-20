@@ -70,6 +70,36 @@ describe('signEnveloped', () => {
     expect(verifyEnveloped(signed, { elementTag: 'Documento', rootTag: 'DTE' }).valid).toBe(true)
   })
 
+  test('the same tags after the root, or in an instruction or a comment before it, are not where the root closes', () => {
+    const sign = (text: string) =>
+      signEnveloped({ xml: text, elementTag: 'Documento', rootTag: 'DTE', certificate }).xml
+    const verifies = (text: string) => verifyEnveloped(text, { elementTag: 'Documento', rootTag: 'DTE' }).valid
+    // A comment after the root that copies its closing tags.
+    const trailing = sign(`${xml}\n<!-- copy: </Documento></DTE> -->`)
+    expect(trailing.endsWith('</Signature></DTE>\n<!-- copy: </Documento></DTE> -->')).toBe(true)
+    expect(verifies(trailing)).toBe(true)
+    // The same tags three times before the root closes, and twice after.
+    const everywhere = sign(
+      `<?xml version="1.0"?><!--</Documento></DTE>-->${xml.replace('<B/>', '<B><?note </Documento></DTE>?><![CDATA[</Documento></DTE>]]></B>')}<?end </Documento></DTE>?><!--</Documento></DTE>-->`,
+    )
+    expect(everywhere.match(/<Signature /g)).toHaveLength(1)
+    expect(everywhere).toContain('</Signature></DTE><?end </Documento></DTE>?><!--</Documento></DTE>-->')
+    expect(verifies(everywhere)).toBe(true)
+  })
+
+  test('a root its tags do not close is refused, though a comment holds them', () => {
+    const apart = xml
+      .replace('<B/>', '<B><!--</Documento></DTE>--></B>')
+      .replace(/<\/Documento><\/DTE>$/, '</Documento>\n</DTE>')
+    expect(apart).toContain('<!--</Documento></DTE>-->')
+    expect(() => signEnveloped({ xml: apart, elementTag: 'Documento', rootTag: 'DTE', certificate })).toThrow(
+      expect.objectContaining({
+        code: 'XML_PARSE_FAILED',
+        details: { field: 'DTE', reason: 'expected </Documento></DTE>' },
+      }),
+    )
+  })
+
   test('stored SignedInfo with xmlns:xsi verifies too (envelopes and books)', () => {
     const envelope = `<EnvioDTE xmlns="${NS}" xmlns:xsi="${XSI}" version="1.0"><SetDTE ID="SET1"><Caratula version="1.0"><RutEmisor>76543210-3</RutEmisor></Caratula></SetDTE></EnvioDTE>`
     const { xml: signed } = signEnveloped({ xml: envelope, elementTag: 'SetDTE', rootTag: 'EnvioDTE', certificate })
