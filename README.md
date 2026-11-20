@@ -498,8 +498,9 @@ exportInvoice.header.otherCurrency
   exemption indicator or with 1 and the global adjustments, and the total, the same amount, or zero on an export
   without payment (`exportPaymentTerms: '21'`, Formato DTE 2.5, field 124) (`calculateExportTotals`, which
   `calculateTotals` calls for these types). Each is worked out exactly, over the decimal digits as written, and rounded
-  half away from zero. An amount goes up to 99 999 999 999.9999, the fifteen digits a number holds exactly, though the
-  schema admits three more, and a line discount or surcharge in percent whose whole amount is zero is refused with
+  half away from zero. An amount goes up to the schema's 99 999 999 999 999.9999, and one worked out with more digits
+  than a number holds, which would be written as another amount, is refused with `INVALID_AMOUNT` and the amount in
+  `details.value`. A line discount or surcharge in percent whose whole amount is zero is refused with
   `INVALID_AMOUNT`, since the format writes a percent with its amount (fields 30 and 33 of the detail): give the line
   its amount, or use a global adjustment. With `exchangeRate`, `OtraMoneda` carries the exempt amount and the total in Chilean pesos, as
   field 129 asks: each the amount by the rate, rounded half away from zero to a whole peso (`convertToPesos`). The
@@ -586,8 +587,8 @@ answers to a received envelope and the assignment file (`DTE`, `EnvioDTE`, `Envi
 `ConsumoFolio`, `RespuestaEnvioDTE`, `EnvioRecibos` and `AEC`; `SII_SCHEMAS` lists them). The schema is the one of the document element unless
 `schema` names another, and `schemaOf(xml)` says which that is. A receipt (39, 41) on its own has none, since only
 `EnvioBOLETA_v11.xsd` declares its `DTE`: validate it inside its envelope. The document can be its text or the bytes
-of its file, read in the charset its declaration names, ISO-8859-1 or UTF-8; bytes that name another are refused with
-`INVALID_OPTION`. The validator, `xmllint-wasm`, is an optional peer loaded on first use:
+of its file, read in the charset its declaration names, ISO-8859-1 or UTF-8 under any of their usual names (`latin1`,
+`UTF8`, `US-ASCII`); bytes that name another are refused with `INVALID_OPTION`. The validator, `xmllint-wasm`, is an optional peer loaded on first use:
 without it the call throws `DEPENDENCY_UNAVAILABLE`. The messages are the validator's, in English, and name each
 element with its namespace.
 
@@ -973,8 +974,9 @@ The password is a function on purpose. The client holds no password, so logging 
 the capture port writes the login form as `clave=[redacted]`; and no error carries it. The SII locks a password after a
 few wrong attempts, so a password the SII refused is never sent again by the same client: the next login throws
 `SII_PORTAL_LOGIN_FAILED` with `refusedBefore: true` before it asks the SII for anything, and trying another password
-takes a new client. The request that posts a password is sent once, whatever `retry` says: a timeout after the SII read
-a wrong password would otherwise count twice.
+takes a new client. The request that posts a password is never retried, whatever `retry` says: a timeout after the SII
+read a wrong password would otherwise count twice. It is posted a second time in one case alone: the SII took it, said
+the user has too many sessions open, and the client closed the earlier ones (`closePreviousSessions`).
 
 A session in the cache is used without the password, so who can find it can use it. The key of a password session is
 therefore random and of its client alone: in a `sessionCache` shared with other people, a client that merely names the

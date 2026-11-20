@@ -63,31 +63,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SII shapes (`SiiExtranjero`, `SiiAduana`, `SiiTipoBultos`, `SiiOtraMoneda`); `fromSiiDocument` reads them back. Their
   amounts are in the document's currency with the four decimals the schema admits: a line is its quantity by its price
   rounded to four decimals, less its discount and plus its surcharge, each a whole number because `DescuentoMonto` and
-  `RecargoMonto` are (`calculateExportLineAmount`); the totals are the exempt amount, the only one an export has, and the
-  same total, or zero on an export without payment, `FmaPagExp` 21 (field 124) (`calculateExportTotals`); and each
+  `RecargoMonto` are (`calculateExportLineAmount`); the totals are the exempt amount, the only one an export has, and
+  the same total, or zero on an export without payment, `FmaPagExp` 21 (field 124) (`calculateExportTotals`); and each
   amount in pesos is the amount by the rate rounded half away from zero to a whole peso (`convertToPesos`). All of it is
   worked out exactly, over the decimal digits as written, so binary floating point never decides a rounding. An amount
-  goes up to 99 999 999 999.9999, the fifteen digits a number holds exactly, though the schema admits three more, and a
-  number that is not finite or is 10^21 or more is `INVALID_AMOUNT` in every function of the arithmetic. A line discount
-  or surcharge in percent whose whole amount is zero is refused, since Formato DTE 2.5 writes a percent with its amount
-  (fields 30 and 33 of the detail). The stamp carries the total as the document writes it, decimals and all. Before
-  stamping, `createDocument` refuses what `Exportaciones` does not declare (prices with VAT, the withholding,
-  commissions, six options of `IdDoc`, every total but the exempt amount and the total, the trailer plate and the
-  departure and arrival of the transport, a line's withholding agent and additional taxes), a service indicator other
-  than 3 to 6 (`EXPORT_SERVICE_INDICATORS`), an `exportPaymentTerms` that is not a code of one or two digits, a receiver
-  whose RUT is not the generic 55555555-5 the format gives (`FOREIGN_RECEIVER_RUT`), a global adjustment without
-  `exemptIndicator: 1` and more than ten package types, and asks on a 110 for what Formato DTE 2.5 asks: the receiver's
-  city and country, each weight's unit and, unless the service indicator excuses them, the sale modality, clause and
-  clause total, the transport route and each line's quantity and unit; a commune is not asked of a receiver abroad.
-  Every other type refuses the new fields, and the service indicators 5 and 6. A received export document is read and
-  verified under `Exportaciones`, its total and the `MNT` of its stamp read with their decimals; `readReceivedEnvelope`
-  refuses one whose total has decimals, which the answers have no place for. The SII's `DTE_v10.xsd` and
-  `EnvioDTE_v10.xsd` validate every variant the tests build, and none has been sent to the SII. Not done yet: the
-  printed sample of an export document, which `dte-sdk/pdf` refuses with `INVALID_DOCUMENT_TYPE` instead of printing its
-  amounts as pesos; the status of one, which `queryDocumentStatus` refuses as before, since its query carries a whole
-  total; the export sets of the certification runner; the books; and the customs service's code tables, which are
-  written as given. `dte-sdk` grows from 43.06 kB to 46.24 kB, over its 44 kB limit, which goes to 48 kB, and
-  `dte-sdk/portal` from 82.11 kB to 84.82 kB, over its 84 kB limit, which goes to 86 kB.
+  goes up to the schema's 99 999 999 999 999.9999 and is written as it is given. A number holds some fifteen significant
+  digits, so an amount the arithmetic works out with more may have no number of its own: when the number it would get
+  writes another amount, it is `INVALID_AMOUNT` with the amount in `details.value`, and so is a number that is not
+  finite or is 10^21 or more, in every function of the arithmetic. A line discount or surcharge in percent whose whole
+  amount is zero is refused, since Formato DTE 2.5 writes a percent with its amount (fields 30 and 33 of the detail).
+  The stamp carries the total as the document writes it, decimals and all. Before stamping, `createDocument` refuses
+  what `Exportaciones` does not declare (prices with VAT, the withholding, commissions, six options of `IdDoc`, every
+  total but the exempt amount and the total, the trailer plate and the departure and arrival of the transport, a line's
+  withholding agent and additional taxes), a service indicator other than 3 to 6 (`EXPORT_SERVICE_INDICATORS`), an
+  `exportPaymentTerms` that is not a code of one or two digits, a receiver whose RUT is not the generic 55555555-5 the
+  format gives (`FOREIGN_RECEIVER_RUT`), a global adjustment without `exemptIndicator: 1` and more than ten package
+  types, and asks on a 110 for what Formato DTE 2.5 asks: the receiver's city and country, each weight's unit and,
+  unless the service indicator excuses them, the sale modality, clause and clause total, the transport route and each
+  line's quantity and unit; a commune is not asked of a receiver abroad. Every other type refuses the new fields, and
+  the service indicators 5 and 6. A received export document is read and verified under `Exportaciones`, its total and
+  the `MNT` of its stamp read with their decimals; `readReceivedEnvelope` refuses one whose total has decimals, which
+  the answers have no place for. The SII's `DTE_v10.xsd` and `EnvioDTE_v10.xsd` validate every variant the tests build,
+  and none has been sent to the SII. Not done yet: the printed sample of an export document, which `dte-sdk/pdf` refuses
+  with `INVALID_DOCUMENT_TYPE` instead of printing its amounts as pesos; the status of one, which `queryDocumentStatus`
+  refuses as before, since its query carries a whole total; the export sets of the certification runner; the books; and
+  the customs service's code tables, which are written as given. `dte-sdk` grows from 43.06 kB to 46.24 kB, over its 44
+  kB limit, which goes to 48 kB, and `dte-sdk/portal` from 82.11 kB to 84.82 kB, over its 84 kB limit, which goes to 86
+  kB.
   - **What to change:** nothing for the other types. Code that switches over `DocumentType`, or keeps a record keyed by
     it, has three new members; `HeaderOptions.serviceIndicator` also takes `ExportServiceIndicator`.
 - **The assignment of an invoice: the electronic assignment file (AEC), built and signed, and its registration.** The
@@ -124,23 +126,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `dte-sdk/schemas` from 23.59 kB to 24.64 kB, over its 24 kB limit, which goes to 26 kB.
   - **What to change:** nothing. Code that switches over `UploadKind` has a new member, `assignment`, and code that
     builds a whole `SiiEndpoints` by hand adds `assignments`.
-- **A new entry point, `dte-sdk/schemas`: validation against the SII's schemas, as an option.** The tests validated
-  what dte-sdk issues against the SII's schemas, and nothing did at run time; the README listed it as planned.
-  `validateAgainstSchema(xml, { schema })` validates a document against the SII's own schema and returns what the
-  schema says against it, `{ message, line }` each, and an empty list when the document is valid. It is the check the
-  SII runs first on an upload, where one document that fails takes the whole envelope with it, so running it before
-  costs no folio. The schema is the one of the document element (`schemaOf(xml)`) unless `schema` names another; a
-  receipt (39, 41) on its own has none, since only `EnvioBOLETA_v11.xsd` declares its `DTE`, and is validated inside
-  its envelope; and
-  `SII_SCHEMAS` lists the eight it has: `DTE`, `EnvioDTE`, `EnvioBOLETA`, `LibroCV`, `LibroGuia`, `ConsumoFolio`,
-  `RespuestaEnvioDTE` and `EnvioRecibos`. The document can be its text or the bytes of its file, read in the charset
-  its declaration names, ISO-8859-1 or UTF-8; bytes that name another are refused with `INVALID_OPTION`. The schemas
-  come inside the package, as text (`SCHEMA_SOURCES`): the SII's 14 files, whole, decoded from ISO-8859-1, and a test
-  holds them to the files the tests already validated against, which now validate through this entry. The validator,
-  `xmllint-wasm`, is a new optional peer dependency, loaded on first use; without it the call throws
-  `DEPENDENCY_UNAVAILABLE`. Nothing else in the package calls the entry, and no other entry reaches the schemas. `npm
-  run schemas` writes them again after a schema of the SII changes. The entry measures 23.59 kB against a limit of 24
-  kB.
+- **A new entry point, `dte-sdk/schemas`: validation against the SII's schemas, as an option.** The tests validated what
+  dte-sdk issues against the SII's schemas, and nothing did at run time; the README listed it as planned.
+  `validateAgainstSchema(xml, { schema })` validates a document against the SII's own schema and returns what the schema
+  says against it, `{ message, line }` each, and an empty list when the document is valid. It is the check the SII runs
+  first on an upload, where one document that fails takes the whole envelope with it, so running it before costs no
+  folio. The schema is the one of the document element (`schemaOf(xml)`) unless `schema` names another; a receipt (39,
+  41) on its own has none, since only `EnvioBOLETA_v11.xsd` declares its `DTE`, and is validated inside its envelope;
+  and `SII_SCHEMAS` lists the eight it has: `DTE`, `EnvioDTE`, `EnvioBOLETA`, `LibroCV`, `LibroGuia`, `ConsumoFolio`,
+  `RespuestaEnvioDTE` and `EnvioRecibos`. The document can be its text or the bytes of its file, read in the charset its
+  declaration names, ISO-8859-1 or UTF-8 under any of their usual names (`latin1`, `UTF8`, `US-ASCII`); bytes that name
+  another are refused with `INVALID_OPTION`. The schemas come inside the package, as text (`SCHEMA_SOURCES`): the SII's
+  14 files, whole, decoded from ISO-8859-1, and a test holds them to the files the tests already validated against,
+  which now validate through this entry. The validator, `xmllint-wasm`, is a new optional peer dependency, loaded on
+  first use; without it the call throws `DEPENDENCY_UNAVAILABLE`. Nothing else in the package calls the entry, and no
+  other entry reaches the schemas. `npm run schemas` writes them again after a schema of the SII changes. The entry
+  measures 23.59 kB against a limit of 24 kB.
   - **What to change:** nothing. To validate, install `xmllint-wasm` and import from `dte-sdk/schemas`.
 - **The purchase and sales register as a file, from `dte-sdk/portal`.** The register was read page by page, and the
   README listed its file as planned. `unstable_downloadRegisterFile(portal, { period, operation, accountingStatus })`
@@ -158,20 +159,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A portal client that signs in with a tax password, from `dte-sdk/portal`.** The portal took a certificate alone.
   `unstable_createPasswordPortalClient({ environment, userRut, password, companyRut })` makes a client that signs in
   with the RUT and the tax password of a person (the SII's "Clave Tributaria"), posted to the same CGI the certificate
-  login uses, on the host that asks for no client certificate; every portal function takes it as it takes the client
-  of `createPortalClient`. `password` is a function, asked for each time a login needs it and never kept, so the
-  client holds no password and writing it down writes none. The capture port writes the login form as
-  `clave=[redacted]`, and no error or log message carries the password. The SII locks a password after a few wrong
-  attempts, so a password it refused is never sent again by the same client: the next login throws
-  `SII_PORTAL_LOGIN_FAILED` with `refusedBefore: true` before it asks the SII for anything. For the same reason the
-  request that posts a password is sent once, whatever the retry policy of the client says, and a refusal is read from
-  the cookies that login set, never from the ones an expired session left behind. A session in the cache is used without
-  the password, so the key of a password session is random and of its client alone: in a cache shared with other
-  people, a client that merely names the same RUT finds no session and has to sign in. `sessionKey`, a secret of that
-  person, shares a session on purpose, across restarts for one. It carries the `unstable_` prefix because dte-sdk has
-  not run this login
-  against the SII yet. `PortalClient.certificate` is null on such a client and the new `passwordSignIn` is null on a
-  certificate's; new types `PasswordPortalClientOptions`, `PortalPasswordSignIn` and `PortalSignIn`.
+  login uses, on the host that asks for no client certificate; every portal function takes it as it takes the client of
+  `createPortalClient`. `password` is a function, asked for each time a login needs it and never kept, so the client
+  holds no password and writing it down writes none. The capture port writes the login form as `clave=[redacted]`, and
+  no error or log message carries the password. The SII locks a password after a few wrong attempts, so a password it
+  refused is never sent again by the same client: the next login throws `SII_PORTAL_LOGIN_FAILED` with `refusedBefore:
+  true` before it asks the SII for anything. For the same reason the request that posts a password is never retried,
+  whatever the retry policy of the client says, and a refusal is read from the cookies that login set, never from the
+  ones an expired session or another page left behind. A password is posted a second time in one case alone: the SII
+  took it, said the user has too many sessions open, and the client closed the earlier ones (`closePreviousSessions`). A
+  session in the cache is used without the password, so the key of a password session is random and of its client alone:
+  in a cache shared with other people, a client that merely names the same RUT finds no session and has to sign in.
+  `sessionKey`, a secret of that person, shares a session on purpose, across restarts for one. It carries the
+  `unstable_` prefix because dte-sdk has not run this login against the SII yet. `PortalClient.certificate` is null on
+  such a client and the new `passwordSignIn` is null on a certificate's; new types `PasswordPortalClientOptions`,
+  `PortalPasswordSignIn` and `PortalSignIn`.
   - **What to change:** nothing for a client made with `createPortalClient`. Code that reads `portal.certificate` of
     a `PortalClient` it did not make now gets `Certificate | null`.
 - **The runtime's own RSA signs, checked against the JavaScript engine.** Every signature is RSA-SHA1 with PKCS#1
@@ -227,15 +229,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that is the rate of the tax) and to `partialVatWithheld` when it is of less; the other taxes stay in `otherTaxes`.
   - **What to change:** nothing. A sales book built from such a document no longer reports the mismatch.
 - **A signature is put where the root closes.** Every enveloped signature was inserted at the first place the text had
-  the two tags that close the root. A document embedded in that text may carry them inside a comment or a CDATA
-  section, which changes nothing of what its own signature covers, and the signature then went inside the comment: the
-  file came back with no signature and no error. It goes before the last such pair, which is the one that closes the
-  root.
+  the two tags that close the root. A document embedded in that text may carry them inside a comment or a CDATA section,
+  which changes nothing of what its own signature covers, and the signature then went inside the comment: the file came
+  back with no signature and no error. It goes before the pair that closes the root, found among the nodes of the
+  document: the same tags inside a comment, a CDATA section or a processing instruction, before the root closes or after
+  it, are left alone, and a root those tags do not close is `XML_PARSE_FAILED`.
   - **What to change:** nothing.
-- **A text with a control character no longer makes a document that cannot be read.** `sanitizeText`, which every text
-  of a document goes through, kept the control characters XML 1.0 forbids (U+0000 to U+001F but the tab, the line feed
-  and the carriage return), and a name with one was written, stamped and signed into a file no parser reads. They are
-  dropped, as the characters outside ISO-8859-1 are.
+- **A text with a control character no longer makes a document that cannot be read.** The control characters XML 1.0
+  forbids (U+0000 to U+001F but the tab, the line feed and the carriage return) were written as they came, and a name
+  with one was stamped and signed into a file the SII's schemas, and any parser that follows XML 1.0, refuse.
+  `sanitizeText` drops them, as it drops the characters outside ISO-8859-1, and so does the writer of every document,
+  book and answer, for the texts that are written as they are given: a code of a line, the folio of a reference, the
+  note of a payment.
   - **What to change:** nothing.
 - **`verifyDocumentSignature` reads the signed element from the elements of the `DTE`.** It chose between `Documento`
   and `Liquidacion` by searching the text, so a signed invoice with a comment that named the other one did not verify,
