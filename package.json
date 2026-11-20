@@ -29,6 +29,10 @@
       "types": "./dist/catalogs/index.d.ts",
       "default": "./dist/catalogs.min.js"
     },
+    "./schemas": {
+      "types": "./dist/schemas/index.d.ts",
+      "default": "./dist/schemas.min.js"
+    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
@@ -44,6 +48,9 @@
       ],
       "catalogs": [
         "./dist/catalogs/index.d.ts"
+      ],
+      "schemas": [
+        "./dist/schemas/index.d.ts"
       ]
     }
   },
@@ -60,6 +67,7 @@
     "build:types": "tsc --emitDeclarationOnly --outDir dist && node scripts/add-declaration-extensions.mjs",
     "scan": "node scripts/scan-real-data.mjs",
     "fixtures": "node scripts/make-fixtures.mjs",
+    "schemas": "node scripts/make-schemas.mjs && prettier --write src/schemas/sources.ts",
     "fixtures:tls": "node scripts/make-tls-fixture.mjs",
     "fixtures:sii": "node scripts/make-sii-key-fixture.mjs",
     "test:differential": "RUN_DIFFERENTIAL=1 jest --config jest.config.cjs differential"
@@ -136,13 +144,17 @@
   },
   "peerDependencies": {
     "bwip-js": "^4.11.4",
-    "pdf-lib": "^1.17.1"
+    "pdf-lib": "^1.17.1",
+    "xmllint-wasm": "^5.3.0"
   },
   "peerDependenciesMeta": {
     "bwip-js": {
       "optional": true
     },
     "pdf-lib": {
+      "optional": true
+    },
+    "xmllint-wasm": {
       "optional": true
     }
   }

@@ -63,6 +63,7 @@ every field.
 - [Entry points](#entry-points)
 - [Quick start](#quick-start)
 - [Step by step](#step-by-step)
+- [Validating against the SII's schemas](#validating-against-the-siis-schemas)
 - [Answering a received envelope](#answering-a-received-envelope)
 - [Received documents](#received-documents)
 - [SII web services](#sii-web-services)
@@ -151,9 +152,6 @@ Planned, after the first certification: export documents (110, 111 and 112) and 
 
 Planned, with no date:
 
-- **Validation against the SII's schemas at run time, as an option.** Today the tests validate what dte-sdk issues
-  against those schemas, and nothing does at run time. It will be opt-in: the validator as an optional peer dependency,
-  as the PDF's are, and the schemas shipped in the package.
 - **A received document checked against its schema and its content,** besides its signature, its stamp and its CAF.
 - **The backup's two-day range,** which today downloads only its first day when it holds more than 20 documents.
 - **A lock for the directory folio registry that holds across processes.** Today it is for a single process.
@@ -174,6 +172,12 @@ samples need two more packages, which stay out of the install otherwise:
 npm install pdf-lib bwip-js
 ```
 
+And validating a document against the SII's schemas needs one, `xmllint-wasm`, on the same terms:
+
+```bash
+npm install xmllint-wasm
+```
+
 ## Entry points
 
 | Import from        | What it holds                                                                                                                                                                                                             | Runs on                                                        |
@@ -182,6 +186,7 @@ npm install pdf-lib bwip-js
 | `dte-sdk/node`     | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope`  | Node                                                           |
 | `dte-sdk/portal`   | SII portal, folios and CAF requests, the folio registry, purchase and sales register, MIPYME backup, activity verification, and certification: sets, runner, exchange, upload of the samples and the receipts application | Node                                                           |
 | `dte-sdk/pdf`      | Printed samples and the SII office of each commune (`SII_OFFICES`, `siiOfficeForCommune`)                                                                                                                                 | Node, with `pdf-lib` and `bwip-js` installed                   |
+| `dte-sdk/schemas`  | The SII's schemas, inside the package, and the validation of a document against them (`validateAgainstSchema`, `schemaOf`, `SII_SCHEMAS`)                                                                                 | Node, with `xmllint-wasm` installed |
 | `dte-sdk/catalogs` | The SII's large code tables: the business activities (`BUSINESS_ACTIVITIES`, `businessActivity`, `isBusinessActivityCode`)                                                                                                | Node, Bun, Deno; bundles for the browser with no configuration |
 
 `DteError` and `isDteError` come from `dte-sdk` and recognize what every entry throws.
@@ -468,6 +473,32 @@ const periodic = createDocument({
   e-mail and postal address are left out too: the schema declares them and dte-sdk does not write them yet.
 - **Not checked yet.** A receipt's `paymentMedium` has to be a number from 1 to 5 and is written as given; the rules
   for receipts over 135 UF, and the fields of tickets to shows, are not there either.
+
+## Validating against the SII's schemas
+
+The first thing the SII does with an upload is to validate it against its schemas, and one document that fails takes
+the whole envelope with it. `dte-sdk/schemas` runs the same check before anything is sent, so finding out costs no
+folio:
+
+```typescript
+import { validateAgainstSchema } from 'dte-sdk/schemas'
+
+const issues = await validateAgainstSchema(envelope.xml) // [] when the document is valid
+if (issues.length > 0) throw new Error(issues.map((issue) => `line ${issue.line}: ${issue.message}`).join('\n'))
+```
+
+It is an option, and nothing else in dte-sdk calls it. The schemas come inside the package: the SII's own files, in the
+versions in force, for every document dte-sdk sends in an `EnvioDTE` or an `EnvioBOLETA`, the three books and the
+answers to a received envelope (`DTE`, `EnvioDTE`, `EnvioBOLETA`, `LibroCV`, `LibroGuia`, `ConsumoFolio`,
+`RespuestaEnvioDTE` and `EnvioRecibos`; `SII_SCHEMAS` lists them). The schema is the one of the document element unless
+`schema` names another, and `schemaOf(xml)` says which that is. The document can be its text or the bytes of its file,
+read in the charset its declaration names. The validator, `xmllint-wasm`, is an optional peer loaded on first use:
+without it the call throws `DEPENDENCY_UNAVAILABLE`. The messages are the validator's, in English, and name each
+element with its namespace.
+
+A valid document is not an accepted one. The schema checks the structure alone: what `createDocument` refuses before
+stamping, the signatures, the stamps and the rules of content the SII applies after its schema are all checked
+elsewhere, and the last ones only by the SII.
 
 ## Answering a received envelope
 

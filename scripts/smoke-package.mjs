@@ -33,6 +33,7 @@ const ENTRIES = {
   'dte-sdk/portal': ['createPortalClient', 'requestCaf', 'runCertification'],
   'dte-sdk/pdf': ['parsePrintableDocuments', 'renderPrintedSample'],
   'dte-sdk/catalogs': ['businessActivity', 'isBusinessActivityCode'],
+  'dte-sdk/schemas': ['validateAgainstSchema', 'schemaOf'],
 }
 
 const RUNTIME = `
@@ -41,12 +42,13 @@ import * as node from 'dte-sdk/node'
 import * as portal from 'dte-sdk/portal'
 import * as pdf from 'dte-sdk/pdf'
 import * as catalogs from 'dte-sdk/catalogs'
+import * as schemas from 'dte-sdk/schemas'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 
 const fail = (what) => { console.error('package smoke FAILED: ' + what); process.exit(1) }
-const modules = { 'dte-sdk': root, 'dte-sdk/node': node, 'dte-sdk/portal': portal, 'dte-sdk/pdf': pdf, 'dte-sdk/catalogs': catalogs }
+const modules = { 'dte-sdk': root, 'dte-sdk/node': node, 'dte-sdk/portal': portal, 'dte-sdk/pdf': pdf, 'dte-sdk/catalogs': catalogs, 'dte-sdk/schemas': schemas }
 const require = createRequire(join(process.cwd(), 'consumer.cjs'))
 
 for (const [name, functions] of Object.entries(${JSON.stringify(ENTRIES)})) {
@@ -88,7 +90,11 @@ if (Buffer.from(sample.subarray(0, 5)).toString() !== '%PDF-') fail('dte-sdk/pdf
 // dte-sdk/catalogs holds the business activities on its own.
 if (catalogs.businessActivity(11101)?.name !== 'CULTIVO DE TRIGO') fail('dte-sdk/catalogs has no activity 11101')
 
-console.log('package smoke ok (runtime: five entries, import and require, issue, verify, PDF, catalogs)')
+// dte-sdk/schemas validates what the root issued against the SII's schema, with the validator installed as a peer.
+if ((await schemas.validateAgainstSchema(signed.xml)).length !== 0) fail('dte-sdk/schemas found the signed document invalid')
+if (schemas.schemaOf(signed.xml) !== 'DTE') fail('dte-sdk/schemas did not name the schema of a DTE')
+
+console.log('package smoke ok (runtime: six entries, import and require, issue, verify, PDF, catalogs, schemas)')
 `
 
 // An `any` would let each assignment compile, and the unused `@ts-expect-error` would then be the error.
@@ -98,6 +104,7 @@ import { createNodeHttpsTransport } from 'dte-sdk/node'
 import { createPortalClient } from 'dte-sdk/portal'
 import { parsePrintableDocuments } from 'dte-sdk/pdf'
 import { businessActivity } from 'dte-sdk/catalogs'
+import { validateAgainstSchema } from 'dte-sdk/schemas'
 
 // @ts-expect-error
 export const root: number = createDocument
@@ -109,6 +116,8 @@ export const portal: number = createPortalClient
 export const pdf: number = parsePrintableDocuments
 // @ts-expect-error
 export const catalogs: number = businessActivity
+// @ts-expect-error
+export const schemas: number = validateAgainstSchema
 `
 
 // The `exports` map (nodenext) and `typesVersions` (node10) each have to reach the shipped declarations.

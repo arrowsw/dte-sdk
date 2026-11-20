@@ -4,7 +4,8 @@ Status: decided by Hans on 2026-11-04, before 0.1.0. Replaces the decision of 20
 D40 and D41 of the design specs). Tracks [issue #5](https://github.com/arrowsw/dte-sdk/issues/5).
 
 **Decision: four entries, ES modules only.** A fifth, `dte-sdk/catalogs`, for the SII's large code tables, was decided
-by Hans on 2026-11-14.
+by Hans on 2026-11-14. A sixth, `dte-sdk/schemas`, follows the same reasoning for the SII's schemas, which Hans decided
+on 2026-11-14 to ship inside the package with their validator as an optional peer.
 
 | Entry | Holds | Size | Reaches `node:` |
 |---|---|---|---|
@@ -13,6 +14,7 @@ by Hans on 2026-11-14.
 | `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 82.03 kB | Yes, on first use |
 | `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 19.59 kB | Yes, on first use |
 | `dte-sdk/catalogs` | The SII's large code tables: the business activities | 10.65 kB | No |
+| `dte-sdk/schemas` | The SII's schemas as text and the validation of a document against them; `xmllint-wasm` is an optional peer | 23.59 kB | No |
 
 Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
 it. The decision was taken at phase 5b-2, which took `dte-sdk/portal` from 39.35 kB to 55.86 kB; each limit was then the
@@ -117,6 +119,11 @@ The portal client that signs in with a tax password, also after 0.14.0, took `dt
 40.15 kB, under its limit; the other entries did not move.
 The purchase and sales register as a file, also after 0.14.0, took `dte-sdk/portal` from 81.68 kB to 82.03 kB, over
 its 82 kB limit, which went to 84 kB; the other entries did not move.
+The SII's schemas, also after 0.14.0, went to an entry of their own, `dte-sdk/schemas`: its 14 files are 475 kB of
+text, 23.59 kB compressed, which no other entry should carry for whoever never validates. They are text inside the
+entry and not files beside it, so the entry needs no file system and no way to find its own directory, which the
+tests, run from source, and the shipped ES modules do not share. Its limit is the measure rounded up to the next 2 kB,
+24 kB; the other entries did not move.
 
 ## Why
 

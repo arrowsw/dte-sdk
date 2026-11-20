@@ -7,7 +7,7 @@ import { build } from 'esbuild'
 
 // `node:*` stays external: the Node adapters import `node:https` and `node:fs/promises` lazily, inside the
 // function that needs them, so loading an entry never evaluates them. The root entry does not reach them at all.
-const EXTERNAL = ['node-forge', '@xmldom/xmldom', 'fast-xml-parser', 'rut.ts', 'pdf-lib', 'bwip-js', 'node:*']
+const EXTERNAL = ['node-forge', '@xmldom/xmldom', 'fast-xml-parser', 'rut.ts', 'pdf-lib', 'bwip-js', 'xmllint-wasm', 'node:*']
 
 const ENTRIES = {
   index: 'src/index.ts',
@@ -15,6 +15,7 @@ const ENTRIES = {
   portal: 'src/portal/index.ts',
   pdf: 'src/pdf/index.ts',
   catalogs: 'src/catalogs/index.ts',
+  schemas: 'src/schemas/index.ts',
 }
 
 await rm('dist', { recursive: true, force: true })

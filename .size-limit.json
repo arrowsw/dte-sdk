@@ -2,31 +2,37 @@
   {
     "name": "dte-sdk (min + brotli)",
     "path": "dist/index.min.js",
-    "ignore": ["node-forge", "@xmldom/xmldom", "fast-xml-parser", "rut.ts", "pdf-lib", "bwip-js", "node:*"],
+    "ignore": ["node-forge", "@xmldom/xmldom", "fast-xml-parser", "rut.ts", "pdf-lib", "bwip-js", "xmllint-wasm", "node:*"],
     "limit": "42 kB"
   },
   {
     "name": "dte-sdk/node (min + brotli)",
     "path": "dist/node.min.js",
-    "ignore": ["node-forge", "@xmldom/xmldom", "fast-xml-parser", "rut.ts", "pdf-lib", "bwip-js", "node:*"],
+    "ignore": ["node-forge", "@xmldom/xmldom", "fast-xml-parser", "rut.ts", "pdf-lib", "bwip-js", "xmllint-wasm", "node:*"],
     "limit": "8 kB"
   },
   {
     "name": "dte-sdk/portal (min + brotli)",
     "path": "dist/portal.min.js",
-    "ignore": ["node-forge", "@xmldom/xmldom", "fast-xml-parser", "rut.ts", "pdf-lib", "bwip-js", "node:*"],
+    "ignore": ["node-forge", "@xmldom/xmldom", "fast-xml-parser", "rut.ts", "pdf-lib", "bwip-js", "xmllint-wasm", "node:*"],
     "limit": "84 kB"
   },
   {
     "name": "dte-sdk/pdf (min + brotli)",
     "path": "dist/pdf.min.js",
-    "ignore": ["node-forge", "@xmldom/xmldom", "fast-xml-parser", "rut.ts", "pdf-lib", "bwip-js", "node:*"],
+    "ignore": ["node-forge", "@xmldom/xmldom", "fast-xml-parser", "rut.ts", "pdf-lib", "bwip-js", "xmllint-wasm", "node:*"],
     "limit": "20 kB"
   },
   {
     "name": "dte-sdk/catalogs (min + brotli)",
     "path": "dist/catalogs.min.js",
-    "ignore": ["node-forge", "@xmldom/xmldom", "fast-xml-parser", "rut.ts", "pdf-lib", "bwip-js", "node:*"],
+    "ignore": ["node-forge", "@xmldom/xmldom", "fast-xml-parser", "rut.ts", "pdf-lib", "bwip-js", "xmllint-wasm", "node:*"],
     "limit": "12 kB"
+  },
+  {
+    "name": "dte-sdk/schemas (min + brotli)",
+    "path": "dist/schemas.min.js",
+    "ignore": ["node-forge", "@xmldom/xmldom", "fast-xml-parser", "rut.ts", "pdf-lib", "bwip-js", "xmllint-wasm", "node:*"],
+    "limit": "24 kB"
   }
 ]

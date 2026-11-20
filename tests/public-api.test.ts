@@ -3,6 +3,7 @@ import * as catalogs from '../src/catalogs'
 import * as node from '../src/node'
 import * as pdf from '../src/pdf'
 import * as portal from '../src/portal'
+import * as schemas from '../src/schemas'
 
 /**
  * The runtime surface of each entry of the package. Adding, moving or removing an export is a deliberate API change:
@@ -374,12 +375,21 @@ const PDF_EXPORTS = [
 
 const CATALOGS_EXPORTS = ['BUSINESS_ACTIVITIES', 'businessActivity', 'isBusinessActivityCode'] as const
 
+const SCHEMAS_EXPORTS = [
+  'SCHEMA_SOURCES',
+  'SII_SCHEMAS',
+  'loadSchemaValidator',
+  'schemaOf',
+  'validateAgainstSchema',
+] as const
+
 const ENTRIES: ReadonlyArray<readonly [string, Record<string, unknown>, readonly string[]]> = [
   ['dte-sdk', root, ROOT_EXPORTS],
   ['dte-sdk/node', node, NODE_EXPORTS],
   ['dte-sdk/portal', portal, PORTAL_EXPORTS],
   ['dte-sdk/pdf', pdf, PDF_EXPORTS],
   ['dte-sdk/catalogs', catalogs, CATALOGS_EXPORTS],
+  ['dte-sdk/schemas', schemas, SCHEMAS_EXPORTS],
 ]
 
 test.each(ENTRIES)('%s exports exactly the documented runtime names', (_name, entry, names) => {
