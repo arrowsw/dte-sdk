@@ -151,9 +151,9 @@ export type LineItemInput = {
   readonly exemptIndicator?: ExemptIndicator
   /** EN: Marks the line as a transaction of a withholding agent (`IndAgente` R), with the bases it declares; refused on a receipt and on a settlement invoice (43), whose lines have no such element. ES: `Retenedor` — Marca la línea como transacción de un agente retenedor (`IndAgente` R), con las bases que declara; se rechaza en una boleta y en una liquidación factura (43), cuyas líneas no tienen ese elemento. */
   readonly withholdingAgent?: WithholdingAgentLine
-  /** EN: Line discount percent, rounded to two decimals; refused on a settlement invoice (43). ES: `DescuentoPct` — Porcentaje de descuento de la línea, redondeado a dos decimales; se rechaza en una liquidación factura (43). */
+  /** EN: Line discount percent, rounded to two decimals; refused on a settlement invoice (43), and when its share of the line rounds to zero, since the percent is written with its amount. ES: `DescuentoPct` — Porcentaje de descuento de la línea, redondeado a dos decimales; se rechaza en una liquidación factura (43), y cuando su parte de la línea redondea a cero, porque el porcentaje se escribe con su monto. */
   readonly discountPercent?: number
-  /** EN: Line surcharge percent, rounded to two decimals; refused on a settlement invoice (43). ES: `RecargoPct` — Porcentaje de recargo de la línea, redondeado a dos decimales; se rechaza en una liquidación factura (43). */
+  /** EN: Line surcharge percent, rounded to two decimals; refused on a settlement invoice (43), and when its share of the line rounds to zero, since the percent is written with its amount. ES: `RecargoPct` — Porcentaje de recargo de la línea, redondeado a dos decimales; se rechaza en una liquidación factura (43), y cuando su parte de la línea redondea a cero, porque el porcentaje se escribe con su monto. */
   readonly surchargePercent?: number
   /** EN: Item codes. ES: `CdgItem` — Códigos del ítem (hasta 5). */
   readonly codes?: readonly ItemCode[]
