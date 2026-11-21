@@ -652,6 +652,56 @@ describe('the decimals the schema admits', () => {
 })
 
 // `CdgSIISucur` is a positive integer of at most nine digits in `DTE_v10.xsd` and `EnvioBOLETA_v11.xsd`.
+// Formato DTE 2.5, fields 30 and 34 of the detail: "Si va el descuento en %, debe ir el monto correspondiente", and the
+// same of a surcharge. `DescuentoMonto` and `RecargoMonto` are `MntImpType` in `DTE_v10.xsd`, a positive integer, so a
+// percent whose share of the line rounds to no peso has no amount to go with it.
+describe('a line percent goes with its amount', () => {
+  const line = (item: LineItemInput, type: 33 | 34 | 52 = 33) =>
+    createDocument({ type, folio: 7, issueDate: '2026-11-15', issuer, receiver, items: [item] })
+  const receipt = (item: LineItemInput, type: 39 | 41 = 39) =>
+    createDocument({ type, folio: 1, issueDate: '2026-11-15', issuer, items: [item], pricesIncludeVat: type === 39 })
+
+  test.each<[string, LineItemInput, string]>([
+    ['a discount', { name: 'Clip', quantity: 1, unitPrice: 49, discountPercent: 1 }, 'discountPercent'],
+    ['a surcharge', { name: 'Clip', quantity: 1, unitPrice: 49, surchargePercent: 1 }, 'surchargePercent'],
+    [
+      'a discount on a line with an amount and no price',
+      { name: 'Ajuste', amount: 100, discountPercent: 5 },
+      'discountPercent',
+    ],
+    [
+      'a surcharge on a line priced at zero',
+      { name: 'Regalo', quantity: 1, unitPrice: 0, surchargePercent: 10 },
+      'surchargePercent',
+    ],
+  ])('%s in percent whose amount rounds to no peso is refused', (_label, item, field) => {
+    // 1 % of 49 is 0.49, which rounds to 0.
+    expectError(() => line(item), 'INVALID_AMOUNT', { field: `items[0].${field}` })
+  })
+
+  test.each([34, 52] as const)('the same line is refused on a %s', (type) => {
+    const item = { name: 'Clip', quantity: 1, unitPrice: 49, discountPercent: 1 }
+    expectError(() => line(item, type), 'INVALID_AMOUNT', { field: 'items[0].discountPercent' })
+  })
+
+  test.each([39, 41] as const)('and on a receipt (%s)', (type) => {
+    const item = { name: 'Clip', quantity: 1, unitPrice: 49, surchargePercent: 1 }
+    expectError(() => receipt(item, type), 'INVALID_AMOUNT', { field: 'items[0].surchargePercent' })
+  })
+
+  test('a percent whose amount rounds to one peso is written with it', () => {
+    // 1 % of 50 is 0.5, which rounds half away from zero to 1.
+    const doc = line({ name: 'Clip', quantity: 1, unitPrice: 50, discountPercent: 1, surchargePercent: 1 })
+    expect(doc.items[0]).toMatchObject({ discountAmount: 1, surchargeAmount: 1, amount: 50 })
+    expect(toSiiDocument(doc).Detalle[0]).toMatchObject({
+      DescuentoPct: 1,
+      DescuentoMonto: 1,
+      RecargoPct: 1,
+      RecargoMonto: 1,
+    })
+  })
+})
+
 describe("the issuer's SII branch code", () => {
   const branch = (siiBranchCode: number, type: DocumentInput['type'] = 33) =>
     createDocument({ type, folio: 7, issuer: { ...issuer, siiBranchCode }, receiver, items })
@@ -1328,7 +1378,7 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
       'discountPercent',
     ],
   ])('%s in percent whose whole amount is zero is refused: a percent goes with its amount', (_label, item, field) => {
-    // Formato DTE 2.5, fields 30 and 33 of the detail. On an export line the amount is a whole number of a currency
+    // Formato DTE 2.5, fields 30 and 34 of the detail. On an export line the amount is a whole number of a currency
     // whose unit is worth much, so 10 % of 4.99 rounds to none, and the percent would be written alone.
     expectError(() => exportOf({ items: [item] }), 'INVALID_AMOUNT', { field: `items[0].${field}` })
   })

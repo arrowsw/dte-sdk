@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A line discount or surcharge in percent whose share of the line rounds to no peso is refused.** A line's discount
+  is its percent of the line rounded to a whole peso, and on a cheap line a small percent rounds to none: 1 % of 49 is
+  0.49. `createDocument` then wrote `DescuentoPct` alone, where Formato DTE 2.5 asks for the amount with it ("Si va el
+  descuento en %, debe ir el monto correspondiente", fields 30 and 34 of the detail, the same of a surcharge), and
+  `DescuentoMonto` and `RecargoMonto` take no zero in `DTE_v10.xsd`, so there is no amount to write. It is now
+  `INVALID_AMOUNT` with the field in `details.field`, `items[i].discountPercent` or `items[i].surchargePercent`, on
+  every type that takes them, as an export document already did. That includes a percent on a line whose base is
+  zero, one with no price or priced at zero. A percent whose share rounds to one peso or more is written with its
+  amount, as before, and `calculateLineAmount` still answers a share of zero.
+  - **What to change:** a line that brought such a percent, which 0.14.0 issued, is now refused: leave the percent
+    out of that line, whose discount or surcharge comes to no peso.
 - **The status of an upload is its verdict, not the class of its code.** The SII answers `EPR` ("Envío Procesado")
   once it has processed an envelope, whatever it did with each document inside, and `queryUploadStatus` and
   `waitForUploadStatus` read that code as `accepted` while the counts of the same answer reported rejected documents.
@@ -72,7 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   digits, so an amount the arithmetic works out with more may have no number of its own: when the number it would get
   writes another amount, it is `INVALID_AMOUNT` with the amount in `details.value`, and so is a number that is not
   finite or is 10^21 or more, in every function of the arithmetic. A line discount or surcharge in percent whose whole
-  amount is zero is refused, since Formato DTE 2.5 writes a percent with its amount (fields 30 and 33 of the detail).
+  amount is zero is refused, since Formato DTE 2.5 writes a percent with its amount (fields 30 and 34 of the detail).
   The stamp carries the total as the document writes it, decimals and all. Before stamping, `createDocument` refuses
   what `Exportaciones` does not declare (prices with VAT, the withholding, commissions, six options of `IdDoc`, every
   total but the exempt amount and the total, the trailer plate and the departure and arrival of the transport, a line's
