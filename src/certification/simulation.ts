@@ -131,13 +131,12 @@ const purchaseItems = (note: PlannedNote, referenced: IssuedRecord | undefined):
       })
 
 // The totals of an invoice, credit note or debit note of the basic or the exempt set: the net after the global
-// discount, the exempt, the VAT on the net. With nothing to add up the total stands alone, with no VAT rate.
+// discount, the exempt, the VAT on the net. With nothing to add up the total stands alone, with no VAT rate. Each line
+// is the amount `createDocument` writes for it, worked out the same way, so the net is the sum of the lines.
 const generalTotals = (items: readonly PlannedItem[], globalDiscountPercent: number | undefined): Totals => {
   const sums = items.reduce(
     (acc, item) => {
-      const base = Math.round((item.quantity || 1) * item.unitPrice)
-      const discountPercent = item.discountPercent ?? 0
-      const line = base - (discountPercent > 0 ? Math.round(base * (discountPercent / 100)) : 0)
+      const line = calculateLineAmount({ ...item, quantity: item.quantity || 1 }).amount
       return item.exempt === true ? { ...acc, exempt: acc.exempt + line } : { ...acc, net: acc.net + line }
     },
     { net: 0, exempt: 0 },

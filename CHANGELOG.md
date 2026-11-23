@@ -33,7 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is that amount is taken as if it were not given. A zero is still taken on a line with a price and no percent, since
   the same field asks for one on a line that is not a sale (`IndExe` 4 or 5) and on a credit note that corrects a
   text, and admits one on a dispatch guide that is not a sale. On an export document the given amount is compared
-  once rounded to its four decimals. A line with no price takes its amount as it comes, as before.
+  once rounded to its four decimals. A line with no price takes its amount as it comes, as before. The message of
+  `TOTAL_MISMATCH` now reads "Amount does not match the SII formula", since a line's amount has it too; the code is
+  the same.
   - **What to change:** a line that brought a price and an amount that do not add up, which 0.14.0 issued, is now
     refused: leave out the amount, or the price. A negative line of a settlement invoice (43) goes without a price, as
     `PrcItem` is above zero in the schema.
@@ -270,17 +272,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already took them, the base is their product rounded half away from zero to a whole peso and each share is its
   percent of the base rounded the same way, all over decimal digits. An input that is not finite or is 10^21 or more,
   and an amount with more digits than a number holds, which would be written as another one, are `INVALID_AMOUNT`
-  with it in `details.value`, where the function answered `NaN` or the other amount.
-  - **What to change:** nothing. A line whose base or share is a half in decimal digits is written a peso further from
-    zero, and its totals with it.
+  with it in `details.value`, where the function answered `NaN` or the other amount; from `createDocument`, such a
+  line is refused with `items[i].amount` in `details.field`. The certification runner adds up the invoices and the
+  notes of its simulation with the same function, so their net is the sum of the lines they carry.
+  - **What to change:** `calculateLineAmount` now throws a `DteError` with `INVALID_AMOUNT` where it answered `NaN` or
+    another amount: a caller that may pass a value that is not a finite number, or a quantity and a price whose
+    product has more digits than a number holds (about fifteen), checks its inputs first or catches the error. A line
+    whose base or share is a half in decimal digits is written a peso further from zero, and its totals with it.
+- **A quantity, a price or a percent is rounded to its decimals over its decimal digits.** `createDocument` rounded
+  each number to the decimals its schema type holds with `toFixed`, over its binary value, where a half in decimal
+  digits may be a hair below it: a discount of 1.005 % was written `DescuentoPct` 1, and a quantity of 1.0000015
+  `QtyItem` 1.000001. `calculateLineAmount` takes the same numbers half away from zero over their decimal digits, so
+  on a price of 10 000 it answered a discount of 101 where `createDocument` wrote 100. Each number is now rounded half
+  away from zero over its decimal digits, as the amounts of a line are: 1.005 is written 1.01, and the line's amounts
+  are worked out with what is written. That covers every decimal `createDocument` rounds: a line's quantity, price,
+  reference quantity and reference price, a percent, a global adjustment value, a commission rate and, on an export
+  document, the exchange rate, the freight, the insurance, the sale clause total and the weights. A receipt's cap of
+  100 is on the percent as written, so 100.005 is now refused.
+  - **What to change:** nothing. A number a half past its decimals in decimal digits, which binary floating point holds
+    a hair below, is written one unit of its last decimal further from zero, and the line's amounts with it.
 - **A receipt refuses a line percent above 100.** `EnvioBOLETA_v11.xsd` restricts a receipt's `DescuentoPct` and
   `RecargoPct` to 100.00 at most, where the `PctType` of `DTE_v10.xsd` goes up to 999.99, and `createDocument` wrote a
   receipt's line with `surchargePercent: 150` as it came, which fails the receipts schema and with it the whole
-  envelope. A percent above 100 on a receipt (39, 41) is now `INVALID_AMOUNT` with `items[i].discountPercent` or
-  `items[i].surchargePercent` in `details.field`; a discount above 100 was refused already, with `items[i].amount`,
-  since it left the line below zero. Every other type takes up to 999.99, as before.
-  - **What to change:** a receipt line with a surcharge above 100 % is now refused: write the line with the surcharge
-    in its price.
+  envelope. A discount above 100 was refused only when its share left the line below zero, with `items[i].amount`:
+  100.01 % of 1 500 is a discount of 1 500 and a line of zero, which was written with `DescuentoPct` 100.01 and failed
+  the same schema. A percent above 100 on a receipt (39, 41) is now `INVALID_AMOUNT` with `items[i].discountPercent`
+  or `items[i].surchargePercent` in `details.field`. Every other type takes up to 999.99, as before.
+  - **What to change:** a receipt line with a discount or a surcharge above 100 % is now refused: write a surcharge
+    above it in the line's price, and a discount of the whole line as 100.
 - **A sale line of a purchase invoice carries a partial withholding where the sales detail takes it.**
   `bookEntryFromDocument` with `operation: 'sale'` left a withholding of VAT other than code 15 in `otherTaxes`, where
   the sales detail takes none (the format, section 2.4: "Estos datos van sólo en los Campos IVA Retenido Total e IVA

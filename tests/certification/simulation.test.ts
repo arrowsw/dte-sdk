@@ -393,6 +393,26 @@ describe('the purchase notes, as the field prices them', () => {
   })
 })
 
+describe('the lines of an invoice, as createDocument writes them', () => {
+  test('the net is the sum of the lines, each worked out over its decimal digits', async () => {
+    const basic = plan.basic!
+    const items = [
+      // 100 × 0.145 and 1500 × 0.009 are 14.5 and 13.5, and 9.2 % of 375 is 34.5: in binary floating point each is a
+      // hair below its half.
+      { name: 'Tornillo', quantity: 100, unitPrice: 0.145 },
+      { name: 'Arandela', quantity: 1500, unitPrice: 0.009 },
+      { name: 'Bisagra', quantity: 1, unitPrice: 375, discountPercent: 9.2 },
+    ]
+    const simulation = await issueSimulation(
+      { basic: { ...basic, invoices: [{ ...basic.invoices[0], items }], creditNotes: [], debitNotes: [] } },
+      issueOptions(),
+    )
+    const { document } = simulation.cases[0]
+    expect(document.items.map((item) => item.amount)).toEqual([15, 14, 340])
+    expect(document.header.totals).toEqual({ netAmount: 369, vatRate: 19, vatAmount: 70, totalAmount: 439 })
+  })
+})
+
 describe('the global discount', () => {
   test('a discount of 0 is no discount', async () => {
     const basic = plan.basic!

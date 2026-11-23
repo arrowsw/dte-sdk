@@ -1,6 +1,7 @@
 import { createDocument, FIELD_LIMITS } from '../src/document/create'
 import { fromSiiDocument, toSiiDocument } from '../src/model/codec'
 import { DteError } from '../src/errors'
+import { calculateLineAmount } from '../src/totals/calculate'
 import type { Currency } from '../src/catalogs/codes'
 import { FOREIGN_RECEIVER_RUT } from '../src/catalogs/codes'
 import type { DocumentInput, LineItemInput } from '../src/model/document'
@@ -743,6 +744,45 @@ describe('a line percent goes with its amount', () => {
     expect(weighed.items[0].amount).toBe(15)
   })
 
+  // 1.005 is 1.00499999999999989… in binary floating point, 0.015 is 0.01499999999999999… and 1.0000015 is
+  // 1.00000149999999…: each is a half past the decimals its schema type holds in decimal digits, and a hair below it
+  // in binary. Each is written rounded half away from zero, and the line is worked out with what is written.
+  test.each<[string, LineItemInput, Record<string, number>]>([
+    [
+      'a discount percent',
+      { name: 'Clip', unitPrice: 10000, discountPercent: 1.005 },
+      { discountPercent: 1.01, discountAmount: 101, amount: 9899 },
+    ],
+    [
+      'a surcharge percent',
+      { name: 'Clip', unitPrice: 10000, surchargePercent: 0.015 },
+      { surchargePercent: 0.02, surchargeAmount: 2, amount: 10002 },
+    ],
+    [
+      'a quantity',
+      { name: 'Granel', quantity: 1.0000015, unitPrice: 1000000 },
+      { quantity: 1.000002, amount: 1000002 },
+    ],
+  ])(
+    '%s a half past its decimals is written rounded half away from zero, with its amounts',
+    (_label, item, written) => {
+      const [first] = line(item).items
+      expect(first).toMatchObject(written)
+      const computed = calculateLineAmount(item)
+      expect([first.discountAmount ?? 0, first.surchargeAmount ?? 0, first.amount]).toEqual([
+        computed.discountAmount,
+        computed.surchargeAmount,
+        computed.amount,
+      ])
+    },
+  )
+
+  test('and so is a percent on a receipt line with a price', () => {
+    const doc = receipt({ name: 'Café', quantity: 1, unitPrice: 10000, discountPercent: 1.005 })
+    expect(doc.items[0]).toMatchObject({ discountPercent: 1.01, discountAmount: 101, amount: 9899 })
+    expect(toSiiDocument(doc).Detalle[0]).toMatchObject({ DescuentoPct: 1.01, DescuentoMonto: 101, MontoItem: 9899 })
+  })
+
   // `EnvioBOLETA_v11.xsd` restricts a receipt's `DescuentoPct` and `RecargoPct` to 100.00 at most, where the
   // `PctType` of `DTE_v10.xsd` goes up to 999.99.
   test.each<[39 | 41, keyof LineItemInput]>([
@@ -758,6 +798,29 @@ describe('a line percent goes with its amount', () => {
         field: `items[0].${field}`,
       },
     )
+  })
+
+  // The cap is on the percent as it is written, with two decimals: 100.004 is written 100, and 100.005, a hair below
+  // its half in binary, is written 100.01.
+  test('a receipt takes a percent its two decimals write as 100, and refuses one they write above it', () => {
+    const doc = receipt({ name: 'Café', quantity: 1, unitPrice: 1500, discountPercent: 100.004 })
+    expect(doc.items[0]).toMatchObject({ discountPercent: 100, discountAmount: 1500, amount: 0 })
+    expectError(
+      () => receipt({ name: 'Café', quantity: 1, unitPrice: 1500, discountPercent: 100.005 }),
+      'INVALID_AMOUNT',
+      { field: 'items[0].discountPercent' },
+    )
+  })
+
+  // `PctType` stops at 999.99: 999.995 is below it, and its two decimals write it 1000.
+  test('a percent its two decimals write past 999.99 is refused', () => {
+    expectError(
+      () => line({ name: 'Café', quantity: 1, unitPrice: 1500, surchargePercent: 999.995 }),
+      'INVALID_AMOUNT',
+      { field: 'items[0].surchargePercent' },
+    )
+    const doc = line({ name: 'Café', quantity: 1, unitPrice: 1500, surchargePercent: 999.994 })
+    expect(doc.items[0]).toMatchObject({ surchargePercent: 999.99 })
   })
 
   test('a receipt takes a percent of 100, and any other type one above it', () => {
@@ -802,6 +865,14 @@ describe('a given amount on a priced line', () => {
 
   test('a line with no price takes its amount as it comes', () => {
     expect(line({ name: 'Glosa', quantity: 2, amount: 1500 }).items[0]).toMatchObject({ quantity: 2, amount: 1500 })
+  })
+
+  // 123 456 789 by 123 456 789 is 15 241 578 750 190 521, which has no number of its own: the nearest one ends in 520.
+  test('an amount with more digits than a number holds is refused on the line amount', () => {
+    expectError(() => line({ name: 'Clip', quantity: 123456789, unitPrice: 123456789 }), 'INVALID_AMOUNT', {
+      field: 'items[0].amount',
+      value: '15241578750190521',
+    })
   })
 })
 
@@ -1067,6 +1138,11 @@ describe('what the schema admits on a settlement invoice (43)', () => {
       commissions: [{ kind: 'commission', description: 'Comisión', netValue: 1000 }],
       ...overrides,
     })
+
+  test('a quantity a half past its six decimals is written rounded half away from zero, with its amount', () => {
+    const items = [{ ...line, quantity: 1.0000015, unitPrice: 1000000 }]
+    expect(settle({ items }).items[0]).toMatchObject({ quantity: 1.000002, amount: 1000002 })
+  })
 
   test('the receiver needs a business activity', () => {
     expectError(() => settle({ receiver: { ...receiver, businessActivity: undefined } }), 'MISSING_FIELD', {
@@ -1439,6 +1515,14 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
   test('an amount of a number too large to be written in digits is refused', () => {
     const item = { name: 'Ajuste', quantity: 1, unit: 'U', amount: 1e21 }
     expectError(() => exportOf({ items: [item] }), 'INVALID_AMOUNT', { field: 'items[0].amount' })
+  })
+
+  test('so is a base with more digits than a number holds, on the line amount', () => {
+    const item = { name: 'Uva de mesa', quantity: 123456789, unit: 'KN', unitPrice: 123456789 }
+    expectError(() => exportOf({ items: [item] }), 'INVALID_AMOUNT', {
+      field: 'items[0].amount',
+      value: '15241578750190521.0000',
+    })
   })
 
   // Formato DTE 2.5, field 38 of the detail, as on any other type: a given amount is the one the price gives, to the
