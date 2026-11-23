@@ -651,10 +651,10 @@ describe('the decimals the schema admits', () => {
   })
 })
 
-// `CdgSIISucur` is a positive integer of at most nine digits in `DTE_v10.xsd` and `EnvioBOLETA_v11.xsd`.
 // Formato DTE 2.5, fields 30 and 34 of the detail: "Si va el descuento en %, debe ir el monto correspondiente", and the
 // same of a surcharge. `DescuentoMonto` and `RecargoMonto` are `MntImpType` in `DTE_v10.xsd`, a positive integer, so a
-// percent whose share of the line rounds to no peso has no amount to go with it.
+// percent whose share of the line rounds to no peso has no amount to go with it. The receipts schema takes an amount of
+// zero, and a receipt follows the same rule all the same.
 describe('a line percent goes with its amount', () => {
   const line = (item: LineItemInput, type: 33 | 34 | 52 = 33) =>
     createDocument({ type, folio: 7, issueDate: '2026-11-15', issuer, receiver, items: [item] })
@@ -689,6 +689,38 @@ describe('a line percent goes with its amount', () => {
     expectError(() => receipt(item, type), 'INVALID_AMOUNT', { field: 'items[0].surchargePercent' })
   })
 
+  // `PctType` starts at 0.01 in `SiiTypes_v10.xsd`, so `<DescuentoPct>0</DescuentoPct>` fails the schema.
+  test.each([33, 34, 52] as const)('a percent of zero is left out of a %s: it is no discount or surcharge', (type) => {
+    const doc = line({ name: 'Clip', quantity: 1, unitPrice: 49, discountPercent: 0, surchargePercent: -0 }, type)
+    expect(doc.items[0]).not.toHaveProperty('discountPercent')
+    expect(doc.items[0]).not.toHaveProperty('surchargePercent')
+    expect(doc.items[0].amount).toBe(49)
+    expect(toSiiDocument(doc).Detalle[0]).not.toHaveProperty('DescuentoPct')
+  })
+
+  test.each([39, 41] as const)('and of a receipt (%s)', (type) => {
+    const doc = receipt({ name: 'Clip', quantity: 1, unitPrice: 49, discountPercent: 0 }, type)
+    expect(doc.items[0]).not.toHaveProperty('discountPercent')
+  })
+
+  test.each<[string, LineItemInput, string]>([
+    ['a negative discount', { name: 'Clip', quantity: 1, unitPrice: 1000, discountPercent: -5 }, 'discountPercent'],
+    ['a negative surcharge', { name: 'Clip', quantity: 1, unitPrice: 1000, surchargePercent: -5 }, 'surchargePercent'],
+    // 0.004 is written to two decimals as 0: a percent asked for with no share of the line.
+    [
+      'a discount its two decimals bring to zero',
+      { name: 'Clip', unitPrice: 1e6, discountPercent: 0.004 },
+      'discountPercent',
+    ],
+    [
+      'a negative one they bring to zero',
+      { name: 'Clip', unitPrice: 1e6, surchargePercent: -0.004 },
+      'surchargePercent',
+    ],
+  ])('%s is refused', (_label, item, field) => {
+    expectError(() => line(item), 'INVALID_AMOUNT', { field: `items[0].${field}` })
+  })
+
   test('a percent whose amount rounds to one peso is written with it', () => {
     // 1 % of 50 is 0.5, which rounds half away from zero to 1.
     const doc = line({ name: 'Clip', quantity: 1, unitPrice: 50, discountPercent: 1, surchargePercent: 1 })
@@ -702,6 +734,7 @@ describe('a line percent goes with its amount', () => {
   })
 })
 
+// `CdgSIISucur` is a positive integer of at most nine digits in `DTE_v10.xsd` and `EnvioBOLETA_v11.xsd`.
 describe("the issuer's SII branch code", () => {
   const branch = (siiBranchCode: number, type: DocumentInput['type'] = 33) =>
     createDocument({ type, folio: 7, issuer: { ...issuer, siiBranchCode }, receiver, items })
