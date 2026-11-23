@@ -88,7 +88,7 @@ export type TotalsOptions = {
   readonly pricesIncludeVat?: boolean
   /** EN: VAT rate percent (default 19). ES: Tasa de IVA en porcentaje (por defecto 19). */
   readonly vatRate?: number
-  /** EN: Global discounts and surcharges, applied in order: one in percent is its percent of the running amount and one in pesos its value, rounded half away from zero to a whole peso over decimal digits. ES: `DscRcgGlobal` — Descuentos y recargos globales, aplicados en orden: uno en porcentaje es su porcentaje del monto que va quedando y uno en pesos su valor, redondeados la mitad lejos de cero a un peso entero sobre dígitos decimales. */
+  /** EN: Global discounts and surcharges, applied in order, each value taken with two decimals: one in percent is its percent of the running amount, taken as a whole peso, and one in pesos its value, rounded half away from zero to a whole peso over decimal digits. ES: `DscRcgGlobal` — Descuentos y recargos globales, aplicados en orden, cada valor tomado con dos decimales: uno en porcentaje es su porcentaje del monto que va quedando, tomado como un peso entero, y uno en pesos su valor, redondeados la mitad lejos de cero a un peso entero sobre dígitos decimales. */
   readonly globalAdjustments?: readonly GlobalAdjustment[]
   /** EN: Withhold the whole VAT (default: true for purchase invoices). ES: Retener todo el IVA (por defecto: true en facturas de compra, 46). */
   readonly withholdVat?: boolean
@@ -165,8 +165,11 @@ const sumCommissions = (lines: NonNullable<TotalsOptions['commissions']>, vatRat
  * EN: Computes `Totales` from detail lines: net, exempt, VAT (derived from the gross when `pricesIncludeVat`),
  * non-billable, withholding for purchase invoices, the summary of commissions and other charges, and the total, which
  * is net + exempt + VAT (left out when withheld) less those charges (Formato DTE 2.5, field 124). Each global
- * adjustment is applied to its base in order, its share worked out over decimal digits and rounded half away from
- * zero to a whole peso, so 9.2 % of 375 is 35 where binary floating point makes it 34. Keys come out in
+ * adjustment is applied to its base in order, as `createDocument` writes it: its value is taken with the two decimals
+ * `ValorDR` holds and the amount it applies to as a whole peso, each rounded half away from zero over its decimal
+ * digits, and its share, its percent of that amount or its value, is rounded half away from zero to a whole peso. So
+ * 9.2 % of 375 is 35, where binary floating point makes it 34, a value of 0.495 is 0.50 and takes off 1, and a percent
+ * of 0.004 is 0.00 and takes off nothing. Keys come out in
  * schema order and zero sections are omitted, exactly as the SII expects. On a settlement invoice (43) the net, the
  * exempt amount, the VAT and the total keep their sign, so the total may be zero or negative, and non-billable lines
  * are not totalled, because `Liquidacion` declares no `MontoNF`. An export document (110, 111, 112) has the totals of
@@ -174,12 +177,16 @@ const sumCommissions = (lines: NonNullable<TotalsOptions['commissions']>, vatRat
  * ES: Calcula `Totales` desde las líneas: neto, exento, IVA (derivado del bruto con `pricesIncludeVat`), no facturable,
  * retención en facturas de compra, el resumen de comisiones y otros cargos, y el total, que es neto + exento + IVA (sin
  * el IVA si está retenido) menos esos cargos (Formato DTE 2.5, campo 124). Cada ajuste global se aplica a su base en
- * orden, con su parte calculada sobre dígitos decimales y redondeada la mitad lejos de cero a un peso entero, así que el
- * 9,2 % de 375 es 35 donde el punto flotante binario da 34. Las claves salen en el orden del esquema y
+ * orden, como lo escribe `createDocument`: su valor se toma con los dos decimales que admite `ValorDR` y el monto al que
+ * se aplica como un peso entero, cada uno redondeado la mitad lejos de cero sobre sus dígitos decimales, y su parte, su
+ * porcentaje de ese monto o su valor, se redondea la mitad lejos de cero a un peso entero. Así el 9,2 % de 375 es 35,
+ * donde el punto flotante binario da 34, un valor de 0,495 es 0,50 y resta 1, y un porcentaje de 0,004 es 0,00 y no
+ * resta nada. Las claves salen en el orden del esquema y
  * las secciones en cero se omiten, tal como espera el SII. En una liquidación factura (43) el neto, el exento, el IVA y
  * el total conservan su signo, así que el total puede ser cero o negativo, y las líneas no facturables no se totalizan,
  * porque `Liquidacion` no declara `MontoNF`. Un documento de exportación (110, 111, 112) tiene los totales de
  * `calculateExportTotals`: su monto exento y su total, en su moneda con cuatro decimales.
+ * @throws {DteError} EN: `INVALID_AMOUNT` for a global adjustment value, or an amount it applies to, that is not finite or is 10^21 or more, and for a share with more digits than a number holds, with it in `details.value`; on an export document, what `calculateExportTotals` throws. ES: `INVALID_AMOUNT` ante el valor de un ajuste global, o un monto al que se aplica, que no es finito o es 10^21 o más, y ante una parte con más dígitos de los que guarda un número, con él en `details.value`; en un documento de exportación, lo que lanza `calculateExportTotals`.
  */
 export const calculateTotals = (
   items: readonly Pick<LineItem, 'amount' | 'exemptIndicator'>[],

@@ -516,9 +516,10 @@ const assertSingleReference = (type: DocumentType, references: readonly Referenc
   if (single !== undefined && other !== undefined) refuse(`references[${other}]`)
 }
 
-// `QtyItem`, `PrcItem`, `QtyRef` and `PrcRef` are each a `Dec12_6Type`, which starts at 0.000001 in `SiiTypes_v10.xsd`,
-// in every root and in a receipt: a quantity, a reference quantity or a reference price at or below zero, or above
-// zero and brought to zero by its six decimals, would fail the schema and is refused. Formato DTE 2.5 lets a transfer
+// `QtyItem`, `PrcItem`, `QtyRef` and `PrcRef` are each a `Dec12_6Type` of `SiiTypes_v10.xsd` in every root, and a
+// receipt's `QtyItem` and `PrcItem` a `Dec5Type` of `EnvioBOLETA_v11.xsd` with the same limits; both start at 0.000001:
+// a quantity, a reference quantity or a reference price at or below zero, or above zero and brought to zero by its six
+// decimals, would fail the schema and is refused. Formato DTE 2.5 lets a transfer
 // that is not a sale leave the unit price out (field 22 of the detail): a price of zero is no price and is left out, so
 // the line is written as one without a price, and one below zero is refused as the others are.
 const linePrice = (value: number | undefined, path: string): number | undefined =>
@@ -1014,7 +1015,11 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
   // "por otros motivos que no corresponden a venta", so 9, whose label reads "Venta para exportación", is not a sale
   // here, as field 38 reads "Guía de despacho NO VENTA (Según campo Indicador Tipo de traslado de bienes del
   // encabezado)" and `IndExe` 4 calls a sale guide one "con Indicador Tipo de Traslado de Bienes igual a 1".
-  const zero = (type === 61 || type === 112) && (input.references ?? []).some(({ code }) => code === CORRECTS_TEXT)
+  // A `SET` reference names no document, so its code makes no note one that corrects a text, as it counts for no
+  // reference above.
+  const zero =
+    (type === 61 || type === 112) &&
+    (input.references ?? []).some(({ documentType, code }) => documentType !== 'SET' && code === CORRECTS_TEXT)
   const context: LineContext = {
     counted,
     zero,

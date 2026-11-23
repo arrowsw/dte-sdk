@@ -175,6 +175,30 @@ describe('calculateTotals', () => {
     expect(adjusted(100, 'discount', 14.5)).toBe(85)
   })
 
+  // A direct caller's numbers are taken as `createDocument` writes them: the value of an adjustment with two decimals,
+  // and the amount it applies to as a whole peso, each rounded half away from zero.
+  test('a global adjustment takes its value with two decimals and its base as a whole peso', () => {
+    const adjusted = (amount: number, valueType: 'amount' | 'percent', value: number) =>
+      calculateTotals([line(amount)], {
+        type: 33,
+        globalAdjustments: [{ lineNumber: 1, kind: 'discount', valueType, value }],
+      }).netAmount
+    // 0.495 is 0.50, half a peso, and takes one off; 0.494 is 0.49, and takes none.
+    expect(adjusted(1000, 'amount', 0.495)).toBe(999)
+    expect(adjusted(1000, 'amount', 0.494)).toBe(1000)
+    // 0.004 % is 0.00 %.
+    expect(adjusted(1_000_000, 'percent', 0.004)).toBe(1_000_000)
+    // Half of 10.5 is taken of 11: 5.5, which rounds to 6.
+    expect(adjusted(10.5, 'percent', 50)).toBe(4.5)
+  })
+
+  test.each([1e21, Number.NaN])('a global adjustment value of %p is refused', (value) => {
+    const globalAdjustments = [{ lineNumber: 1, kind: 'discount' as const, valueType: 'amount' as const, value }]
+    expect(() => calculateTotals([line(1000)], { type: 33, globalAdjustments })).toThrow(
+      expect.objectContaining({ code: 'INVALID_AMOUNT', details: { value: String(value) } }),
+    )
+  })
+
   test('global amount surcharge on exempt base', () => {
     const totals = calculateTotals([line(1000), line(500, 1)], {
       type: 33,

@@ -1020,7 +1020,8 @@ describe('a line that must be zero', () => {
 })
 
 // Formato DTE 2.5, field 22 of the detail: "Para documentos de traslados que no importen venta podrá omitirse el valor
-// unitario". `PrcItem` is a `Dec12_6Type`, which starts at 0.000001 in `SiiTypes_v10.xsd`.
+// unitario". `PrcItem` is a `Dec12_6Type` in `SiiTypes_v10.xsd`, and a `Dec5Type` with the same limits in
+// `EnvioBOLETA_v11.xsd`: both start at 0.000001.
 describe('the unit price of a line', () => {
   const sale = { name: 'Bebida', quantity: 1, unitPrice: 990 }
   const issue = (items: readonly LineItemInput[], type: DocumentInput['type'] = 33) =>
@@ -1067,8 +1068,8 @@ describe('the unit price of a line', () => {
   })
 })
 
-// `QtyItem`, `QtyRef` and `PrcRef` are each a `Dec12_6Type`, which starts at 0.000001 in `SiiTypes_v10.xsd`, as a
-// receipt's `QtyItem` does in `EnvioBOLETA_v11.xsd`.
+// `QtyItem`, `QtyRef` and `PrcRef` are each a `Dec12_6Type` in `SiiTypes_v10.xsd`, and a receipt's `QtyItem` a
+// `Dec5Type` of `EnvioBOLETA_v11.xsd` with the same limits: both start at 0.000001.
 describe('the quantity of a line', () => {
   const issue = (type: DocumentInput['type'], item: LineItemInput, overrides: Partial<DocumentInput> = {}) =>
     createDocument({ type, folio: 7, issueDate: '2026-11-15', issuer, receiver, items: [item], ...overrides })
@@ -1158,6 +1159,13 @@ describe('a note that cancels a document or corrects a text', () => {
     expect(note(56, [reference(2, 8), reference(3, 9)]).references).toHaveLength(2)
     expect(note(61, [reference(3, 8), reference(3, 9)]).references).toHaveLength(2)
     expect(note(33, [reference(1, 8), reference(1, 9)]).references).toHaveLength(2)
+  })
+
+  test('a SET reference with code 2 makes no note one that corrects a text: its lines keep their amounts', () => {
+    const set = { documentType: 'SET' as const, folio: 1, date: '2026-11-15', code: 2 as const, reason: 'CASO 1' }
+    const written = note(61, [set, reference(3, 8)])
+    expect(written.items[0].amount).toBe(1000)
+    expect(written.header.totals.totalAmount).toBe(1190)
   })
 })
 

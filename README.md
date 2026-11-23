@@ -310,10 +310,11 @@ A receipt, whose schema does, follows the same rule. A percent of zero is left o
 of zero is left out the same way, since `PrcItem` starts at 0.000001 and the format lets a transfer that is not a sale
 leave it out (field 22 of the detail): the line is one without a price. A negative price is refused with
 `INVALID_AMOUNT`; a negative line of a settlement invoice (43) is an `amount` with no price. A quantity, a reference
-quantity or a reference price at or below zero, which their `Dec12_6Type` does not admit, is refused with
-`INVALID_AMOUNT` on its field, on every line. With `unitPriceDecimals` the price is written with those decimals over
-its decimal digits, padded with zeros, and fewer decimals than the price has are refused with `INVALID_OPTION`, since
-`PrcItem` would be another price than the one the amount is worked out with. A line's `amount` is taken
+quantity or a reference price at or below zero, which their `Dec12_6Type` (a `Dec5Type` on a receipt) does not admit,
+is refused with `INVALID_AMOUNT` on its field, on every line. With `unitPriceDecimals` the price is written with those
+decimals over its decimal digits, padded with zeros, and fewer decimals than the price has are refused with
+`INVALID_OPTION`, since `PrcItem` would be another price than the one the amount is worked out with. A line's `amount`
+is taken
 as it comes on a line with no price; on a line with one, `MontoItem` is the price by the quantity less the discount
 plus the surcharge (Formato DTE 2.5, field 38 of the detail), and a given amount that is not that one is refused with
 `TOTAL_MISMATCH`, the amount the price gives in `details.expected`. The same field makes some lines zero: a line that
@@ -344,8 +345,8 @@ check stops at the first fault it finds:
 | A line amount that is a whole number, and not negative outside a 43 | `MontoItem` | `INVALID_AMOUNT` (`items[i].amount`) |
 | A given line amount on a line with a price is the price by the quantity less the discount plus the surcharge, or a zero with no percent on a dispatch guide that is not a sale | Formato DTE 2.5 field 38 of the detail | `TOTAL_MISMATCH` (`items[i].amount`), with `expected` and `actual` |
 | A line that is not a sale (`IndExe` 4 or 5), and every line of a credit note that corrects a text, is zero and has no percent | Formato DTE 2.5 field 38 of the detail | `TOTAL_MISMATCH` (`items[i].amount`, `expected` 0), or `INVALID_AMOUNT` (`items[i].discountPercent`, `items[i].surchargePercent`) |
-| A unit price above zero, when one is given (a price of zero is left out) | `PrcItem`, `Dec12_6Type` | `INVALID_AMOUNT` (`items[i].unitPrice`) |
-| A quantity, a reference quantity and a reference price above zero | `QtyItem`, `QtyRef`, `PrcRef`, `Dec12_6Type` | `INVALID_AMOUNT` (`items[i].quantity`, `items[i].referenceQuantity`, `items[i].referencePrice`) |
+| A unit price above zero, when one is given (a price of zero is left out) | `PrcItem`, `Dec12_6Type`, and `Dec5Type` on a receipt | `INVALID_AMOUNT` (`items[i].unitPrice`) |
+| A quantity, a reference quantity and a reference price above zero | `QtyItem`, `QtyRef`, `PrcRef`, `Dec12_6Type`, and `Dec5Type` for a receipt's `QtyItem` | `INVALID_AMOUNT` (`items[i].quantity`, `items[i].referenceQuantity`, `items[i].referencePrice`) |
 | A price written with no fewer decimals than it has | `PrcItem`, Formato DTE 2.5 field 38 of the detail | `INVALID_OPTION` (`items[i].unitPriceDecimals`) |
 | A credit note that cancels a document or corrects a text, and a debit note that cancels a credit note, have one document reference besides a `SET` one | Formato DTE 2.5, the `CodRef` row | `INVALID_OPTION` (`references[i]`) |
 | A credit note that corrects a text has no global adjustment and no commission | Formato DTE 2.5 field 38 of the detail | `INVALID_OPTION` (`globalAdjustments[0]`, `commissions[0]`) |

@@ -259,7 +259,8 @@ export const totaledItems = (
   type: DocumentType,
   references: readonly ReferenceInput[],
   items: readonly PlannedItem[],
-): readonly PlannedItem[] => (type === 61 && references.some(({ code }) => code === 2) ? [] : items)
+): readonly PlannedItem[] =>
+  type === 61 && references.some(({ documentType, code }) => documentType !== 'SET' && code === 2) ? [] : items
 
 // The totals of a document of the basic or the purchase set whose lines add up to nothing: the total alone, without a
 // VAT rate. The exempt set and the guides keep the rate next to a zero total.

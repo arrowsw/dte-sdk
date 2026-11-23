@@ -312,14 +312,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **What to change:** a line with `exemptIndicator` 4 or 5, or of a credit note that corrects a text, is now
     written at zero whatever its price, and its document totals change with it: leave out its `amount`, or give 0, and
     leave out its percents, and the global adjustments and commissions of a credit note that corrects a text.
-- **A unit price of zero is left out, and a negative one is refused.** `PrcItem` is a `Dec12_6Type`, which starts at
-  0.000001 in `SiiTypes_v10.xsd`, and `createDocument` wrote a price of zero as `<PrcItem>0</PrcItem>`, which fails the
-  schema, and with it the whole envelope; Formato DTE 2.5 lets a transfer that is not a sale leave the price out
-  (field 22 of the detail). A price of zero is now no price, as a percent of zero is no percent: the line is written
-  as one without a price, its amount the one it brings, or zero. A negative price, or one above zero that its six
-  decimals bring to zero, is `INVALID_AMOUNT` with `items[i].unitPrice` in `details.field`; a negative line of a
-  settlement invoice (43) is an amount with no price. The certification runner's purchase notes, which gave an item
-  the original's price or zero, write one whose price is zero without it.
+- **A unit price of zero is left out, and a negative one is refused.** `PrcItem` is a `Dec12_6Type` in
+  `SiiTypes_v10.xsd`, and on a receipt a `Dec5Type` of `EnvioBOLETA_v11.xsd` with the same limits, both from 0.000001
+  up, and `createDocument` wrote a price of zero as `<PrcItem>0</PrcItem>`, which fails the schema, and with it the
+  whole envelope; Formato DTE 2.5 lets a transfer that is not a sale leave the price out (field 22 of the detail). A
+  price of zero is now no price, as a percent of zero is no percent: the line is written as one without a price, its
+  amount the one it brings, or zero. A negative price, or one above zero that its six decimals bring to zero, is
+  `INVALID_AMOUNT` with `items[i].unitPrice` in `details.field`; a negative line of a settlement invoice (43) is an
+  amount with no price. The certification runner's purchase notes, which gave an item the original's price or zero,
+  write one whose price is zero without it.
   - **What to change:** nothing for a price of zero, except that a line with a price of zero and no quantity is now
     written with no quantity, where it was written with 1: give the quantity if it should be written (a dispatch
     guide still writes 1). On an export invoice of goods (110), which asks each line for its quantity, such a line is
@@ -336,28 +337,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **What to change:** a receipt line with a discount or a surcharge above 100 % is now refused: write a surcharge
     above it in the line's price, and a discount of the whole line as 100.
 - **A quantity, a reference quantity or a reference price at or below zero is refused.** `QtyItem`, `QtyRef` and
-  `PrcRef` are each a `Dec12_6Type`, which starts at 0.000001 in `SiiTypes_v10.xsd`, as a receipt's `QtyItem` does in
-  `EnvioBOLETA_v11.xsd`, and `createDocument` wrote what it was given: `quantity: 0` as `<QtyItem>0</QtyItem>` on
-  every type, and on a settlement invoice (43) `quantity: -1` and `unitPrice: 300` as `QtyItem` -1 and `MontoItem`
-  -300, either of which fails the schema and the whole envelope with it. A quantity, a reference quantity or a
-  reference price at or below zero, or above zero and brought to zero by its six decimals, is now `INVALID_AMOUNT`
-  with `items[i].quantity`, `items[i].referenceQuantity` or `items[i].referencePrice` in `details.field`, on every
-  line, priced or not, and on a line written at zero too. The certification runner leaves out a planned quantity of
-  zero, an item the case gives none, so a priced line is written with 1, the quantity its simulation and its totals of
-  zero already added it up with.
+  `PrcRef` are each a `Dec12_6Type` in `SiiTypes_v10.xsd`, and a receipt's `QtyItem` a `Dec5Type` of
+  `EnvioBOLETA_v11.xsd` with the same limits, both from 0.000001 up, and `createDocument` wrote what it was given:
+  `quantity: 0` as `<QtyItem>0</QtyItem>` on every type, and on a settlement invoice (43) `quantity: -1` and
+  `unitPrice: 300` as `QtyItem` -1 and `MontoItem` -300, either of which fails the schema and the whole envelope with
+  it. A
+  quantity, a reference quantity or a reference price at or below zero, or above zero and brought to zero by its six
+  decimals, is now `INVALID_AMOUNT` with `items[i].quantity`, `items[i].referenceQuantity` or `items[i].referencePrice`
+  in `details.field`, on every line, priced or not, and on a line written at zero too. The certification runner leaves
+  out a planned quantity of zero, an item the case gives none, so a priced line is written with 1, the quantity its
+  simulation and its totals of zero already added it up with.
   - **What to change:** a line that brought a quantity of zero is now refused: leave the quantity out, and a line with
     a price is written with 1. A negative line of a settlement invoice (43) is a negative `amount` with no price and
     no quantity.
 - **A note that cancels a document or corrects a text has a single document reference.** Formato DTE 2.5 asks a
   credit note that cancels the document it references (`CodRef` 1) or corrects a text of it (2), and a debit note
   that cancels a credit note (1), for one document reference ("CASOS a) b) y c) DEBEN TENER UN ÚNICO DOCUMENTO DE
-  REFERENCIA", the `CodRef` row), and `createDocument` wrote such a note with as many as it was given: a credit note
-  with a reference of `code` 3 and another of `code` 2 was written with every line at zero. A credit note (61, 112)
-  with a reference of `code` 1 or 2, or a debit note (56, 111) with one of `code` 1, and another document reference is
-  now `INVALID_OPTION` with that other `references[i]` in `details.field`. The reference of a certification set
-  (`documentType: 'SET'`) names no document and is not counted, so the test sets issue as before.
+  REFERENCIA", the `CodRef` row), and `createDocument` wrote such a note with as many as it was given. A credit note
+  (61, 112) with a reference of `code` 1 or 2, or a debit note (56, 111) with one of `code` 1, and another document
+  reference is now `INVALID_OPTION` with that other `references[i]` in `details.field`. Each type the `TpoDocRef` row
+  lists counts ("Indica si el documento de referencia es: …"): a tax document, a purchase order (801), a DUS (807) and
+  the others. The reference of a certification set (`documentType: 'SET'`) names no document and is not counted, here or
+  for the credit note that corrects a text above, so the test sets issue as before.
   - **What to change:** a note that cancels or corrects more than one document is now refused: issue one note for
-    each document.
+    each document. A reference to a purchase order, a DUS or any other document cannot go beside a reference of
+    `code` 1 or 2 on such a note either: leave it out of the note.
 - **A price is written with the decimals asked for over its digits, and with no fewer than it has.**
   `unitPriceDecimals` wrote `PrcItem` with `toFixed`, over the binary value of the price and with any number of
   decimals: a price of 1.005 with two was written `PrcItem` 1.00 beside a `MontoItem` worked out with 1.005, which by
@@ -375,8 +379,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decimal digits, as a line's share is, so that net is 340; a global adjustment in pesos is rounded the same way. The
   certification runner's simulation, which worked out its global discount with its own floating point, takes it the
   same way, so its totals are the ones of its lines: a discount of 14.5 % on 100 gave a net of 86, and gives 85.
-  - **What to change:** nothing. Some totals with a global percent whose share is a half in decimal digits change by a
-    peso; totals worked out outside the library round that share half away from zero to match.
+  `calculateTotals` takes each adjustment as `createDocument` writes it: its value with two decimals and the amount it
+  applies to as a whole peso, each rounded half away from zero. A value of 10^21 or more, or one that is not a
+  number, is now `INVALID_AMOUNT` with it in `details.value`.
+  - **What to change:** from `createDocument`, nothing: some totals with a global percent whose share is a half in
+    decimal digits change by a peso, and totals worked out outside the library round that share half away from zero
+    to match. A direct caller of `calculateTotals` sees the two-decimal step: an adjustment of 0.495 pesos on 1 000 now
+    takes off 1, where it took off none, and a discount of 0.004 % on 1 000 000 now takes off nothing, where it took
+    off 40. Give the value with the two decimals `ValorDR` holds, and catch `INVALID_AMOUNT` where a value may not be
+    a finite number below 10^21.
 - **A sale line of a purchase invoice carries a partial withholding where the sales detail takes it.**
   `bookEntryFromDocument` with `operation: 'sale'` left a withholding of VAT other than code 15 in `otherTaxes`, where
   the sales detail takes none (the format, section 2.4: "Estos datos van sólo en los Campos IVA Retenido Total e IVA

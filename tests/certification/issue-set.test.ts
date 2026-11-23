@@ -299,6 +299,19 @@ describe('the guide set', () => {
     expect(priced.cases[0].document.header.totals).toEqual({ vatRate: 19, totalAmount: 0 })
   })
 
+  // `QtyItem` starts above zero: a guide's item planned with no quantity is written with the 1 a guide's line gets.
+  test('an item planned with no quantity is written with 1', async () => {
+    const own = await issueTestSet(
+      {
+        ...plan.guide!,
+        guides: [{ ...plan.guide!.guides[0], items: [{ name: 'Relleno', quantity: 0, unitPrice: 500 }] }],
+      },
+      issueOptions(),
+    )
+    expect(own.cases[0].document.items[0]).toMatchObject({ quantity: 1, unitPrice: 500, amount: 500 })
+    expect(await validateAgainstXsd(own.envelope.xml, 'EnvioDTE')).toEqual([])
+  })
+
   test('the envelope validates against EnvioDTE_v10.xsd', async () => {
     expect(await validateAgainstXsd(set.envelope.xml, 'EnvioDTE')).toEqual([])
   })
@@ -387,6 +400,21 @@ describe('the purchase set', () => {
       issueOptions(),
     )
     expect(noQuantity.cases[1].document.items[0]).toMatchObject({ quantity: 1, unitPrice: 1200, amount: 1200 })
+  })
+
+  test('an invoice item planned with no quantity is written with 1, and its total with it', async () => {
+    const invoice = plan.purchase!.invoice
+    const items = invoice.items.map((item, index) => (index === 0 ? { ...item, quantity: 0 } : item))
+    const own = await issueTestSet(
+      { ...plan.purchase!, invoice: { ...invoice, items }, creditNote: null, debitNote: null },
+      issueOptions(),
+    )
+    const document = own.cases[0].document
+    expect(document.items[0]).toMatchObject({ quantity: 1, unitPrice: items[0].unitPrice, amount: items[0].unitPrice })
+    expect(document.header.totals.netAmount).toBe(
+      document.items.reduce((sum, line) => sum + (line.exemptIndicator === undefined ? line.amount : 0), 0),
+    )
+    expect(await validateAgainstXsd(own.envelope.xml, 'EnvioDTE')).toEqual([])
   })
 
   test('the envelope validates against EnvioDTE_v10.xsd', async () => {

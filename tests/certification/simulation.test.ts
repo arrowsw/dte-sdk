@@ -399,6 +399,18 @@ describe('the purchase notes, as the field prices them', () => {
     expect(upper.cases[1].document.items[0]).toMatchObject({ unitPrice: 1 })
   })
 
+  // `QtyItem` starts above zero, so an item planned with no quantity is written with 1, and the totals add it up so.
+  test('an invoice item planned with no quantity is written with 1, and its totals with it', async () => {
+    const invoice = { ...purchase.invoice, items: [{ name: 'Chatarra de fierro', quantity: 0, unitPrice: 1200 }] }
+    const simulation = await issueSimulation(
+      { purchase: { ...purchase, invoice, creditNote: null, debitNote: null } },
+      issueOptions(),
+    )
+    const document = simulation.cases[0].document
+    expect(document.items[0]).toMatchObject({ quantity: 1, unitPrice: 1200, amount: 1200 })
+    expect(document.header.totals).toMatchObject({ netAmount: 1200, vatAmount: 228, totalAmount: 1200 })
+  })
+
   test('a credit note that corrects a text writes its priced items at zero, and its total alone', async () => {
     const simulation = await run({
       ...purchase.creditNote!,
