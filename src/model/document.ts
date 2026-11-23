@@ -139,13 +139,13 @@ export type LineItemInput = {
   readonly name: string
   /** EN: Description (max 1000). ES: `DscItem` — Descripción, máximo 1000. */
   readonly description?: string
-  /** EN: Quantity, rounded to the six decimals the schema holds; 1 on a line with a price above zero and no quantity, and on any line of a dispatch guide (52) without one. ES: `QtyItem` — Cantidad, redondeada a los seis decimales que admite el esquema; 1 en una línea con precio mayor que cero y sin cantidad, y en cualquier línea de una guía de despacho (52) que no la traiga. */
+  /** EN: Quantity, rounded to the six decimals the schema holds; 1 on a line with a price above zero and no quantity, and on any line of a dispatch guide (52) without one. One at or below zero, or above zero and brought to zero by its six decimals, is refused with `INVALID_AMOUNT`, since the schema's `QtyItem` starts at 0.000001. ES: `QtyItem` — Cantidad, redondeada a los seis decimales que admite el esquema; 1 en una línea con precio mayor que cero y sin cantidad, y en cualquier línea de una guía de despacho (52) que no la traiga. Una de cero o menos, o mayor que cero y llevada a cero por sus seis decimales, se rechaza con `INVALID_AMOUNT`, porque el `QtyItem` del esquema parte en 0.000001. */
   readonly quantity?: number
   /** EN: Unit of measure (max 4). ES: `UnmdItem` — Unidad de medida, máximo 4. */
   readonly unit?: string
   /** EN: Unit price, net or VAT-included according to `pricesIncludeVat`, rounded to the six decimals the schema holds. A price of zero is left out, and the line is one without a price, since the schema's `PrcItem` starts at 0.000001 and Formato DTE 2.5 lets a transfer that is not a sale leave it out (field 22 of the detail); a negative one, or one above zero its six decimals bring to zero, is refused with `INVALID_AMOUNT`. A negative line of a settlement invoice (43) is an `amount` with no price. ES: `PrcItem` — Precio unitario, neto o con IVA según `pricesIncludeVat`, redondeado a los seis decimales que admite el esquema. Un precio de cero se omite, y la línea queda sin precio, porque el `PrcItem` del esquema parte en 0.000001 y el Formato DTE 2.5 permite omitirlo en un traslado que no importa venta (campo 22 del detalle); uno negativo, o uno mayor que cero que sus seis decimales llevan a cero, se rechaza con `INVALID_AMOUNT`. Una línea negativa de una liquidación factura (43) es un `amount` sin precio. */
   readonly unitPrice?: number
-  /** EN: Decimals `PrcItem` is written with (0 to 6); the plain number when omitted. ES: `PrcItem` — Decimales con que se escribe el precio (0 a 6); el número tal cual si se omite. */
+  /** EN: Decimals `PrcItem` is written with (0 to 6), padded with zeros; the plain number when omitted. Fewer than the price has, once rounded to six, would write another price than the one the amount is worked out with, and are refused with `INVALID_OPTION`. ES: `PrcItem` — Decimales con que se escribe el precio (0 a 6), completados con ceros; el número tal cual si se omite. Menos de los que tiene el precio, ya redondeado a seis, escribirían otro precio que el con que se calcula el monto, y se rechazan con `INVALID_OPTION`. */
   readonly unitPriceDecimals?: number
   /** EN: Shorthand for `exemptIndicator: 1`. ES: Atajo para `exemptIndicator: 1` (`IndExe=1`). */
   readonly exempt?: boolean
@@ -163,11 +163,11 @@ export type LineItemInput = {
   readonly additionalTaxCodes?: readonly number[]
   /** EN: Type of the settled document (max 3): required on a settlement invoice (43), refused on any other type. ES: `TpoDocLiq` — Tipo del documento liquidado, máximo 3; obligatorio en liquidación factura (43) y rechazado en cualquier otro tipo. */
   readonly settledDocumentType?: string
-  /** EN: Reference quantity, rounded to six decimals; refused on a receipt. ES: `QtyRef` — Cantidad de referencia, redondeada a seis decimales; se rechaza en una boleta. */
+  /** EN: Reference quantity, rounded to six decimals; refused on a receipt, and at or below zero, or brought to zero by its six decimals, with `INVALID_AMOUNT`. ES: `QtyRef` — Cantidad de referencia, redondeada a seis decimales; se rechaza en una boleta, y con `INVALID_AMOUNT` si es cero o menos, o si sus seis decimales la llevan a cero. */
   readonly referenceQuantity?: number
   /** EN: Reference unit (max 4); refused on a receipt. ES: `UnmdRef` — Unidad de referencia, máximo 4; se rechaza en una boleta. */
   readonly referenceUnit?: string
-  /** EN: Reference price, rounded to six decimals; refused on a receipt. ES: `PrcRef` — Precio de referencia, redondeado a seis decimales; se rechaza en una boleta. */
+  /** EN: Reference price, rounded to six decimals; refused on a receipt, and at or below zero, or brought to zero by its six decimals, with `INVALID_AMOUNT`. ES: `PrcRef` — Precio de referencia, redondeado a seis decimales; se rechaza en una boleta, y con `INVALID_AMOUNT` si es cero o menos, o si sus seis decimales lo llevan a cero. */
   readonly referencePrice?: number
   /** EN: Explicit line amount, taken as it comes on a line with no price. On a line with a price it must be the price by the quantity less the discount plus the surcharge (Formato DTE 2.5, field 38 of the detail), or a zero with no percent on a dispatch guide whose transfer is not a sale, or `createDocument` refuses it with `TOTAL_MISMATCH`. On a line that is not a sale (`IndExe` 4 or 5) and on every line of a credit note that corrects a text (a reference with `code` 2), priced or not, it is zero, and any other is `TOTAL_MISMATCH` with `expected` 0. On an export document it is rounded to the four decimals the schema holds. ES: `MontoItem` — Monto explícito de la línea, que se toma tal como viene en una línea sin precio. En una línea con precio debe ser el precio por la cantidad menos el descuento más el recargo (Formato DTE 2.5, campo 38 del detalle), o un cero sin porcentaje en una guía de despacho cuyo traslado no es venta, o `createDocument` lo rechaza con `TOTAL_MISMATCH`. En una línea que no es venta (`IndExe` 4 o 5) y en cada línea de una nota de crédito que corrige un texto (una referencia con `code` 2), con precio o sin él, es cero, y cualquier otro es `TOTAL_MISMATCH` con `expected` 0. En un documento de exportación se redondea a los cuatro decimales que admite el esquema. */
   readonly amount?: number
@@ -296,7 +296,7 @@ export type ReferenceInput = {
   readonly folio: number | string
   /** EN: Referenced document date YYYY-MM-DD. ES: `FchRef` — Fecha del documento referenciado, AAAA-MM-DD. */
   readonly date: string
-  /** EN: Reference code (1 cancels, 2 corrects text, 3 corrects amounts). ES: `CodRef` — Código de referencia (1 anula, 2 corrige texto, 3 corrige montos). */
+  /** EN: Reference code (1 cancels, 2 corrects text, 3 corrects amounts). A credit note (61, 112) with code 1 or 2, and a debit note (56, 111) with code 1, have a single document reference (Formato DTE 2.5, the `CodRef` row): another one, unless it is a `SET` reference, is refused with `INVALID_OPTION`. ES: `CodRef` — Código de referencia (1 anula, 2 corrige texto, 3 corrige montos). Una nota de crédito (61, 112) con código 1 o 2, y una nota de débito (56, 111) con código 1, tienen un único documento de referencia (Formato DTE 2.5, fila de `CodRef`): otra, salvo una referencia `SET`, se rechaza con `INVALID_OPTION`. */
   readonly code?: ReferenceCode
   /** EN: Reason (max 90). ES: `RazonRef` — Razón de la referencia, máximo 90. */
   readonly reason?: string
@@ -778,10 +778,10 @@ export type DocumentInput = {
   readonly references?: readonly ReferenceInput[]
   /** EN: References of a receipt (39, 41); `references` is for every other type. ES: `Referencia` — Referencias de una boleta (39, 41); `references` es para los demás tipos. */
   readonly receiptReferences?: readonly ReceiptReferenceInput[]
-  /** EN: Global discounts and surcharges; refused on a settlement invoice (43). ES: `DscRcgGlobal` — Descuentos y recargos globales; se rechazan en una liquidación factura (43). */
+  /** EN: Global discounts and surcharges; refused on a settlement invoice (43) and on a credit note that corrects a text (a reference with `code` 2), whose lines are zero. ES: `DscRcgGlobal` — Descuentos y recargos globales; se rechazan en una liquidación factura (43) y en una nota de crédito que corrige un texto (una referencia con `code` 2), cuyas líneas son cero. */
   readonly globalAdjustments?: readonly GlobalAdjustmentInput[]
   readonly subtotals?: readonly SubtotalInfo[]
-  /** EN: Commission and other charge lines, at most 20: summed into the totals and taken off the total; refused on a receipt. ES: `Comisiones` — Líneas de comisiones y otros cargos, 20 como máximo: se suman en los totales y se restan del total; se rechazan en una boleta. */
+  /** EN: Commission and other charge lines, at most 20: summed into the totals and taken off the total; refused on a receipt and on a credit note that corrects a text (a reference with `code` 2), whose total is zero. ES: `Comisiones` — Líneas de comisiones y otros cargos, 20 como máximo: se suman en los totales y se restan del total; se rechazan en una boleta y en una nota de crédito que corrige un texto (una referencia con `code` 2), cuyo total es cero. */
   readonly commissions?: readonly CommissionLineInput[]
   /** EN: Transport of the goods, on a dispatch guide or an invoice that moves them; refused on a settlement invoice (43) and on a receipt. ES: `Transporte` — Transporte de los bienes, en una guía de despacho o una factura que los traslada; se rechaza en una liquidación factura (43) y en una boleta. */
   readonly transport?: TransportInput

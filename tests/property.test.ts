@@ -37,6 +37,35 @@ describe('totals invariants', () => {
     )
   })
 
+  // In hundredths of a percent the share of a whole base is an integer division, exact in a number at these sizes, and
+  // a half goes away from zero: floating point puts 9.2 % of 375, which is 34.5, a hair below its half. Half the cases
+  // are halves: a base of 5 000 × u / d at d × t hundredths, with d dividing 5 000 and t and u odd, is a share of
+  // (t × u + 1) / 2 less a half.
+  const divisorsOf5000 = [1, 2, 4, 5, 8, 10, 20, 25, 40, 50, 100, 125, 200, 250, 500, 625, 1000, 1250, 2500, 5000]
+  const odd = (max: number) => fc.integer({ min: 0, max }).map((n) => 2 * n + 1)
+  const halfCase = fc
+    .tuple(fc.constantFrom(...divisorsOf5000), odd(49), odd(499))
+    .map(([d, t, u]) => [(5000 * u) / d, d * t] as const)
+    .filter(([base, hundredths]) => base <= 1_000_000 && hundredths <= 10_000)
+  const anyCase = fc.tuple(fc.integer({ min: 1, max: 1_000_000 }), fc.integer({ min: 1, max: 10_000 }))
+
+  test('a global percent is its share of the base over decimal digits, half away from zero', () => {
+    fc.assert(
+      fc.property(
+        fc.oneof(halfCase, anyCase),
+        fc.constantFrom('discount' as const, 'surcharge' as const),
+        ([base, hundredths], kind) => {
+          const share = Math.floor((base * hundredths + 5_000) / 10_000)
+          const globalAdjustments = [{ lineNumber: 1, kind, valueType: 'percent' as const, value: hundredths / 100 }]
+          const totals = calculateTotals([{ amount: base }], { type: 33, globalAdjustments })
+          const net = kind === 'discount' ? base - share : base + share
+          expect(totals.netAmount ?? 0).toBe(net)
+        },
+      ),
+      { numRuns: 500 },
+    )
+  })
+
   test('purchase invoice: total excludes the withheld VAT', () => {
     fc.assert(
       fc.property(linesArb, (lines) => {

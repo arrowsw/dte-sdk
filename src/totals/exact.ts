@@ -65,6 +65,15 @@ const digitsOf = (units: bigint, decimals: number): string => {
 }
 
 /**
+ * EN: A finite number written with `decimals` decimals, rounded half away from zero over its decimal digits and padded
+ * with zeros, where `toFixed` rounds its binary value: 1.005 is written `'1.01'` with two. Internal.
+ * ES: Un número finito escrito con `decimals` decimales, redondeado la mitad lejos de cero sobre sus dígitos decimales
+ * y completado con ceros, donde `toFixed` redondea su valor binario: 1.005 se escribe `'1.01'` con dos. Interno.
+ * @throws {DteError} EN: `INVALID_AMOUNT` for a number that is not finite or is 10^21 or more, with it in `details.value`. ES: `INVALID_AMOUNT` ante un número que no es finito o es 10^21 o más, con él en `details.value`.
+ */
+export const toFixedDigits = (value: number, decimals: number): string => digitsOf(unitsOf(value, decimals), decimals)
+
+/**
  * EN: The number a scaled amount writes, read from its decimal digits, so it is the one the same literal gives.
  * Internal.
  * ES: El número que escribe un monto escalado, leído de sus dígitos decimales, así que es el que da el mismo literal.

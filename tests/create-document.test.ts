@@ -571,6 +571,24 @@ describe('the decimals of a line price', () => {
   test.each([-1, 7, 1.5, Number.NaN])('%p decimals are refused', (decimals) => {
     expectError(() => priced(decimals), 'INVALID_OPTION', { field: 'items[0].unitPriceDecimals' })
   })
+
+  // With fewer decimals than the price has, `PrcItem` would be another price than the one the amount is worked out
+  // with: 1.005 with two is 1.00 or 1.01, either of which by 1 000 is not 1 005, and 0.4 with none is zero.
+  test.each([
+    [1.005, 2],
+    [0.4, 0],
+    [1000.5, 0],
+    [1 / 3, 5],
+  ])('a price of %p with %p decimals is refused', (unitPrice, decimals) => {
+    expectError(() => priced(decimals, { unitPrice }), 'INVALID_OPTION', { field: 'items[0].unitPriceDecimals' })
+  })
+
+  // `toFixed` writes the binary value of a number: 84301134689.0647 with six decimals would be 84301134689.064697.
+  test('the price is written over its decimal digits, padded with the zeros asked for', () => {
+    expect(toSiiDocument(priced(3, { unitPrice: 1.005 })).Detalle[0].PrcItem).toBe('1.005')
+    expect(toSiiDocument(priced(4, { unitPrice: 1.005 })).Detalle[0].PrcItem).toBe('1.0050')
+    expect(toSiiDocument(priced(6, { unitPrice: 84301134689.0647 })).Detalle[0].PrcItem).toBe('84301134689.064700')
+  })
 })
 
 // `DTE_v10.xsd` and `EnvioBOLETA_v11.xsd` give `QtyItem`, `PrcItem`, `QtyRef` and `PrcRef` twelve digits and six
@@ -631,6 +649,21 @@ describe('the decimals the schema admits', () => {
     ['surchargePercent', { quantity: 1, unitPrice: 1, surchargePercent: 1000 }],
   ])('a %s with more digits than its type holds is refused', (field, item) => {
     expectError(() => line({ name: 'Lote', ...item }), 'INVALID_AMOUNT', { field: `items[0].${field}` })
+  })
+
+  // From 10^21 up a number has no decimal digits to round, and what is not a finite number has none at all: either is
+  // refused on its field before it is rounded.
+  test.each([1e21, -1e21, Number.POSITIVE_INFINITY, Number.NaN, '5'])('a quantity of %p is refused', (quantity) => {
+    expectError(() => line({ name: 'Lote', quantity: quantity as number, unitPrice: 1 }), 'INVALID_AMOUNT', {
+      field: 'items[0].quantity',
+    })
+  })
+
+  test('so is a global adjustment value of 10^21', () => {
+    const adjusted = { globalAdjustments: [{ kind: 'discount', valueType: 'amount', value: 1e21 }] } as const
+    expectError(() => line({ name: 'Lote', unitPrice: 1 }, adjusted), 'INVALID_AMOUNT', {
+      field: 'globalAdjustments[0].value',
+    })
   })
 
   // A discount of 999.99 % leaves the line below zero, which `MontoItem` does not admit: the surcharge, of the same
@@ -884,6 +917,17 @@ describe('a given amount on a priced line', () => {
     expect(line({ name: 'Glosa', quantity: 2, amount: 1500 }).items[0]).toMatchObject({ quantity: 2, amount: 1500 })
   })
 
+  test('a zero given as -0 is written 0, not -0', () => {
+    for (const item of [
+      { name: 'Pallet', quantity: 3, unitPrice: 1000, amount: -0 },
+      { name: 'Glosa', amount: -0 },
+    ]) {
+      const guide = line(item, 52, { transferType: 5 })
+      expect(guide.items[0].amount).toBe(0)
+      expect(toSiiDocument(guide).Detalle[0].MontoItem).toBe(0)
+    }
+  })
+
   // 123 456 789 by 123 456 789 is 15 241 578 750 190 521, which has no number of its own: the nearest one ends in 520.
   test('an amount with more digits than a number holds is refused on the line amount', () => {
     expectError(() => line({ name: 'Clip', quantity: 123456789, unitPrice: 123456789 }), 'INVALID_AMOUNT', {
@@ -954,6 +998,16 @@ describe('a line that must be zero', () => {
     })
   })
 
+  test.each<[string, Partial<DocumentInput>]>([
+    ['globalAdjustments[0]', { globalAdjustments: [{ kind: 'discount', valueType: 'percent', value: 10 }] }],
+    ['commissions[0]', { commissions: [{ kind: 'commission', description: 'Comisión', netValue: 100 }] }],
+  ])('a credit note that corrects a text refuses %s: it has nothing to apply it to', (field, extra) => {
+    const lines = [{ name: 'Clip', quantity: 2, unitPrice: 1000 }]
+    expectError(() => issue(61, lines, { references: [correction], ...extra }), 'INVALID_OPTION', { field })
+    const empty = { globalAdjustments: [], commissions: [] }
+    expect(issue(61, lines, { references: [correction], ...empty }).header.totals.totalAmount).toBe(0)
+  })
+
   test.each<[string, DocumentInput['type'], 1 | 2 | 3]>([
     ['a credit note that corrects amounts', 61, 3],
     ['a debit note that corrects a text', 56, 2],
@@ -1010,6 +1064,100 @@ describe('the unit price of a line', () => {
       'INVALID_AMOUNT',
       { field: 'items[1].unitPrice' },
     )
+  })
+})
+
+// `QtyItem`, `QtyRef` and `PrcRef` are each a `Dec12_6Type`, which starts at 0.000001 in `SiiTypes_v10.xsd`, as a
+// receipt's `QtyItem` does in `EnvioBOLETA_v11.xsd`.
+describe('the quantity of a line', () => {
+  const issue = (type: DocumentInput['type'], item: LineItemInput, overrides: Partial<DocumentInput> = {}) =>
+    createDocument({ type, folio: 7, issueDate: '2026-11-15', issuer, receiver, items: [item], ...overrides })
+  const correction = { documentType: 33, folio: 5, date: '2026-11-01', code: 2 as const }
+
+  test.each([0, -0, -1, 0.0000004, -0.0000004])('a quantity of %p is refused', (quantity) => {
+    expectError(() => issue(33, { name: 'Clip', quantity, unitPrice: 1000 }), 'INVALID_AMOUNT', {
+      field: 'items[0].quantity',
+    })
+  })
+
+  test.each<[string, DocumentInput['type'], LineItemInput, Partial<DocumentInput>]>([
+    ['a line that is not a sale', 33, { name: 'Envase', quantity: -1, unitPrice: 1000, exemptIndicator: 4 }, {}],
+    [
+      'a credit note that corrects a text',
+      61,
+      { name: 'Clip', quantity: -1, unitPrice: 1000 },
+      {
+        references: [correction],
+      },
+    ],
+    ['a line without a price', 33, { name: 'Glosa', quantity: 0, amount: 500 }, {}],
+    [
+      'a guide that is not a sale',
+      52,
+      { name: 'Pallet', quantity: 0, unitPrice: 1000, amount: 0 },
+      {
+        options: { transferType: 5 },
+      },
+    ],
+    [
+      'a priced line of a settlement invoice',
+      43,
+      { name: 'Venta', quantity: -1, unitPrice: 300, settledDocumentType: '33' },
+      {},
+    ],
+    [
+      'a line of a settlement invoice with no price',
+      43,
+      { name: 'Ajuste', quantity: -1, amount: -300, settledDocumentType: '33' },
+      {},
+    ],
+    ['a receipt', 39, { name: 'Pan', quantity: 0, unitPrice: 1000 }, { receiver: undefined }],
+  ])('so is one on %s', (_label, type, item, overrides) => {
+    expectError(() => issue(type, item, overrides), 'INVALID_AMOUNT', { field: 'items[0].quantity' })
+  })
+
+  test.each(['referenceQuantity', 'referencePrice'] as const)('a %s at or below zero is refused', (field) => {
+    for (const value of [0, -1, 0.0000004])
+      expectError(() => issue(33, { name: 'Caja', quantity: 1, unitPrice: 1000, [field]: value }), 'INVALID_AMOUNT', {
+        field: `items[0].${field}`,
+      })
+  })
+})
+
+// The `CodRef` row of Formato DTE 2.5: a credit note that cancels the document it references or corrects a text of
+// it, and a debit note that cancels a credit note, "DEBEN TENER UN ÚNICO DOCUMENTO DE REFERENCIA".
+describe('a note that cancels a document or corrects a text', () => {
+  const note = (type: DocumentInput['type'], references: DocumentInput['references']) =>
+    createDocument({
+      type,
+      folio: 7,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver,
+      items: [{ name: 'Clip', quantity: 1, unitPrice: 1000 }],
+      references,
+    })
+  const reference = (code: 1 | 2 | 3 | undefined, folio: number, documentType = 33) =>
+    code === undefined ? { documentType, folio, date: '2026-11-01' } : { documentType, folio, date: '2026-11-01', code }
+
+  test.each<[string, DocumentInput['type'], (1 | 2 | 3 | undefined)[], string]>([
+    ['a credit note that corrects a text, after another', 61, [3, 2], 'references[0]'],
+    ['a credit note that corrects a text, before another', 61, [2, 3], 'references[1]'],
+    ['a credit note that cancels, next to one with no code', 61, [1, undefined], 'references[1]'],
+    ['a credit note that cancels two documents', 61, [1, 1], 'references[1]'],
+    ['a debit note that cancels a credit note', 56, [1, 3], 'references[1]'],
+  ])('%s is refused on the other reference', (_label, type, codes, field) => {
+    const references = codes.map((code, index) => reference(code, 8 + index, type === 56 ? 61 : 33))
+    expectError(() => note(type, references), 'INVALID_OPTION', { field })
+  })
+
+  test('the reference of a certification set is not a document, and other notes keep every reference', () => {
+    const set = { documentType: 'SET' as const, folio: 1, date: '2026-11-15', reason: 'CASO 1' }
+    expect(note(61, [set, reference(2, 8)]).items[0].amount).toBe(0)
+    expect(note(61, [set, reference(1, 8)]).references).toHaveLength(2)
+    expect(note(56, [reference(2, 8), reference(3, 9)]).references).toHaveLength(2)
+    expect(note(61, [reference(3, 8), reference(3, 9)]).references).toHaveLength(2)
+    expect(note(33, [reference(1, 8), reference(1, 9)]).references).toHaveLength(2)
   })
 })
 
@@ -1662,8 +1810,6 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
     })
   })
 
-  // Formato DTE 2.5, field 38 of the detail, as on any other type: a given amount is the one the price gives, to the
-  // four decimals the schema holds.
   // Formato DTE 2.5, field 38 of the detail, on an export credit note as on a 61: every line of one that corrects a
   // text is zero.
   test('every line of an export credit note that corrects a text is zero, and so are its totals', () => {
@@ -1680,14 +1826,53 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
     expect(note(111, { items: [priced], references: [correction] }).items[0].amount).toBe(1234.5)
   })
 
+  test.each<[111 | 112, 1 | 2]>([
+    [112, 1],
+    [112, 2],
+    [111, 1],
+  ])('a %s with a reference of code %s and another is refused on the other', (type, code) => {
+    const references = [
+      { documentType: 110, folio: 1, date: '2026-11-10', code },
+      { documentType: 110, folio: 2, date: '2026-11-10', code: 3 as const },
+    ]
+    expectError(() => note(type, { references }), 'INVALID_OPTION', { field: 'references[1]' })
+  })
+
+  test('a quantity at or below zero is refused on an export line too', () => {
+    expectError(() => exportOf({ items: [{ ...line, quantity: 0 }] }), 'INVALID_AMOUNT', { field: 'items[0].quantity' })
+  })
+
+  // An export line's amount is written with four decimals, so a given one is compared as it is written.
+  test.each([
+    [0.00001, undefined],
+    [0.00005, 0.0001],
+    [1e15, 1e15],
+  ])(
+    'a given amount of %p on a line of an export credit note that corrects a text is compared as %p',
+    (amount, actual) => {
+      const correction = { documentType: 110, folio: 1, date: '2026-11-10', code: 2 as const }
+      const items = [{ name: 'Uva de mesa', quantity: 100, unit: 'KN', unitPrice: 12.345, amount }]
+      if (actual === undefined) expect(note(112, { items, references: [correction] }).items[0].amount).toBe(0)
+      else
+        expectError(() => note(112, { items, references: [correction] }), 'TOTAL_MISMATCH', {
+          field: 'items[0].amount',
+          expected: 0,
+          actual,
+        })
+    },
+  )
+
+  // Formato DTE 2.5, field 38 of the detail, as on any other type: a given amount is the one the price gives, to the
+  // four decimals the schema holds, and a zero is no exception.
   test('a given amount on a priced line is the quantity by the price, or it is refused', () => {
     const priced = { name: 'Uva de mesa', quantity: 100, unit: 'KN', unitPrice: 12.345 }
     expect(exportOf({ items: [{ ...priced, amount: 1234.50001 }] }).items[0].amount).toBe(1234.5)
-    expectError(() => exportOf({ items: [{ ...priced, amount: 1234.6 }] }), 'TOTAL_MISMATCH', {
-      field: 'items[0].amount',
-      expected: 1234.5,
-      actual: 1234.6,
-    })
+    for (const amount of [1234.6, 0])
+      expectError(() => exportOf({ items: [{ ...priced, amount }] }), 'TOTAL_MISMATCH', {
+        field: 'items[0].amount',
+        expected: 1234.5,
+        actual: amount,
+      })
   })
 
   // 150 000 000 000 guaranies and 120 000 000 000 pesos are exports of some twenty and some hundred million dollars.

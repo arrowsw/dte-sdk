@@ -753,6 +753,17 @@ test("random quantities and prices keep every document's totals consistent with 
   )
 })
 
+// `QtyItem` starts above zero, so an item planned with no quantity is written with 1, and the set adds it up and
+// discounts it with the same 1.
+test('a basic invoice item planned with no quantity is written with 1, with its discount and its totals', async () => {
+  const items = [{ name: 'Caja', quantity: 0, unitPrice: 2800, discountPercent: 10 }]
+  const issued = await issueTestSet(invoiceAlone(items), issueOptions())
+  const document = issued.cases[0].document
+  expect(document.items[0]).toMatchObject({ quantity: 1, discountPercent: 10, discountAmount: 280, amount: 2520 })
+  expect(document.header.totals).toEqual({ netAmount: 2520, vatRate: 19, vatAmount: 479, totalAmount: 2999 })
+  expect(await validateAgainstXsd(issued.envelope.xml, 'EnvioDTE')).toEqual([])
+})
+
 // `createDocument` refuses a line percent whose share of the line rounds to no peso, since `DescuentoMonto` takes no
 // zero (Formato DTE 2.5, field 30). The set leaves such a discount out, which changes no amount.
 test('a basic invoice line whose discount rounds to no peso is issued without the discount', async () => {

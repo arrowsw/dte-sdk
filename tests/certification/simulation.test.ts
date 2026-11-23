@@ -1,6 +1,7 @@
 import { issueSimulation, type IssuedSimulation } from '../../src/certification/simulation'
 import { verifyEnvelopeSignature } from '../../src/envelope/sign'
 import { chileTimestamp } from '../../src/time/chile'
+import { calculateTotals } from '../../src/totals/calculate'
 import { cafFor, fullPlan, issueOptions, issuer, receiver } from '../support/certification-fixtures'
 import { ISSUER_RUT, RECEIVER_RUT } from '../support/fixtures'
 import { failure } from '../support/portal'
@@ -347,7 +348,12 @@ describe('the items of the notes, as the field resolves them', () => {
         basic.invoices[2],
       ],
     )
-    expect(itemsOf(simulation, 'n-1')).toEqual([['Cajon de manzanas', 0, 2800]])
+    // `QtyItem` starts above zero: an item planned with no quantity is written with 1, the one its amount is added up
+    // with.
+    expect(itemsOf(simulation, 'n-1')).toEqual([['Cajon de manzanas', 1, 2800]])
+    const invoice = simulation.cases[0].document
+    expect(invoice.items[0]).toMatchObject({ quantity: 1, amount: 2800 })
+    expect(invoice.header.totals).toMatchObject({ netAmount: 2800 })
     expect(itemsOf(simulation, 'n-2')).toEqual([['Cemento', 10, 8000]])
     expect(itemsOf(simulation, 'n-3')).toEqual([['Propio', 3, 9]])
   })
@@ -391,6 +397,18 @@ describe('the purchase notes, as the field prices them', () => {
       items: [{ name: 'CHATARRA DE FIERRO', quantity: 100, unitPrice: 0 }],
     })
     expect(upper.cases[1].document.items[0]).toMatchObject({ unitPrice: 1 })
+  })
+
+  test('a credit note that corrects a text writes its priced items at zero, and its total alone', async () => {
+    const simulation = await run({
+      ...purchase.creditNote!,
+      referenceCode: 2,
+      items: [{ name: 'Chatarra de fierro', quantity: 100, unitPrice: 1200 }],
+    })
+    const note = simulation.cases[1].document
+    expect(note.references[0]).toMatchObject({ code: 2 })
+    expect(note.items[0]).toMatchObject({ quantity: 100, unitPrice: 1200, amount: 0 })
+    expect(note.header.totals).toEqual({ totalAmount: 0 })
   })
 })
 
@@ -450,5 +468,21 @@ describe('the global discount', () => {
       issueOptions(),
     )
     expect(simulation.cases[0].document.globalAdjustments).toEqual([])
+  })
+
+  // 14.5 % of 100 is 14.5, a hair below its half in binary floating point: the net is 85, as `calculateTotals` gives
+  // for the same line and discount.
+  test('is worked out over its decimal digits, as createDocument works it out', async () => {
+    const basic = plan.basic!
+    const invoice = { ...basic.invoices[0], items: [{ name: 'Tornillo', quantity: 1, unitPrice: 100 }] }
+    const simulation = await issueSimulation(
+      { basic: { ...basic, invoices: [{ ...invoice, globalDiscountPercent: 14.5 }], creditNotes: [], debitNotes: [] } },
+      issueOptions(),
+    )
+    const { document } = simulation.cases[0]
+    expect(document.header.totals).toEqual({ netAmount: 85, vatRate: 19, vatAmount: 16, totalAmount: 101 })
+    expect(document.header.totals).toEqual(
+      calculateTotals(document.items, { type: 33, globalAdjustments: document.globalAdjustments }),
+    )
   })
 })

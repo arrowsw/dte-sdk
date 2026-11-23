@@ -40,13 +40,19 @@ export type LineAmount = {
  * the base is their product rounded half away from zero to a whole peso, and the discount and the surcharge are each
  * their percent of that base rounded the same way. Formato DTE 2.5 does not say how a line is rounded: each percent is
  * taken of the base already rounded to a whole peso, not of the unrounded product. The arithmetic is over decimal
- * digits, so 9.2 % of 375 is 34.5 and rounds to 35, where binary floating point makes it 34.49999999999999.
+ * digits, so 9.2 % of 375 is 34.5 and rounds to 35, where binary floating point makes it 34.49999999999999. It works
+ * out a line from its numbers alone: `createDocument` writes a line that is not a sale (`IndExe` 4 or 5), and every
+ * line of a credit note that corrects a text, with an amount of zero (Formato DTE 2.5, field 38 of the detail), which
+ * this function does not know.
  * ES: Calcula el monto de una línea con redondeo por línea (el SII compara `MontoItem` contra `QtyItem × PrcItem`), con
  * exactitud: la cantidad y el precio se toman con los seis decimales que admite el esquema y los porcentajes con dos,
  * la base es su producto redondeado, la mitad lejos de cero, a un peso entero, y el descuento y el recargo son cada uno
  * su porcentaje de esa base redondeado igual. El Formato DTE 2.5 no dice cómo se redondea una línea: cada porcentaje
  * se toma de la base ya redondeada a un peso entero, no del producto sin redondear. La aritmética es sobre dígitos
  * decimales, así que el 9,2 % de 375 es 34,5 y redondea a 35, donde el punto flotante binario da 34,49999999999999.
+ * Calcula una línea solo con sus números: `createDocument` escribe una línea que no es venta (`IndExe` 4 o 5), y cada
+ * línea de una nota de crédito que corrige un texto, con monto cero (Formato DTE 2.5, campo 38 del detalle), lo que
+ * esta función no sabe.
  * @param input EN: the quantity, the price and the percentages. ES: la cantidad, el precio y los porcentajes.
  * @returns EN: the base, the discount, the surcharge and the amount, in whole pesos. ES: la base, el descuento, el recargo y el monto, en pesos enteros.
  * @throws {DteError} EN: `INVALID_AMOUNT` for an input that is not finite or is 10^21 or more, and for an amount with more digits than a number holds, which would be written as another one, with it in `details.value`. ES: `INVALID_AMOUNT` ante una entrada que no es finita o es 10^21 o más, y ante un monto con más dígitos de los que guarda un número, que se escribiría como otro, con él en `details.value`.
@@ -82,7 +88,7 @@ export type TotalsOptions = {
   readonly pricesIncludeVat?: boolean
   /** EN: VAT rate percent (default 19). ES: Tasa de IVA en porcentaje (por defecto 19). */
   readonly vatRate?: number
-  /** EN: Global discounts/surcharges. ES: Descuentos/recargos globales. */
+  /** EN: Global discounts and surcharges, applied in order: one in percent is its percent of the running amount and one in pesos its value, rounded half away from zero to a whole peso over decimal digits. ES: `DscRcgGlobal` — Descuentos y recargos globales, aplicados en orden: uno en porcentaje es su porcentaje del monto que va quedando y uno en pesos su valor, redondeados la mitad lejos de cero a un peso entero sobre dígitos decimales. */
   readonly globalAdjustments?: readonly GlobalAdjustment[]
   /** EN: Withhold the whole VAT (default: true for purchase invoices). ES: Retener todo el IVA (por defecto: true en facturas de compra, 46). */
   readonly withholdVat?: boolean
@@ -104,14 +110,28 @@ const sumBases = (items: readonly Pick<LineItem, 'amount' | 'exemptIndicator'>[]
     { affected: 0, exempt: 0, nonBillable: 0 },
   )
 
+/**
+ * EN: The share of a global adjustment, in whole pesos: its percent, with two decimals, of the amount it applies to,
+ * or its value, rounded half away from zero over decimal digits, as a line's share is, so 9.2 % of 375 is 34.5 and
+ * rounds to 35. Internal: `calculateTotals` and the certification simulation share it.
+ * ES: La parte de un ajuste global, en pesos enteros: su porcentaje, con dos decimales, del monto al que se aplica, o
+ * su valor, redondeados la mitad lejos de cero sobre dígitos decimales, como la parte de una línea, así que el 9,2 % de
+ * 375 es 34,5 y redondea a 35. Interno: lo comparten `calculateTotals` y la simulación de certificación.
+ * @throws {DteError} EN: `INVALID_AMOUNT` for an amount or a value that is not finite or is 10^21 or more, and for a share with more digits than a number holds, with it in `details.value`. ES: `INVALID_AMOUNT` ante un monto o un valor que no es finito o es 10^21 o más, y ante una parte con más dígitos de los que guarda un número, con ella en `details.value`.
+ */
+export const adjustmentShare = (amount: number, adjustment: Pick<GlobalAdjustment, 'valueType' | 'value'>): number =>
+  held(
+    adjustment.valueType === 'percent'
+      ? divide(unitsOf(amount, 0) * unitsOf(adjustment.value, 2), pow10(4))
+      : divide(unitsOf(adjustment.value, 2), pow10(2)),
+    0,
+  )
+
 const applyAdjustments = (bases: Bases, adjustments: readonly GlobalAdjustment[]): Bases =>
   adjustments.reduce<Bases>((acc, adjustment) => {
     const key =
       adjustment.exemptIndicator === 1 ? 'exempt' : adjustment.exemptIndicator === 2 ? 'nonBillable' : 'affected'
-    const delta =
-      adjustment.valueType === 'percent'
-        ? Math.round((acc[key] * adjustment.value) / 100)
-        : Math.round(adjustment.value)
+    const delta = adjustmentShare(acc[key], adjustment)
     const signed = adjustment.kind === 'discount' ? -delta : delta
     return { ...acc, [key]: acc[key] + signed }
   }, bases)
@@ -144,14 +164,18 @@ const sumCommissions = (lines: NonNullable<TotalsOptions['commissions']>, vatRat
 /**
  * EN: Computes `Totales` from detail lines: net, exempt, VAT (derived from the gross when `pricesIncludeVat`),
  * non-billable, withholding for purchase invoices, the summary of commissions and other charges, and the total, which
- * is net + exempt + VAT (left out when withheld) less those charges (Formato DTE 2.5, field 124). Keys come out in
+ * is net + exempt + VAT (left out when withheld) less those charges (Formato DTE 2.5, field 124). Each global
+ * adjustment is applied to its base in order, its share worked out over decimal digits and rounded half away from
+ * zero to a whole peso, so 9.2 % of 375 is 35 where binary floating point makes it 34. Keys come out in
  * schema order and zero sections are omitted, exactly as the SII expects. On a settlement invoice (43) the net, the
  * exempt amount, the VAT and the total keep their sign, so the total may be zero or negative, and non-billable lines
  * are not totalled, because `Liquidacion` declares no `MontoNF`. An export document (110, 111, 112) has the totals of
  * `calculateExportTotals`: its exempt amount and its total, in its currency with four decimals.
  * ES: Calcula `Totales` desde las líneas: neto, exento, IVA (derivado del bruto con `pricesIncludeVat`), no facturable,
  * retención en facturas de compra, el resumen de comisiones y otros cargos, y el total, que es neto + exento + IVA (sin
- * el IVA si está retenido) menos esos cargos (Formato DTE 2.5, campo 124). Las claves salen en el orden del esquema y
+ * el IVA si está retenido) menos esos cargos (Formato DTE 2.5, campo 124). Cada ajuste global se aplica a su base en
+ * orden, con su parte calculada sobre dígitos decimales y redondeada la mitad lejos de cero a un peso entero, así que el
+ * 9,2 % de 375 es 35 donde el punto flotante binario da 34. Las claves salen en el orden del esquema y
  * las secciones en cero se omiten, tal como espera el SII. En una liquidación factura (43) el neto, el exento, el IVA y
  * el total conservan su signo, así que el total puede ser cero o negativo, y las líneas no facturables no se totalizan,
  * porque `Liquidacion` no declara `MontoNF`. Un documento de exportación (110, 111, 112) tiene los totales de

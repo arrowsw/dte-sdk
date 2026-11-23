@@ -163,6 +163,18 @@ describe('calculateTotals', () => {
     expect(totals).toEqual({ netAmount: 900, exemptAmount: 500, vatRate: 19, vatAmount: 171, totalAmount: 1571 })
   })
 
+  // 9.2 % of 375 is 34.5 and 14.5 % of 100 is 14.5, each a hair below its half in binary floating point.
+  test('a global percent is worked out over decimal digits and rounded half away from zero', () => {
+    const adjusted = (amount: number, kind: 'discount' | 'surcharge', value: number) =>
+      calculateTotals([line(amount)], {
+        type: 33,
+        globalAdjustments: [{ lineNumber: 1, kind, valueType: 'percent', value }],
+      }).netAmount
+    expect(adjusted(375, 'discount', 9.2)).toBe(340)
+    expect(adjusted(100, 'surcharge', 14.5)).toBe(115)
+    expect(adjusted(100, 'discount', 14.5)).toBe(85)
+  })
+
   test('global amount surcharge on exempt base', () => {
     const totals = calculateTotals([line(1000), line(500, 1)], {
       type: 33,
