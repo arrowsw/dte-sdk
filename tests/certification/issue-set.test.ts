@@ -715,13 +715,24 @@ test('a basic invoice whose lines add up to nothing stops the set: it would carr
   }
 })
 
+test('a basic invoice with a line discount that rounds to no peso stops the set: the percent has no amount', async () => {
+  // 10 % of 4 is 0.4, which rounds to 0, and `DescuentoMonto` admits no zero (Formato DTE 2.5, field 30).
+  const items = [{ name: 'Caja', quantity: 1, unitPrice: 4, discountPercent: 10 }]
+  const error = await failure(issueTestSet(invoiceAlone(items), issueOptions()))
+  expect(error.code).toBe('INVALID_AMOUNT')
+  expect(error.details).toEqual({ field: 'items[0].discountPercent' })
+})
+
 test("random quantities and prices keep every document's totals consistent with calculateTotals", async () => {
-  const item = fc.record({
-    name: fc.constantFrom('Caja', 'Saco', 'Tubo'),
-    quantity: fc.integer({ min: 1, max: 500 }),
-    unitPrice: fc.integer({ min: 0, max: 100000 }),
-    discountPercent: fc.option(fc.integer({ min: 0, max: 50 }), { nil: undefined }),
-  })
+  // A line whose discount rounds to no peso is refused, as the test above shows, so none is generated.
+  const item = fc
+    .record({
+      name: fc.constantFrom('Caja', 'Saco', 'Tubo'),
+      quantity: fc.integer({ min: 1, max: 500 }),
+      unitPrice: fc.integer({ min: 0, max: 100000 }),
+      discountPercent: fc.option(fc.integer({ min: 0, max: 50 }), { nil: undefined }),
+    })
+    .filter((line) => !((line.discountPercent ?? 0) > 0 && calculateLineAmount(line).discountAmount === 0))
   await fc.assert(
     fc.asyncProperty(fc.array(item, { minLength: 1, maxLength: 4 }), async (items) => {
       // An invoice whose lines add up to nothing is refused, as the test above shows: it has no totals to compare.
