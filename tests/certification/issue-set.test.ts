@@ -733,3 +733,40 @@ test("random quantities and prices keep every document's totals consistent with 
     { numRuns: 10 },
   )
 })
+
+// `createDocument` refuses a line percent whose share of the line rounds to no peso, since `DescuentoMonto` takes no
+// zero (Formato DTE 2.5, field 30). The set leaves such a discount out, which changes no amount.
+test('a basic invoice line whose discount rounds to no peso is issued without the discount', async () => {
+  // 10 % of 4 is 0.4, which rounds to 0.
+  const items = [{ name: 'Caja', quantity: 1, unitPrice: 4, discountPercent: 10 }]
+  const issued = await issueTestSet(invoiceAlone(items), issueOptions())
+  const line = issued.cases[0].document.items[0]
+  expect(line).not.toHaveProperty('discountPercent')
+  expect(line.amount).toBe(4)
+})
+
+test('a return of one unit of a discounted line takes the discount only when it comes to a peso', async () => {
+  // 10 × 9 less 5 % is 85.5 less 4.5, written as 5; one unit of it is 9 less 0.45, which rounds to no peso.
+  const plan: BasicSetPlan = {
+    ...invoiceAlone([
+      { name: 'Clip', quantity: 10, unitPrice: 9, discountPercent: 5 },
+      { name: 'Caja', quantity: 1, unitPrice: 1000 },
+    ]),
+    creditNotes: [
+      {
+        caseId: id(2),
+        referencedCase: id(1),
+        referenceCode: 3,
+        reasonText: 'DEVOLUCION DE MERCADERIAS',
+        items: [{ name: 'Clip', quantity: 1, unitPrice: 0 }],
+        itemsFromCase: null,
+      },
+    ],
+    folios: { 33: 1, 61: 1 },
+  }
+  const issued = await issueTestSet(plan, issueOptions())
+  expect(issued.cases[0].document.items[0]).toMatchObject({ discountPercent: 5, discountAmount: 5, amount: 85 })
+  const returned = issued.cases[1].document.items[0]
+  expect(returned).toMatchObject({ name: 'Clip', quantity: 1, unitPrice: 9, amount: 9 })
+  expect(returned).not.toHaveProperty('discountPercent')
+})

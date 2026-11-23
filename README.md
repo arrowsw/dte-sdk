@@ -294,10 +294,14 @@ Every function that depends on "now" accepts `{ now: Date }`, so tests are deter
 `createDocument` writes numbers the way the schema holds them. A quantity and a unit price are rounded to six
 decimals, and a percentage, the value of a global adjustment and the rate of a commission to two, before any amount is
 computed: `0.1 + 0.2` is written `0.3`, and every amount is the one of the numbers written. A number too large for its
-type is refused with `INVALID_AMOUNT`. A line with a price and no quantity is written with the quantity it is computed
-with, 1, and so is every line of a dispatch guide (52) that brings none. On a purchase invoice (46), or any document with `withholdVat: true`, each VAT-affected line carries
-additional tax code 15, the one the withholding is summed over, unless it brings codes of its own. A line's
-`withholdingAgent` writes `Retenedor`, the element of a transaction of a withholding agent: `{}` marks the line
+type is refused with `INVALID_AMOUNT`, and so is a line discount or surcharge in percent whose share of the line rounds
+to no peso, as 1 % of 49: the format writes a percent with its amount (Formato DTE 2.5, fields 30 and 34 of the
+detail), and `DTE_v10.xsd` takes no amount of zero. A receipt, whose schema does, follows the same rule. A percent of
+zero is left out, as no discount or surcharge, since `PctType` starts at 0.01, and a negative one is refused with
+`INVALID_AMOUNT`. A line with a price and no quantity is written with the quantity it is computed with, 1, and so is
+every line of a dispatch guide (52) that brings none. On a purchase invoice (46), or any document with
+`withholdVat: true`, each VAT-affected line carries additional tax code 15, the one the withholding is summed over,
+unless it brings codes of its own. A line's `withholdingAgent` writes `Retenedor`, the element of a transaction of a withholding agent: `{}` marks the line
 (`IndAgente` R), and `slaughterBase`, `marginBase` and `finalConsumerPrice` are the bases it may declare (`MntBaseFaena`,
 `MntMargComer`, `PrcConsFinal`). No type gets it by default, and a receipt and a settlement invoice refuse it, since
 their lines have no such element.
@@ -502,10 +506,10 @@ exportInvoice.header.otherCurrency
   half away from zero. An amount goes up to the schema's 99 999 999 999 999.9999, and one worked out with more digits
   than a number holds, which would be written as another amount, is refused with `INVALID_AMOUNT` and the amount in
   `details.value`. A line discount or surcharge in percent whose whole amount is zero is refused with
-  `INVALID_AMOUNT`, since the format writes a percent with its amount (fields 30 and 33 of the detail): give the line
-  its amount, or use a global adjustment. With `exchangeRate`, `OtraMoneda` carries the exempt amount and the total in Chilean pesos, as
-  field 129 asks: each the amount by the rate, rounded half away from zero to a whole peso (`convertToPesos`). The
-  stamp carries the total as the document writes it, decimals and all.
+  `INVALID_AMOUNT`, since the format writes a percent with its amount (fields 30 and 34 of the detail): leave the
+  percent out of that line, as on any other type. With `exchangeRate`, `OtraMoneda` carries the exempt amount and the
+  total in Chilean pesos, as field 129 asks: each the amount by the rate, rounded half away from zero to a whole peso
+  (`convertToPesos`). The stamp carries the total as the document writes it, decimals and all.
 - **What it refuses.** What `Exportaciones` does not declare: `pricesIncludeVat`, `withholdVat`, `commissions`, the
   options `noDebitReduction`, `transferType`, `printFormat`, `grossAmounts`, `purchaseTransactionType`,
   `saleTransactionType` and `netAmountsIndicator`, every total but `exemptAmount` and `totalAmount`, the transport's

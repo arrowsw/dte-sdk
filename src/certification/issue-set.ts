@@ -183,13 +183,17 @@ const line = (item: PlannedItem, style: LineStyle, priceDecimals: number | undef
       unitPrice: priced ? item.unitPrice : undefined,
       exempt: item.exempt,
     })
+  // A discount whose share of the line rounds to no peso is left out, which changes no amount: `createDocument`
+  // refuses a percent it cannot write with its amount, and a return of one unit of a cheap discounted line, at the
+  // original's price and discount, comes to that.
+  const discounted = priced && calculateLineAmount(item).discountAmount > 0
   return compact({
     name: item.name,
     quantity: priced ? item.quantity : undefined,
     unit: priced ? item.unit : undefined,
     unitPrice: priced ? item.unitPrice : undefined,
     unitPriceDecimals,
-    discountPercent: priced ? item.discountPercent : undefined,
+    discountPercent: discounted ? item.discountPercent : undefined,
     exempt: item.exempt,
   })
 }

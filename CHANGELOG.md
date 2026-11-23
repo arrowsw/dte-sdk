@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A line discount or surcharge in percent whose share of the line rounds to no peso is refused.** A line's discount
+  is its percent of the line rounded to a whole peso, and on a cheap line a small percent rounds to none: 1 % of 49 is
+  0.49. `createDocument` then wrote `DescuentoPct` alone, where Formato DTE 2.5 asks for the amount with it ("Si va el
+  descuento en %, debe ir el monto correspondiente", fields 30 and 34 of the detail, the same of a surcharge), and
+  `DescuentoMonto` and `RecargoMonto` take no zero in `DTE_v10.xsd`, so there is no amount to write. It is now
+  `INVALID_AMOUNT` with the field in `details.field`, `items[i].discountPercent` or `items[i].surchargePercent`, on
+  every type that takes them, as an export document already did. That includes a percent on a line whose base is
+  zero, one with no price or priced at zero, and one above zero that its two decimals bring to zero, as 0.004. A
+  receipt follows the same rule, though `EnvioBOLETA_v11.xsd` would take an amount of zero, so a line is written one
+  way whatever its type. A percent whose share rounds to one peso or more is written with its amount, as before, and
+  `calculateLineAmount` still answers a share of zero. The certification runner leaves such a discount out of the line
+  it builds, which changes no amount: a return of one unit of a cheap discounted line, at the original's price and
+  discount, comes to it, and the set would otherwise stop there.
+  - **What to change:** a line that brought such a percent, which 0.14.0 issued, is now refused: leave the percent
+    out of that line, whose discount or surcharge comes to no peso.
 - **The status of an upload is its verdict, not the class of its code.** The SII answers `EPR` ("Envío Procesado")
   once it has processed an envelope, whatever it did with each document inside, and `queryUploadStatus` and
   `waitForUploadStatus` read that code as `accepted` while the counts of the same answer reported rejected documents.
@@ -72,7 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   digits, so an amount the arithmetic works out with more may have no number of its own: when the number it would get
   writes another amount, it is `INVALID_AMOUNT` with the amount in `details.value`, and so is a number that is not
   finite or is 10^21 or more, in every function of the arithmetic. A line discount or surcharge in percent whose whole
-  amount is zero is refused, since Formato DTE 2.5 writes a percent with its amount (fields 30 and 33 of the detail).
+  amount is zero is refused, since Formato DTE 2.5 writes a percent with its amount (fields 30 and 34 of the detail).
   The stamp carries the total as the document writes it, decimals and all. Before stamping, `createDocument` refuses
   what `Exportaciones` does not declare (prices with VAT, the withholding, commissions, six options of `IdDoc`, every
   total but the exempt amount and the total, the trailer plate and the departure and arrival of the transport, a line's
@@ -225,6 +240,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A line percent of zero is left out, and a negative one is refused.** `DescuentoPct` and `RecargoPct` are
+  `PctType`, which starts at 0.01 in `SiiTypes_v10.xsd`, and `createDocument` wrote a percent of zero as it came, as
+  `<DescuentoPct>0</DescuentoPct>`, which fails the schema on every type but a receipt, and with it the whole
+  envelope. A percent of zero is no discount or surcharge, and the line is now written without it, its amount the
+  same. A negative percent was written too, and left the amount of the line as if there were none; it is now
+  `INVALID_AMOUNT` with the field in `details.field`. A settlement invoice (43) still refuses any line percent with
+  `INVALID_OPTION`.
+  - **What to change:** nothing for a percent of zero. A line that brought a negative percent is now refused.
 - **A sale line of a purchase invoice carries a partial withholding where the sales detail takes it.**
   `bookEntryFromDocument` with `operation: 'sale'` left a withholding of VAT other than code 15 in `otherTaxes`, where
   the sales detail takes none (the format, section 2.4: "Estos datos van sólo en los Campos IVA Retenido Total e IVA
