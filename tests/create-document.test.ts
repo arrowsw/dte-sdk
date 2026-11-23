@@ -732,6 +732,77 @@ describe('a line percent goes with its amount', () => {
       RecargoMonto: 1,
     })
   })
+
+  // 9.2 % of 375 is 34.5, which binary floating point works out as 34.49999999999999; 0.145 by 100 is 14.5, which it
+  // works out as 14.499999999999998.
+  test('a share and a base that are a half in decimal digits round half away from zero', () => {
+    const discounted = line({ name: 'Clip', quantity: 1, unitPrice: 375, discountPercent: 9.2 })
+    expect(discounted.items[0]).toMatchObject({ discountAmount: 35, amount: 340 })
+    expect(toSiiDocument(discounted).Detalle[0]).toMatchObject({ DescuentoMonto: 35, MontoItem: 340 })
+    const weighed = line({ name: 'Granel', quantity: 0.145, unitPrice: 100 })
+    expect(weighed.items[0].amount).toBe(15)
+  })
+
+  // `EnvioBOLETA_v11.xsd` restricts a receipt's `DescuentoPct` and `RecargoPct` to 100.00 at most, where the
+  // `PctType` of `DTE_v10.xsd` goes up to 999.99.
+  test.each<[39 | 41, keyof LineItemInput]>([
+    [39, 'surchargePercent'],
+    [41, 'surchargePercent'],
+    [39, 'discountPercent'],
+    [41, 'discountPercent'],
+  ])('a receipt (%s) refuses a %s above 100', (type, field) => {
+    expectError(
+      () => receipt({ name: 'Café', quantity: 1, unitPrice: 1500, [field]: 100.01 }, type),
+      'INVALID_AMOUNT',
+      {
+        field: `items[0].${field}`,
+      },
+    )
+  })
+
+  test('a receipt takes a percent of 100, and any other type one above it', () => {
+    const doc = receipt({ name: 'Café', quantity: 1, unitPrice: 1500, surchargePercent: 100 })
+    expect(doc.items[0]).toMatchObject({ surchargePercent: 100, surchargeAmount: 1500, amount: 3000 })
+    const invoice = line({ name: 'Café', quantity: 1, unitPrice: 1500, surchargePercent: 150 })
+    expect(invoice.items[0]).toMatchObject({ surchargePercent: 150, surchargeAmount: 2250, amount: 3750 })
+  })
+})
+
+// Formato DTE 2.5, field 38 of the detail: `MontoItem` is "(Precio Unitario * Cantidad) – Monto Descuento + Monto
+// Recargo". The same field asks for a zero on a line that is not a sale (`IndExe` 4 or 5) and on a credit note that
+// corrects a text, and admits one on a dispatch guide that is not a sale.
+describe('a given amount on a priced line', () => {
+  const line = (item: LineItemInput, type: DocumentInput['type'] = 33) =>
+    createDocument({ type, folio: 7, issueDate: '2026-11-15', issuer, receiver, items: [item] })
+
+  test.each<[string, LineItemInput, number]>([
+    ['a discount', { name: 'Clip', unitPrice: 1000, amount: 100, discountPercent: 10 }, 900],
+    ['a surcharge', { name: 'Clip', unitPrice: 1000, amount: 1000, surchargePercent: 10 }, 1100],
+    ['a quantity', { name: 'Clip', quantity: 2, unitPrice: 1000, amount: 1500 }, 2000],
+    ['a zero next to a percent', { name: 'Clip', unitPrice: 1000, amount: 0, discountPercent: 10 }, 900],
+  ])('that does not add up with %s is refused', (_label, item, expected) => {
+    expectError(() => line(item), 'TOTAL_MISMATCH', { field: 'items[0].amount', expected, actual: item.amount })
+  })
+
+  test('one that adds up is taken, as if it were not given', () => {
+    const item = { name: 'Clip', quantity: 2, unitPrice: 1000, discountPercent: 10 }
+    expect(line({ ...item, amount: 1800 }).items).toEqual(line(item).items)
+  })
+
+  test.each<[string, LineItemInput, DocumentInput['type']]>([
+    ['a line that is not a sale', { name: 'Envase', unitPrice: 1000, amount: 0, exemptIndicator: 4 }, 33],
+    ['a line to take off a guide', { name: 'Envase', quantity: 2, unitPrice: 1000, amount: 0, exemptIndicator: 5 }, 52],
+    ['a line of a guide', { name: 'Pallet', quantity: 3, unitPrice: 1000, amount: 0 }, 52],
+  ])('a zero is taken on %s with no percent', (_label, item, type) => {
+    const sale = { name: 'Bebida', quantity: 1, unitPrice: 990 }
+    const doc = createDocument({ type, folio: 7, issueDate: '2026-11-15', issuer, receiver, items: [sale, item] })
+    expect(doc.items[1]).toMatchObject({ unitPrice: 1000, amount: 0 })
+    expect(toSiiDocument(doc).Detalle[1].MontoItem).toBe(0)
+  })
+
+  test('a line with no price takes its amount as it comes', () => {
+    expect(line({ name: 'Glosa', quantity: 2, amount: 1500 }).items[0]).toMatchObject({ quantity: 2, amount: 1500 })
+  })
 })
 
 // `CdgSIISucur` is a positive integer of at most nine digits in `DTE_v10.xsd` and `EnvioBOLETA_v11.xsd`.
@@ -1039,7 +1110,8 @@ describe('what the schema admits on a settlement invoice (43)', () => {
 
   test('what Liquidacion does declare still passes', () => {
     const doc = settle({
-      items: [line, { ...line, name: 'No facturable', amount: -300, exemptIndicator: 2 }],
+      // A negative line has no price: `PrcItem` is above zero, and field 38 makes the amount its price by its quantity.
+      items: [line, { name: 'No facturable', amount: -300, exemptIndicator: 2, settledDocumentType: '33' }],
       references: [{ documentType: 33, folio: 9, date: '2026-11-10', reason: 'Factura liquidada' }],
       subtotals: [{ number: 1, description: 'Ventas', totalAmount: 10000, lines: [1] }],
       globalAdjustments: [],
@@ -1367,6 +1439,18 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
   test('an amount of a number too large to be written in digits is refused', () => {
     const item = { name: 'Ajuste', quantity: 1, unit: 'U', amount: 1e21 }
     expectError(() => exportOf({ items: [item] }), 'INVALID_AMOUNT', { field: 'items[0].amount' })
+  })
+
+  // Formato DTE 2.5, field 38 of the detail, as on any other type: a given amount is the one the price gives, to the
+  // four decimals the schema holds.
+  test('a given amount on a priced line is the quantity by the price, or it is refused', () => {
+    const priced = { name: 'Uva de mesa', quantity: 100, unit: 'KN', unitPrice: 12.345 }
+    expect(exportOf({ items: [{ ...priced, amount: 1234.50001 }] }).items[0].amount).toBe(1234.5)
+    expectError(() => exportOf({ items: [{ ...priced, amount: 1234.6 }] }), 'TOTAL_MISMATCH', {
+      field: 'items[0].amount',
+      expected: 1234.5,
+      actual: 1234.6,
+    })
   })
 
   // 150 000 000 000 guaranies and 120 000 000 000 pesos are exports of some twenty and some hundred million dollars.

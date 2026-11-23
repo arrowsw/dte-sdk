@@ -1,6 +1,7 @@
 import { VAT_RATE, WITHHOLDING_TAX_CODES } from '../catalogs/codes'
 import { isExport, isReceipt, type DocumentType } from '../catalogs/document-types'
 import type { CommissionLineInput, GlobalAdjustment, LineItem, Totals } from '../model/document'
+import { divide, held, pow10, unitsOf, ZERO } from './exact'
 import { calculateExportTotals } from './export'
 
 /**
@@ -34,8 +35,19 @@ export type LineAmount = {
 }
 
 /**
- * EN: Computes a detail line amount with per-line rounding (the SII compares `MontoItem` against `QtyItem × PrcItem`).
- * ES: Calcula el monto de una línea con redondeo por línea (el SII compara `MontoItem` contra `QtyItem × PrcItem`).
+ * EN: Computes a detail line amount with per-line rounding (the SII compares `MontoItem` against `QtyItem × PrcItem`),
+ * exactly: the quantity and the price are taken with the six decimals the schema holds and the percentages with two,
+ * the base is their product rounded half away from zero to a whole peso, and the discount and the surcharge are each
+ * their percent of that base rounded the same way. The arithmetic is over decimal digits, so 9.2 % of 375 is 34.5 and
+ * rounds to 35, where binary floating point makes it 34.49999999999999.
+ * ES: Calcula el monto de una línea con redondeo por línea (el SII compara `MontoItem` contra `QtyItem × PrcItem`), con
+ * exactitud: la cantidad y el precio se toman con los seis decimales que admite el esquema y los porcentajes con dos,
+ * la base es su producto redondeado, la mitad lejos de cero, a un peso entero, y el descuento y el recargo son cada uno
+ * su porcentaje de esa base redondeado igual. La aritmética es sobre dígitos decimales, así que el 9,2 % de 375 es 34,5
+ * y redondea a 35, donde el punto flotante binario da 34,49999999999999.
+ * @param input EN: the quantity, the price and the percentages. ES: la cantidad, el precio y los porcentajes.
+ * @returns EN: the base, the discount, the surcharge and the amount, in whole pesos. ES: la base, el descuento, el recargo y el monto, en pesos enteros.
+ * @throws {DteError} EN: `INVALID_AMOUNT` for an input that is not finite or is 10^21 or more, and for an amount with more digits than a number holds, which would be written as another one, with it in `details.value`. ES: `INVALID_AMOUNT` ante una entrada que no es finita o es 10^21 o más, y ante un monto con más dígitos de los que guarda un número, que se escribiría como otro, con él en `details.value`.
  */
 export const calculateLineAmount = ({
   quantity = 1,
@@ -43,10 +55,18 @@ export const calculateLineAmount = ({
   discountPercent = 0,
   surchargePercent = 0,
 }: LineAmountInput): LineAmount => {
-  const base = Math.round(quantity * unitPrice)
-  const discountAmount = discountPercent > 0 ? Math.round((base * discountPercent) / 100) : 0
-  const surchargeAmount = surchargePercent > 0 ? Math.round((base * surchargePercent) / 100) : 0
-  return { base, discountAmount, surchargeAmount, amount: base - discountAmount + surchargeAmount }
+  // Quantity and price with six decimals each: their product has twelve, rounded to a whole peso.
+  const base = divide(unitsOf(quantity, 6) * unitsOf(unitPrice, 6), pow10(12))
+  // A whole base by a percent with two decimals, over 100: a whole peso is that over 10^4.
+  const share = (percent: number): bigint => (percent > 0 ? divide(base * unitsOf(percent, 2), pow10(4)) : ZERO)
+  const discount = share(discountPercent)
+  const surcharge = share(surchargePercent)
+  return {
+    base: held(base, 0),
+    discountAmount: held(discount, 0),
+    surchargeAmount: held(surcharge, 0),
+    amount: held(base - discount + surcharge, 0),
+  }
 }
 
 /**

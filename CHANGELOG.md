@@ -24,6 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   discount, comes to it, and the set would otherwise stop there.
   - **What to change:** a line that brought such a percent, which 0.14.0 issued, is now refused: leave the percent
     out of that line, whose discount or surcharge comes to no peso.
+- **A given amount on a line with a price is the amount the price gives.** `createDocument` took a line's `amount` as
+  it came, and on a line with a price wrote beside it the discount and the surcharge the price gives: `unitPrice:
+  1000`, `amount: 100` and `discountPercent: 10` wrote `MontoItem` 100 and `DescuentoMonto` 100, which do not add up.
+  Formato DTE 2.5 makes `MontoItem` "(Precio Unitario * Cantidad) – Monto Descuento + Monto Recargo" (field 38 of the
+  detail). On a line with a price, a given amount that is not that one is now `TOTAL_MISMATCH`, with `items[i].amount`
+  in `details.field`, the amount the price gives in `details.expected` and the given one in `details.actual`; one that
+  is that amount is taken as if it were not given. A zero is still taken on a line with a price and no percent, since
+  the same field asks for one on a line that is not a sale (`IndExe` 4 or 5) and on a credit note that corrects a
+  text, and admits one on a dispatch guide that is not a sale. On an export document the given amount is compared
+  once rounded to its four decimals. A line with no price takes its amount as it comes, as before.
+  - **What to change:** a line that brought a price and an amount that do not add up, which 0.14.0 issued, is now
+    refused: leave out the amount, or the price. A negative line of a settlement invoice (43) goes without a price, as
+    `PrcItem` is above zero in the schema.
 - **The status of an upload is its verdict, not the class of its code.** The SII answers `EPR` ("Envío Procesado")
   once it has processed an envelope, whatever it did with each document inside, and `queryUploadStatus` and
   `waitForUploadStatus` read that code as `accepted` while the counts of the same answer reported rejected documents.
@@ -248,6 +261,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `INVALID_AMOUNT` with the field in `details.field`. A settlement invoice (43) still refuses any line percent with
   `INVALID_OPTION`.
   - **What to change:** nothing for a percent of zero. A line that brought a negative percent is now refused.
+- **A line's amounts are worked out over decimal digits.** `calculateLineAmount`, which `createDocument` writes a line
+  with, rounded the quantity by the price, and each percent of that base, with `Math.round` over binary floating
+  point, where a half in decimal digits may come out a hair below it: 9.2 % of 375 is 34.5, worked out as
+  34.49999999999999 and written as `DescuentoMonto` 34, and 0.145 by 100 is 14.5, written as `MontoItem` 14. Of the
+  shares of a base of 1 to 2 000 pesos at each percent from 0.01 to 100.00, 264 came out a peso short. The quantity and
+  the price are now taken with the six decimals the schema holds and a percent with two, as `calculateExportLineAmount`
+  already took them, the base is their product rounded half away from zero to a whole peso and each share is its
+  percent of the base rounded the same way, all over decimal digits. An input that is not finite or is 10^21 or more,
+  and an amount with more digits than a number holds, which would be written as another one, are `INVALID_AMOUNT`
+  with it in `details.value`, where the function answered `NaN` or the other amount.
+  - **What to change:** nothing. A line whose base or share is a half in decimal digits is written a peso further from
+    zero, and its totals with it.
+- **A receipt refuses a line percent above 100.** `EnvioBOLETA_v11.xsd` restricts a receipt's `DescuentoPct` and
+  `RecargoPct` to 100.00 at most, where the `PctType` of `DTE_v10.xsd` goes up to 999.99, and `createDocument` wrote a
+  receipt's line with `surchargePercent: 150` as it came, which fails the receipts schema and with it the whole
+  envelope. A percent above 100 on a receipt (39, 41) is now `INVALID_AMOUNT` with `items[i].discountPercent` or
+  `items[i].surchargePercent` in `details.field`; a discount above 100 was refused already, with `items[i].amount`,
+  since it left the line below zero. Every other type takes up to 999.99, as before.
+  - **What to change:** a receipt line with a surcharge above 100 % is now refused: write the line with the surcharge
+    in its price.
 - **A sale line of a purchase invoice carries a partial withholding where the sales detail takes it.**
   `bookEntryFromDocument` with `operation: 'sale'` left a withholding of VAT other than code 15 in `otherTaxes`, where
   the sales detail takes none (the format, section 2.4: "Estos datos van sólo en los Campos IVA Retenido Total e IVA

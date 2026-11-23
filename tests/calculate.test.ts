@@ -31,6 +31,59 @@ describe('calculateLineAmount', () => {
   ])('%p → %p', (input, expected) => {
     expect(calculateLineAmount(input)).toEqual(expected)
   })
+
+  // Each of these is a half in decimal digits that binary floating point writes a hair below it: 375 × 9.2 / 100 is
+  // 34.49999999999999 there, and 0.145 × 100 is 14.499999999999998.
+  test.each([
+    [
+      { unitPrice: 375, discountPercent: 9.2 },
+      { base: 375, discountAmount: 35, surchargeAmount: 0, amount: 340 },
+    ],
+    [
+      { unitPrice: 375, surchargePercent: 16.4 },
+      { base: 375, discountAmount: 0, surchargeAmount: 62, amount: 437 },
+    ],
+    [
+      { unitPrice: 250, discountPercent: 64.6 },
+      { base: 250, discountAmount: 162, surchargeAmount: 0, amount: 88 },
+    ],
+    [
+      { quantity: 0.145, unitPrice: 100 },
+      { base: 15, discountAmount: 0, surchargeAmount: 0, amount: 15 },
+    ],
+    [
+      { quantity: 0.009, unitPrice: 1500 },
+      { base: 14, discountAmount: 0, surchargeAmount: 0, amount: 14 },
+    ],
+  ])('a half in decimal digits rounds away from zero: %p → %p', (input, expected) => {
+    expect(calculateLineAmount(input)).toEqual(expected)
+  })
+
+  test('a negative half rounds away from zero too', () => {
+    expect(calculateLineAmount({ quantity: 1, unitPrice: -14.5 })).toEqual({
+      base: -15,
+      discountAmount: 0,
+      surchargeAmount: 0,
+      amount: -15,
+    })
+  })
+
+  test('the quantity and the price are taken with the six decimals the schema holds, and a percent with two', () => {
+    expect(calculateLineAmount({ quantity: 2.4999996, unitPrice: 1 })).toMatchObject({ base: 3, amount: 3 })
+    expect(calculateLineAmount({ unitPrice: 100000, discountPercent: 4.994 })).toMatchObject({
+      discountAmount: 4990,
+      amount: 95010,
+    })
+  })
+
+  test('an amount with more digits than a number holds is refused, and so is an input that is not finite', () => {
+    expect(() => calculateLineAmount({ quantity: 123456789, unitPrice: 123456789 })).toThrow(
+      expect.objectContaining({ code: 'INVALID_AMOUNT', details: { value: '15241578750190521' } }),
+    )
+    expect(() => calculateLineAmount({ quantity: Number.NaN, unitPrice: 1000 })).toThrow(
+      expect.objectContaining({ code: 'INVALID_AMOUNT', details: { value: 'NaN' } }),
+    )
+  })
 })
 
 describe('calculateTotals', () => {

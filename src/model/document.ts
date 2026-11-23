@@ -129,8 +129,10 @@ export type WithholdingAgentLine = {
 }
 
 /**
- * EN: A detail line as the caller provides it; amounts are computed unless `amount` is given.
- * ES: Línea de detalle tal como la entrega el llamador; los montos se calculan salvo que venga `amount`.
+ * EN: A detail line as the caller provides it; amounts are computed, and a given `amount` is taken on a line with no
+ * price.
+ * ES: Línea de detalle tal como la entrega el llamador; los montos se calculan, y un `amount` dado se toma en una línea
+ * sin precio.
  */
 export type LineItemInput = {
   /** EN: Item name (max 80). ES: `NmbItem` — Nombre del ítem, máximo 80. */
@@ -151,9 +153,9 @@ export type LineItemInput = {
   readonly exemptIndicator?: ExemptIndicator
   /** EN: Marks the line as a transaction of a withholding agent (`IndAgente` R), with the bases it declares; refused on a receipt and on a settlement invoice (43), whose lines have no such element. ES: `Retenedor` — Marca la línea como transacción de un agente retenedor (`IndAgente` R), con las bases que declara; se rechaza en una boleta y en una liquidación factura (43), cuyas líneas no tienen ese elemento. */
   readonly withholdingAgent?: WithholdingAgentLine
-  /** EN: Line discount percent, rounded to two decimals; refused on a settlement invoice (43). A percent of zero is left out; a negative one, or one above zero whose share of the line rounds to zero, is refused, since the percent is written with its amount. ES: `DescuentoPct` — Porcentaje de descuento de la línea, redondeado a dos decimales; se rechaza en una liquidación factura (43). Un porcentaje de cero se omite; uno negativo, o uno mayor que cero cuya parte de la línea redondea a cero, se rechaza, porque el porcentaje se escribe con su monto. */
+  /** EN: Line discount percent, rounded to two decimals; refused on a settlement invoice (43). A percent of zero is left out; a negative one, or one above zero whose share of the line rounds to zero, is refused, since the percent is written with its amount, and so is one above 100 on a receipt (39, 41), whose schema stops there. ES: `DescuentoPct` — Porcentaje de descuento de la línea, redondeado a dos decimales; se rechaza en una liquidación factura (43). Un porcentaje de cero se omite; uno negativo, o uno mayor que cero cuya parte de la línea redondea a cero, se rechaza, porque el porcentaje se escribe con su monto, y también uno mayor que 100 en una boleta (39, 41), cuyo esquema llega hasta ahí. */
   readonly discountPercent?: number
-  /** EN: Line surcharge percent, rounded to two decimals; refused on a settlement invoice (43). A percent of zero is left out; a negative one, or one above zero whose share of the line rounds to zero, is refused, since the percent is written with its amount. ES: `RecargoPct` — Porcentaje de recargo de la línea, redondeado a dos decimales; se rechaza en una liquidación factura (43). Un porcentaje de cero se omite; uno negativo, o uno mayor que cero cuya parte de la línea redondea a cero, se rechaza, porque el porcentaje se escribe con su monto. */
+  /** EN: Line surcharge percent, rounded to two decimals; refused on a settlement invoice (43). A percent of zero is left out; a negative one, or one above zero whose share of the line rounds to zero, is refused, since the percent is written with its amount, and so is one above 100 on a receipt (39, 41), whose schema stops there. ES: `RecargoPct` — Porcentaje de recargo de la línea, redondeado a dos decimales; se rechaza en una liquidación factura (43). Un porcentaje de cero se omite; uno negativo, o uno mayor que cero cuya parte de la línea redondea a cero, se rechaza, porque el porcentaje se escribe con su monto, y también uno mayor que 100 en una boleta (39, 41), cuyo esquema llega hasta ahí. */
   readonly surchargePercent?: number
   /** EN: Item codes. ES: `CdgItem` — Códigos del ítem (hasta 5). */
   readonly codes?: readonly ItemCode[]
@@ -167,7 +169,7 @@ export type LineItemInput = {
   readonly referenceUnit?: string
   /** EN: Reference price, rounded to six decimals; refused on a receipt. ES: `PrcRef` — Precio de referencia, redondeado a seis decimales; se rechaza en una boleta. */
   readonly referencePrice?: number
-  /** EN: Explicit line amount; skips the quantity × price computation. On an export document it is rounded to the four decimals the schema holds. ES: `MontoItem` — Monto explícito de la línea; omite el cálculo cantidad × precio. En un documento de exportación se redondea a los cuatro decimales que admite el esquema. */
+  /** EN: Explicit line amount, taken as it comes on a line with no price. On a line with a price it must be the price by the quantity less the discount plus the surcharge (Formato DTE 2.5, field 38 of the detail), or a zero on a line with no percent, or `createDocument` refuses it with `TOTAL_MISMATCH`. On an export document it is rounded to the four decimals the schema holds. ES: `MontoItem` — Monto explícito de la línea, que se toma tal como viene en una línea sin precio. En una línea con precio debe ser el precio por la cantidad menos el descuento más el recargo (Formato DTE 2.5, campo 38 del detalle), o un cero en una línea sin porcentaje, o `createDocument` lo rechaza con `TOTAL_MISMATCH`. En un documento de exportación se redondea a los cuatro decimales que admite el esquema. */
   readonly amount?: number
 }
 

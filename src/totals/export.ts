@@ -1,5 +1,5 @@
-import { DteError } from '../errors'
 import type { GlobalAdjustment, LineItem, Totals } from '../model/document'
+import { divide, held, HUNDRED, pow10, toNumber, unitsOf, ZERO } from './exact'
 
 // The amounts of an export document are in a foreign currency, with the decimals `Exportaciones` admits: four in a
 // line's `MontoItem` and in `MntExe` and `MntTotal` (`totalDigits` 18, `fractionDigits` 4), none in a line's
@@ -7,55 +7,7 @@ import type { GlobalAdjustment, LineItem, Totals } from '../model/document'
 // decimal digits of the numbers as they are written in the XML, and rounded half away from zero to the decimals of
 // its element: binary floating point never decides a cent.
 
-const TEN = BigInt(10)
-const ZERO = BigInt(0)
-const HUNDRED = BigInt(100)
 const AMOUNT_DECIMALS = 4
-
-const pow10 = (exponent: number): bigint => TEN ** BigInt(exponent)
-
-// The decimal digits of a finite number as JavaScript writes it, the way the XML writes it, scaled to `decimals` and
-// rounded half away from zero.
-const unitsOf = (value: number, decimals: number): bigint => {
-  // From 10^21 up JavaScript writes a number with an exponent whatever it is asked, and what is not finite has no
-  // digits at all.
-  if (!(Math.abs(value) < 1e21)) throw new DteError('INVALID_AMOUNT', { value: String(value) })
-  const written = String(value)
-  const plain = /e/i.test(written) ? value.toFixed(20) : written
-  const negative = plain.startsWith('-')
-  const [whole, fraction = ''] = (negative ? plain.slice(1) : plain).split('.')
-  const kept = BigInt(whole + fraction.slice(0, decimals).padEnd(decimals, '0'))
-  const rounded = Number(fraction.charAt(decimals) || '0') >= 5 ? kept + BigInt(1) : kept
-  return negative ? ZERO - rounded : rounded
-}
-
-// `numerator / denominator`, rounded half away from zero; the denominator is above zero.
-const divide = (numerator: bigint, denominator: bigint): bigint => {
-  const negative = numerator < ZERO
-  const magnitude = negative ? ZERO - numerator : numerator
-  const quotient = (magnitude * BigInt(2) + denominator) / (denominator * BigInt(2))
-  return negative ? ZERO - quotient : quotient
-}
-
-// A scaled amount in decimal digits.
-const digitsOf = (units: bigint, decimals: number): string => {
-  const negative = units < ZERO
-  const digits = String(negative ? ZERO - units : units).padStart(decimals + 1, '0')
-  const cut = digits.length - decimals
-  return `${negative ? '-' : ''}${digits.slice(0, cut)}.${digits.slice(cut)}`
-}
-
-// The number a scaled amount writes, read from its decimal digits, so it is the one the same literal gives.
-const toNumber = (units: bigint, decimals: number): number => Number(digitsOf(units, decimals))
-
-// The number an amount worked out here is handed back as. A number holds some fifteen significant digits: an amount
-// with more may have no number of its own, and the number it gets is written as another amount. That one is refused,
-// with its digits; an amount whose number writes it back is taken, however many digits it has.
-const held = (units: bigint, decimals: number): number => {
-  const amount = toNumber(units, decimals)
-  if (unitsOf(amount, decimals) !== units) throw new DteError('INVALID_AMOUNT', { value: digitsOf(units, decimals) })
-  return amount
-}
 
 /**
  * EN: Rounds a number half away from zero to `decimals` decimals, over its decimal digits as JavaScript writes it, so
