@@ -235,6 +235,19 @@ export const exemptAll = (items: readonly PlannedItem[]): readonly PlannedItem[]
 const exemptWithUnit = (items: readonly PlannedItem[]): readonly PlannedItem[] =>
   items.map((item) => ({ ...item, unit: item.unit ?? 'UN', exempt: true }))
 
+/**
+ * EN: The items a document's totals add up: none on a credit note that corrects a text (`CodRef` 2), whose every line
+ * `createDocument` writes with an amount of zero (Formato DTE 2.5, field 38 of the detail), else every one. Internal.
+ * ES: Los ítems que suman los totales de un documento: ninguno en una nota de crédito que corrige un texto (`CodRef`
+ * 2), cuyas líneas `createDocument` escribe todas con monto cero (Formato DTE 2.5, campo 38 del detalle), si no todos.
+ * Interno.
+ */
+export const totaledItems = (
+  type: DocumentType,
+  references: readonly ReferenceInput[],
+  items: readonly PlannedItem[],
+): readonly PlannedItem[] => (type === 61 && references.some(({ code }) => code === 2) ? [] : items)
+
 // The totals of a document of the basic or the purchase set whose lines add up to nothing: the total alone, without a
 // VAT rate. The exempt set and the guides keep the rate next to a zero total.
 const zeroTotals = (items: readonly PlannedItem[]): DocumentInput['totals'] =>
@@ -438,15 +451,19 @@ const issueInvoicesAndNotes = async (
   const creditItems = kind === 'basic' ? basicCreditItems : kind === 'exempt' ? exemptCreditItems : purchaseCreditItems
   for (const note of creditNotes) {
     const items = creditItems(context, note)
+    const references = [
+      setReference(note.caseId, context.date),
+      documentReference(referencedRecord(context, note), note),
+    ]
     await issueCertificationDocument(context, {
       caseId: note.caseId,
       type: 61,
       items,
       style,
       receiver,
-      references: [setReference(note.caseId, context.date), documentReference(referencedRecord(context, note), note)],
+      references,
       withholdVat: kind === 'purchase' ? true : undefined,
-      totals: bareZero ? zeroTotals(items) : undefined,
+      totals: bareZero ? zeroTotals(totaledItems(61, references, items)) : undefined,
       priceDecimals: SET_PRICE_DECIMALS,
       record: true,
     })

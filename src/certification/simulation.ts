@@ -11,6 +11,7 @@ import {
   issuerAsReceiver,
   sameName,
   signCertificationEnvelope,
+  totaledItems,
   type IssueContext,
   type IssueSetOptions,
   type IssuedCase,
@@ -216,13 +217,14 @@ export const issueSimulation = async (plan: CertificationPlan, options: IssueSet
       for (const note of notes) {
         const referenced = referencedOf(context, note)
         const items = basicLikeItems(set.kind, note, referenced)
+        const references = noteReference(referenced, note)
         await issueCertificationDocument(context, {
           caseId: note.caseId,
           type,
           items,
           style: 'plain',
-          references: noteReference(referenced, note),
-          totals: generalTotals(items, undefined),
+          references,
+          totals: generalTotals(totaledItems(type, references, items), undefined),
           record: true,
         })
       }
@@ -258,15 +260,16 @@ export const issueSimulation = async (plan: CertificationPlan, options: IssueSet
       if (note === null) continue
       const referenced = referencedOf(context, note)
       const items = purchaseItems(note, referenced)
+      const references = noteReference(referenced, note)
       await issueCertificationDocument(context, {
         caseId: note.caseId,
         type,
         items,
         style: 'purchase',
         receiver: issuer,
-        references: noteReference(referenced, note),
+        references,
         withholdVat: true,
-        totals: purchaseTotals(items),
+        totals: purchaseTotals(totaledItems(type, references, items)),
         record: true,
       })
     }

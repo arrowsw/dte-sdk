@@ -30,15 +30,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Formato DTE 2.5 makes `MontoItem` "(Precio Unitario * Cantidad) – Monto Descuento + Monto Recargo" (field 38 of the
   detail). On a line with a price, a given amount that is not that one is now `TOTAL_MISMATCH`, with `items[i].amount`
   in `details.field`, the amount the price gives in `details.expected` and the given one in `details.actual`; one that
-  is that amount is taken as if it were not given. A zero is still taken on a line with a price and no percent, since
-  the same field asks for one on a line that is not a sale (`IndExe` 4 or 5) and on a credit note that corrects a
-  text, and admits one on a dispatch guide that is not a sale. On an export document the given amount is compared
-  once rounded to its four decimals. A line with no price takes its amount as it comes, as before. The message of
-  `TOTAL_MISMATCH` now reads "Amount does not match the SII formula", since a line's amount has it too; the code is
-  the same.
+  is that amount is taken as if it were not given. A zero is no exception, save where the same field admits one: on
+  a dispatch guide (52) whose `transferType` is not 1, a transfer that is not a sale ("Puede ser cero cuando el
+  documento es una Guía de despacho NO VENTA"), a zero is taken on a line with a price and no percent. On an export
+  document the given amount is compared once rounded to its four decimals. A line with no price takes its amount as it
+  comes, as before. The message of `TOTAL_MISMATCH` now reads "Amount does not match the SII formula", since a line's
+  amount has it too; the code is the same.
   - **What to change:** a line that brought a price and an amount that do not add up, which 0.14.0 issued, is now
-    refused: leave out the amount, or the price. A negative line of a settlement invoice (43) goes without a price, as
-    `PrcItem` is above zero in the schema.
+    refused: leave out the amount, or the price. A line with a price and an amount of zero is refused too, outside a
+    guide that is not a sale: mark a line that is not a sale with `exemptIndicator: 4`, which writes it at zero. A
+    negative line of a settlement invoice (43) goes without a price, as `PrcItem` is above zero in the schema.
 - **The status of an upload is its verdict, not the class of its code.** The SII answers `EPR` ("Envío Procesado")
   once it has processed an envelope, whatever it did with each document inside, and `queryUploadStatus` and
   `waitForUploadStatus` read that code as `accepted` while the counts of the same answer reported rejected documents.
@@ -270,7 +271,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shares of a base of 1 to 2 000 pesos at each percent from 0.01 to 100.00, 264 came out a peso short. The quantity and
   the price are now taken with the six decimals the schema holds and a percent with two, as `calculateExportLineAmount`
   already took them, the base is their product rounded half away from zero to a whole peso and each share is its
-  percent of the base rounded the same way, all over decimal digits. An input that is not finite or is 10^21 or more,
+  percent of the base rounded the same way, all over decimal digits. Formato DTE 2.5 does not say how a line is
+  rounded; each percent is still taken of the base already rounded to a whole peso, not of the unrounded product, as
+  the README and the JSDoc now say. An input that is not finite or is 10^21 or more,
   and an amount with more digits than a number holds, which would be written as another one, are `INVALID_AMOUNT`
   with it in `details.value`, where the function answered `NaN` or the other amount; from `createDocument`, such a
   line is refused with `items[i].amount` in `details.field`. The certification runner adds up the invoices and the
@@ -291,6 +294,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   100 is on the percent as written, so 100.005 is now refused.
   - **What to change:** nothing. A number a half past its decimals in decimal digits, which binary floating point holds
     a hair below, is written one unit of its last decimal further from zero, and the line's amounts with it.
+- **A line that is not a sale, and every line of a credit note that corrects a text, is written with an amount of
+  zero.** Formato DTE 2.5 says of `MontoItem` that it "debe ser cero" on a line whose `IndExe` is 4 (an item that is
+  not a sale) or 5 (an item a guide that is not a sale takes off an earlier one), and on a credit note that corrects a
+  text ("fe de erratas", `CodRef` 2) (field 38 of the detail). `createDocument` wrote such a line with the amount its
+  price gives. It now writes it with an amount of zero, with its price and quantity, on every line with `IndExe` 4 or
+  5 and on every line of a credit note (61, or 112 on an export) with a reference of `code` 2, and its totals add up
+  that zero. A given amount other than zero there is `TOTAL_MISMATCH` with `items[i].amount` in `details.field` and
+  `expected` 0, and a line percent is `INVALID_AMOUNT` on its field, since its discount or surcharge would add up with
+  nothing. A debit note that corrects a text keeps its amounts. The certification runner and its simulation add up
+  such a note's totals as zero, the total alone, as they do for a note whose lines bring no price.
+  - **What to change:** a line with `exemptIndicator` 4 or 5, or of a credit note that corrects a text, is now
+    written at zero whatever its price, and its document totals change with it: leave out its `amount`, or give 0, and
+    leave out its percents.
+- **A unit price of zero is left out, and a negative one is refused.** `PrcItem` is a `Dec12_6Type`, which starts at
+  0.000001 in `SiiTypes_v10.xsd`, and `createDocument` wrote a price of zero as `<PrcItem>0</PrcItem>`, which fails the
+  schema, and with it the whole envelope; Formato DTE 2.5 lets a transfer that is not a sale leave the price out
+  (field 22 of the detail). A price of zero is now no price, as a percent of zero is no percent: the line is written
+  as one without a price, its amount the one it brings, or zero. A negative price, or one above zero that its six
+  decimals bring to zero, is `INVALID_AMOUNT` with `items[i].unitPrice` in `details.field`; a negative line of a
+  settlement invoice (43) is an amount with no price. The certification runner's purchase notes, which gave an item
+  the original's price or zero, write one whose price is zero without it.
+  - **What to change:** nothing for a price of zero, except that a line with a price of zero and no quantity is now
+    written with no quantity, where it was written with 1: give the quantity if it should be written (a dispatch
+    guide still writes 1). A line with a negative price is now refused: write it with a negative `amount` and no
+    price on a 43, or as a credit note elsewhere.
 - **A receipt refuses a line percent above 100.** `EnvioBOLETA_v11.xsd` restricts a receipt's `DescuentoPct` and
   `RecargoPct` to 100.00 at most, where the `PctType` of `DTE_v10.xsd` goes up to 999.99, and `createDocument` wrote a
   receipt's line with `surchargePercent: 150` as it came, which fails the receipts schema and with it the whole

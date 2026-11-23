@@ -295,20 +295,27 @@ Every function that depends on "now" accepts `{ now: Date }`, so tests are deter
 decimals, and a percentage, the value of a global adjustment and the rate of a commission to two, half away from zero
 over their decimal digits, before any amount is computed: `0.1 + 0.2` is written `0.3`, a percent of 1.005 is written
 1.01, and every amount is the one of the numbers written. A line's amounts (`calculateLineAmount`) are worked out over
-those decimal digits, not in binary floating point: the quantity by the price, rounded half away from zero to a whole
-peso, and the discount and the surcharge each their percent of it, rounded the same way, so 9.2 % of 375 is 34.5 and
-is written as 35. A number too large for its type is refused with `INVALID_AMOUNT`, and so is a line whose amount has
-more digits than a number holds, with `items[i].amount`, and a line discount or surcharge in percent whose share of
-the line rounds to no peso, as 1 % of 49: the format writes a percent with its amount (Formato DTE 2.5, fields 30 and
-34 of the detail), and `DTE_v10.xsd` takes no amount of zero. A receipt, whose schema does, follows the same rule. A
-percent of zero is left out, as no discount or surcharge, since `PctType` starts at 0.01, and a negative one is
-refused with `INVALID_AMOUNT`, as is one above 100 on a receipt (39, 41) once written with its two decimals, whose
-schema stops there where `DTE_v10.xsd` goes up to 999.99. A line's `amount` is taken as it comes on a line with no
-price; on a line with one, `MontoItem` is the price by the quantity less the discount plus the surcharge (Formato DTE
-2.5, field 38 of the detail), and a given amount that is not that one is refused with `TOTAL_MISMATCH`, the amount the
-price gives in `details.expected`. A zero is taken on a priced line with no percent, as the same field asks of a line
-that is not a sale (`IndExe` 4 or 5) and of a credit note that corrects a text, and admits one on a dispatch guide
-that is not a sale. A line with a price and no quantity is written with the quantity it is computed with, 1, and so is
+those decimal digits, not in binary floating point: the base is the quantity by the price, rounded half away from
+zero to a whole peso, and the discount and the surcharge are each their percent of that base, rounded the same way, so
+9.2 % of 375 is 34.5 and is written as 35. Formato DTE 2.5 does not say how a line is rounded; each percent is taken of
+the base already rounded, not of the unrounded product. A number too large for its type is refused with
+`INVALID_AMOUNT`, and so is a line whose amount has more digits than a number holds, with `items[i].amount`, and a
+line discount or surcharge in percent whose share of the line rounds to no peso, as 1 % of 49: the format writes a
+percent with its amount (Formato DTE 2.5, fields 30 and 34 of the detail), and `DTE_v10.xsd` takes no amount of zero.
+A receipt, whose schema does, follows the same rule. A percent of zero is left out, as no discount or surcharge, since
+`PctType` starts at 0.01, and a negative one is refused with `INVALID_AMOUNT`, as is one above 100 on a receipt (39,
+41) once written with its two decimals, whose schema stops there where `DTE_v10.xsd` goes up to 999.99. A unit price
+of zero is left out the same way, since `PrcItem` starts at 0.000001 and the format lets a transfer that is not a sale
+leave it out (field 22 of the detail): the line is one without a price. A negative price is refused with
+`INVALID_AMOUNT`; a negative line of a settlement invoice (43) is an `amount` with no price. A line's `amount` is taken
+as it comes on a line with no price; on a line with one, `MontoItem` is the price by the quantity less the discount
+plus the surcharge (Formato DTE 2.5, field 38 of the detail), and a given amount that is not that one is refused with
+`TOTAL_MISMATCH`, the amount the price gives in `details.expected`. The same field makes some lines zero: a line that
+is not a sale (`IndExe` 4 or 5) and every line of a credit note that corrects a text (61 or 112 with a reference of
+`code` 2) are written with an amount of zero whatever their price, a given amount other than zero is refused with
+`TOTAL_MISMATCH` and `expected` 0, and a percent on them is refused with `INVALID_AMOUNT`. A given zero is also taken
+on a priced line with no percent of a dispatch guide whose `transferType` is not 1, a transfer that is not a sale.
+A line with a price and no quantity is written with the quantity it is computed with, 1, and so is
 every line of a dispatch guide (52) that brings none. On a purchase invoice (46), or any document with
 `withholdVat: true`, each VAT-affected line carries additional tax code 15, the one the withholding is summed over,
 unless it brings codes of its own. A line's `withholdingAgent` writes `Retenedor`, the element of a transaction of a withholding agent: `{}` marks the line
@@ -328,7 +335,9 @@ check stops at the first fault it finds:
 | The issuer's `activityCode`, on every type but a receipt | `Acteco`, Formato DTE 2.5 field 37 | `MISSING_FIELD`, or `INVALID_OPTION` outside 1 to 999999 |
 | An informative subtotal's `description`, on every type but a receipt | `GlosaSTI` | `MISSING_FIELD` |
 | A line amount that is a whole number, and not negative outside a 43 | `MontoItem` | `INVALID_AMOUNT` (`items[i].amount`) |
-| A given line amount on a line with a price is the price by the quantity less the discount plus the surcharge, or a zero on a line with no percent | Formato DTE 2.5 field 38 of the detail | `TOTAL_MISMATCH` (`items[i].amount`), with `expected` and `actual` |
+| A given line amount on a line with a price is the price by the quantity less the discount plus the surcharge, or a zero with no percent on a dispatch guide that is not a sale | Formato DTE 2.5 field 38 of the detail | `TOTAL_MISMATCH` (`items[i].amount`), with `expected` and `actual` |
+| A line that is not a sale (`IndExe` 4 or 5), and every line of a credit note that corrects a text, is zero and has no percent | Formato DTE 2.5 field 38 of the detail | `TOTAL_MISMATCH` (`items[i].amount`, `expected` 0), or `INVALID_AMOUNT` (`items[i].discountPercent`, `items[i].surchargePercent`) |
+| A unit price above zero, when one is given (a price of zero is left out) | `PrcItem`, `Dec12_6Type` | `INVALID_AMOUNT` (`items[i].unitPrice`) |
 | A line percent of 100 at most on a receipt | `DescuentoPct`, `RecargoPct` of `EnvioBOLETA_v11.xsd` | `INVALID_AMOUNT` (`items[i].discountPercent`, `items[i].surchargePercent`) |
 | Net, exempt, VAT and total that are whole numbers, and not negative outside a 43 | `MntNeto`, `MntExe`, `IVA`, `MntTotal` | `INVALID_AMOUNT` |
 | An invoice (33) declares its VAT | validation 55 | `MISSING_FIELD` (`totals.vatAmount`) |
@@ -520,10 +529,11 @@ exportInvoice.header.otherCurrency
   `details.value` (on a line, with `items[i].amount` in `details.field`). A line discount or surcharge in percent
   whose whole amount is zero is refused with `INVALID_AMOUNT`, since the format writes a percent with its amount
   (fields 30 and 34 of the detail): leave the percent out of that line, as on any other type. A line's given `amount`
-  is rounded to four decimals, and on a line with a price it is the amount the price gives, or a zero, or
-  `TOTAL_MISMATCH`, as on any other type (field 38 of the detail). With `exchangeRate`, `OtraMoneda` carries the
-  exempt amount and the total in Chilean pesos, as field 129 asks: each the amount by the rate, rounded half away from
-  zero to a whole peso (`convertToPesos`). The stamp carries the total as the document writes it, decimals and all.
+  is rounded to four decimals, and on a line with a price it is the amount the price gives or `TOTAL_MISMATCH`, and
+  every line of an export credit note (112) that corrects a text is zero, as on any other type (field 38 of the
+  detail). With `exchangeRate`, `OtraMoneda` carries the exempt amount and the total in Chilean pesos, as field 129
+  asks: each the amount by the rate, rounded half away from zero to a whole peso (`convertToPesos`). The stamp carries
+  the total as the document writes it, decimals and all.
 - **What it refuses.** What `Exportaciones` does not declare: `pricesIncludeVat`, `withholdVat`, `commissions`, the
   options `noDebitReduction`, `transferType`, `printFormat`, `grossAmounts`, `purchaseTransactionType`,
   `saleTransactionType` and `netAmountsIndicator`, every total but `exemptAmount` and `totalAmount`, the transport's

@@ -367,7 +367,7 @@ describe('the purchase notes, as the field prices them', () => {
   const run = (creditNote: typeof purchase.creditNote) =>
     issueSimulation({ purchase: { ...purchase, creditNote, debitNote: null } }, issueOptions())
 
-  test('a note whose invoice is not in the simulation keeps its own price, even when it is nothing', async () => {
+  test('a note whose invoice is not in the simulation keeps its own price, and a price of nothing is no price', async () => {
     const simulation = await run({
       ...purchase.creditNote!,
       referencedCase: 'nope',
@@ -375,7 +375,8 @@ describe('the purchase notes, as the field prices them', () => {
     })
     const note = simulation.cases[1].document
     expect(note.references).toEqual([])
-    expect(note.items[0]).toMatchObject({ unitPrice: 0, amount: 0 })
+    expect(note.items[0]).toMatchObject({ quantity: 100, amount: 0 })
+    expect(note.items[0]).not.toHaveProperty('unitPrice')
     expect(note.header.totals).toEqual({ totalAmount: 0 })
   })
 
@@ -410,6 +411,27 @@ describe('the lines of an invoice, as createDocument writes them', () => {
     const { document } = simulation.cases[0]
     expect(document.items.map((item) => item.amount)).toEqual([15, 14, 340])
     expect(document.header.totals).toEqual({ netAmount: 369, vatRate: 19, vatAmount: 70, totalAmount: 439 })
+  })
+})
+
+describe('a credit note that corrects a text', () => {
+  test('writes its priced items at zero, and its total alone', async () => {
+    const basic = plan.basic!
+    const priced = [{ name: 'Cemento', quantity: 2, unitPrice: 8000 }]
+    const simulation = await issueSimulation(
+      {
+        basic: {
+          ...basic,
+          creditNotes: basic.creditNotes.map((note) => (note.referenceCode === 2 ? { ...note, items: priced } : note)),
+          debitNotes: [],
+        },
+      },
+      issueOptions(),
+    )
+    const note = byCase(simulation, 5).document
+    expect(note.references[0]).toMatchObject({ code: 2 })
+    expect(note.items).toEqual([expect.objectContaining({ name: 'Cemento', unitPrice: 8000, amount: 0 })])
+    expect(note.header.totals).toEqual({ totalAmount: 0 })
   })
 })
 

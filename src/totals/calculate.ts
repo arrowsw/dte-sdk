@@ -38,13 +38,15 @@ export type LineAmount = {
  * EN: Computes a detail line amount with per-line rounding (the SII compares `MontoItem` against `QtyItem × PrcItem`),
  * exactly: the quantity and the price are taken with the six decimals the schema holds and the percentages with two,
  * the base is their product rounded half away from zero to a whole peso, and the discount and the surcharge are each
- * their percent of that base rounded the same way. The arithmetic is over decimal digits, so 9.2 % of 375 is 34.5 and
- * rounds to 35, where binary floating point makes it 34.49999999999999.
+ * their percent of that base rounded the same way. Formato DTE 2.5 does not say how a line is rounded: each percent is
+ * taken of the base already rounded to a whole peso, not of the unrounded product. The arithmetic is over decimal
+ * digits, so 9.2 % of 375 is 34.5 and rounds to 35, where binary floating point makes it 34.49999999999999.
  * ES: Calcula el monto de una línea con redondeo por línea (el SII compara `MontoItem` contra `QtyItem × PrcItem`), con
  * exactitud: la cantidad y el precio se toman con los seis decimales que admite el esquema y los porcentajes con dos,
  * la base es su producto redondeado, la mitad lejos de cero, a un peso entero, y el descuento y el recargo son cada uno
- * su porcentaje de esa base redondeado igual. La aritmética es sobre dígitos decimales, así que el 9,2 % de 375 es 34,5
- * y redondea a 35, donde el punto flotante binario da 34,49999999999999.
+ * su porcentaje de esa base redondeado igual. El Formato DTE 2.5 no dice cómo se redondea una línea: cada porcentaje
+ * se toma de la base ya redondeada a un peso entero, no del producto sin redondear. La aritmética es sobre dígitos
+ * decimales, así que el 9,2 % de 375 es 34,5 y redondea a 35, donde el punto flotante binario da 34,49999999999999.
  * @param input EN: the quantity, the price and the percentages. ES: la cantidad, el precio y los porcentajes.
  * @returns EN: the base, the discount, the surcharge and the amount, in whole pesos. ES: la base, el descuento, el recargo y el monto, en pesos enteros.
  * @throws {DteError} EN: `INVALID_AMOUNT` for an input that is not finite or is 10^21 or more, and for an amount with more digits than a number holds, which would be written as another one, with it in `details.value`. ES: `INVALID_AMOUNT` ante una entrada que no es finita o es 10^21 o más, y ante un monto con más dígitos de los que guarda un número, que se escribiría como otro, con él en `details.value`.

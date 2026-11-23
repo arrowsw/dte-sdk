@@ -128,6 +128,22 @@ describe('the basic set', () => {
     })
   })
 
+  // Formato DTE 2.5, field 38 of the detail: every line of a credit note that corrects a text is zero.
+  test('a credit note that corrects text with priced items writes them at zero, and its total alone', async () => {
+    const basic = plan.basic!
+    const priced = [{ name: 'Cemento', quantity: 2, unitPrice: 8000 }]
+    const own = await issueTestSet(
+      {
+        ...basic,
+        creditNotes: basic.creditNotes.map((note) => (note.referenceCode === 2 ? { ...note, items: priced } : note)),
+      },
+      issueOptions(),
+    )
+    const note = byCase(own, 5).document
+    expect(note.items).toEqual([expect.objectContaining({ name: 'Cemento', quantity: 2, unitPrice: 8000, amount: 0 })])
+    expect(note.header.totals).toEqual({ totalAmount: 0 })
+  })
+
   test('a credit note that cancels takes the items of the cancelled invoice', () => {
     const note = byCase(set, 6).document
     expect(note.items).toEqual([
@@ -341,7 +357,7 @@ describe('the purchase set', () => {
     expect(debit.header.receiver.rut).toBe(ISSUER_RUT)
   })
 
-  test('a debit note without items takes the referenced document items, and an unknown name gets price 0', async () => {
+  test('a debit note without items takes the referenced document items, and an unknown name gets no price', async () => {
     const own = await issueTestSet(
       {
         ...plan.purchase!,
@@ -350,12 +366,15 @@ describe('the purchase set', () => {
       },
       issueOptions(),
     )
-    expect(own.cases[1].document.items[0]).toMatchObject({ name: 'Otra cosa', quantity: 2, unitPrice: 0, amount: 0 })
+    expect(own.cases[1].document.items[0]).toMatchObject({ name: 'Otra cosa', quantity: 2, amount: 0 })
+    expect(own.cases[1].document.items[0]).not.toHaveProperty('unitPrice')
     expect(own.cases[2].document.items[0]).toMatchObject({ name: 'Otra cosa', quantity: 2 })
-    // Lines that add up to nothing leave the total alone; a zero price is written plain, a real one with six decimals.
+    // Lines that add up to nothing leave the total alone; a price of zero is no price, since `PrcItem` starts at
+    // 0.000001 in the schema, and a real one is written with six decimals.
     expect(own.cases[1].document.header.totals).toEqual({ totalAmount: 0 })
-    expect(own.cases[1].document.xml).toContain('<PrcItem>0</PrcItem>')
+    expect(own.cases[1].document.xml).not.toContain('<PrcItem>')
     expect(own.cases[0].document.xml).toContain('<PrcItem>1200.000000</PrcItem>')
+    expect(await validateAgainstXsd(own.envelope.xml, 'EnvioDTE')).toEqual([])
     const noQuantity = await issueTestSet(
       {
         ...plan.purchase!,
