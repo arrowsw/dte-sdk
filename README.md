@@ -111,8 +111,13 @@ rejects in a document's content, which now asks for the issuer's activity code o
 sent to the SII. 0.14.0 prints on the printed sample the fields Formato DTE 2.5 marks to be printed, and writes more of
 the document in words; it reads a document received from a third party from the bytes of its file and prints its stamp
 as it was signed, and it bounds the key a received document names before a signature is checked with it. None of it has
-been sent to the SII. Every area this README describes ships in 0.14.0. The export documents (110, 111 and 112), not
-released yet, are checked against `DTE_v10.xsd`, and none has been sent to the SII.
+been sent to the SII. 0.15.0 issues the export documents (110, 111 and 112) under their own root, builds and signs the
+assignment of an invoice and registers it, and validates a document against the SII's schemas at run time from a new
+entry, `dte-sdk/schemas`; from `dte-sdk/portal` it signs in with a tax password, reads the purchase and sales register
+as a file and reads the mailbox an issuer registered for the exchange; and it works a line's amounts out over decimal
+digits and writes each line as field 38 of Formato DTE 2.5 asks. The export documents and the assignment file are
+checked against the SII's schemas, and none of it has been sent to the SII. Every area this README describes ships in
+0.15.0.
 Releases before 1.0.0 come out as the work lands, without waiting for the runs against the
 real SII; those runs come before 1.0.0, the first version recommended for production.
 
