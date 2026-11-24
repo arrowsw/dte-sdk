@@ -713,7 +713,9 @@ verified: an `EnvioDTE` or `EnvioBOLETA` with no DOCTYPE, one `SetDTE` with ever
 document giving its own type, folio, date, issuer, receiver and total. Nothing is taken from the cover and no number is
 converted: a document that lacks one of them, or writes a folio such as `12abc`, refuses the envelope with
 `XML_PARSE_FAILED`, and `details.field` and `details.index` name the element and the document. To answer an envelope
-that cannot be read (`EstadoRecepEnv` 1 or 91), pass a `ReceivedEnvelope` built by hand with no documents.
+that cannot be read (`EstadoRecepEnv` 1 or 91), pass a `ReceivedEnvelope` built by hand with no documents. The
+envelope read also carries the digest of its own signature (`digest`), which the reception answer quotes (`Digest`) so
+the sender can tell which file it answers.
 
 A record names a document by its type and folio alone, so each of its keys has to be one document of the envelope. A
 record is refused with `INVALID_OPTION` (`details.key` names the key) when one of its keys names no document, so a
@@ -825,7 +827,9 @@ has no known key, and `valid` otherwise:
 
 - **`signature`**: its XMLDSig signature over `Documento` (or `Liquidacion`, or `Exportaciones`), with `found`, `digestValid` and
   `signatureValid`. It proves the document is intact with respect to the certificate it carries, not whose that
-  certificate is.
+  certificate is. `certificate` reports that certificate as the document states it, the RUT it names as its holder
+  and its validity, with its chain unchecked: they can refuse a document (another holder than the one the company
+  expects, a validity that does not cover `TmstFirma`) and never vouch for one.
 - **`ted`**: the stamp. Its `FRMT` must verify with the key of the CAF the TED carries, over the `DD` as ISO-8859-1
   bytes, and its `DD` must agree with the header: `mismatches` names what differs among the issuer, the type, the folio,
   the date, the receiver and the total, which on an export document is compared by value with its decimals. `RSR` and
@@ -1744,11 +1748,14 @@ that verifies; a stamp no form of which verifies prints as written.
 `parsePrintableDocuments` reads the area into `transport` (`PrintableTransport`), every field as written. The legend under the type box is `siiOffice` when given;
 otherwise the office of the issuer's commune (`CmnaOrigen`), looked up with `siiOfficeForCommune` in
 `SII_OFFICES` (360 commune names in 40
-offices, every official commune included, ignoring case, surrounding spaces and accents), and `S.I.I. - SANTIAGO CENTRO` for a commune the table lacks.
+offices, every official commune included, matched by its letters and digits alone, so case, accents, spaces, hyphens and apostrophes do not count), and `S.I.I. - SANTIAGO CENTRO` for a commune the table lacks.
 The line under the stamp is `resolution`: a string printed as given, or the company's resolution as `{ number, date }`
 (`NroResol`, and `FchResol` as `YYYY-MM-DD`) printed as `Res. Ex. SII N° {number} del {year}`, the line
 `resolutionLine` returns alone; a number that is not a whole number from 0 throws `INVALID_OPTION` and a date that is
 not real `INVALID_DATE`. Without it the line is number 0 of the year of `now`, the one of certification.
+The last legend says where the document is verified, `Verifique documento: www.sii.cl`; `verificationSite` names
+another site there, the one a company declared to the SII for consulting its receipts (up to 80 printable ASCII
+characters with no space, or `INVALID_OPTION`).
 `paper: 'roll'` prints the continuous paper of the manual (the format of a point of sale printer) instead of the sheet,
 for any type: a page 80 mm wide, above the 7.5 cm the manual asks for, with the 0.5 cm border, as tall as its content
 with no cap, and the order the manual gives for it: the type box centred, the SII office, the issuer, the receiver, the
@@ -1758,10 +1765,12 @@ the certification samples are always the sheet. `stamp: false` leaves the electr
 receipt (39 or 41), whose printed stamp is optional from 1 January 2026 (Res. Ex. SII N° 207 of 2025; the XML keeps its
 `TED`), on the sheet or on the roll; on any other type it throws `INVALID_OPTION`. Delivering the receipt virtually
 instead of printing it (Res. Ex. SII N° 53 of 2025) stays with the application. The stamp encodes the signed bytes exactly (`renderTedBarcode` gives the PNG
-alone), always at error correction level 5, the one the SII's instructions ask for. A stamp with a byte above ASCII,
-as the document of another issuer may carry in a name, is written in byte compaction alone when it fits, so no reader
-has to follow a shift in the middle of text to get the byte that was signed; a stamp of plain ASCII, as every one
-dte-sdk issues, keeps the compaction the barcode library picks. It needs Node and the optional peers `pdf-lib` and `bwip-js`, which are loaded on first use: without them
+alone), as section A.2.5 of the SII's issuance instructions asks of the PDF417: error correction level 5, always;
+byte compaction alone, whenever the TED fits in it (up to 1,034 bytes), so no reader has to follow a shift in the
+middle of text to get the byte that was signed; rows three modules high; and four pixels a module, over 300 DPI at
+any size it is printed at. The symbol is 387 modules across with its quiet zone, and the sheet and the roll draw it
+by one factor for both sides: a module of 9.2 mils across the 9 cm of the sheet and of 7.1 across the roll, over the
+6.7 mils of the instructions. It needs Node and the optional peers `pdf-lib` and `bwip-js`, which are loaded on first use: without them
 the render functions throw `DEPENDENCY_UNAVAILABLE`. Failures of a batch come back as data (`failures[].code`), never as thrown errors; a folio that is not a run
 of digits is an `INVALID_FOLIO` failure, since it would name the file. A stamp raster above 300 DPI is not printed
 yet: see the
