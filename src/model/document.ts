@@ -632,7 +632,7 @@ export type HeaderOptions = {
   readonly settledAmount?: number
   /** EN: Outstanding balance. ES: `SaldoInsol` — Saldo insoluto. */
   readonly outstandingBalance?: number
-  /** EN: Payment installments. ES: `MntPagos` — Cuotas de pago. */
+  /** EN: Payment installments, at most 30. ES: `MntPagos` — Cuotas de pago, 30 como máximo. */
   readonly payments?: readonly Payment[]
   /** EN: Billing period. ES: `PeriodoDesde`/`PeriodoHasta` — Período de facturación. */
   readonly billingPeriod?: { readonly from: string; readonly to: string }

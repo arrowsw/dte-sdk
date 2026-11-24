@@ -1589,6 +1589,22 @@ describe('commissions and other charges', () => {
     },
   )
 
+  test('a document admits 30 payment installments, the most the format gives it', () => {
+    const payments = (count: number) => Array.from({ length: count }, () => ({ date: '2026-12-01', amount: 1000 }))
+    const invoice = (count: number) =>
+      createDocument({
+        type: 33,
+        folio: 1,
+        issueDate: '2026-11-15',
+        issuer,
+        receiver,
+        items: [{ name: 'Servicio', unitPrice: 1000 }],
+        options: { payments: payments(count) },
+      })
+    expect(invoice(30).header.options.payments).toHaveLength(30)
+    expectError(() => invoice(31), 'INVALID_OPTION', { field: 'options.payments' })
+  })
+
   test('the schema admits 20 lines, on any type', () => {
     const lines = (count: number) => Array.from({ length: count }, () => ({ ...charge, netValue: 10 }))
     expect(settle({ commissions: lines(20) }).commissions).toHaveLength(20)
