@@ -2,8 +2,10 @@ import type { GlobalAdjustment, LineItem, Totals } from '../model/document'
 import { divide, held, HUNDRED, pow10, toNumber, unitsOf, ZERO } from './exact'
 
 // The amounts of an export document are in a foreign currency, with the decimals `Exportaciones` admits: four in a
-// line's `MontoItem` and in `MntExe` and `MntTotal` (`totalDigits` 18, `fractionDigits` 4), none in a line's
-// `DescuentoMonto` and `RecargoMonto` (`MntImpType`, a whole number). Each amount is worked out exactly, over the
+// line's `MontoItem` and in `MntExe` and `MntTotal` (`totalDigits` 18, `fractionDigits` 4). A line's `DescuentoMonto`
+// and `RecargoMonto` admit none (`MntImpType`, a whole number), and Formato DTE 2.5 leaves them optional on an export
+// document (fields 30 and 34 of the detail), so the share of a percent is worked out with the four decimals of the
+// amount it goes into, and written only when it is a whole number. Each amount is worked out exactly, over the
 // decimal digits of the numbers as they are written in the XML, and rounded half away from zero to the decimals of
 // its element: binary floating point never decides a cent.
 
@@ -46,9 +48,9 @@ export type ExportLineAmountInput = {
 export type ExportLineAmount = {
   /** EN: Quantity by price, rounded to four decimals. ES: Cantidad por precio, redondeada a cuatro decimales. */
   readonly base: number
-  /** EN: The discount percent of the base, rounded to a whole number, since the schema's `DescuentoMonto` is one. ES: `DescuentoMonto` — El porcentaje de descuento de la base, redondeado a un entero, porque el `DescuentoMonto` del esquema es uno. */
+  /** EN: The discount percent of the base, with four decimals; it is written as `DescuentoMonto` only when it is a whole number, the only one the schema's element admits. ES: `DescuentoMonto` — El porcentaje de descuento de la base, con cuatro decimales; se escribe como `DescuentoMonto` solo cuando es un entero, el único que admite el elemento del esquema. */
   readonly discountAmount: number
-  /** EN: The surcharge percent of the base, rounded to a whole number, since the schema's `RecargoMonto` is one. ES: `RecargoMonto` — El porcentaje de recargo de la base, redondeado a un entero, porque el `RecargoMonto` del esquema es uno. */
+  /** EN: The surcharge percent of the base, with four decimals; it is written as `RecargoMonto` only when it is a whole number, the only one the schema's element admits. ES: `RecargoMonto` — El porcentaje de recargo de la base, con cuatro decimales; se escribe como `RecargoMonto` solo cuando es un entero, el único que admite el elemento del esquema. */
   readonly surchargeAmount: number
   /** EN: `base − discount + surcharge`, four decimals at most (Formato DTE 2.5, field 38 of the detail). ES: `MontoItem` — `base − descuento + recargo`, con cuatro decimales a lo más (Formato DTE 2.5, campo 38 del detalle). */
   readonly amount: number
@@ -57,11 +59,11 @@ export type ExportLineAmount = {
 /**
  * EN: Computes the amount of a line of an export document exactly: the quantity by the price rounded half away from
  * zero to the four decimals of `MontoItem`, less the discount and plus the surcharge, each its percent of that base
- * rounded half away from zero to a whole number, the only amount `DescuentoMonto` and `RecargoMonto` admit.
+ * rounded half away from zero to the same four decimals, so a price of 94 with a surcharge of 10 % is 103.4.
  * ES: Calcula con exactitud el monto de una línea de un documento de exportación: la cantidad por el precio redondeada,
  * la mitad lejos de cero, a los cuatro decimales de `MontoItem`, menos el descuento y más el recargo, cada uno su
- * porcentaje de esa base redondeado, la mitad lejos de cero, a un entero, el único monto que admiten `DescuentoMonto` y
- * `RecargoMonto`.
+ * porcentaje de esa base redondeado, la mitad lejos de cero, a los mismos cuatro decimales, así que un precio de 94 con
+ * un recargo de 10 % es 103,4.
  * @param input EN: the quantity, the price and the percentages. ES: la cantidad, el precio y los porcentajes.
  * @returns EN: the base, the discount, the surcharge and the amount. ES: la base, el descuento, el recargo y el monto.
  * @throws {DteError} EN: `INVALID_AMOUNT` for an input that is not finite or is 10^21 or more, and for a base or an amount with more digits than a number holds, which would be written as another one, with it in `details.value`. ES: `INVALID_AMOUNT` ante una entrada que no es finita o es 10^21 o más, y ante una base o un monto con más dígitos de los que guarda un número, que se escribiría como otro, con él en `details.value`.
@@ -74,17 +76,16 @@ export const calculateExportLineAmount = ({
 }: ExportLineAmountInput): ExportLineAmount => {
   // Quantity and price with six decimals each: their product has twelve, rounded to the four of the amount.
   const base = divide(unitsOf(quantity, 6) * unitsOf(unitPrice, 6), pow10(12 - AMOUNT_DECIMALS))
-  // A base with four decimals by a percent with two, over 100: a whole number is that over 10^8.
+  // A base with four decimals by a percent with two, over 100: with four decimals again, that over 10^4.
   const share = (percent: number): bigint =>
-    percent > 0 ? divide(base * unitsOf(percent, 2), pow10(AMOUNT_DECIMALS + 2) * HUNDRED) : ZERO
+    percent > 0 ? divide(base * unitsOf(percent, 2), pow10(2) * HUNDRED) : ZERO
   const discount = share(discountPercent)
   const surcharge = share(surchargePercent)
-  const scale = pow10(AMOUNT_DECIMALS)
   return {
     base: held(base, AMOUNT_DECIMALS),
-    discountAmount: Number(discount),
-    surchargeAmount: Number(surcharge),
-    amount: held(base - discount * scale + surcharge * scale, AMOUNT_DECIMALS),
+    discountAmount: held(discount, AMOUNT_DECIMALS),
+    surchargeAmount: held(surcharge, AMOUNT_DECIMALS),
+    amount: held(base - discount + surcharge, AMOUNT_DECIMALS),
   }
 }
 

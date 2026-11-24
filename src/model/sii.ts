@@ -441,6 +441,8 @@ export type SiiDscRcgGlobal = {
   readonly TpoValor: '%' | '$'
   /** EN: Value. ES: `ValorDR` — Valor del descuento o recargo. */
   readonly ValorDR: number
+  /** EN: Value in the other currency (export documents). ES: `ValorDROtrMnda` — Valor en otra moneda (documentos de exportación). */
+  readonly ValorDROtrMnda?: number
   /** EN: Exemption indicator: 1 exempt base, 2 non-billable base. ES: `IndExeDR` — Indicador de exención del descuento o recargo. */
   readonly IndExeDR?: number
 }

@@ -580,9 +580,10 @@ const linePercent = (value: number | undefined, path: string, receipt: boolean):
 
 // A discount or a surcharge in percent goes with its amount (Formato DTE 2.5, fields 30 and 34 of the detail), and
 // `DTE_v10.xsd` takes that amount as a whole number from one up (`MntImpType`): a percent whose share of the line
-// rounds to none would be written alone. In pesos that is a small percent of a cheap line; on an export line, a
-// currency whose unit is worth much. The receipts schema takes an amount of zero, and a receipt follows the same rule
-// all the same, so a line is written one way whatever its type.
+// rounds to none would be written alone, a small percent of a cheap line. The receipts schema takes an amount of
+// zero, and a receipt follows the same rule all the same, so a line is written one way whatever its type. On an export
+// document the same fields leave the amount optional, and the share has the four decimals of the line's amount: only a
+// share those four decimals bring to none is refused, a percent that changes nothing.
 const assertSharesWritten = (parts: LineParts, shares: LineShares, path: string): void => {
   for (const [percent, share, field] of [
     [parts.discountPercent, shares.discountAmount, 'discountPercent'],
@@ -683,6 +684,11 @@ const lineAmounts = (
   return { ...computed, amount }
 }
 
+// `DescuentoMonto` and `RecargoMonto` are whole numbers from one up in every root (`MntImpType`). In pesos a share is
+// one already; on an export document a share with decimals is left to its percent, which Formato DTE 2.5 admits alone
+// there (fields 30 and 34 of the detail, optional on the three export documents), and the line's amount carries it.
+const writtenShare = (share: number): number | undefined => (share > 0 && Number.isInteger(share) ? share : undefined)
+
 const normalizeItem = (input: LineItemInput, index: number, type: DocumentType, context: LineContext): LineItem => {
   const path = `items[${index}]`
   const { counted } = context
@@ -736,9 +742,9 @@ const normalizeItem = (input: LineItemInput, index: number, type: DocumentType, 
     unitPrice,
     unitPriceDecimals: unitPrice === undefined ? undefined : decimals,
     discountPercent,
-    discountAmount: computed.discountAmount > 0 ? computed.discountAmount : undefined,
+    discountAmount: writtenShare(computed.discountAmount),
     surchargePercent,
-    surchargeAmount: computed.surchargeAmount > 0 ? computed.surchargeAmount : undefined,
+    surchargeAmount: writtenShare(computed.surchargeAmount),
     additionalTaxCodes: input.additionalTaxCodes,
     amount: computed.amount,
   })
@@ -910,6 +916,15 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
         arrivalDate: transportDate(input.arrivalDate, 'transport.arrivalDate'),
         customs: normalizeCustoms(input.customs),
       })
+
+// An adjustment of an export document given as an amount carries that amount in pesos too, when the document brings
+// its exchange rate: Formato DTE 2.5 marks `ValorDROtrMnda` required on the three export documents and says it applies
+// to the amounts of discounts and surcharges (field 6 of the global discounts and surcharges). A percent is the same
+// in any currency, and is written alone.
+const adjustmentInPesos = (adjustment: GlobalAdjustment, rate: number | undefined): GlobalAdjustment =>
+  rate === undefined || adjustment.valueType !== 'amount'
+    ? adjustment
+    : { ...adjustment, otherCurrencyValue: convertToPesos(adjustment.value, rate) }
 
 // The totals of an export document in pesos, when it brings the exchange rate: `PESO CL`, as Formato DTE 2.5 asks
 // (fields 129 to 132 and 138), each amount `convertToPesos` of the document's.
@@ -1142,7 +1157,7 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
     }),
     items,
     subtotals,
-    globalAdjustments,
+    globalAdjustments: globalAdjustments.map((adjustment) => adjustmentInPesos(adjustment, exchangeRate)),
     references,
     receiptReferences,
     commissions,

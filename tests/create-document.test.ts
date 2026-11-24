@@ -1,3 +1,4 @@
+import { buildDocumentXml } from '../src/document/build-xml'
 import { createDocument, FIELD_LIMITS } from '../src/document/create'
 import { fromSiiDocument, toSiiDocument } from '../src/model/codec'
 import { DteError } from '../src/errors'
@@ -1995,24 +1996,41 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
     expectError(() => exportOf({ exchangeRate }), 'INVALID_AMOUNT', { field: 'exchangeRate' })
   })
 
-  test('a line is its quantity by its price to four decimals, with a discount and a surcharge in whole units', () => {
+  test('a line is its quantity by its price to four decimals, and the share of a percent has the same four', () => {
     const doc = exportOf({
       items: [
         { name: 'Vino', quantity: 3, unit: 'BOT', unitPrice: 1234.565, surchargePercent: 3 },
         { name: 'Pisco', quantity: 1 / 3, unit: 'BOT', unitPrice: 100, discountPercent: 10 },
         { name: 'Flete interno', quantity: 1, unit: 'U', amount: 10.123456 },
+        { name: 'Queso', quantity: 2, unit: 'KN', unitPrice: 50, discountPercent: 10 },
       ],
     })
     expect(
       doc.items.map(({ amount, discountAmount, surchargeAmount }) => ({ amount, discountAmount, surchargeAmount })),
     ).toEqual([
-      // 3 × 1234.565 = 3703.695, and its 3 % is 111.11085, written as 111.
-      { amount: 3814.695, discountAmount: undefined, surchargeAmount: 111 },
-      // 0.333333 × 100 = 33.3333, and its 10 % is 3.33333, written as 3.
-      { amount: 30.3333, discountAmount: 3, surchargeAmount: undefined },
+      // 3 × 1234.565 = 3703.695, and its 3 % is 111.11085: 111.1109 in the amount, and no `RecargoMonto`.
+      { amount: 3814.8059, discountAmount: undefined, surchargeAmount: undefined },
+      // 0.333333 × 100 = 33.3333, and its 10 % is 3.33333: 3.3333 in the amount, and no `DescuentoMonto`.
+      { amount: 30, discountAmount: undefined, surchargeAmount: undefined },
       { amount: 10.1235, discountAmount: undefined, surchargeAmount: undefined },
+      // A share that is a whole number is written: 10 % of 100.
+      { amount: 90, discountAmount: 10, surchargeAmount: undefined },
     ])
-    expect(doc.header.totals).toEqual({ exemptAmount: 3855.1518, totalAmount: 3855.1518 })
+    expect(doc.header.totals).toEqual({ exemptAmount: 3944.9294, totalAmount: 3944.9294 })
+  })
+
+  test('a share with decimals is written as its percent alone, which the format admits on an export document', () => {
+    // Formato DTE 2.5, fields 30 and 34 of the detail: the amount of a percent is optional on the three export
+    // documents, and its element holds whole numbers only. A service of 94 with 10 % on the line is 103.4.
+    const doc = exportOf({
+      items: [{ name: 'Asesoría', quantity: 1, unit: 'U', unitPrice: 94, surchargePercent: 10 }],
+    })
+    expect(doc.items[0]).toMatchObject({ unitPrice: 94, surchargePercent: 10, amount: 103.4 })
+    expect(doc.items[0].surchargeAmount).toBeUndefined()
+    expect(doc.header.totals).toEqual({ exemptAmount: 103.4, totalAmount: 103.4 })
+    const xml = buildDocumentXml(doc)
+    expect(xml).toContain('<PrcItem>94</PrcItem><RecargoPct>10</RecargoPct><MontoItem>103.4</MontoItem>')
+    expect(xml).not.toContain('RecargoMonto')
   })
 
   test.each<[string, LineItemInput]>([
@@ -2130,12 +2148,12 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
   test.each<[string, LineItemInput, string]>([
     [
       'a discount',
-      { name: 'Muestra', quantity: 1, unit: 'U', unitPrice: 4.99, discountPercent: 10 },
+      { name: 'Muestra', quantity: 1, unit: 'U', unitPrice: 0.0004, discountPercent: 10 },
       'discountPercent',
     ],
     [
       'a surcharge',
-      { name: 'Muestra', quantity: 1, unit: 'U', unitPrice: 4.99, surchargePercent: 10 },
+      { name: 'Muestra', quantity: 1, unit: 'U', unitPrice: 0.0004, surchargePercent: 10 },
       'surchargePercent',
     ],
     [
@@ -2143,10 +2161,30 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
       { name: 'Ajuste', quantity: 1, unit: 'U', amount: 100, discountPercent: 5 },
       'discountPercent',
     ],
-  ])('%s in percent whose whole amount is zero is refused: a percent goes with its amount', (_label, item, field) => {
-    // Formato DTE 2.5, fields 30 and 34 of the detail. On an export line the amount is a whole number of a currency
-    // whose unit is worth much, so 10 % of 4.99 rounds to none, and the percent would be written alone.
+  ])('%s in percent whose share is zero is refused: a percent that changes nothing', (_label, item, field) => {
+    // The share of a percent has the four decimals of the line's amount: 10 % of 0.0004 is none of them, and so is any
+    // percent of a line with no price.
     expectError(() => exportOf({ items: [item] }), 'INVALID_AMOUNT', { field: `items[0].${field}` })
+  })
+
+  test('an adjustment given as an amount carries it in pesos too, when the document brings its exchange rate', () => {
+    // Formato DTE 2.5, field 6 of the global discounts and surcharges: `ValorDROtrMnda`, required on the three export
+    // documents, "aplica en montos de desctos. o recargos".
+    const globalAdjustments = [
+      { kind: 'surcharge', valueType: 'amount', value: 150.25, description: 'Flete', exemptIndicator: 1 },
+      { kind: 'discount', valueType: 'percent', value: 3.33, exemptIndicator: 1 },
+    ] as const
+    const priced = exportOf({ globalAdjustments, exchangeRate: 950.5 })
+    // 150.25 × 950.5 = 142812.625, a whole 142813.
+    expect(priced.globalAdjustments.map((adjustment) => adjustment.otherCurrencyValue)).toEqual([142813, undefined])
+    const xml = buildDocumentXml(priced)
+    expect(xml).toContain('<ValorDR>150.25</ValorDR><ValorDROtrMnda>142813</ValorDROtrMnda><IndExeDR>1</IndExeDR>')
+    expect(xml).toContain('<ValorDR>3.33</ValorDR><IndExeDR>1</IndExeDR>')
+    expect(fromSiiDocument(toSiiDocument(priced)).globalAdjustments).toEqual(priced.globalAdjustments)
+    // Without the rate there is no other currency to write it in.
+    const bare = exportOf({ globalAdjustments })
+    expect(bare.globalAdjustments.every((adjustment) => adjustment.otherCurrencyValue === undefined)).toBe(true)
+    expect(buildDocumentXml(bare)).not.toContain('ValorDROtrMnda')
   })
 
   test('the global adjustments apply to the exempt amount, in order', () => {

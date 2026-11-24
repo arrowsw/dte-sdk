@@ -351,6 +351,7 @@ const toSiiDscRcgGlobal = (adjustment: GlobalAdjustment): SiiDscRcgGlobal =>
     GlosaDR: adjustment.description,
     TpoValor: adjustment.valueType === 'percent' ? '%' : '$',
     ValorDR: adjustment.value,
+    ValorDROtrMnda: adjustment.otherCurrencyValue,
     IndExeDR: adjustment.exemptIndicator,
   })
 
@@ -660,6 +661,7 @@ const fromSiiDscRcgGlobal = (adjustment: SiiDscRcgGlobal): GlobalAdjustment =>
     value: adjustment.ValorDR,
     description: adjustment.GlosaDR,
     exemptIndicator: adjustment.IndExeDR as 1 | 2 | undefined,
+    otherCurrencyValue: adjustment.ValorDROtrMnda,
   })
 
 const fromSiiReferencia = (reference: SiiReferencia): Reference =>

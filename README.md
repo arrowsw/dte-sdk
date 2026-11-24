@@ -549,20 +549,24 @@ exportInvoice.header.otherCurrency
 ```
 
 - **The amounts.** A line is its quantity by its price rounded to the four decimals of `MontoItem`, less its discount
-  and plus its surcharge, each its percent of that base rounded to a whole number, the only amount `DescuentoMonto` and
-  `RecargoMonto` admit (`calculateExportLineAmount`). The totals are the exempt amount, the sum of the lines with no
+  and plus its surcharge, each its percent of that base rounded to the same four decimals: a price of 94 with a
+  surcharge of 10 % is 103.4 (`calculateExportLineAmount`). `DescuentoMonto` and `RecargoMonto` admit whole numbers
+  only, and Formato DTE 2.5 leaves them optional on an export document (fields 30 and 34 of the detail), so a share
+  with decimals is written as its percent alone, and a whole one with its amount. The totals are the exempt amount, the sum of the lines with no
   exemption indicator or with 1 and the global adjustments, and the total, the same amount, or zero on an export
   without payment (`exportPaymentTerms: '21'`, Formato DTE 2.5, field 124) (`calculateExportTotals`, which
   `calculateTotals` calls for these types). Each is worked out exactly, over the decimal digits as written, and rounded
   half away from zero. An amount goes up to the schema's 99 999 999 999 999.9999, and one worked out with more digits
   than a number holds, which would be written as another amount, is refused with `INVALID_AMOUNT` and the amount in
   `details.value` (on a line, with `items[i].amount` in `details.field`). A line discount or surcharge in percent
-  whose whole amount is zero is refused with `INVALID_AMOUNT`, since the format writes a percent with its amount
-  (fields 30 and 34 of the detail): leave the percent out of that line, as on any other type. A line's given `amount`
+  whose share those four decimals bring to zero is refused with `INVALID_AMOUNT`, a percent that changes nothing:
+  leave it out of that line. A line's given `amount`
   is rounded to four decimals, and on a line with a price it is the amount the price gives or `TOTAL_MISMATCH`, and
   every line of an export credit note (112) that corrects a text is zero, as on any other type (field 38 of the
   detail). With `exchangeRate`, `OtraMoneda` carries the exempt amount and the total in Chilean pesos, as field 129
-  asks: each the amount by the rate, rounded half away from zero to a whole peso (`convertToPesos`). The stamp carries
+  asks: each the amount by the rate, rounded half away from zero to a whole peso (`convertToPesos`), and so does a
+  global adjustment given as an amount (`ValorDROtrMnda`, field 6 of the global discounts and surcharges, required on
+  the three export documents). The stamp carries
   the total as the document writes it, decimals and all.
 - **What it refuses.** What `Exportaciones` does not declare: `pricesIncludeVat`, `withholdVat`, `commissions`, the
   options `noDebitReduction`, `transferType`, `printFormat`, `grossAmounts`, `purchaseTransactionType`,
@@ -585,7 +589,8 @@ exportInvoice.header.otherCurrency
 - **Not checked yet.** The codes of the customs service's tables (countries, ports, sale modalities and clauses,
   transport routes, units, package types, payment forms) are written as given; whether a package is a container, and
   so carries its id, seal and seal issuer; the cancellation date of an export paid in advance; that a note references
-  the export invoice it corrects; and the value of a global adjustment in another currency (`ValorDROtrMnda`). An
+  the export invoice it corrects; and the value in pesos of a global adjustment in percent (`ValorDROtrMnda` is
+  written for an adjustment given as an amount, when the document brings its `exchangeRate`). An
   export document is not printed yet (`renderPrintedSample` refuses it with `INVALID_DOCUMENT_TYPE`), and the
   certification runner has no export sets.
 
