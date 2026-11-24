@@ -7,78 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **A line discount or surcharge in percent whose share of the line rounds to no peso is refused.** A line's discount
-  is its percent of the line rounded to a whole peso, and on a cheap line a small percent rounds to none: 1 % of 49 is
-  0.49. `createDocument` then wrote `DescuentoPct` alone, where Formato DTE 2.5 asks for the amount with it ("Si va el
-  descuento en %, debe ir el monto correspondiente", fields 30 and 34 of the detail, the same of a surcharge), and
-  `DescuentoMonto` and `RecargoMonto` take no zero in `DTE_v10.xsd`, so there is no amount to write. It is now
-  `INVALID_AMOUNT` with the field in `details.field`, `items[i].discountPercent` or `items[i].surchargePercent`, on
-  every type that takes them, as an export document already did. That includes a percent on a line whose base is
-  zero, one with no price or priced at zero, and one above zero that its two decimals bring to zero, as 0.004. A
-  receipt follows the same rule, though `EnvioBOLETA_v11.xsd` would take an amount of zero, so a line is written one
-  way whatever its type. A percent whose share rounds to one peso or more is written with its amount, as before, and
-  `calculateLineAmount` still answers a share of zero. The certification runner leaves such a discount out of the line
-  it builds, which changes no amount: a return of one unit of a cheap discounted line, at the original's price and
-  discount, comes to it, and the set would otherwise stop there.
-  - **What to change:** a line that brought such a percent, which 0.14.0 issued, is now refused: leave the percent
-    out of that line, whose discount or surcharge comes to no peso.
-- **A given amount on a line with a price is the amount the price gives.** `createDocument` took a line's `amount` as
-  it came, and on a line with a price wrote beside it the discount and the surcharge the price gives: `unitPrice:
-  1000`, `amount: 100` and `discountPercent: 10` wrote `MontoItem` 100 and `DescuentoMonto` 100, which do not add up.
-  Formato DTE 2.5 makes `MontoItem` "(Precio Unitario * Cantidad) – Monto Descuento + Monto Recargo" (field 38 of the
-  detail). On a line with a price, a given amount that is not that one is now `TOTAL_MISMATCH`, with `items[i].amount`
-  in `details.field`, the amount the price gives in `details.expected` and the given one in `details.actual`; one that
-  is that amount is taken as if it were not given. A zero is no exception, save where the same field admits one: on
-  a dispatch guide (52) whose `transferType` is not 1, a transfer that is not a sale ("Puede ser cero cuando el
-  documento es una Guía de despacho NO VENTA"), a zero is taken on a line with a price and no percent. On an export
-  document the given amount is compared once rounded to its four decimals. A line with no price takes its amount as it
-  comes, as before, save that a given -0 is written 0, where it was written `<MontoItem>-0</MontoItem>`. The message
-  of `TOTAL_MISMATCH` now reads "Amount does not match the SII formula", since a line's amount has it too; the code is
-  the same.
-  - **What to change:** a line that brought a price and an amount that do not add up, which 0.14.0 issued, is now
-    refused: leave out the amount, or the price. A line with a price and an amount of zero is refused too, outside a
-    guide that is not a sale: mark a line that is not a sale with `exemptIndicator: 4`, which writes it at zero. A
-    negative line of a settlement invoice (43) goes without a price, as `PrcItem` is above zero in the schema.
-- **The status of an upload is its verdict, not the class of its code.** The SII answers `EPR` ("Envío Procesado")
-  once it has processed an envelope, whatever it did with each document inside, and `queryUploadStatus` and
-  `waitForUploadStatus` read that code as `accepted` while the counts of the same answer reported rejected documents.
-  Now `status` is settled with the counts: an accepted code with rejected documents is the new class
-  `partiallyRejected`, or `rejected` when none was accepted, and one with objections and no rejection is
-  `acceptedWithObjections`. Counts only lower an acceptance: a pending or a rejected envelope stays as its code says,
-  and so does an answer without counts. `QueryEstUp` answers one block of counts per document type of the envelope, and
-  only the first was read: `counts` now adds up every type and the new `countsByType` has each one, on both channels.
-  `uploadVerdict(cls, counts)` is the rule as a pure function, and `classifyUploadStatus` still reads a code alone,
-  without ever answering the new class. The certification runner reads the codes, as before.
-  - **What to change:** a caller that takes `status === 'accepted'` as "every document went in" needs nothing more.
-    One that compares against the list of classes, or switches over `UploadStatusClass`, has a new member,
-    `partiallyRejected`: the envelope went in and some of its documents did not, so only those are to be corrected
-    and sent again. Code that builds an `UploadStatus` by hand, a test double for one, adds `countsByType`.
-- **A purchase book reports the VAT a purchase invoice withholds where the format puts it.** The format of the book
-  (Información Electrónica de Compras y Ventas 3.0, sections 2.4 and 3.4) gives each side its own fields: the sales
-  detail has `IVARetTotal` and `IVARetParcial`, which the schema itself marks "(LV)", and the purchase detail has
-  neither, and takes the withheld VAT in `OtrosImp` under a withholding code, 15 with the rate of the tax when the whole
-  VAT was withheld, and off `MntTotal`. Three things followed the sales side on a purchase book and now follow the
-  format. The line total of a purchase line takes off the amount of `otherTaxes` under a withholding code, and a
-  purchase line that brings `totalVatWithheld` or `partialVatWithheld`, which would be written and leave the total as if
-  nothing had been withheld, is refused with `INVALID_OPTION` and the field in `details.field`; a sale line is as
-  before. `bookEntryFromDocument` with `operation: 'purchase'` puts the withholding of code 15 in `otherTaxes`, with the
-  rate the document gives it, and keeps `totalVatWithheld` for `operation: 'sale'`. And the certification purchase book
-  writes the withholding of a purchase invoice as `OtrosImp` with code 15 and rate 19, where it wrote the rate as 0.19
-  and `IVARetTotal` beside it; the line total is still the net amount.
-  - **What to change:** nothing for a sales book. On a purchase book, a line that brought `totalVatWithheld` or
-    `partialVatWithheld` is now refused: give the withheld VAT in `otherTaxes` under its withholding code, 15 for the
-    whole tax, instead. A line with an explicit `totalAmount` keeps it, and a difference with the formula is reported in
-    `totalMismatches`, as always.
-- **The stamp is always printed at error correction level 5.** The level was left to the barcode library, which picks
-  it by the size of the data and lowers or raises it to fill the symbol: 5 for a stamp of the usual size, and nothing
-  held it there. It is now fixed at 5, the level the SII's instructions ask for (section A.2.5). And a stamp with a
-  byte above ASCII, as the document of another issuer may carry in the name of its receiver or of its first item, is
-  written in byte compaction alone when it fits in the symbol, where it was mixed with text compaction and the byte
-  travelled behind a shift. A stamp of plain ASCII, as every document dte-sdk issues has, is encoded as before.
-  - **What to change:** nothing. A `BarcodeModule` written for a test receives `eclevel` and `fixedeclevel`, and
-    `raw: true` with the codewords as its text for a stamp in bytes.
+## [0.15.0] - 2026-11-23
 
 ### Added
 
@@ -254,6 +183,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before, and without `resolution` the line is still number 0 of the year of `now`.
   - **What to change:** nothing. To print a production resolution, pass it as `{ number, date }` instead of writing
     the line.
+
+### Changed
+
+- **A line discount or surcharge in percent whose share of the line rounds to no peso is refused.** A line's discount
+  is its percent of the line rounded to a whole peso, and on a cheap line a small percent rounds to none: 1 % of 49 is
+  0.49. `createDocument` then wrote `DescuentoPct` alone, where Formato DTE 2.5 asks for the amount with it ("Si va el
+  descuento en %, debe ir el monto correspondiente", fields 30 and 34 of the detail, the same of a surcharge), and
+  `DescuentoMonto` and `RecargoMonto` take no zero in `DTE_v10.xsd`, so there is no amount to write. It is now
+  `INVALID_AMOUNT` with the field in `details.field`, `items[i].discountPercent` or `items[i].surchargePercent`, on
+  every type that takes them, as an export document already did. That includes a percent on a line whose base is
+  zero, one with no price or priced at zero, and one above zero that its two decimals bring to zero, as 0.004. A
+  receipt follows the same rule, though `EnvioBOLETA_v11.xsd` would take an amount of zero, so a line is written one
+  way whatever its type. A percent whose share rounds to one peso or more is written with its amount, as before, and
+  `calculateLineAmount` still answers a share of zero. The certification runner leaves such a discount out of the line
+  it builds, which changes no amount: a return of one unit of a cheap discounted line, at the original's price and
+  discount, comes to it, and the set would otherwise stop there.
+  - **What to change:** a line that brought such a percent, which 0.14.0 issued, is now refused: leave the percent
+    out of that line, whose discount or surcharge comes to no peso.
+- **A given amount on a line with a price is the amount the price gives.** `createDocument` took a line's `amount` as
+  it came, and on a line with a price wrote beside it the discount and the surcharge the price gives: `unitPrice:
+  1000`, `amount: 100` and `discountPercent: 10` wrote `MontoItem` 100 and `DescuentoMonto` 100, which do not add up.
+  Formato DTE 2.5 makes `MontoItem` "(Precio Unitario * Cantidad) – Monto Descuento + Monto Recargo" (field 38 of the
+  detail). On a line with a price, a given amount that is not that one is now `TOTAL_MISMATCH`, with `items[i].amount`
+  in `details.field`, the amount the price gives in `details.expected` and the given one in `details.actual`; one that
+  is that amount is taken as if it were not given. A zero is no exception, save where the same field admits one: on
+  a dispatch guide (52) whose `transferType` is not 1, a transfer that is not a sale ("Puede ser cero cuando el
+  documento es una Guía de despacho NO VENTA"), a zero is taken on a line with a price and no percent. On an export
+  document the given amount is compared once rounded to its four decimals. A line with no price takes its amount as it
+  comes, as before, save that a given -0 is written 0, where it was written `<MontoItem>-0</MontoItem>`. The message
+  of `TOTAL_MISMATCH` now reads "Amount does not match the SII formula", since a line's amount has it too; the code is
+  the same.
+  - **What to change:** a line that brought a price and an amount that do not add up, which 0.14.0 issued, is now
+    refused: leave out the amount, or the price. A line with a price and an amount of zero is refused too, outside a
+    guide that is not a sale: mark a line that is not a sale with `exemptIndicator: 4`, which writes it at zero. A
+    negative line of a settlement invoice (43) goes without a price, as `PrcItem` is above zero in the schema.
+- **The status of an upload is its verdict, not the class of its code.** The SII answers `EPR` ("Envío Procesado")
+  once it has processed an envelope, whatever it did with each document inside, and `queryUploadStatus` and
+  `waitForUploadStatus` read that code as `accepted` while the counts of the same answer reported rejected documents.
+  Now `status` is settled with the counts: an accepted code with rejected documents is the new class
+  `partiallyRejected`, or `rejected` when none was accepted, and one with objections and no rejection is
+  `acceptedWithObjections`. Counts only lower an acceptance: a pending or a rejected envelope stays as its code says,
+  and so does an answer without counts. `QueryEstUp` answers one block of counts per document type of the envelope, and
+  only the first was read: `counts` now adds up every type and the new `countsByType` has each one, on both channels.
+  `uploadVerdict(cls, counts)` is the rule as a pure function, and `classifyUploadStatus` still reads a code alone,
+  without ever answering the new class. The certification runner reads the codes, as before.
+  - **What to change:** a caller that takes `status === 'accepted'` as "every document went in" needs nothing more.
+    One that compares against the list of classes, or switches over `UploadStatusClass`, has a new member,
+    `partiallyRejected`: the envelope went in and some of its documents did not, so only those are to be corrected
+    and sent again. Code that builds an `UploadStatus` by hand, a test double for one, adds `countsByType`.
+- **A purchase book reports the VAT a purchase invoice withholds where the format puts it.** The format of the book
+  (Información Electrónica de Compras y Ventas 3.0, sections 2.4 and 3.4) gives each side its own fields: the sales
+  detail has `IVARetTotal` and `IVARetParcial`, which the schema itself marks "(LV)", and the purchase detail has
+  neither, and takes the withheld VAT in `OtrosImp` under a withholding code, 15 with the rate of the tax when the whole
+  VAT was withheld, and off `MntTotal`. Three things followed the sales side on a purchase book and now follow the
+  format. The line total of a purchase line takes off the amount of `otherTaxes` under a withholding code, and a
+  purchase line that brings `totalVatWithheld` or `partialVatWithheld`, which would be written and leave the total as if
+  nothing had been withheld, is refused with `INVALID_OPTION` and the field in `details.field`; a sale line is as
+  before. `bookEntryFromDocument` with `operation: 'purchase'` puts the withholding of code 15 in `otherTaxes`, with the
+  rate the document gives it, and keeps `totalVatWithheld` for `operation: 'sale'`. And the certification purchase book
+  writes the withholding of a purchase invoice as `OtrosImp` with code 15 and rate 19, where it wrote the rate as 0.19
+  and `IVARetTotal` beside it; the line total is still the net amount.
+  - **What to change:** nothing for a sales book. On a purchase book, a line that brought `totalVatWithheld` or
+    `partialVatWithheld` is now refused: give the withheld VAT in `otherTaxes` under its withholding code, 15 for the
+    whole tax, instead. A line with an explicit `totalAmount` keeps it, and a difference with the formula is reported in
+    `totalMismatches`, as always.
+- **The stamp is always printed at error correction level 5.** The level was left to the barcode library, which picks
+  it by the size of the data and lowers or raises it to fill the symbol: 5 for a stamp of the usual size, and nothing
+  held it there. It is now fixed at 5, the level the SII's instructions ask for (section A.2.5). And a stamp with a
+  byte above ASCII, as the document of another issuer may carry in the name of its receiver or of its first item, is
+  written in byte compaction alone when it fits in the symbol, where it was mixed with text compaction and the byte
+  travelled behind a shift. A stamp of plain ASCII, as every document dte-sdk issues has, is encoded as before.
+  - **What to change:** nothing. A `BarcodeModule` written for a test receives `eclevel` and `fixedeclevel`, and
+    `raw: true` with the codewords as its text for a stamp in bytes.
 
 ### Fixed
 
@@ -1774,7 +1776,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Jest, ESLint, Prettier, size-limit, Stryker, CI and tag-triggered publish)
   and a single `hello()` export that returns `'dte-sdk is coming'`.
 
-[Unreleased]: https://github.com/arrowsw/dte-sdk/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/arrowsw/dte-sdk/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.15.0
 [0.14.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.14.0
 [0.13.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.13.0
 [0.12.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.12.0
