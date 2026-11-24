@@ -13,6 +13,7 @@ test('the set of an envelope comes from its name', () => {
   expect(sampleSetOf('ENVIO-SET-GUIA.XML')).toBe('tests')
   expect(sampleSetOf('envio-set-exenta.xml')).toBe('tests')
   expect(sampleSetOf('envio-set-compra.xml')).toBe('tests')
+  expect(sampleSetOf('envio-set-liquidacion.xml')).toBe('tests')
   expect(sampleSetOf('envio-set-boleta.xml')).toBe('simulation')
   expect(sampleSetOf('envio-simulacion.xml')).toBe('simulation')
   expect(sampleSetOf('artefact:basic')).toBe('simulation')

@@ -1,22 +1,24 @@
 /**
  * EN: The SII office of each commune, keyed by the legend printed under the type box of a printed sample
  * (`S.I.I. - {office}`), each with the communes it serves, written lowercase, without accents and with single spaces:
- * 355 commune names in 40 offices. The first 306, in 37 offices, were gathered from the SII office directory
+ * 360 commune names in 40 offices. The first 306, in 37 offices, were gathered from the SII office directory
  * (sii.cl/ayudas/asistencia/oficinas) as field behaviour keeps them, spelling variants included. The other 49 are the
  * official communes that list left out, placed by the jurisdiction of the SII unit that serves each: under the office
  * the table already gives to the commune where that unit sits, or under a new office named after it (Talcahuano,
  * Panguipulli, Chaitén); an official spelling of a name already listed (Llay-Llay, Treguaco, Mostazal, Saavedra) goes
  * with that name. A commune two units serve (Quemchi) goes with the unit that sits in it, else with the one that
- * serves fewer communes.
+ * serves fewer communes. The last 5 are other spellings in use of names already listed, each with that name: Aisén,
+ * Coihaique, Llaillay, Marchigüe and Paiguano.
  * ES: La oficina del SII de cada comuna, por la leyenda que va bajo el recuadro de una muestra impresa
  * (`S.I.I. - {oficina}`), cada una con las comunas que atiende, escritas en minúsculas, sin tildes y con un solo espacio:
- * 355 nombres de comuna en 40 oficinas. Los primeros 306, en 37 oficinas, se reunieron del directorio de oficinas del
+ * 360 nombres de comuna en 40 oficinas. Los primeros 306, en 37 oficinas, se reunieron del directorio de oficinas del
  * SII (sii.cl/ayudas/asistencia/oficinas) como los guarda el comportamiento de campo, variantes de escritura incluidas.
  * Los otros 49 son las comunas oficiales que esa lista omitía, ubicadas por la jurisdicción de la unidad del SII que
  * atiende a cada una: bajo la oficina que la tabla ya da a la comuna donde está esa unidad, o bajo una oficina nueva con
  * su nombre (Talcahuano, Panguipulli, Chaitén); una escritura oficial de un nombre ya listado (Llay-Llay, Treguaco,
  * Mostazal, Saavedra) va con ese nombre. Una comuna que atienden dos unidades (Quemchi) va con la unidad que está en
- * ella, si no con la que atiende menos comunas.
+ * ella, si no con la que atiende menos comunas. Los últimos 5 son otras escrituras en uso de nombres ya listados, cada
+ * una con ese nombre: Aisén, Coihaique, Llaillay, Marchigüe y Paiguano.
  */
 export const SII_OFFICES: Readonly<Record<string, readonly string[]>> = {
   'S.I.I. - ARICA': ['arica', 'camarones', 'putre', 'general lagos'],
@@ -29,6 +31,7 @@ export const SII_OFFICES: Readonly<Record<string, readonly string[]>> = {
     'la serena',
     'la higuera',
     'paihuano',
+    'paiguano',
     'andacollo',
     'vicuna',
     'ovalle',
@@ -63,7 +66,16 @@ export const SII_OFFICES: Readonly<Record<string, readonly string[]>> = {
   'S.I.I. - VIÑA DEL MAR': ['vina del mar', 'concon', 'quintero', 'puchuncavi'],
   'S.I.I. - SAN ANTONIO': ['san antonio', 'santo domingo', 'navidad', 'cartagena', 'el tabo', 'el quisco', 'algarrobo'],
   'S.I.I. - LOS ANDES': ['los andes', 'calle larga', 'san esteban', 'rinconada'],
-  'S.I.I. - SAN FELIPE': ['san felipe', 'panquehue', 'catemu', 'putaendo', 'llay llay', 'llay-llay', 'santa maria'],
+  'S.I.I. - SAN FELIPE': [
+    'san felipe',
+    'panquehue',
+    'catemu',
+    'putaendo',
+    'llay llay',
+    'llay-llay',
+    'llaillay',
+    'santa maria',
+  ],
   'S.I.I. - VILLA ALEMANA': ['villa alemana', 'quilpue'],
   'S.I.I. - SANTIAGO CENTRO': ['santiago'],
   'S.I.I. - SANTIAGO ORIENTE': ['las condes', 'lo barnechea', 'vitacura'],
@@ -132,6 +144,7 @@ export const SII_OFFICES: Readonly<Record<string, readonly string[]>> = {
     'la estrella',
     'litueche',
     'marchihue',
+    'marchigue',
     'paredones',
     'chepica',
     'chimbarongo',
@@ -294,11 +307,13 @@ export const SII_OFFICES: Readonly<Record<string, readonly string[]>> = {
   ],
   'S.I.I. - COYHAIQUE': [
     'coyhaique',
+    'coihaique',
     'rio ibanez',
     'tortel',
     'cochrane',
     'chile chico',
     'aysen',
+    'aisen',
     'cisnes',
     'lago verde',
     'guaitecas',
@@ -348,20 +363,30 @@ export const SII_OFFICES: Readonly<Record<string, readonly string[]>> = {
   'S.I.I. - CHAITÉN': ['chaiten', 'futaleufu', 'palena'],
 }
 
-const normalize = (commune: string): string => commune.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+// A commune is looked up by its letters and digits alone: without accents, case, spaces, hyphens or apostrophes, so
+// `Til Til`, `Til-Til` and `Tiltil` are one name, and so are `O'Higgins` and `OHiggins`.
+const normalize = (commune: string): string =>
+  commune
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[^a-z0-9]/g, '')
 
 const cache: { byCommune?: ReadonlyMap<string, string> } = {}
 
 const officesByCommune = (): ReadonlyMap<string, string> =>
   (cache.byCommune ??= new Map(
-    Object.entries(SII_OFFICES).flatMap(([office, communes]) => communes.map((commune) => [commune, office] as const)),
+    Object.entries(SII_OFFICES).flatMap(([office, communes]) =>
+      communes.map((commune) => [normalize(commune), office] as const),
+    ),
   ))
 
 /**
- * EN: The SII office legend for a commune (the issuer's `CmnaOrigen`), or null when the table does not have it. Case,
- * surrounding spaces and accents are ignored: `Ñuñoa`, ` ÑUÑOA ` and `Nunoa` all give `S.I.I. - ÑUÑOA`.
- * ES: La leyenda de la oficina del SII para una comuna (`CmnaOrigen` del emisor), o null si la tabla no la tiene. Se
- * ignoran mayúsculas, espacios alrededor y tildes: `Ñuñoa`, ` ÑUÑOA ` y `Nunoa` dan `S.I.I. - ÑUÑOA`.
+ * EN: The SII office legend for a commune (the issuer's `CmnaOrigen`), or null when the table does not have it. Only
+ * its letters and digits count: case, accents, spaces, hyphens and apostrophes are ignored, so `Ñuñoa`, ` ÑUÑOA ` and
+ * `Nunoa` all give `S.I.I. - ÑUÑOA`, and `Til Til`, `Til-Til` and `Tiltil` the same office.
+ * ES: La leyenda de la oficina del SII para una comuna (`CmnaOrigen` del emisor), o null si la tabla no la tiene. Solo
+ * cuentan sus letras y dígitos: se ignoran mayúsculas, tildes, espacios, guiones y apóstrofes, así que `Ñuñoa`,
+ * ` ÑUÑOA ` y `Nunoa` dan `S.I.I. - ÑUÑOA`, y `Til Til`, `Til-Til` y `Tiltil` la misma oficina.
  * @param commune EN: the commune name. ES: el nombre de la comuna.
  */
 export const siiOfficeForCommune = (commune: string): string | null =>

@@ -8,6 +8,11 @@ describe('sanitizeText', () => {
     ['acento ´ y grave `', 'acento  y grave'],
     ['guion — largo – corto', 'guion - largo - corto'],
     ['puntos…', 'puntos...'],
+    // Every dash a text editor writes is a hyphen, and the minus sign too: dropped, `−5` would read `5`.
+    ['Lun\u2010Vie \u2011 9\u2012 18 \u2015 fin', 'Lun-Vie - 9- 18 - fin'],
+    ['Temperatura \u22125 grados', 'Temperatura -5 grados'],
+    // A typographic space is a space: dropped, two words would run together.
+    ['10\u202f000 unidades\u2009netas\u3000aqui', '10 000 unidades netas aqui'],
     ['emoji 🚀 fuera', 'emoji  fuera'],
     ['comillas “tipográficas” y ‘simples’', 'comillas tipográficas y simples'],
     ['  bordes  ', 'bordes'],

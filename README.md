@@ -1738,7 +1738,7 @@ with its `DD` written again from its element. So a file some tool indented after
 that verifies; a stamp no form of which verifies prints as written.
 `parsePrintableDocuments` reads the area into `transport` (`PrintableTransport`), every field as written. The legend under the type box is `siiOffice` when given;
 otherwise the office of the issuer's commune (`CmnaOrigen`), looked up with `siiOfficeForCommune` in
-`SII_OFFICES` (355 commune names in 40
+`SII_OFFICES` (360 commune names in 40
 offices, every official commune included, ignoring case, surrounding spaces and accents), and `S.I.I. - SANTIAGO CENTRO` for a commune the table lacks.
 The line under the stamp is `resolution`: a string printed as given, or the company's resolution as `{ number, date }`
 (`NroResol`, and `FchResol` as `YYYY-MM-DD`) printed as `Res. Ex. SII N° {number} del {year}`, the line
