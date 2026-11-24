@@ -170,14 +170,34 @@ const measureTypeBox = (doc: PrintableDocument, fonts: Fonts): number => {
   return Math.min(TYPE_BOX.maxHeight, Math.max(TYPE_BOX.minHeight, content))
 }
 
+const TYPE_BOX_X = PAGE.width - MARGIN - TYPE_BOX.width
+
+// The issuer's lines of the header, each wrapped to the width left of the type box: a name of a hundred characters, or
+// an address with its commune and its city, does not fit on one line and would run under the box. A text that fits is
+// one line, as it always was.
+const ISSUER_WIDTH = TYPE_BOX_X - MARGIN - GAP.section
+
+const issuerLines = (
+  { issuer }: PrintableDocument,
+  fonts: Fonts,
+): { readonly name: readonly string[]; readonly details: readonly string[] } => {
+  const detail = (text: string): readonly string[] => wrapText(text, fonts.normal, FONT.small, ISSUER_WIDTH)
+  return {
+    name: wrapText(issuer.name, fonts.bold, FONT.name, ISSUER_WIDTH),
+    details: [
+      ...detail(issuer.activity),
+      ...detail(issuerAddress(issuer)),
+      ...(issuer.branch ? detail(`Sucursal: ${issuer.branch}`) : []),
+    ],
+  }
+}
+
 const measureHeader = (doc: PrintableDocument, fonts: Fonts, logo: PDFImage | null): number => {
-  const left =
-    (logo ? 25 + GAP.small : 0) + LINE.normal + LINE.small + LINE.small + (doc.issuer.branch ? LINE.small : 0)
+  const { name, details } = issuerLines(doc, fonts)
+  const left = (logo ? 25 + GAP.small : 0) + name.length * LINE.normal + details.length * LINE.small
   const right = measureTypeBox(doc, fonts) + GAP.small + LINE.small
   return Math.max(left, right)
 }
-
-const TYPE_BOX_X = PAGE.width - MARGIN - TYPE_BOX.width
 
 const logoSize = (logo: PDFImage): { readonly width: number; readonly height: number } => {
   const maxWidth = Math.min((TYPE_BOX_X - MARGIN - GAP.section) * 0.4, 120)
@@ -266,13 +286,15 @@ const drawHeader = (
     canvas.page.drawImage(logo, { x: MARGIN, y: canvas.height - ly - height, width, height })
     ly += height + GAP.small
   }
-  drawText(canvas, issuer.name, MARGIN, ly, fonts.bold, FONT.name, black)
-  ly += LINE.normal
-  drawText(canvas, issuer.activity, MARGIN, ly, fonts.normal, FONT.small, black)
-  ly += LINE.small
-  drawText(canvas, issuerAddress(issuer), MARGIN, ly, fonts.normal, FONT.small, black)
-  ly += LINE.small
-  if (issuer.branch) drawText(canvas, `Sucursal: ${issuer.branch}`, MARGIN, ly, fonts.normal, FONT.small, black)
+  const { name, details } = issuerLines(doc, fonts)
+  for (const line of name) {
+    drawText(canvas, line, MARGIN, ly, fonts.bold, FONT.name, black)
+    ly += LINE.normal
+  }
+  for (const line of details) {
+    drawText(canvas, line, MARGIN, ly, fonts.normal, FONT.small, black)
+    ly += LINE.small
+  }
 
   drawRect(canvas, boxX, y, TYPE_BOX.width, boxHeight, { stroke: red, strokeWidth: TYPE_BOX.border })
   const innerWidth = TYPE_BOX.width - TYPE_BOX.padX * 2

@@ -122,6 +122,30 @@ describe('an invoice', () => {
     await expect(office('')).resolves.toBe('S.I.I. - SANTIAGO CENTRO')
   })
 
+  test('a name or an address too long for the width left of the type box wraps instead of running under it', async () => {
+    // Whole, each on more than one line: the words in order, with a line break where a space was.
+    const flowing = (text: string): RegExp =>
+      new RegExp(
+        text
+          .split(' ')
+          .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+          .join('\\s+'),
+      )
+    const name =
+      'SOCIEDAD COMERCIALIZADORA Y DISTRIBUIDORA DE PRODUCTOS ALIMENTICIOS Y BEBIDAS DEL SUR DE CHILE LIMITADA'
+    const address = 'Avenida Libertador General Bernardo OHiggins 1234, Oficina 1501, Torre'
+    const issuer = { ...invoiceDoc.issuer, name, address, commune: 'San Pedro de Atacama' }
+    const long = { ...invoiceDoc, issuer }
+    const printed = await pdfText(await render(long))
+    for (const text of [name, `Casa Matriz: ${address}, San Pedro de Atacama`]) {
+      expect(printed).toMatch(flowing(text))
+      expect(printed).not.toContain(text)
+    }
+    // A text that fits is one line, as before.
+    const short = { ...invoiceDoc, issuer: { ...issuer, name: 'Sur Ltda', address: 'Calle 1' } }
+    expect(await pdfText(await render(short))).toContain('Sur Ltda\nDesarrollo de software\nCasa Matriz: Calle 1, San')
+  })
+
   test('the legend under the stamp names the site the company gives, and www.sii.cl without one', async () => {
     expect(await pdfText(await render(invoiceDoc))).toContain('Verifique documento: www.sii.cl')
     const named = await pdfText(await render(invoiceDoc, { verificationSite: 'boletas.ejemplo.cl/consulta' }))
