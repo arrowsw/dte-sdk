@@ -303,6 +303,49 @@ describe('queryUploadStatus (SOAP)', () => {
 })
 
 describe('queryUploadStatus (REST)', () => {
+  // The shape the receipts API answers a query with: the track id as text (the upload answers it as a number), the
+  // date in another format than the upload's, an envelope the SII processed (`EPR`) with every document rejected, an
+  // error whose code is a number and whose detail is null.
+  const PROCESSED_AND_REJECTED =
+    '{"rut_emisor":"10000004-0","rut_envia":"12345678-5","trackid":"1234567890","fecha_recepcion":"09/10/2026 21:28:39",' +
+    '"estado":"EPR","estadistica":[{"tipo":39,"informados":3,"aceptados":0,"rechazados":3,"reparos":0}],' +
+    '"detalle_rep_rech":[' +
+    [42, 43, 44]
+      .map(
+        (folio) =>
+          `{"tipo":39,"folio":${folio},"estado":"RCH","descripcion":"DTE Rechazado","error":[{"seccion":"DTE","linea":0,` +
+          '"nivel":3,"codigo":101,"descripcion":"Folio para este Tipo de documento ya fue recibido en el SII","detalle":null}]}',
+      )
+      .join(',') +
+    ']}'
+
+  test('an envelope the SII processed with every document rejected is rejected, and each document says why', async () => {
+    const { sii } = cachedSii(route(REST_STATUS, restBody(PROCESSED_AND_REJECTED)))
+    const status = await queryUploadStatus(sii, { trackId: '1234567890', channel: 'rest' })
+    expect(status).toMatchObject({
+      code: 'EPR',
+      status: 'rejected',
+      trackId: '1234567890',
+      counts: { reported: 3, accepted: 0, rejected: 3, objections: 0 },
+      countsByType: [{ documentType: '39', reported: 3, accepted: 0, rejected: 3, objections: 0 }],
+    })
+    expect(status.documents.map(({ folio, code }) => [folio, code])).toEqual([
+      [42, 'RCH'],
+      [43, 'RCH'],
+      [44, 'RCH'],
+    ])
+    expect(status.documents[0].errors).toEqual([
+      {
+        section: 'DTE',
+        line: 0,
+        level: 3,
+        code: '101',
+        description: 'Folio para este Tipo de documento ya fue recibido en el SII',
+        detail: '',
+      },
+    ])
+  })
+
   test('GETs the envelope status with the REST token and maps counts and documents', async () => {
     const { sii, fake } = cachedSii(route(REST_STATUS, json('rest-envelope-status.json')))
     const status = await queryUploadStatus(sii, { trackId: '1234567890', channel: 'rest' })
@@ -1086,6 +1129,21 @@ describe('queryDocumentStatus', () => {
     const rest = cachedSii(route('*', json('rest-document-status.json')))
     await queryDocumentStatus(rest.sii, { ...document, channel: 'rest' })
     expect(rest.fake.requests[0].url).toContain('/boleta.electronica/10000004-0-33-45/estado?')
+  })
+
+  // The four answers of the receipts API for one receipt, each with the gloss the SII words it with.
+  test.each([
+    ['DOK', 'Documento Recibido por el SII. Datos Coinciden con los Registrados', 'received'],
+    ['DNK', 'Documento Recibido por el SII pero Datos NO Coinciden con los registrados', 'receivedWithMismatch'],
+    ['FAU', 'Documento No Recibido por el SII', 'notReceived'],
+    ['FNA', 'Documento No Autorizado', 'notAuthorized'],
+  ] as const)('a receipt answered %s is read with the gloss of the SII', async (codigo, descripcion, status) => {
+    const { sii } = cachedSii(route(REST_DOC, restBody(JSON.stringify({ codigo, descripcion }))))
+    expect(await queryDocumentStatus(sii, receiptDocument)).toMatchObject({
+      code: codigo,
+      status,
+      message: descripcion,
+    })
   })
 
   test('REST gloss falls back to the catalog when absent or blank', async () => {
