@@ -460,8 +460,6 @@ test('withholdVat withholds the whole VAT on a note that affects a purchase invo
   expect(createDocument({ ...base, type: 46, withholdVat: false }).header.totals.totalAmount).toBe(11900)
 })
 
-// Formato DTE 2.5, field 117: the withheld amount is the rate by the sum of the lines that carry the code of the
-// withholding. A document that withholds the whole VAT and whose lines carry no code states a withholding over nothing.
 // Formato DTE 2.5: `GrntDep` is the sum of the lines with `IndExe` 3 (field 120), `MntTotal` adds it (field 124), and
 // `MontoNF` is the lines with `IndExe` 2 less the lines with `IndExe` 6 (field 125).
 describe('the deposit guarantee and the non-billable amount', () => {
@@ -490,9 +488,21 @@ describe('the deposit guarantee and the non-billable amount', () => {
     expect(doc.header.totals).toEqual({ exemptAmount: 100000, depositGuarantee: 10000, totalAmount: 110000 })
   })
 
+  // The `IndExe` row admits the indicator on a guide and a purchase invoice, and the column of `GrntDep` is 0 there.
   test.each([
     [46, {}],
     [52, { options: { transferType: 1 } }],
+  ] as const)('an IndExe 3 line on a %i keeps its amount and is in no total', (type, extra) => {
+    const doc = document(type, { items: [items[0], crate], ...extra })
+    expect(doc.items[1]).toMatchObject({ exemptIndicator: 3, amount: 10000 })
+    expect(doc.items[1]).not.toHaveProperty('additionalTaxCodes')
+    expect(doc.header.totals).not.toHaveProperty('depositGuarantee')
+    expect(doc.header.totals).not.toHaveProperty('nonBillableAmount')
+    expect(doc.header.totals).toEqual(document(type, { items: [items[0]], ...extra }).header.totals)
+    expect(toSiiDocument(doc).Encabezado.Totales).not.toHaveProperty('GrntDep')
+  })
+
+  test.each([
     [
       43,
       {
@@ -503,8 +513,33 @@ describe('the deposit guarantee and the non-billable amount', () => {
       },
     ],
     [110, { currency: 'DOLAR USA' as Currency, receiver: { ...receiver, rut: FOREIGN_RECEIVER_RUT, city: 'Lima' } }],
-  ] as const)('an IndExe 3 line is refused on a %i, which the format gives no GrntDep', (type, extra) => {
+  ] as const)('an IndExe 3 line is refused on a %i, whose root declares no GrntDep', (type, extra) => {
     expectError(() => document(type, { items: [items[0], crate], ...extra }), 'INVALID_OPTION', {
+      field: 'items[1].exemptIndicator',
+    })
+  })
+
+  // The schemas enumerate `IndExe` 1 to 6.
+  const settled = (exemptIndicator: number) => ({
+    items: [
+      { ...items[0], settledDocumentType: '33' },
+      { ...items[0], settledDocumentType: '33', exemptIndicator } as unknown as LineItemInput,
+    ],
+  })
+  const foreign = {
+    currency: 'DOLAR USA' as Currency,
+    receiver: { ...receiver, rut: FOREIGN_RECEIVER_RUT, city: 'Lima' },
+  }
+  test.each([
+    [33, 0, {}],
+    [33, 7, {}],
+    [52, 1.5, { options: { transferType: 1 } }],
+    [39, 7, { receiver: undefined }],
+    [43, 7, settled(7)],
+    [110, 7, foreign],
+  ] as const)('an IndExe outside 1 to 6 is refused on a %i: %d', (type, exemptIndicator, extra) => {
+    const line = { ...items[0], exemptIndicator } as unknown as LineItemInput
+    expectError(() => document(type, { items: [items[0], line], ...extra }), 'INVALID_OPTION', {
       field: 'items[1].exemptIndicator',
     })
   })
@@ -513,9 +548,25 @@ describe('the deposit guarantee and the non-billable amount', () => {
     [46, {}],
     [52, { options: { transferType: 1 } }],
     [39, { receiver: undefined }],
-  ] as const)('a given depositGuarantee is refused on a %i', (type, extra) => {
+  ] as const)('a given depositGuarantee above zero is refused on a %i, and one of zero is none', (type, extra) => {
     const totals = { netAmount: 145000, vatAmount: 27550, depositGuarantee: 1, totalAmount: 172551 }
     expectError(() => document(type, { totals, ...extra }), 'INVALID_OPTION', { field: 'totals.depositGuarantee' })
+    const zero = document(type, { totals: { ...totals, depositGuarantee: 0, totalAmount: 172550 }, ...extra })
+    expect(zero.header.totals.totalAmount).toBe(172550)
+    expect(toSiiDocument(zero).Encabezado.Totales).not.toHaveProperty('GrntDep')
+  })
+
+  test.each([33, 56, 61] as const)('a given depositGuarantee of zero writes no GrntDep on a %i', (type) => {
+    const references = [{ documentType: 33, folio: 1, date: '2026-11-01', code: 3 }] as const
+    const totals = { netAmount: 145000, vatRate: 19, vatAmount: 27550, depositGuarantee: 0, totalAmount: 172550 }
+    const sii = toSiiDocument(document(type, { totals, ...(type === 33 ? {} : { references }) }))
+    expect(Object.keys(sii.Encabezado.Totales)).toEqual(['MntNeto', 'TasaIVA', 'IVA', 'MntTotal'])
+    expect(fromSiiDocument(sii).header.totals).toEqual({
+      netAmount: 145000,
+      vatRate: 19,
+      vatAmount: 27550,
+      totalAmount: 172550,
+    })
   })
 
   test('IndExe 6 lines are taken off the non-billable amount, which may be negative', () => {
@@ -530,6 +581,8 @@ describe('the deposit guarantee and the non-billable amount', () => {
   })
 })
 
+// Formato DTE 2.5, field 117: the withheld amount is the rate by the sum of the lines that carry the code of the
+// withholding. A document that withholds the whole VAT and whose lines carry no code states a withholding over nothing.
 describe('the lines of a document that withholds the whole VAT', () => {
   const purchase = (items: DocumentInput['items'], extra: Partial<DocumentInput> = {}) =>
     createDocument({ type: 46, folio: 7, issueDate: '2026-11-15', issuer, receiver, items, ...extra })

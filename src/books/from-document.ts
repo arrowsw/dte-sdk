@@ -22,7 +22,7 @@ export type BookEntryFromDocumentOptions = {
   readonly bookRut: string
   /** EN: Book side. ES: Lado del libro. */
   readonly operation: BookOperation
-  /** EN: `negative` negates exempt, net, VAT and total of a credit note (61). `positive` by default, as the format has it. ES: `negative` niega exento, neto, IVA y total de una nota de crédito (61). `positive` por defecto, como dice el formato. */
+  /** EN: `negative` negates exempt, net, VAT and total of a credit note (61), and refuses one with a deposit guarantee (`GrntDep`), since the book's `DepEnvase` holds no amount below zero. `positive` by default, as the format has it. ES: `negative` niega exento, neto, IVA y total de una nota de crédito (61), y rechaza una con garantía por depósito de envases (`GrntDep`), porque el `DepEnvase` del libro no admite montos bajo cero. `positive` por defecto, como dice el formato. */
   readonly creditNoteSign?: 'positive' | 'negative'
 }
 
@@ -45,12 +45,14 @@ export type BookEntryFromDocumentOptions = {
  * depósito de envases (`GrntDep`), que su total incluye, en `containerDeposit` (`DepEnvase`). El nombre se trunca a
  * 50 porque el documento admite 100 y el campo del libro es opcional en documentos electrónicos. `Emisor`,
  * `IndFactCompra` y la referencia al documento anulado no se infieren: se agregan al resultado si el caso los necesita.
- * @throws {DteError} EN: `INVALID_RUT`. ES: `INVALID_RUT`.
+ * @throws {DteError} EN: `INVALID_RUT`; `INVALID_OPTION` with `creditNoteSign` in `details.field` for a `negative` sign on a credit note with a deposit guarantee, which `DepEnvase` (`MontoType`) cannot carry negated. ES: `INVALID_RUT`; `INVALID_OPTION` con `creditNoteSign` en `details.field` ante un signo `negative` en una nota de crédito con garantía por depósito de envases, que `DepEnvase` (`MontoType`) no admite negada.
  */
 export const bookEntryFromDocument = (document: Document, options: BookEntryFromDocumentOptions): BookEntryInput => {
   const { type, folio, issueDate, issuer, receiver, totals } = document.header
   const counterparty = issuer.rut === toSiiRut(options.bookRut, 'bookRut') ? receiver : issuer
   const negate = options.creditNoteSign === 'negative' && type === CREDIT_NOTE_TYPE
+  // `DepEnvase` is a `MontoType` of `LibroCV_v10.xsd`, from zero up: a negated guarantee has no field to go in.
+  if (negate && totals.depositGuarantee) throw new DteError('INVALID_OPTION', { field: 'creditNoteSign' })
   const signed = (value: number): number => (negate ? 0 - value : value)
   // Zero amounts stay absent: the sale defaults put them back, and purchase books omit them.
   const amount = (value: number | undefined): number | undefined => (value ? signed(value) : undefined)

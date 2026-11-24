@@ -65,9 +65,9 @@ const mismatch = (field: string, expected: number, actual: number): DteError =>
  * ES: Rechaza los totales que el SII rechaza, en este orden: un monto neto, un monto exento, un IVA, una garantía por
  * depósito de envases o un monto total que no es entero, o que es negativo en cualquier tipo salvo la liquidación
  * factura (43); una factura (33) sin IVA (validación 55); una factura exenta (34) sin monto exento mayor que cero, o
- * con monto neto o IVA distintos de cero (validación 57); un monto total que no es la suma que define el Formato DTE 2.5 (campo 124), revisado salvo que los
- * totales traigan un código de impuesto distinto del 15; y un monto del período que no es el total más el monto no
- * facturable (campo 126).
+ * con monto neto o IVA distintos de cero (validación 57); un monto total que no es la suma que define el Formato DTE
+ * 2.5 (campo 124), revisado salvo que los totales traigan un código de impuesto distinto del 15; y un monto del
+ * período que no es el total más el monto no facturable (campo 126).
  * @throws {DteError} EN: `INVALID_AMOUNT` and `MISSING_FIELD`, `TOTAL_MISMATCH` with `expected` and `actual`, and the field in `details.field`. ES: `INVALID_AMOUNT` y `MISSING_FIELD`, `TOTAL_MISMATCH` con `expected` y `actual`, y el campo en `details.field`.
  */
 export const assertTotals = (type: DocumentType, totals: Totals): void => {

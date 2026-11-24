@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A dispatch guide without its transfer type is refused.** Formato DTE 2.5 marks `IndTraslado` (field 7) mandatory
+  on a guide, and `createDocument` issued a 52 without `options.transferType` and read it as a sale. It now refuses
+  one with `MISSING_FIELD` and `options.transferType` in `details.field`. The schema still declares the element
+  optional, since `IdDoc` serves every type, and the certification runner always gives one.
+  - **What to change:** pass `options.transferType` on every 52: `TRANSFER_TYPES.sale` (1) for a guide that is a
+    sale, or the reason of the transfer (2 to 9) for one that is not.
+- **A line's `IndExe` outside 1 to 6 is refused, and so is a line with `IndExe` 3 on a settlement invoice or an export
+  document.** The schemas admit `IndExe` 1 to 6 and no other value, and `createDocument` took any other value and put
+  the line in `MontoNF`. It now refuses it on every type with `INVALID_OPTION` and `items[i].exemptIndicator` in
+  `details.field`, as a receipt already did. A settlement invoice (43) and an export document (110, 111, 112) also
+  refuse a line with `IndExe` 3, the deposit guarantee for containers: their roots, `Liquidacion` and
+  `Exportaciones`, declare no `GrntDep`, and such a line was in none of their totals. On every type the format gives
+  no `GrntDep` to, `createDocument` refuses a given `totals.depositGuarantee` other than zero (`INVALID_OPTION`,
+  `totals.depositGuarantee`).
+  - **What to change:** give a line an `exemptIndicator` from 1 to 6, or none. Issue a guarantee for containers on a
+    33, 34, 56 or 61, not on a 43 or an export document.
+- **`bookEntryFromDocument` refuses a negative sign on a credit note with a deposit guarantee.** The guarantee of a
+  credit note (61) now travels to the purchase and sales book as `containerDeposit` (`DepEnvase`), a `MontoType` of
+  `LibroCV_v10.xsd`, from zero up, so `creditNoteSign: 'negative'` cannot negate it with the other amounts. Such a
+  note is now refused with `INVALID_OPTION` and `creditNoteSign` in `details.field`. The positive sign, the default,
+  carries the guarantee.
+  - **What to change:** book a credit note with `IndExe` 3 lines with the positive sign.
+
 ### Fixed
 
 - **The non-billable amount takes off the lines with `IndExe` 6.** Formato DTE 2.5 defines `MontoNF` (field 125) as
@@ -28,20 +53,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Totals` gains `depositGuarantee` (`GrntDep`), which `calculateTotals` works out, the codec writes and reads, the
   check of the total adds and `bookEntryFromDocument` carries to the purchase and sales book as `containerDeposit`
   (`DepEnvase`), whose total already added it. The format gives `GrntDep` to a 33, 34, 56 and 61 alone (code 0, "no
-  debe ir", on every other type), so on a 46, 52, 43, receipt or export document `createDocument` refuses a line with
-  `IndExe` 3 (`INVALID_OPTION`, `items[i].exemptIndicator`; a receipt already refused it) and a given
-  `depositGuarantee` (`INVALID_OPTION`, `totals.depositGuarantee`), and `calculateTotals` totals it there nowhere.
-  - **What to change:** nothing for a document without `IndExe` 3 lines. On a 33, 34, 56 or 61 with them, the total now
-    includes the guarantee, the XML carries `GrntDep` and no longer carries the guarantee in `MontoNF`; totals given
-    by hand need `depositGuarantee` and a `totalAmount` that includes it, or `createDocument` refuses them with
-    `TOTAL_MISMATCH`. On a 46 or 52, a line with `IndExe` 3 is now refused: drop the indicator or issue the guarantee
-    on the invoice.
-- **A dispatch guide without its transfer type is refused.** Formato DTE 2.5 marks `IndTraslado` (field 7) mandatory
-  on a guide, and `createDocument` issued a 52 without `options.transferType` and read it as a sale. It now refuses
-  one with `MISSING_FIELD` and `options.transferType` in `details.field`. The schema still declares the element
-  optional, since `IdDoc` serves every type, and the certification runner always gives one.
-  - **What to change:** pass `options.transferType` on every 52: `TRANSFER_TYPES.sale` (1) for a guide that is a
-    sale, or the reason of the transfer (2 to 9) for one that is not.
+  debe ir", on every other type). Its `IndExe` row admits the indicator on a dispatch guide (52) and a purchase
+  invoice (46) without limiting the value 3 by type, so there a line with `IndExe` 3 keeps its amount and is in no
+  total, as one with 4 or 5 is. A given `depositGuarantee` of zero is none on every type: no `GrntDep` is written.
+  - **What to change:** nothing in the call for a document without `IndExe` 3 lines. On a 33, 34, 56 or 61 with
+    them, the totals worked out now include the guarantee in the total and report it in `GrntDep`, no longer in
+    `MontoNF`. Totals given by hand are taken as they come: given as before, with the guarantee in
+    `nonBillableAmount` and no `depositGuarantee`, they are issued unchanged, with `MontoNF` and no `GrntDep`, so move
+    the guarantee to `depositGuarantee` and add it to `totalAmount` to write it where the format puts it. A given
+    `depositGuarantee` that `totalAmount` leaves out is refused with `TOTAL_MISMATCH`. On a 46 or 52, a line with
+    `IndExe` 3 no longer counts in `nonBillableAmount`.
 
 ## [0.15.0] - 2026-11-23
 

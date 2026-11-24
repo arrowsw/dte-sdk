@@ -261,7 +261,8 @@ const toSiiTotales = (totals: Totals, receipt: boolean): SiiTotales =>
         IVAProp: totals.ownVatAmount,
         IVATerc: totals.thirdPartyVatAmount,
         ImptoReten: totals.withholdings?.map((w) => ({ TipoImp: w.taxCode, TasaImp: w.rate, MontoImp: w.amount })),
-        GrntDep: totals.depositGuarantee,
+        // A guarantee of zero is none, as `calculateTotals` leaves it out: no `GrntDep` is written at zero.
+        GrntDep: totals.depositGuarantee || undefined,
         Comisiones:
           totals.commissions === undefined
             ? undefined

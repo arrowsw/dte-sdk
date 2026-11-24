@@ -261,6 +261,29 @@ describe('bookEntryFromDocument', () => {
     expect(bookEntryFromDocument(createDocument(base), sale)).not.toHaveProperty('containerDeposit')
   })
 
+  // `DepEnvase` is a `MontoType` of `LibroCV_v10.xsd`, from zero up, so a credit note's guarantee cannot be negated.
+  test('a negative sign is refused on a credit note with a deposit guarantee, and a positive one adds up', () => {
+    const note = createDocument({
+      ...base,
+      type: 61,
+      items: [
+        { name: 'Cerveza retornable', quantity: 24, unitPrice: 900 },
+        { name: 'Garantía de envases', quantity: 24, unitPrice: 150, exemptIndicator: 3 },
+      ],
+      references: [{ documentType: 33, folio: '10', date: '2026-10-15', code: 3, reason: 'Devolución' }],
+    })
+    for (const side of [sale, purchase])
+      expect(() => bookEntryFromDocument(note, { ...side, creditNoteSign: 'negative' })).toThrow(
+        expect.objectContaining({ code: 'INVALID_OPTION', details: { field: 'creditNoteSign' } }),
+      )
+    const entry = bookEntryFromDocument(note, sale)
+    expect(entry).toMatchObject({ containerDeposit: 3600, totalAmount: 29304 })
+    expect(createPurchaseSalesBook({ cover: saleCover, entries: [entry] }).totalMismatches).toEqual([])
+    const received = bookEntryFromDocument(note, purchase)
+    const cover = { ...purchaseCover, issuerRut: RECEIVER_RUT }
+    expect(createPurchaseSalesBook({ cover, entries: [received] }).totalMismatches).toEqual([])
+  })
+
   test('rejects an invalid book RUT', () => {
     expectCodeOf(() => bookEntryFromDocument(createDocument(base), { ...sale, bookRut: '1-1' }), 'INVALID_RUT')
   })

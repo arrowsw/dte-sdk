@@ -323,11 +323,14 @@ is not a sale (`IndExe` 4 or 5) and every line of a credit note that corrects a 
 `TOTAL_MISMATCH` and `expected` 0, and a percent on them is refused with `INVALID_AMOUNT`, as a global adjustment or
 a commission on such a credit note is with `INVALID_OPTION`. A given zero is also taken on a priced line with no
 percent of a dispatch guide whose `transferType` is not 1, a transfer that is not a sale; a given -0 is written 0.
-The totals follow `IndExe` as Formato DTE 2.5 reads it. `nonBillableAmount` (`MontoNF`, field 125) is the lines with
+The totals follow `IndExe` as Formato DTE 2.5 reads it, and a line's `IndExe` is 1 to 6 or none, the values the
+schemas admit: any other is refused with `INVALID_OPTION`. `nonBillableAmount` (`MontoNF`, field 125) is the lines with
 `IndExe` 2 less the lines with `IndExe` 6, so it may be negative, and stays out of the total. `depositGuarantee`
 (`GrntDep`, field 120) is the lines with `IndExe` 3, the deposit guarantee of containers, and is added to the total
-(field 124); the format gives it to a 33, 34, 56 and 61 alone, so a line with `IndExe` 3, or a `depositGuarantee`, on
-any other type is refused with `INVALID_OPTION`. A line with `IndExe` 4 or 5 is in no total.
+(field 124). The format gives it to a 33, 34, 56 and 61 alone: on a dispatch guide (52) or a purchase invoice (46) a
+line with `IndExe` 3 keeps its amount and is in no total, a settlement invoice (43) and an export document refuse such
+a line, and a `depositGuarantee` other than zero is refused on any other type, both with `INVALID_OPTION`; a given
+zero is none. A line with `IndExe` 4 or 5 is in no total.
 A line with a price and no quantity is written with the quantity it is computed with, 1, and so is
 every line of a dispatch guide (52) that brings none. On a purchase invoice (46), or any document with
 `withholdVat: true`, each VAT-affected line carries additional tax code 15, the one the withholding is summed over,
@@ -356,7 +359,8 @@ check stops at the first fault it finds:
 | A credit note that cancels a document or corrects a text, and a debit note that cancels a credit note, have one document reference besides a `SET` one | Formato DTE 2.5, the `CodRef` row | `INVALID_OPTION` (`references[i]`) |
 | A credit note that corrects a text has no global adjustment and no commission | Formato DTE 2.5 field 38 of the detail | `INVALID_OPTION` (`globalAdjustments[0]`, `commissions[0]`) |
 | A line percent of 100 at most on a receipt | `DescuentoPct`, `RecargoPct` of `EnvioBOLETA_v11.xsd` | `INVALID_AMOUNT` (`items[i].discountPercent`, `items[i].surchargePercent`) |
-| A deposit guarantee line (`IndExe` 3) or a `depositGuarantee` only on a 33, 34, 56 or 61 | Formato DTE 2.5 field 120 | `INVALID_OPTION` (`items[i].exemptIndicator`, `totals.depositGuarantee`) |
+| A line's `IndExe` is 1 to 6, when one is given | `IndExe` | `INVALID_OPTION` (`items[i].exemptIndicator`) |
+| A deposit guarantee line (`IndExe` 3) on no 43 or export document, and a `depositGuarantee` other than zero only on a 33, 34, 56 or 61 | `Liquidacion`, `Exportaciones`, Formato DTE 2.5 field 120 | `INVALID_OPTION` (`items[i].exemptIndicator`, `totals.depositGuarantee`) |
 | A dispatch guide (52) states its transfer | `IndTraslado`, Formato DTE 2.5 field 7 | `MISSING_FIELD` (`options.transferType`) |
 | Net, exempt, VAT, deposit guarantee and total that are whole numbers, and not negative outside a 43 | `MntNeto`, `MntExe`, `IVA`, `GrntDep`, `MntTotal` | `INVALID_AMOUNT` |
 | An invoice (33) declares its VAT | validation 55 | `MISSING_FIELD` (`totals.vatAmount`) |
@@ -985,7 +989,9 @@ invoice has `totalVatWithheld` and `partialVatWithheld` (`IVARetTotal`, `IVARetP
 issued it has neither: there the withheld VAT goes in `otherTaxes` under a withholding code, 15 with the rate of the
 tax when the whole VAT was withheld, and that amount is what the formula takes off. A purchase line that brings
 `totalVatWithheld` or `partialVatWithheld` is refused with `INVALID_OPTION`. `bookEntryFromDocument` follows the
-`operation` it is given.
+`operation` it is given. It carries a document's deposit guarantee as `containerDeposit` (`DepEnvase`), which admits no
+amount below zero, so it refuses `creditNoteSign: 'negative'` on a credit note that has one (`INVALID_OPTION`,
+`creditNoteSign`).
 
 Their use today is narrow. The RCV replaced the purchase and sales book in production from period
 2017-08, and the guide book is sent only when the SII asks for it; both are still part of the
