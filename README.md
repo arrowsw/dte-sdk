@@ -62,7 +62,7 @@ every field.
 - [Status](#status)
 - [Installation](#installation)
 - [Entry points](#entry-points)
-- [Quick start](#quick-start)
+- [Quick start: issue an invoice](#quick-start-issue-an-invoice)
 - [Step by step](#step-by-step): [transport of goods](#transport-of-goods),
   [settlement invoices](#settlement-invoices), [export documents](#export-documents), [receipts](#receipts)
 - [Validating against the SII's schemas](#validating-against-the-siis-schemas)
@@ -212,26 +212,40 @@ engine signs, as before. `rsaSigningEngine()` says which one is in charge (`nati
 first signature). The runtime signs with an RSA key alone: any other key is left to the JavaScript engine, which
 throws on it.
 
-## Quick start
+## Quick start: issue an invoice
+
+Issuing takes three steps, and each one is a function of its own: issue the document, stamped with your CAF and
+signed with your certificate; put it in an envelope, signed too; and upload the envelope to the SII.
 
 ```typescript
 import { readFileSync } from 'node:fs'
-import { loadCertificateFromPkcs12, parseCaf, issueDocument, createEnvelope, signEnvelope, encodeLatin1 } from 'dte-sdk'
+import {
+  loadCertificateFromPkcs12,
+  parseCaf,
+  issueDocument,
+  createEnvelope,
+  signEnvelope,
+  createSiiClient,
+  uploadEnvelope,
+  PAYMENT_TERMS,
+} from 'dte-sdk'
 
-const certificate = loadCertificateFromPkcs12(readFileSync('firma.pfx'), process.env.PFX_PASSWORD!)
-const caf = parseCaf(readFileSync('caf-33.xml', 'utf8'))
+const certificate = loadCertificateFromPkcs12(readFileSync('firma.pfx'), process.env.PFX_PASSWORD!) // your certificate
+const caf = parseCaf(readFileSync('caf-33.xml', 'utf8')) // the CAF of the type you issue: it holds the folios
 
+// 1. The document: checked, its totals worked out from the lines, stamped (TED) with the CAF and signed (XMLDSig).
 const invoice = issueDocument({
   document: {
-    type: 33,
-    folio: 1,
+    type: 33, // factura electrónica
+    folio: 1, // a folio of the CAF
+    // issueDate: '2026-11-24', today in Chile when left out
     issuer: {
       rut: '76543210-3',
       businessName: 'Comercial Andina SpA',
-      businessActivity: 'Software',
+      businessActivity: 'Software', // giro
+      activityCode: 620200, // Acteco, required on every type but a receipt
       address: 'Av. Los Aromos 1540',
       commune: 'Santiago',
-      activityCode: 620200,
     },
     receiver: {
       rut: '12345678-5',
@@ -241,34 +255,58 @@ const invoice = issueDocument({
       commune: 'Providencia',
     },
     items: [{ name: 'Plan anual', quantity: 1, unitPrice: 100000 }],
+    options: { paymentTerms: PAYMENT_TERMS.cash }, // FmaPago
   },
   caf,
   certificate,
 })
 
 invoice.header.totals // { netAmount: 100000, vatRate: 19, vatAmount: 19000, totalAmount: 119000 }
-invoice.xml // signed <DTE> with its TED
 
+// 2. The envelope (EnvioDTE), signed with the same certificate. It holds up to 2,000 documents.
 const envelope = signEnvelope(
   createEnvelope({
     kind: 'dte',
     documents: [invoice],
     cover: {
       issuerRut: '76543210-3',
-      senderRut: certificate.rut!,
-      resolutionDate: '2024-01-15',
-      resolutionNumber: 123,
+      senderRut: certificate.rut!, // the person who holds the certificate
+      resolutionDate: '2024-01-15', // the SII resolution that authorized the company to issue
+      resolutionNumber: 0, // 0 in certification
     },
   }),
   certificate,
 )
 
-encodeLatin1(envelope.xml) // ISO-8859-1 bytes, as the SII receives them
+// 3. The upload. 'certification' is maullin, the SII's test environment; 'production' is palena.
+const sii = createSiiClient({ environment: 'certification', certificate, companyRut: '76543210-3' })
+const upload = await uploadEnvelope(sii, { envelope }) // the token is asked for and reused for you
+upload.trackId // the SII received the envelope
 ```
 
-To send the envelope to the SII, see [SII web services](#sii-web-services).
+**A `trackId` is not an acceptance.** The SII answers the upload at once and checks the envelope afterwards, so ask
+until it settles:
 
-Receipts (boletas) need no receiver and take VAT-included prices:
+```typescript
+import { waitForUploadStatus } from 'dte-sdk'
+
+const status = await waitForUploadStatus(sii, { trackId: upload.trackId }) // every 5 s, for up to 10 minutes
+status.status // 'accepted' | 'acceptedWithObjections' | 'partiallyRejected' | 'rejected' | …
+status.counts // { reported, accepted, rejected, objections }
+```
+
+The upload needs a company the SII authorized to issue in that environment, and a CAF the SII delivered there
+([SII portal and folios](#sii-portal-and-folios)). The cover's `resolutionDate` and `resolutionNumber` are those of that
+authorization, and `queryAuthorizedIssuer(sii, { rut })` reads them from the SII's public registry
+([SII web services](#sii-web-services)). `issueDocument` runs `createDocument`, `stampDocument` and `signDocument` in one
+call, and [Step by step](#step-by-step) takes them apart. `uploadEnvelope` sends the ISO-8859-1 bytes of
+`envelope.xml`, the ones `encodeLatin1(envelope.xml)` gives to keep a copy of the file.
+
+dte-sdk keeps nothing of its own in these steps: the certificate and the CAF are passed in, the token is cached in
+memory, and nothing is written to disk. Where you keep the certificate and the CAF is up to you; `dte-sdk/node` has a
+token cache, an HTTP capture and an upload archive on disk, as options.
+
+A receipt (boleta, 39 or 41) needs no receiver and takes VAT-included prices:
 
 ```typescript
 const receipt = issueDocument({
@@ -278,7 +316,11 @@ const receipt = issueDocument({
 })
 ```
 
-A receipt has a schema of its own, and `createDocument` holds it to that schema: see [Receipts](#receipts).
+It goes in an envelope of `kind: 'receipt'` (`EnvioBOLETA`), and the SII takes it through another channel:
+`uploadEnvelope` sends it to the receipts REST API in production and to `DTEUpload` in certification, and
+`upload.channel` says which, for `waitForUploadStatus(sii, { trackId: upload.trackId, channel: upload.channel })`;
+`channel` on the upload picks one by hand. A receipt has a schema of its own, and `createDocument` holds it to that
+schema: see [Receipts](#receipts).
 
 ## Step by step
 
