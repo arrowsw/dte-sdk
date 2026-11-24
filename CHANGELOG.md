@@ -201,6 +201,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   discount, comes to it, and the set would otherwise stop there.
   - **What to change:** a line that brought such a percent, which 0.14.0 issued, is now refused: leave the percent
     out of that line, whose discount or surcharge comes to no peso.
+- **A given amount on a line with a price is the amount the price gives.** `createDocument` took a line's `amount` as
+  it came, and on a line with a price wrote beside it the discount and the surcharge the price gives: `unitPrice:
+  1000`, `amount: 100` and `discountPercent: 10` wrote `MontoItem` 100 and `DescuentoMonto` 100, which do not add up.
+  Formato DTE 2.5 makes `MontoItem` "(Precio Unitario * Cantidad) – Monto Descuento + Monto Recargo" (field 38 of the
+  detail). On a line with a price, a given amount that is not that one is now `TOTAL_MISMATCH`, with `items[i].amount`
+  in `details.field`, the amount the price gives in `details.expected` and the given one in `details.actual`; one that
+  is that amount is taken as if it were not given. A zero is no exception, save where the same field admits one: on
+  a dispatch guide (52) whose `transferType` is not 1, a transfer that is not a sale ("Puede ser cero cuando el
+  documento es una Guía de despacho NO VENTA"), a zero is taken on a line with a price and no percent. On an export
+  document the given amount is compared once rounded to its four decimals. A line with no price takes its amount as it
+  comes, as before, save that a given -0 is written 0, where it was written `<MontoItem>-0</MontoItem>`. The message
+  of `TOTAL_MISMATCH` now reads "Amount does not match the SII formula", since a line's amount has it too; the code is
+  the same.
+  - **What to change:** a line that brought a price and an amount that do not add up, which 0.14.0 issued, is now
+    refused: leave out the amount, or the price. A line with a price and an amount of zero is refused too, outside a
+    guide that is not a sale: mark a line that is not a sale with `exemptIndicator: 4`, which writes it at zero. A
+    negative line of a settlement invoice (43) goes without a price, as `PrcItem` is above zero in the schema.
 - **The status of an upload is its verdict, not the class of its code.** The SII answers `EPR` ("Envío Procesado")
   once it has processed an envelope, whatever it did with each document inside, and `queryUploadStatus` and
   `waitForUploadStatus` read that code as `accepted` while the counts of the same answer reported rejected documents.
@@ -250,6 +267,129 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `INVALID_AMOUNT` with the field in `details.field`. A settlement invoice (43) still refuses any line percent with
   `INVALID_OPTION`.
   - **What to change:** nothing for a percent of zero. A line that brought a negative percent is now refused.
+- **A line's amounts are worked out over decimal digits.** `calculateLineAmount`, which `createDocument` writes a line
+  with, rounded the quantity by the price, and each percent of that base, with `Math.round` over binary floating
+  point, where a half in decimal digits may come out a hair below it: 9.2 % of 375 is 34.5, worked out as
+  34.49999999999999 and written as `DescuentoMonto` 34, and 0.145 by 100 is 14.5, written as `MontoItem` 14. Of the
+  shares of a base of 1 to 2 000 pesos at each percent from 0.01 to 100.00, 264 came out a peso short. The quantity and
+  the price are now taken with the six decimals the schema holds and a percent with two, as `calculateExportLineAmount`
+  already took them, the base is their product rounded half away from zero to a whole peso and each share is its
+  percent of the base rounded the same way, all over decimal digits. Formato DTE 2.5 does not say how a line is
+  rounded; each percent is still taken of the base already rounded to a whole peso, not of the unrounded product, as
+  the README and the JSDoc now say. An input that is not finite or is 10^21 or more,
+  and an amount with more digits than a number holds, which would be written as another one, are `INVALID_AMOUNT`
+  with it in `details.value`, where the function answered `NaN` or the other amount; from `createDocument`, such a
+  line is refused with `items[i].amount` in `details.field`. The certification runner adds up the invoices and the
+  notes of its simulation with the same function, so their net is the sum of the lines they carry.
+  - **What to change:** `calculateLineAmount` now throws a `DteError` with `INVALID_AMOUNT` where it answered `NaN` or
+    another amount: a caller that may pass a value that is not a finite number, or a quantity and a price whose
+    product has more digits than a number holds (about fifteen), checks its inputs first or catches the error. A line
+    whose base or share is a half in decimal digits is written a peso further from zero, and its totals with it.
+- **A quantity, a price or a percent is rounded to its decimals over its decimal digits.** `createDocument` rounded
+  each number to the decimals its schema type holds with `toFixed`, over its binary value, where a half in decimal
+  digits may be a hair below it: a discount of 1.005 % was written `DescuentoPct` 1, and a quantity of 1.0000015
+  `QtyItem` 1.000001. `calculateLineAmount` takes the same numbers half away from zero over their decimal digits, so
+  on a price of 10 000 it answered a discount of 101 where `createDocument` wrote 100. Each number is now rounded half
+  away from zero over its decimal digits, as the amounts of a line are: 1.005 is written 1.01, and the line's amounts
+  are worked out with what is written. That covers every decimal `createDocument` rounds: a line's quantity, price,
+  reference quantity and reference price, a percent, a global adjustment value, a commission rate and, on an export
+  document, the exchange rate, the freight, the insurance, the sale clause total and the weights. A receipt's cap of
+  100 is on the percent as written: 100.005, which 0.14.0 wrote as 100, is now 100.01, and refused.
+  - **What to change:** nothing, except that a receipt percent of 100.005, which 0.14.0 wrote as 100, is now refused
+    by the receipt's cap: give 100. A number a half past its decimals in decimal digits, which binary floating point
+    holds a hair below, is written one unit of its last decimal further from zero, and the line's amounts with it.
+- **A line that is not a sale, and every line of a credit note that corrects a text, is written with an amount of
+  zero.** Formato DTE 2.5 says of `MontoItem` that it "debe ser cero" on a line whose `IndExe` is 4 (an item that is
+  not a sale) or 5 (an item a guide that is not a sale takes off an earlier one), and on a credit note that corrects a
+  text ("fe de erratas", `CodRef` 2) (field 38 of the detail). `createDocument` wrote such a line with the amount its
+  price gives. It now writes it with an amount of zero, with its price and quantity, on every line with `IndExe` 4 or
+  5 and on every line of a credit note (61, or 112 on an export) with a reference of `code` 2, and its totals add up
+  that zero. A given amount other than zero there is `TOTAL_MISMATCH` with `items[i].amount` in `details.field` and
+  `expected` 0, compared on an export document once rounded to four decimals, and a line percent is `INVALID_AMOUNT`
+  on its field, since its discount or surcharge would add up with nothing. Such a credit note has nothing for a global
+  adjustment to apply to, and a commission would take its total below zero: either is `INVALID_OPTION` with
+  `globalAdjustments[0]` or `commissions[0]` in `details.field`. A debit note that corrects a text keeps its amounts.
+  The certification runner and its simulation add up such a note's totals as zero, the total alone, as they do for a
+  note whose lines bring no price.
+  - **What to change:** a line with `exemptIndicator` 4 or 5, or of a credit note that corrects a text, is now
+    written at zero whatever its price, and its document totals change with it: leave out its `amount`, or give 0, and
+    leave out its percents, and the global adjustments and commissions of a credit note that corrects a text.
+- **A unit price of zero is left out, and a negative one is refused.** `PrcItem` is a `Dec12_6Type` in
+  `SiiTypes_v10.xsd`, and on a receipt a `Dec5Type` of `EnvioBOLETA_v11.xsd` with the same limits, both from 0.000001
+  up, and `createDocument` wrote a price of zero as `<PrcItem>0</PrcItem>`, which fails the schema, and with it the
+  whole envelope; Formato DTE 2.5 lets a transfer that is not a sale leave the price out (field 22 of the detail). A
+  price of zero is now no price, as a percent of zero is no percent: the line is written as one without a price, its
+  amount the one it brings, or zero. A negative price, or one above zero that its six decimals bring to zero, is
+  `INVALID_AMOUNT` with `items[i].unitPrice` in `details.field`; a negative line of a settlement invoice (43) is an
+  amount with no price. The certification runner's purchase notes, which gave an item the original's price or zero,
+  write one whose price is zero without it.
+  - **What to change:** nothing for a price of zero, except that a line with a price of zero and no quantity is now
+    written with no quantity, where it was written with 1: give the quantity if it should be written (a dispatch
+    guide still writes 1). On an export invoice of goods (110), which asks each line for its quantity, such a line is
+    now refused with `MISSING_FIELD` and `items[i].quantity` in `details.field`: give its quantity. A line with a
+    negative price is now refused: write it with a negative `amount` and no price on a 43, or as a credit note
+    elsewhere.
+- **A receipt refuses a line percent above 100.** `EnvioBOLETA_v11.xsd` restricts a receipt's `DescuentoPct` and
+  `RecargoPct` to 100.00 at most, where the `PctType` of `DTE_v10.xsd` goes up to 999.99, and `createDocument` wrote a
+  receipt's line with `surchargePercent: 150` as it came, which fails the receipts schema and with it the whole
+  envelope. A discount above 100 was refused only when its share left the line below zero, with `items[i].amount`:
+  100.01 % of 1 500 is a discount of 1 500 and a line of zero, which was written with `DescuentoPct` 100.01 and failed
+  the same schema. A percent above 100 on a receipt (39, 41) is now `INVALID_AMOUNT` with `items[i].discountPercent`
+  or `items[i].surchargePercent` in `details.field`. Every other type takes up to 999.99, as before.
+  - **What to change:** a receipt line with a discount or a surcharge above 100 % is now refused: write a surcharge
+    above it in the line's price, and a discount of the whole line as 100.
+- **A quantity, a reference quantity or a reference price at or below zero is refused.** `QtyItem`, `QtyRef` and
+  `PrcRef` are each a `Dec12_6Type` in `SiiTypes_v10.xsd`, and a receipt's `QtyItem` a `Dec5Type` of
+  `EnvioBOLETA_v11.xsd` with the same limits, both from 0.000001 up, and `createDocument` wrote what it was given:
+  `quantity: 0` as `<QtyItem>0</QtyItem>` on every type, and on a settlement invoice (43) `quantity: -1` and
+  `unitPrice: 300` as `QtyItem` -1 and `MontoItem` -300, either of which fails the schema and the whole envelope with
+  it. A
+  quantity, a reference quantity or a reference price at or below zero, or above zero and brought to zero by its six
+  decimals, is now `INVALID_AMOUNT` with `items[i].quantity`, `items[i].referenceQuantity` or `items[i].referencePrice`
+  in `details.field`, on every line, priced or not, and on a line written at zero too. The certification runner leaves
+  out a planned quantity of zero, an item the case gives none, so a priced line is written with 1, the quantity its
+  simulation and its totals of zero already added it up with.
+  - **What to change:** a line that brought a quantity of zero is now refused: leave the quantity out, and a line with
+    a price is written with 1. A negative line of a settlement invoice (43) is a negative `amount` with no price and
+    no quantity.
+- **A note that cancels a document or corrects a text has a single document reference.** Formato DTE 2.5 asks a
+  credit note that cancels the document it references (`CodRef` 1) or corrects a text of it (2), and a debit note
+  that cancels a credit note (1), for one document reference ("CASOS a) b) y c) DEBEN TENER UN ÚNICO DOCUMENTO DE
+  REFERENCIA", the `CodRef` row), and `createDocument` wrote such a note with as many as it was given. A credit note
+  (61, 112) with a reference of `code` 1 or 2, or a debit note (56, 111) with one of `code` 1, and another document
+  reference is now `INVALID_OPTION` with that other `references[i]` in `details.field`. Each type the `TpoDocRef` row
+  lists counts ("Indica si el documento de referencia es: …"): a tax document, a purchase order (801), a DUS (807) and
+  the others. The reference of a certification set (`documentType: 'SET'`) names no document and is not counted, here or
+  for the credit note that corrects a text above, so the test sets issue as before.
+  - **What to change:** a note that cancels or corrects more than one document is now refused: issue one note for
+    each document. A reference to a purchase order, a DUS or any other document cannot go beside a reference of
+    `code` 1 or 2 on such a note either: leave it out of the note.
+- **A price is written with the decimals asked for over its digits, and with no fewer than it has.**
+  `unitPriceDecimals` wrote `PrcItem` with `toFixed`, over the binary value of the price and with any number of
+  decimals: a price of 1.005 with two was written `PrcItem` 1.00 beside a `MontoItem` worked out with 1.005, which by
+  1 000 is 1 005, and a price of 0.4 with none was written `PrcItem` 0, which fails the schema. A `unitPriceDecimals`
+  below the decimals of the price, once rounded to the six the schema holds, is now `INVALID_OPTION` with
+  `items[i].unitPriceDecimals` in `details.field`, and `PrcItem` is written over the decimal digits of the price,
+  padded with the zeros asked for: 84301134689.0647 with six was written 84301134689.064697, and is now
+  84301134689.064700.
+  - **What to change:** a line whose `unitPriceDecimals` is below the decimals of its price is now refused: ask for as
+    many decimals as the price has, or leave `unitPriceDecimals` out.
+- **A global percent is worked out over decimal digits.** `calculateTotals` took a global discount or surcharge in
+  percent with `Math.round` over binary floating point, where a half in decimal digits may come out a hair below it:
+  a discount of 9.2 % on 375 is 34.5, worked out as 34.49999999999999 and taken off as 34, for a net of 341. Its share
+  is now its percent, with two decimals, of the amount it applies to, rounded half away from zero to a whole peso over
+  decimal digits, as a line's share is, so that net is 340; a global adjustment in pesos is rounded the same way. The
+  certification runner's simulation, which worked out its global discount with its own floating point, takes it the
+  same way, so its totals are the ones of its lines: a discount of 14.5 % on 100 gave a net of 86, and gives 85.
+  `calculateTotals` takes each adjustment as `createDocument` writes it: its value with two decimals and the amount it
+  applies to as a whole peso, each rounded half away from zero. A value of 10^21 or more, or one that is not a
+  number, is now `INVALID_AMOUNT` with it in `details.value`.
+  - **What to change:** from `createDocument`, nothing: some totals with a global percent whose share is a half in
+    decimal digits change by a peso, and totals worked out outside the library round that share half away from zero
+    to match. A direct caller of `calculateTotals` sees the two-decimal step: an adjustment of 0.495 pesos on 1 000 now
+    takes off 1, where it took off none, and a discount of 0.004 % on 1 000 000 now takes off nothing, where it took
+    off 40. Give the value with the two decimals `ValorDR` holds, and catch `INVALID_AMOUNT` where a value may not be
+    a finite number below 10^21.
 - **A sale line of a purchase invoice carries a partial withholding where the sales detail takes it.**
   `bookEntryFromDocument` with `operation: 'sale'` left a withholding of VAT other than code 15 in `otherTaxes`, where
   the sales detail takes none (the format, section 2.4: "Estos datos van sólo en los Campos IVA Retenido Total e IVA

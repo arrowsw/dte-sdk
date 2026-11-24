@@ -16,7 +16,7 @@ import type {
   ReferenceInput,
 } from '../model/document'
 import { sanitizeText } from '../text/sanitize'
-import { calculateLineAmount } from '../totals/calculate'
+import { calculateLineAmount, type LineAmount } from '../totals/calculate'
 import type { FolioSource } from './folios'
 import type {
   BasicSetPlan,
@@ -162,13 +162,26 @@ export const issuerAsReceiver = (issuer: IssuerInput): ReceiverInput => ({
   city: issuer.city ?? issuer.commune,
 })
 
+/**
+ * EN: The amounts of a planned line as `createDocument` writes them: a planned quantity of zero is no quantity, so a
+ * priced line is worked out with 1. Internal: the runner and the simulation add their lines up with it.
+ * ES: Los montos de una línea planificada tal como los escribe `createDocument`: una cantidad planificada de cero es
+ * ninguna cantidad, así que una línea con precio se calcula con 1. Interno: el runner y la simulación suman sus líneas
+ * con ella.
+ */
+export const plannedAmount = (item: PlannedItem): LineAmount =>
+  calculateLineAmount({ ...item, quantity: item.quantity || 1 })
+
 const line = (item: PlannedItem, style: LineStyle, priceDecimals: number | undefined): LineItemInput => {
   const priced = item.unitPrice > 0
   const unitPriceDecimals = priced ? priceDecimals : undefined
+  // `QtyItem` starts above zero: a planned quantity of zero is left out, and `createDocument` writes a priced line and
+  // a guide's with 1.
+  const quantity = item.quantity || undefined
   if (style === 'purchase')
     return compact({
       name: item.name,
-      quantity: item.quantity,
+      quantity,
       unit: item.unit ?? 'UN',
       unitPrice: item.unitPrice,
       unitPriceDecimals,
@@ -178,7 +191,7 @@ const line = (item: PlannedItem, style: LineStyle, priceDecimals: number | undef
   if (style === 'guide')
     return compact({
       name: item.name,
-      quantity: item.quantity,
+      quantity,
       unit: item.unit ?? 'UN',
       unitPrice: priced ? item.unitPrice : undefined,
       exempt: item.exempt,
@@ -186,10 +199,10 @@ const line = (item: PlannedItem, style: LineStyle, priceDecimals: number | undef
   // A discount whose share of the line rounds to no peso is left out, which changes no amount: `createDocument`
   // refuses a percent it cannot write with its amount, and a return of one unit of a cheap discounted line, at the
   // original's price and discount, comes to that.
-  const discounted = priced && calculateLineAmount(item).discountAmount > 0
+  const discounted = priced && plannedAmount(item).discountAmount > 0
   return compact({
     name: item.name,
-    quantity: priced ? item.quantity : undefined,
+    quantity: priced ? quantity : undefined,
     unit: priced ? item.unit : undefined,
     unitPrice: priced ? item.unitPrice : undefined,
     unitPriceDecimals,
@@ -235,10 +248,24 @@ export const exemptAll = (items: readonly PlannedItem[]): readonly PlannedItem[]
 const exemptWithUnit = (items: readonly PlannedItem[]): readonly PlannedItem[] =>
   items.map((item) => ({ ...item, unit: item.unit ?? 'UN', exempt: true }))
 
+/**
+ * EN: The items a document's totals add up: none on a credit note that corrects a text (`CodRef` 2), whose every line
+ * `createDocument` writes with an amount of zero (Formato DTE 2.5, field 38 of the detail), else every one. Internal.
+ * ES: Los ítems que suman los totales de un documento: ninguno en una nota de crédito que corrige un texto (`CodRef`
+ * 2), cuyas líneas `createDocument` escribe todas con monto cero (Formato DTE 2.5, campo 38 del detalle), si no todos.
+ * Interno.
+ */
+export const totaledItems = (
+  type: DocumentType,
+  references: readonly ReferenceInput[],
+  items: readonly PlannedItem[],
+): readonly PlannedItem[] =>
+  type === 61 && references.some(({ documentType, code }) => documentType !== 'SET' && code === 2) ? [] : items
+
 // The totals of a document of the basic or the purchase set whose lines add up to nothing: the total alone, without a
 // VAT rate. The exempt set and the guides keep the rate next to a zero total.
 const zeroTotals = (items: readonly PlannedItem[]): DocumentInput['totals'] =>
-  items.every((item) => calculateLineAmount(item).amount === 0) ? { totalAmount: 0 } : undefined
+  items.every((item) => plannedAmount(item).amount === 0) ? { totalAmount: 0 } : undefined
 
 const basicCreditItems = (context: IssueContext, note: PlannedNote): readonly PlannedItem[] => {
   const referenced = referencedRecord(context, note)
@@ -438,15 +465,19 @@ const issueInvoicesAndNotes = async (
   const creditItems = kind === 'basic' ? basicCreditItems : kind === 'exempt' ? exemptCreditItems : purchaseCreditItems
   for (const note of creditNotes) {
     const items = creditItems(context, note)
+    const references = [
+      setReference(note.caseId, context.date),
+      documentReference(referencedRecord(context, note), note),
+    ]
     await issueCertificationDocument(context, {
       caseId: note.caseId,
       type: 61,
       items,
       style,
       receiver,
-      references: [setReference(note.caseId, context.date), documentReference(referencedRecord(context, note), note)],
+      references,
       withholdVat: kind === 'purchase' ? true : undefined,
-      totals: bareZero ? zeroTotals(items) : undefined,
+      totals: bareZero ? zeroTotals(totaledItems(61, references, items)) : undefined,
       priceDecimals: SET_PRICE_DECIMALS,
       record: true,
     })

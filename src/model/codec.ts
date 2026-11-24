@@ -25,6 +25,7 @@ import type {
   Totals,
   Transport,
 } from './document'
+import { toFixedDigits } from '../totals/exact'
 import { toSiiRut } from './rut'
 import type {
   SiiAduana,
@@ -275,10 +276,11 @@ const toSiiTotales = (totals: Totals, receipt: boolean): SiiTotales =>
         VlrPagar: totals.amountDue,
       })
 
+// A price with its decimals asked for is written with them over its decimal digits, padded with zeros.
 const toSiiPrcItem = (item: LineItem): SiiDetalle['PrcItem'] =>
   item.unitPrice === undefined || item.unitPriceDecimals === undefined
     ? item.unitPrice
-    : item.unitPrice.toFixed(item.unitPriceDecimals)
+    : toFixedDigits(item.unitPrice, item.unitPriceDecimals)
 
 // A receipt's line has no settled document, no reference quantity, unit or price, and no additional tax codes.
 const toSiiDetalle = (item: LineItem, receipt: boolean): SiiDetalle =>
