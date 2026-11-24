@@ -245,9 +245,11 @@ const namespaceForms = (element: Element): readonly string[] => {
 
 const hasSignature = (root: Element): boolean => child(child(root, 'Signature'), 'SignedInfo') !== undefined
 
-// The certificate under the `Signature` of the root, the first one, which is the one the signature is verified with.
+// The certificate under the `Signature` of a root that has one: the first, which is the one the signature is verified
+// with.
 const signerCertificate = (root: Element): ReceivedSignerCertificate | null => {
-  const base64 = child(root, 'Signature')?.getElementsByTagName('X509Certificate')[0]?.textContent ?? ''
+  const certificates = (child(root, 'Signature') as Element).getElementsByTagName('X509Certificate')
+  const base64 = certificates.length > 0 ? String(certificates[0].textContent) : ''
   try {
     const { rut, notBefore, notAfter } = parseCertificatePem(
       `-----BEGIN CERTIFICATE-----\n${base64.replace(/\s+/g, '')}\n-----END CERTIFICATE-----\n`,

@@ -141,6 +141,8 @@ describe('verifyReceivedDocuments: each check on its own', () => {
     )
     const { signature } = only(broken)
     expect(signature).toMatchObject({ found: true, certificate: null, signatureValid: false, valid: false })
+    const none = issued(1).xml.replace(/<X509Certificate>[^<]*<\/X509Certificate>/, '')
+    expect(only(none).signature).toMatchObject({ found: true, certificate: null, signatureValid: false, valid: false })
   })
 
   test('a document changed after it was signed fails its signature, and only that', () => {
