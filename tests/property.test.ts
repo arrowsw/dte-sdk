@@ -1,6 +1,6 @@
 import fc from 'fast-check'
 import { generate } from 'rut.ts'
-import { calculateTotals } from '../src/totals/calculate'
+import { calculateLineAmount, calculateTotals } from '../src/totals/calculate'
 import { sanitizeText, foldToAscii } from '../src/text/sanitize'
 import { encodeLatin1, decodeLatin1 } from '../src/text/latin1'
 import { createDocument } from '../src/document/create'
@@ -37,12 +37,101 @@ describe('totals invariants', () => {
     )
   })
 
+  // In hundredths of a percent the share of a whole base is an integer division, exact in a number at these sizes, and
+  // a half goes away from zero: floating point puts 9.2 % of 375, which is 34.5, a hair below its half. Half the cases
+  // are halves: a base of 5 000 × u / d at d × t hundredths, with d dividing 5 000 and t and u odd, is a share of
+  // (t × u + 1) / 2 less a half.
+  const divisorsOf5000 = [1, 2, 4, 5, 8, 10, 20, 25, 40, 50, 100, 125, 200, 250, 500, 625, 1000, 1250, 2500, 5000]
+  const odd = (max: number) => fc.integer({ min: 0, max }).map((n) => 2 * n + 1)
+  const halfCase = fc
+    .tuple(fc.constantFrom(...divisorsOf5000), odd(49), odd(499))
+    .map(([d, t, u]) => [(5000 * u) / d, d * t] as const)
+    .filter(([base, hundredths]) => base <= 1_000_000 && hundredths <= 10_000)
+  const anyCase = fc.tuple(fc.integer({ min: 1, max: 1_000_000 }), fc.integer({ min: 1, max: 10_000 }))
+
+  test('a global percent is its share of the base over decimal digits, half away from zero', () => {
+    fc.assert(
+      fc.property(
+        fc.oneof(halfCase, anyCase),
+        fc.constantFrom('discount' as const, 'surcharge' as const),
+        ([base, hundredths], kind) => {
+          const share = Math.floor((base * hundredths + 5_000) / 10_000)
+          const globalAdjustments = [{ lineNumber: 1, kind, valueType: 'percent' as const, value: hundredths / 100 }]
+          const totals = calculateTotals([{ amount: base }], { type: 33, globalAdjustments })
+          const net = kind === 'discount' ? base - share : base + share
+          expect(totals.netAmount ?? 0).toBe(net)
+        },
+      ),
+      { numRuns: 500 },
+    )
+  })
+
   test('purchase invoice: total excludes the withheld VAT', () => {
     fc.assert(
       fc.property(linesArb, (lines) => {
         const t = calculateTotals(lines, { type: 46 })
         expect(t.totalAmount).toBe((t.netAmount ?? 0) + (t.exemptAmount ?? 0))
       }),
+    )
+  })
+})
+
+describe('line amounts', () => {
+  // A number with up to `places` decimals, or one with a 5 just past them: a half in decimal digits, which binary
+  // floating point often holds a hair below it.
+  const decimalArb = (max: number, places: number) =>
+    fc.oneof(
+      fc
+        .tuple(fc.integer({ min: 1, max }), fc.integer({ min: 0, max: places }))
+        .map(([units, decimals]) => units / 10 ** decimals),
+      fc.integer({ min: 0, max }).map((units) => (units * 10 + 5) / 10 ** (places + 1)),
+    )
+  // `PctType` goes up to 999.99, and 999.995 is written 1000.
+  const percentArb = fc.option(
+    decimalArb(99_999, 2).filter((percent) => percent < 999.995),
+    { nil: undefined },
+  )
+  const issuer = {
+    rut: ISSUER_RUT,
+    businessName: 'Comercial Andina SpA',
+    businessActivity: 'Software',
+    address: 'Av. Los Aromos 1540',
+    commune: 'Santiago',
+    activityCode: 620200,
+  }
+  const receiver = { rut: RECEIVER_RUT, businessName: 'Comercializadora Rapel Ltda', businessActivity: 'Comercio' }
+
+  test('calculateLineAmount gives the amounts createDocument writes for the same line', () => {
+    fc.assert(
+      fc.property(
+        decimalArb(10_000_000, 6),
+        decimalArb(10_000_000, 6),
+        percentArb,
+        percentArb,
+        (quantity, unitPrice, discountPercent, surchargePercent) => {
+          const line = { quantity, unitPrice, discountPercent, surchargePercent }
+          const computed = calculateLineAmount(line)
+          // `createDocument` refuses a percent with no share of the line and, outside a 43, a line below zero; a 33
+          // whose only line adds up to nothing has no VAT to declare.
+          fc.pre(computed.amount > 0)
+          fc.pre(discountPercent === undefined || computed.discountAmount > 0)
+          fc.pre(surchargePercent === undefined || computed.surchargeAmount > 0)
+          const [written] = createDocument({
+            type: 33,
+            folio: 1,
+            issueDate: '2026-11-15',
+            issuer,
+            receiver: { ...receiver, address: 'Pasaje Los Olmos 88', commune: 'Providencia' },
+            items: [{ name: 'Item', ...line }],
+          }).items
+          expect([written.discountAmount ?? 0, written.surchargeAmount ?? 0, written.amount]).toEqual([
+            computed.discountAmount,
+            computed.surchargeAmount,
+            computed.amount,
+          ])
+        },
+      ),
+      { numRuns: 500 },
     )
   })
 })

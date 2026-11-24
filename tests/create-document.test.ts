@@ -1,6 +1,7 @@
 import { createDocument, FIELD_LIMITS } from '../src/document/create'
 import { fromSiiDocument, toSiiDocument } from '../src/model/codec'
 import { DteError } from '../src/errors'
+import { calculateLineAmount } from '../src/totals/calculate'
 import type { Currency } from '../src/catalogs/codes'
 import { FOREIGN_RECEIVER_RUT } from '../src/catalogs/codes'
 import type { DocumentInput, LineItemInput } from '../src/model/document'
@@ -570,6 +571,24 @@ describe('the decimals of a line price', () => {
   test.each([-1, 7, 1.5, Number.NaN])('%p decimals are refused', (decimals) => {
     expectError(() => priced(decimals), 'INVALID_OPTION', { field: 'items[0].unitPriceDecimals' })
   })
+
+  // With fewer decimals than the price has, `PrcItem` would be another price than the one the amount is worked out
+  // with: 1.005 with two is 1.00 or 1.01, either of which by 1 000 is not 1 005, and 0.4 with none is zero.
+  test.each([
+    [1.005, 2],
+    [0.4, 0],
+    [1000.5, 0],
+    [1 / 3, 5],
+  ])('a price of %p with %p decimals is refused', (unitPrice, decimals) => {
+    expectError(() => priced(decimals, { unitPrice }), 'INVALID_OPTION', { field: 'items[0].unitPriceDecimals' })
+  })
+
+  // `toFixed` writes the binary value of a number: 84301134689.0647 with six decimals would be 84301134689.064697.
+  test('the price is written over its decimal digits, padded with the zeros asked for', () => {
+    expect(toSiiDocument(priced(3, { unitPrice: 1.005 })).Detalle[0].PrcItem).toBe('1.005')
+    expect(toSiiDocument(priced(4, { unitPrice: 1.005 })).Detalle[0].PrcItem).toBe('1.0050')
+    expect(toSiiDocument(priced(6, { unitPrice: 84301134689.0647 })).Detalle[0].PrcItem).toBe('84301134689.064700')
+  })
 })
 
 // `DTE_v10.xsd` and `EnvioBOLETA_v11.xsd` give `QtyItem`, `PrcItem`, `QtyRef` and `PrcRef` twelve digits and six
@@ -630,6 +649,21 @@ describe('the decimals the schema admits', () => {
     ['surchargePercent', { quantity: 1, unitPrice: 1, surchargePercent: 1000 }],
   ])('a %s with more digits than its type holds is refused', (field, item) => {
     expectError(() => line({ name: 'Lote', ...item }), 'INVALID_AMOUNT', { field: `items[0].${field}` })
+  })
+
+  // From 10^21 up a number has no decimal digits to round, and what is not a finite number has none at all: either is
+  // refused on its field before it is rounded.
+  test.each([1e21, -1e21, Number.POSITIVE_INFINITY, Number.NaN, '5'])('a quantity of %p is refused', (quantity) => {
+    expectError(() => line({ name: 'Lote', quantity: quantity as number, unitPrice: 1 }), 'INVALID_AMOUNT', {
+      field: 'items[0].quantity',
+    })
+  })
+
+  test('so is a global adjustment value of 10^21', () => {
+    const adjusted = { globalAdjustments: [{ kind: 'discount', valueType: 'amount', value: 1e21 }] } as const
+    expectError(() => line({ name: 'Lote', unitPrice: 1 }, adjusted), 'INVALID_AMOUNT', {
+      field: 'globalAdjustments[0].value',
+    })
   })
 
   // A discount of 999.99 % leaves the line below zero, which `MontoItem` does not admit: the surcharge, of the same
@@ -731,6 +765,407 @@ describe('a line percent goes with its amount', () => {
       RecargoPct: 1,
       RecargoMonto: 1,
     })
+  })
+
+  // 9.2 % of 375 is 34.5, which binary floating point works out as 34.49999999999999; 0.145 by 100 is 14.5, which it
+  // works out as 14.499999999999998.
+  test('a share and a base that are a half in decimal digits round half away from zero', () => {
+    const discounted = line({ name: 'Clip', quantity: 1, unitPrice: 375, discountPercent: 9.2 })
+    expect(discounted.items[0]).toMatchObject({ discountAmount: 35, amount: 340 })
+    expect(toSiiDocument(discounted).Detalle[0]).toMatchObject({ DescuentoMonto: 35, MontoItem: 340 })
+    const weighed = line({ name: 'Granel', quantity: 0.145, unitPrice: 100 })
+    expect(weighed.items[0].amount).toBe(15)
+  })
+
+  // 1.005 is 1.00499999999999989… in binary floating point, 0.015 is 0.01499999999999999… and 1.0000015 is
+  // 1.00000149999999…: each is a half past the decimals its schema type holds in decimal digits, and a hair below it
+  // in binary. Each is written rounded half away from zero, and the line is worked out with what is written.
+  test.each<[string, LineItemInput, Record<string, number>]>([
+    [
+      'a discount percent',
+      { name: 'Clip', unitPrice: 10000, discountPercent: 1.005 },
+      { discountPercent: 1.01, discountAmount: 101, amount: 9899 },
+    ],
+    [
+      'a surcharge percent',
+      { name: 'Clip', unitPrice: 10000, surchargePercent: 0.015 },
+      { surchargePercent: 0.02, surchargeAmount: 2, amount: 10002 },
+    ],
+    [
+      'a quantity',
+      { name: 'Granel', quantity: 1.0000015, unitPrice: 1000000 },
+      { quantity: 1.000002, amount: 1000002 },
+    ],
+  ])(
+    '%s a half past its decimals is written rounded half away from zero, with its amounts',
+    (_label, item, written) => {
+      const [first] = line(item).items
+      expect(first).toMatchObject(written)
+      const computed = calculateLineAmount(item)
+      expect([first.discountAmount ?? 0, first.surchargeAmount ?? 0, first.amount]).toEqual([
+        computed.discountAmount,
+        computed.surchargeAmount,
+        computed.amount,
+      ])
+    },
+  )
+
+  test('and so is a percent on a receipt line with a price', () => {
+    const doc = receipt({ name: 'Café', quantity: 1, unitPrice: 10000, discountPercent: 1.005 })
+    expect(doc.items[0]).toMatchObject({ discountPercent: 1.01, discountAmount: 101, amount: 9899 })
+    expect(toSiiDocument(doc).Detalle[0]).toMatchObject({ DescuentoPct: 1.01, DescuentoMonto: 101, MontoItem: 9899 })
+  })
+
+  // `EnvioBOLETA_v11.xsd` restricts a receipt's `DescuentoPct` and `RecargoPct` to 100.00 at most, where the
+  // `PctType` of `DTE_v10.xsd` goes up to 999.99.
+  test.each<[39 | 41, keyof LineItemInput]>([
+    [39, 'surchargePercent'],
+    [41, 'surchargePercent'],
+    [39, 'discountPercent'],
+    [41, 'discountPercent'],
+  ])('a receipt (%s) refuses a %s above 100', (type, field) => {
+    expectError(
+      () => receipt({ name: 'Café', quantity: 1, unitPrice: 1500, [field]: 100.01 }, type),
+      'INVALID_AMOUNT',
+      {
+        field: `items[0].${field}`,
+      },
+    )
+  })
+
+  // The cap is on the percent as it is written, with two decimals: 100.004 is written 100, and 100.005, a hair below
+  // its half in binary, is written 100.01.
+  test('a receipt takes a percent its two decimals write as 100, and refuses one they write above it', () => {
+    const doc = receipt({ name: 'Café', quantity: 1, unitPrice: 1500, discountPercent: 100.004 })
+    expect(doc.items[0]).toMatchObject({ discountPercent: 100, discountAmount: 1500, amount: 0 })
+    expectError(
+      () => receipt({ name: 'Café', quantity: 1, unitPrice: 1500, discountPercent: 100.005 }),
+      'INVALID_AMOUNT',
+      { field: 'items[0].discountPercent' },
+    )
+  })
+
+  // `PctType` stops at 999.99: 999.995 is below it, and its two decimals write it 1000.
+  test('a percent its two decimals write past 999.99 is refused', () => {
+    expectError(
+      () => line({ name: 'Café', quantity: 1, unitPrice: 1500, surchargePercent: 999.995 }),
+      'INVALID_AMOUNT',
+      { field: 'items[0].surchargePercent' },
+    )
+    const doc = line({ name: 'Café', quantity: 1, unitPrice: 1500, surchargePercent: 999.994 })
+    expect(doc.items[0]).toMatchObject({ surchargePercent: 999.99 })
+  })
+
+  test('a receipt takes a percent of 100, and any other type one above it', () => {
+    const doc = receipt({ name: 'Café', quantity: 1, unitPrice: 1500, surchargePercent: 100 })
+    expect(doc.items[0]).toMatchObject({ surchargePercent: 100, surchargeAmount: 1500, amount: 3000 })
+    const invoice = line({ name: 'Café', quantity: 1, unitPrice: 1500, surchargePercent: 150 })
+    expect(invoice.items[0]).toMatchObject({ surchargePercent: 150, surchargeAmount: 2250, amount: 3750 })
+  })
+})
+
+// Formato DTE 2.5, field 38 of the detail: `MontoItem` is "(Precio Unitario * Cantidad) – Monto Descuento + Monto
+// Recargo". It must be zero on a line that is not a sale (`IndExe` 4 or 5) and on a credit note that corrects a text,
+// may be zero on a dispatch guide that is not a sale, and may be negative on a settlement invoice.
+describe('a given amount on a priced line', () => {
+  const line = (item: LineItemInput, type: DocumentInput['type'] = 33, options?: DocumentInput['options']) =>
+    createDocument({ type, folio: 7, issueDate: '2026-11-15', issuer, receiver, items: [item], options })
+
+  test.each<[string, LineItemInput, number]>([
+    ['a discount', { name: 'Clip', unitPrice: 1000, amount: 100, discountPercent: 10 }, 900],
+    ['a surcharge', { name: 'Clip', unitPrice: 1000, amount: 1000, surchargePercent: 10 }, 1100],
+    ['a quantity', { name: 'Clip', quantity: 2, unitPrice: 1000, amount: 1500 }, 2000],
+    ['a zero next to a percent', { name: 'Clip', unitPrice: 1000, amount: 0, discountPercent: 10 }, 900],
+    ['a zero and no percent', { name: 'Clip', unitPrice: 1000, amount: 0 }, 1000],
+  ])('that does not add up with %s is refused', (_label, item, expected) => {
+    expectError(() => line(item), 'TOTAL_MISMATCH', { field: 'items[0].amount', expected, actual: item.amount })
+  })
+
+  test('one that adds up is taken, as if it were not given', () => {
+    const item = { name: 'Clip', quantity: 2, unitPrice: 1000, discountPercent: 10 }
+    expect(line({ ...item, amount: 1800 }).items).toEqual(line(item).items)
+  })
+
+  test.each<[string, DocumentInput['options']]>([
+    ['with no transfer type', undefined],
+    ['whose transfer is a sale', { transferType: 1 }],
+  ])('a zero is refused on a guide %s', (_label, options) => {
+    expectError(
+      () => line({ name: 'Pallet', quantity: 3, unitPrice: 1000, amount: 0 }, 52, options),
+      'TOTAL_MISMATCH',
+      {
+        field: 'items[0].amount',
+        expected: 3000,
+        actual: 0,
+      },
+    )
+  })
+
+  test.each([2, 5, 6, 9] as const)('a zero is taken on a guide whose transfer is not a sale (%s)', (transferType) => {
+    const guide = line({ name: 'Pallet', quantity: 3, unitPrice: 1000, amount: 0 }, 52, { transferType })
+    expect(guide.items[0]).toMatchObject({ quantity: 3, unitPrice: 1000, amount: 0 })
+    expect(toSiiDocument(guide).Detalle[0]).toMatchObject({ PrcItem: 1000, MontoItem: 0 })
+    expect(line({ name: 'Pallet', quantity: 3, unitPrice: 1000 }, 52, { transferType }).items[0].amount).toBe(3000)
+  })
+
+  test('but not next to a percent, whose discount would add up with nothing', () => {
+    const item = { name: 'Pallet', quantity: 3, unitPrice: 1000, amount: 0, discountPercent: 10 }
+    expectError(() => line(item, 52, { transferType: 5 }), 'TOTAL_MISMATCH', { expected: 2700, actual: 0 })
+  })
+
+  test('a line with no price takes its amount as it comes', () => {
+    expect(line({ name: 'Glosa', quantity: 2, amount: 1500 }).items[0]).toMatchObject({ quantity: 2, amount: 1500 })
+  })
+
+  test('a zero given as -0 is written 0, not -0', () => {
+    for (const item of [
+      { name: 'Pallet', quantity: 3, unitPrice: 1000, amount: -0 },
+      { name: 'Glosa', amount: -0 },
+    ]) {
+      const guide = line(item, 52, { transferType: 5 })
+      expect(guide.items[0].amount).toBe(0)
+      expect(toSiiDocument(guide).Detalle[0].MontoItem).toBe(0)
+    }
+  })
+
+  // 123 456 789 by 123 456 789 is 15 241 578 750 190 521, which has no number of its own: the nearest one ends in 520.
+  test('an amount with more digits than a number holds is refused on the line amount', () => {
+    expectError(() => line({ name: 'Clip', quantity: 123456789, unitPrice: 123456789 }), 'INVALID_AMOUNT', {
+      field: 'items[0].amount',
+      value: '15241578750190521',
+    })
+  })
+})
+
+describe('a line that must be zero', () => {
+  const sale = { name: 'Bebida', quantity: 1, unitPrice: 990 }
+  const issue = (
+    type: DocumentInput['type'],
+    items: readonly LineItemInput[],
+    overrides: Partial<DocumentInput> = {},
+  ) => createDocument({ type, folio: 7, issueDate: '2026-11-15', issuer, receiver, items, ...overrides })
+  const correction = { documentType: 33, folio: 5, date: '2026-11-01', code: 2 as const, reason: 'Corrige giro' }
+
+  test.each<[string, LineItemInput, DocumentInput['type'], DocumentInput['options']]>([
+    [
+      'that is not a sale (IndExe 4), on an invoice',
+      { name: 'Envase', quantity: 2, unitPrice: 1000, exemptIndicator: 4 },
+      33,
+      undefined,
+    ],
+    [
+      'that is not a sale, on a guide that is one',
+      { name: 'Envase', quantity: 2, unitPrice: 1000, exemptIndicator: 4 },
+      52,
+      { transferType: 1 },
+    ],
+    [
+      'to take off an earlier guide (IndExe 5)',
+      { name: 'Envase', quantity: 2, unitPrice: 1000, exemptIndicator: 5 },
+      52,
+      { transferType: 5 },
+    ],
+  ])('a line %s is written at zero, with its price and quantity', (_label, item, type, options) => {
+    const written = issue(type, [sale, item], { options })
+    expect(written.items[1]).toMatchObject({ quantity: 2, unitPrice: 1000, amount: 0 })
+    expect(toSiiDocument(written).Detalle[1]).toMatchObject({ PrcItem: 1000, MontoItem: 0 })
+    expect(issue(type, [sale, { ...item, amount: 0 }], { options }).items[1].amount).toBe(0)
+    expectError(() => issue(type, [sale, { ...item, amount: 2000 }], { options }), 'TOTAL_MISMATCH', {
+      field: 'items[1].amount',
+      expected: 0,
+      actual: 2000,
+    })
+  })
+
+  test.each(['discountPercent', 'surchargePercent'] as const)('a %s on such a line is refused', (field) => {
+    const item = { name: 'Envase', unitPrice: 1000, exemptIndicator: 4 as const, [field]: 10 }
+    expectError(() => issue(33, [sale, item]), 'INVALID_AMOUNT', { field: `items[1].${field}` })
+  })
+
+  test('every line of a credit note that corrects a text is zero, and so is its total', () => {
+    const note = issue(61, [{ name: 'Clip', quantity: 2, unitPrice: 1000 }, { name: 'Glosa' }], {
+      references: [correction],
+    })
+    expect(note.items.map((item) => [item.unitPrice, item.amount])).toEqual([
+      [1000, 0],
+      [undefined, 0],
+    ])
+    expect(note.header.totals.totalAmount).toBe(0)
+    expectError(() => issue(61, [{ name: 'Glosa', amount: 500 }], { references: [correction] }), 'TOTAL_MISMATCH', {
+      field: 'items[0].amount',
+      expected: 0,
+      actual: 500,
+    })
+  })
+
+  test.each<[string, Partial<DocumentInput>]>([
+    ['globalAdjustments[0]', { globalAdjustments: [{ kind: 'discount', valueType: 'percent', value: 10 }] }],
+    ['commissions[0]', { commissions: [{ kind: 'commission', description: 'Comisión', netValue: 100 }] }],
+  ])('a credit note that corrects a text refuses %s: it has nothing to apply it to', (field, extra) => {
+    const lines = [{ name: 'Clip', quantity: 2, unitPrice: 1000 }]
+    expectError(() => issue(61, lines, { references: [correction], ...extra }), 'INVALID_OPTION', { field })
+    const empty = { globalAdjustments: [], commissions: [] }
+    expect(issue(61, lines, { references: [correction], ...empty }).header.totals.totalAmount).toBe(0)
+  })
+
+  test.each<[string, DocumentInput['type'], 1 | 2 | 3]>([
+    ['a credit note that corrects amounts', 61, 3],
+    ['a debit note that corrects a text', 56, 2],
+  ])('%s keeps the amounts of its lines', (_label, type, code) => {
+    const note = issue(type, [{ name: 'Clip', quantity: 2, unitPrice: 1000 }], {
+      references: [{ ...correction, code }],
+    })
+    expect(note.items[0].amount).toBe(2000)
+  })
+})
+
+// Formato DTE 2.5, field 22 of the detail: "Para documentos de traslados que no importen venta podrá omitirse el valor
+// unitario". `PrcItem` is a `Dec12_6Type` in `SiiTypes_v10.xsd`, and a `Dec5Type` with the same limits in
+// `EnvioBOLETA_v11.xsd`: both start at 0.000001.
+describe('the unit price of a line', () => {
+  const sale = { name: 'Bebida', quantity: 1, unitPrice: 990 }
+  const issue = (items: readonly LineItemInput[], type: DocumentInput['type'] = 33) =>
+    createDocument({ type, folio: 7, issueDate: '2026-11-15', issuer, receiver, items })
+
+  test('a price of zero is no price: the line is written without one, with the amount it brings', () => {
+    const written = issue([sale, { name: 'Regalo', quantity: 2, unitPrice: 0, unitPriceDecimals: 2 }])
+    expect(written.items[1]).toEqual({ lineNumber: 2, name: 'Regalo', quantity: 2, amount: 0 })
+    expect(toSiiDocument(written).Detalle[1]).not.toHaveProperty('PrcItem')
+    expect(issue([{ name: 'Ajuste', unitPrice: 0, amount: 500 }]).items[0]).toMatchObject({ amount: 500 })
+    expect(issue([{ name: 'Ajuste', unitPrice: -0, amount: 500 }]).items[0]).not.toHaveProperty('unitPrice')
+  })
+
+  test('so a line with a price of zero and no quantity is written with none, except on a guide', () => {
+    expect(issue([sale, { name: 'Regalo', unitPrice: 0 }]).items[1]).not.toHaveProperty('quantity')
+    expect(issue([{ name: 'Regalo', unitPrice: 0 }], 52).items[0]).toMatchObject({ quantity: 1, amount: 0 })
+  })
+
+  test.each([-1, -0.5, 0.0000004, -0.0000004])('a price of %p is refused', (unitPrice) => {
+    expectError(() => issue([{ name: 'Clip', quantity: 1, unitPrice }]), 'INVALID_AMOUNT', {
+      field: 'items[0].unitPrice',
+    })
+  })
+
+  test('a settlement invoice (43) writes a negative line as an amount, not a price', () => {
+    const settle = (item: LineItemInput) =>
+      createDocument({
+        type: 43,
+        folio: 1,
+        issueDate: '2026-11-15',
+        issuer,
+        receiver,
+        items: [{ name: 'Venta liquidada', unitPrice: 10000, settledDocumentType: '33' }, item],
+        commissions: [{ kind: 'commission', description: 'Comisión', netValue: 1000 }],
+      })
+    expect(
+      settle({ name: 'Ajuste', amount: -300, exemptIndicator: 2, settledDocumentType: '33' }).items[1].amount,
+    ).toBe(-300)
+    expectError(
+      () => settle({ name: 'Ajuste', quantity: 1, unitPrice: -300, exemptIndicator: 2, settledDocumentType: '33' }),
+      'INVALID_AMOUNT',
+      { field: 'items[1].unitPrice' },
+    )
+  })
+})
+
+// `QtyItem`, `QtyRef` and `PrcRef` are each a `Dec12_6Type` in `SiiTypes_v10.xsd`, and a receipt's `QtyItem` a
+// `Dec5Type` of `EnvioBOLETA_v11.xsd` with the same limits: both start at 0.000001.
+describe('the quantity of a line', () => {
+  const issue = (type: DocumentInput['type'], item: LineItemInput, overrides: Partial<DocumentInput> = {}) =>
+    createDocument({ type, folio: 7, issueDate: '2026-11-15', issuer, receiver, items: [item], ...overrides })
+  const correction = { documentType: 33, folio: 5, date: '2026-11-01', code: 2 as const }
+
+  test.each([0, -0, -1, 0.0000004, -0.0000004])('a quantity of %p is refused', (quantity) => {
+    expectError(() => issue(33, { name: 'Clip', quantity, unitPrice: 1000 }), 'INVALID_AMOUNT', {
+      field: 'items[0].quantity',
+    })
+  })
+
+  test.each<[string, DocumentInput['type'], LineItemInput, Partial<DocumentInput>]>([
+    ['a line that is not a sale', 33, { name: 'Envase', quantity: -1, unitPrice: 1000, exemptIndicator: 4 }, {}],
+    [
+      'a credit note that corrects a text',
+      61,
+      { name: 'Clip', quantity: -1, unitPrice: 1000 },
+      {
+        references: [correction],
+      },
+    ],
+    ['a line without a price', 33, { name: 'Glosa', quantity: 0, amount: 500 }, {}],
+    [
+      'a guide that is not a sale',
+      52,
+      { name: 'Pallet', quantity: 0, unitPrice: 1000, amount: 0 },
+      {
+        options: { transferType: 5 },
+      },
+    ],
+    [
+      'a priced line of a settlement invoice',
+      43,
+      { name: 'Venta', quantity: -1, unitPrice: 300, settledDocumentType: '33' },
+      {},
+    ],
+    [
+      'a line of a settlement invoice with no price',
+      43,
+      { name: 'Ajuste', quantity: -1, amount: -300, settledDocumentType: '33' },
+      {},
+    ],
+    ['a receipt', 39, { name: 'Pan', quantity: 0, unitPrice: 1000 }, { receiver: undefined }],
+  ])('so is one on %s', (_label, type, item, overrides) => {
+    expectError(() => issue(type, item, overrides), 'INVALID_AMOUNT', { field: 'items[0].quantity' })
+  })
+
+  test.each(['referenceQuantity', 'referencePrice'] as const)('a %s at or below zero is refused', (field) => {
+    for (const value of [0, -1, 0.0000004])
+      expectError(() => issue(33, { name: 'Caja', quantity: 1, unitPrice: 1000, [field]: value }), 'INVALID_AMOUNT', {
+        field: `items[0].${field}`,
+      })
+  })
+})
+
+// The `CodRef` row of Formato DTE 2.5: a credit note that cancels the document it references or corrects a text of
+// it, and a debit note that cancels a credit note, "DEBEN TENER UN ÚNICO DOCUMENTO DE REFERENCIA".
+describe('a note that cancels a document or corrects a text', () => {
+  const note = (type: DocumentInput['type'], references: DocumentInput['references']) =>
+    createDocument({
+      type,
+      folio: 7,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver,
+      items: [{ name: 'Clip', quantity: 1, unitPrice: 1000 }],
+      references,
+    })
+  const reference = (code: 1 | 2 | 3 | undefined, folio: number, documentType = 33) =>
+    code === undefined ? { documentType, folio, date: '2026-11-01' } : { documentType, folio, date: '2026-11-01', code }
+
+  test.each<[string, DocumentInput['type'], (1 | 2 | 3 | undefined)[], string]>([
+    ['a credit note that corrects a text, after another', 61, [3, 2], 'references[0]'],
+    ['a credit note that corrects a text, before another', 61, [2, 3], 'references[1]'],
+    ['a credit note that cancels, next to one with no code', 61, [1, undefined], 'references[1]'],
+    ['a credit note that cancels two documents', 61, [1, 1], 'references[1]'],
+    ['a debit note that cancels a credit note', 56, [1, 3], 'references[1]'],
+  ])('%s is refused on the other reference', (_label, type, codes, field) => {
+    const references = codes.map((code, index) => reference(code, 8 + index, type === 56 ? 61 : 33))
+    expectError(() => note(type, references), 'INVALID_OPTION', { field })
+  })
+
+  test('the reference of a certification set is not a document, and other notes keep every reference', () => {
+    const set = { documentType: 'SET' as const, folio: 1, date: '2026-11-15', reason: 'CASO 1' }
+    expect(note(61, [set, reference(2, 8)]).items[0].amount).toBe(0)
+    expect(note(61, [set, reference(1, 8)]).references).toHaveLength(2)
+    expect(note(56, [reference(2, 8), reference(3, 9)]).references).toHaveLength(2)
+    expect(note(61, [reference(3, 8), reference(3, 9)]).references).toHaveLength(2)
+    expect(note(33, [reference(1, 8), reference(1, 9)]).references).toHaveLength(2)
+  })
+
+  test('a SET reference with code 2 makes no note one that corrects a text: its lines keep their amounts', () => {
+    const set = { documentType: 'SET' as const, folio: 1, date: '2026-11-15', code: 2 as const, reason: 'CASO 1' }
+    const written = note(61, [set, reference(3, 8)])
+    expect(written.items[0].amount).toBe(1000)
+    expect(written.header.totals.totalAmount).toBe(1190)
   })
 })
 
@@ -997,6 +1432,11 @@ describe('what the schema admits on a settlement invoice (43)', () => {
       ...overrides,
     })
 
+  test('a quantity a half past its six decimals is written rounded half away from zero, with its amount', () => {
+    const items = [{ ...line, quantity: 1.0000015, unitPrice: 1000000 }]
+    expect(settle({ items }).items[0]).toMatchObject({ quantity: 1.000002, amount: 1000002 })
+  })
+
   test('the receiver needs a business activity', () => {
     expectError(() => settle({ receiver: { ...receiver, businessActivity: undefined } }), 'MISSING_FIELD', {
       field: 'receiver.businessActivity',
@@ -1039,7 +1479,8 @@ describe('what the schema admits on a settlement invoice (43)', () => {
 
   test('what Liquidacion does declare still passes', () => {
     const doc = settle({
-      items: [line, { ...line, name: 'No facturable', amount: -300, exemptIndicator: 2 }],
+      // A negative line has no price: `PrcItem` is above zero, and field 38 makes the amount its price by its quantity.
+      items: [line, { name: 'No facturable', amount: -300, exemptIndicator: 2, settledDocumentType: '33' }],
       references: [{ documentType: 33, folio: 9, date: '2026-11-10', reason: 'Factura liquidada' }],
       subtotals: [{ number: 1, description: 'Ventas', totalAmount: 10000, lines: [1] }],
       globalAdjustments: [],
@@ -1367,6 +1808,79 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
   test('an amount of a number too large to be written in digits is refused', () => {
     const item = { name: 'Ajuste', quantity: 1, unit: 'U', amount: 1e21 }
     expectError(() => exportOf({ items: [item] }), 'INVALID_AMOUNT', { field: 'items[0].amount' })
+  })
+
+  test('so is a base with more digits than a number holds, on the line amount', () => {
+    const item = { name: 'Uva de mesa', quantity: 123456789, unit: 'KN', unitPrice: 123456789 }
+    expectError(() => exportOf({ items: [item] }), 'INVALID_AMOUNT', {
+      field: 'items[0].amount',
+      value: '15241578750190521.0000',
+    })
+  })
+
+  // Formato DTE 2.5, field 38 of the detail, on an export credit note as on a 61: every line of one that corrects a
+  // text is zero.
+  test('every line of an export credit note that corrects a text is zero, and so are its totals', () => {
+    const correction = { documentType: 110, folio: 1, date: '2026-11-10', code: 2 as const }
+    const priced = { name: 'Uva de mesa', quantity: 100, unit: 'KN', unitPrice: 12.345 }
+    const doc = note(112, { items: [priced], references: [correction] })
+    expect(doc.items[0]).toMatchObject({ unitPrice: 12.345, amount: 0 })
+    expect(doc.header.totals).toMatchObject({ totalAmount: 0 })
+    expectError(() => note(112, { references: [correction] }), 'TOTAL_MISMATCH', {
+      field: 'items[0].amount',
+      expected: 0,
+      actual: 10.5,
+    })
+    expect(note(111, { items: [priced], references: [correction] }).items[0].amount).toBe(1234.5)
+  })
+
+  test.each<[111 | 112, 1 | 2]>([
+    [112, 1],
+    [112, 2],
+    [111, 1],
+  ])('a %s with a reference of code %s and another is refused on the other', (type, code) => {
+    const references = [
+      { documentType: 110, folio: 1, date: '2026-11-10', code },
+      { documentType: 110, folio: 2, date: '2026-11-10', code: 3 as const },
+    ]
+    expectError(() => note(type, { references }), 'INVALID_OPTION', { field: 'references[1]' })
+  })
+
+  test('a quantity at or below zero is refused on an export line too', () => {
+    expectError(() => exportOf({ items: [{ ...line, quantity: 0 }] }), 'INVALID_AMOUNT', { field: 'items[0].quantity' })
+  })
+
+  // An export line's amount is written with four decimals, so a given one is compared as it is written.
+  test.each([
+    [0.00001, undefined],
+    [0.00005, 0.0001],
+    [1e15, 1e15],
+  ])(
+    'a given amount of %p on a line of an export credit note that corrects a text is compared as %p',
+    (amount, actual) => {
+      const correction = { documentType: 110, folio: 1, date: '2026-11-10', code: 2 as const }
+      const items = [{ name: 'Uva de mesa', quantity: 100, unit: 'KN', unitPrice: 12.345, amount }]
+      if (actual === undefined) expect(note(112, { items, references: [correction] }).items[0].amount).toBe(0)
+      else
+        expectError(() => note(112, { items, references: [correction] }), 'TOTAL_MISMATCH', {
+          field: 'items[0].amount',
+          expected: 0,
+          actual,
+        })
+    },
+  )
+
+  // Formato DTE 2.5, field 38 of the detail, as on any other type: a given amount is the one the price gives, to the
+  // four decimals the schema holds, and a zero is no exception.
+  test('a given amount on a priced line is the quantity by the price, or it is refused', () => {
+    const priced = { name: 'Uva de mesa', quantity: 100, unit: 'KN', unitPrice: 12.345 }
+    expect(exportOf({ items: [{ ...priced, amount: 1234.50001 }] }).items[0].amount).toBe(1234.5)
+    for (const amount of [1234.6, 0])
+      expectError(() => exportOf({ items: [{ ...priced, amount }] }), 'TOTAL_MISMATCH', {
+        field: 'items[0].amount',
+        expected: 1234.5,
+        actual: amount,
+      })
   })
 
   // 150 000 000 000 guaranies and 120 000 000 000 pesos are exports of some twenty and some hundred million dollars.

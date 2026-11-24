@@ -3,14 +3,16 @@ import type { DocumentType } from '../catalogs/document-types'
 import type { SignedEnvelope } from '../envelope/sign'
 import { DteError } from '../errors'
 import type { IssuerInput, ReceiverInput, ReferenceInput, Totals } from '../model/document'
-import { calculateLineAmount } from '../totals/calculate'
+import { adjustmentShare } from '../totals/calculate'
 import {
   exemptAll,
   isInternalTransfer,
   issueCertificationDocument,
   issuerAsReceiver,
+  plannedAmount,
   sameName,
   signCertificationEnvelope,
+  totaledItems,
   type IssueContext,
   type IssueSetOptions,
   type IssuedCase,
@@ -131,21 +133,21 @@ const purchaseItems = (note: PlannedNote, referenced: IssuedRecord | undefined):
       })
 
 // The totals of an invoice, credit note or debit note of the basic or the exempt set: the net after the global
-// discount, the exempt, the VAT on the net. With nothing to add up the total stands alone, with no VAT rate.
+// discount, the exempt, the VAT on the net. With nothing to add up the total stands alone, with no VAT rate. Each line
+// is the amount `createDocument` writes for it, and the global discount and the VAT are worked out as `calculateTotals`
+// works them out, so the totals are the ones of the lines.
 const generalTotals = (items: readonly PlannedItem[], globalDiscountPercent: number | undefined): Totals => {
   const sums = items.reduce(
     (acc, item) => {
-      const base = Math.round((item.quantity || 1) * item.unitPrice)
-      const discountPercent = item.discountPercent ?? 0
-      const line = base - (discountPercent > 0 ? Math.round(base * (discountPercent / 100)) : 0)
+      const line = plannedAmount(item).amount
       return item.exempt === true ? { ...acc, exempt: acc.exempt + line } : { ...acc, net: acc.net + line }
     },
     { net: 0, exempt: 0 },
   )
   const net = globalDiscountPercent
-    ? Math.max(0, sums.net - Math.round(sums.net * (globalDiscountPercent / 100)))
+    ? Math.max(0, sums.net - adjustmentShare(sums.net, { valueType: 'percent', value: globalDiscountPercent }))
     : sums.net
-  const vat = Math.round(net * (VAT_RATE / 100))
+  const vat = Math.round((net * VAT_RATE) / 100)
   return {
     ...(net > 0 ? { netAmount: net } : {}),
     ...(sums.exempt > 0 ? { exemptAmount: sums.exempt } : {}),
@@ -156,7 +158,7 @@ const generalTotals = (items: readonly PlannedItem[], globalDiscountPercent: num
 
 // A purchase note whose lines add up to nothing totals 0 with no VAT rate; any other total is the one computed.
 const purchaseTotals = (items: readonly PlannedItem[]): Totals | undefined =>
-  items.every((item) => calculateLineAmount(item).amount === 0) ? { totalAmount: 0 } : undefined
+  items.every((item) => plannedAmount(item).amount === 0) ? { totalAmount: 0 } : undefined
 
 /**
  * EN: Issues every case of the four set plans again with fresh folios, in the order basic, exempt, guide and purchase,
@@ -217,13 +219,14 @@ export const issueSimulation = async (plan: CertificationPlan, options: IssueSet
       for (const note of notes) {
         const referenced = referencedOf(context, note)
         const items = basicLikeItems(set.kind, note, referenced)
+        const references = noteReference(referenced, note)
         await issueCertificationDocument(context, {
           caseId: note.caseId,
           type,
           items,
           style: 'plain',
-          references: noteReference(referenced, note),
-          totals: generalTotals(items, undefined),
+          references,
+          totals: generalTotals(totaledItems(type, references, items), undefined),
           record: true,
         })
       }
@@ -259,15 +262,16 @@ export const issueSimulation = async (plan: CertificationPlan, options: IssueSet
       if (note === null) continue
       const referenced = referencedOf(context, note)
       const items = purchaseItems(note, referenced)
+      const references = noteReference(referenced, note)
       await issueCertificationDocument(context, {
         caseId: note.caseId,
         type,
         items,
         style: 'purchase',
         receiver: issuer,
-        references: noteReference(referenced, note),
+        references,
         withholdVat: true,
-        totals: purchaseTotals(items),
+        totals: purchaseTotals(totaledItems(type, references, items)),
         record: true,
       })
     }

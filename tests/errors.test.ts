@@ -18,6 +18,12 @@ describe('DteError', () => {
     expect(err.message).not.toContain('SECRET')
   })
 
+  test('a total and a line amount that do not add up share a message', () => {
+    expect(new DteError('TOTAL_MISMATCH', { field: 'items[0].amount' }).message).toBe(
+      'Amount does not match the SII formula (field=items[0].amount)',
+    )
+  })
+
   test('defaults details to an empty object', () => {
     expect(new DteError('CAF_INVALID').details).toEqual({})
     expect(new DteError('CAF_INVALID').message).toBe('CAF is not valid')

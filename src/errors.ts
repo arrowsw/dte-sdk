@@ -106,7 +106,7 @@ const MESSAGES: Readonly<Record<DteErrorCode, string>> = {
   SII_QUERY_ERROR: 'SII status query failed',
   WAIT_TIMEOUT: 'Timed out waiting for the SII status',
   BOOK_TOTAL_MISMATCH: 'Book line total does not match the SII formula',
-  TOTAL_MISMATCH: 'Document total does not match the SII formula',
+  TOTAL_MISMATCH: 'Amount does not match the SII formula',
   SII_PORTAL_LOGIN_FAILED: 'SII portal login gave no session',
   SII_PORTAL_CERT_NOT_ENABLED: 'Certificate is not enabled as a login method at the SII',
   SII_PORTAL_SESSION_LIMIT: 'SII reports too many authenticated sessions for this RUT',

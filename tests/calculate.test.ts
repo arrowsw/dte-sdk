@@ -31,6 +31,59 @@ describe('calculateLineAmount', () => {
   ])('%p → %p', (input, expected) => {
     expect(calculateLineAmount(input)).toEqual(expected)
   })
+
+  // Each of these is a half in decimal digits that binary floating point writes a hair below it: 375 × 9.2 / 100 is
+  // 34.49999999999999 there, and 0.145 × 100 is 14.499999999999998.
+  test.each([
+    [
+      { unitPrice: 375, discountPercent: 9.2 },
+      { base: 375, discountAmount: 35, surchargeAmount: 0, amount: 340 },
+    ],
+    [
+      { unitPrice: 375, surchargePercent: 16.4 },
+      { base: 375, discountAmount: 0, surchargeAmount: 62, amount: 437 },
+    ],
+    [
+      { unitPrice: 250, discountPercent: 64.6 },
+      { base: 250, discountAmount: 162, surchargeAmount: 0, amount: 88 },
+    ],
+    [
+      { quantity: 0.145, unitPrice: 100 },
+      { base: 15, discountAmount: 0, surchargeAmount: 0, amount: 15 },
+    ],
+    [
+      { quantity: 0.009, unitPrice: 1500 },
+      { base: 14, discountAmount: 0, surchargeAmount: 0, amount: 14 },
+    ],
+  ])('a half in decimal digits rounds away from zero: %p → %p', (input, expected) => {
+    expect(calculateLineAmount(input)).toEqual(expected)
+  })
+
+  test('a negative half rounds away from zero too', () => {
+    expect(calculateLineAmount({ quantity: 1, unitPrice: -14.5 })).toEqual({
+      base: -15,
+      discountAmount: 0,
+      surchargeAmount: 0,
+      amount: -15,
+    })
+  })
+
+  test('the quantity and the price are taken with the six decimals the schema holds, and a percent with two', () => {
+    expect(calculateLineAmount({ quantity: 2.4999996, unitPrice: 1 })).toMatchObject({ base: 3, amount: 3 })
+    expect(calculateLineAmount({ unitPrice: 100000, discountPercent: 4.994 })).toMatchObject({
+      discountAmount: 4990,
+      amount: 95010,
+    })
+  })
+
+  test('an amount with more digits than a number holds is refused, and so is an input that is not finite', () => {
+    expect(() => calculateLineAmount({ quantity: 123456789, unitPrice: 123456789 })).toThrow(
+      expect.objectContaining({ code: 'INVALID_AMOUNT', details: { value: '15241578750190521' } }),
+    )
+    expect(() => calculateLineAmount({ quantity: Number.NaN, unitPrice: 1000 })).toThrow(
+      expect.objectContaining({ code: 'INVALID_AMOUNT', details: { value: 'NaN' } }),
+    )
+  })
 })
 
 describe('calculateTotals', () => {
@@ -108,6 +161,42 @@ describe('calculateTotals', () => {
       globalAdjustments: [{ lineNumber: 1, kind: 'discount', valueType: 'percent', value: 10 }],
     })
     expect(totals).toEqual({ netAmount: 900, exemptAmount: 500, vatRate: 19, vatAmount: 171, totalAmount: 1571 })
+  })
+
+  // 9.2 % of 375 is 34.5 and 14.5 % of 100 is 14.5, each a hair below its half in binary floating point.
+  test('a global percent is worked out over decimal digits and rounded half away from zero', () => {
+    const adjusted = (amount: number, kind: 'discount' | 'surcharge', value: number) =>
+      calculateTotals([line(amount)], {
+        type: 33,
+        globalAdjustments: [{ lineNumber: 1, kind, valueType: 'percent', value }],
+      }).netAmount
+    expect(adjusted(375, 'discount', 9.2)).toBe(340)
+    expect(adjusted(100, 'surcharge', 14.5)).toBe(115)
+    expect(adjusted(100, 'discount', 14.5)).toBe(85)
+  })
+
+  // A direct caller's numbers are taken as `createDocument` writes them: the value of an adjustment with two decimals,
+  // and the amount it applies to as a whole peso, each rounded half away from zero.
+  test('a global adjustment takes its value with two decimals and its base as a whole peso', () => {
+    const adjusted = (amount: number, valueType: 'amount' | 'percent', value: number) =>
+      calculateTotals([line(amount)], {
+        type: 33,
+        globalAdjustments: [{ lineNumber: 1, kind: 'discount', valueType, value }],
+      }).netAmount
+    // 0.495 is 0.50, half a peso, and takes one off; 0.494 is 0.49, and takes none.
+    expect(adjusted(1000, 'amount', 0.495)).toBe(999)
+    expect(adjusted(1000, 'amount', 0.494)).toBe(1000)
+    // 0.004 % is 0.00 %.
+    expect(adjusted(1_000_000, 'percent', 0.004)).toBe(1_000_000)
+    // Half of 10.5 is taken of 11: 5.5, which rounds to 6.
+    expect(adjusted(10.5, 'percent', 50)).toBe(4.5)
+  })
+
+  test.each([1e21, Number.NaN])('a global adjustment value of %p is refused', (value) => {
+    const globalAdjustments = [{ lineNumber: 1, kind: 'discount' as const, valueType: 'amount' as const, value }]
+    expect(() => calculateTotals([line(1000)], { type: 33, globalAdjustments })).toThrow(
+      expect.objectContaining({ code: 'INVALID_AMOUNT', details: { value: String(value) } }),
+    )
   })
 
   test('global amount surcharge on exempt base', () => {
