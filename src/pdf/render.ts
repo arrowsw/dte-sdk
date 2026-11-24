@@ -14,6 +14,7 @@ import {
   PAGE,
   ROLL,
   STAMP,
+  stampSize,
   TABLE,
   TRANSFER_REASON_NAMES,
   TYPE_BOX,
@@ -615,11 +616,7 @@ const drawAcknowledgement = (canvas: Canvas, legendLines: readonly string[], y: 
 
 const drawStamp = (canvas: Canvas, image: PDFImage, y: number, resolution: string): number => {
   const black = canvas.paint(COLOURS.black)
-  const natural = image.scale(1)
-  const targetWidth = Math.max(STAMP.minWidth, Math.min(STAMP.maxWidth, natural.width))
-  const scale = targetWidth / natural.width
-  const width = Math.round(targetWidth)
-  const height = Math.max(STAMP.minHeight, Math.min(STAMP.maxHeight, Math.round(natural.height * scale)))
+  const { width, height } = stampSize(image.scale(1))
   const x = MARGIN + STAMP.marginLeft
   let yy = y + GAP.section
   canvas.page.drawImage(image, { x, y: canvas.height - yy - height, width, height })

@@ -26,7 +26,17 @@ import {
   type Canvas,
   type Fonts,
 } from './draw'
-import { ACKNOWLEDGEMENT_TEXT, COLOURS, FONT, ROLL, ROLL_FONT, STAMP, TRANSFER_REASON_NAMES, UNSTAMPED } from './layout'
+import {
+  ACKNOWLEDGEMENT_TEXT,
+  COLOURS,
+  FONT,
+  ROLL,
+  ROLL_FONT,
+  STAMP,
+  stampSize,
+  TRANSFER_REASON_NAMES,
+  UNSTAMPED,
+} from './layout'
 import type { PrintableDocument } from './parse'
 import { longDate } from './words'
 
@@ -284,14 +294,10 @@ const stampRows = (input: RollInput): readonly Row[] => {
   const { stamp, fonts } = input
   if (input.unstamped) return unstampedRows()
   if (stamp === null) return []
-  const natural = stamp.scale(1)
-  const height = Math.max(
-    STAMP.minHeight,
-    Math.min(STAMP.maxHeight, (natural.height * ROLL.contentWidth) / natural.width),
-  )
+  const { width, height } = stampSize(stamp.scale(1), ROLL.contentWidth)
   return [
     gap(ROLL.gap),
-    { kind: 'image', image: stamp, width: ROLL.contentWidth, height },
+    { kind: 'image', image: stamp, width, height },
     gap(STAMP.legendGap),
     ...wrapped(fonts, 'Timbre Electrónico SII', ROLL_FONT.small, { bold: true, align: 'center' }),
     ...wrapped(fonts, input.resolution, ROLL_FONT.small, { align: 'center' }),

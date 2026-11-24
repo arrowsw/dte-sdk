@@ -1,3 +1,4 @@
+import { ROLL, STAMP, stampSize } from '../../src/pdf/layout'
 import { byteCompactionCodewords, renderTedBarcode, type BarcodeModule } from '../../src/pdf/stamp'
 import { decodePdf417Png, pdf417ErrorCorrectionLevel, pngLuminance } from '../support/pdf417'
 import { failure } from '../support/portal'
@@ -64,14 +65,14 @@ describe('a stamp with a byte above ASCII', () => {
     expect(codewords).toMatch(/^(\^\d{3})+$/)
   })
 
-  test('a stamp of plain ASCII keeps the compaction the library picks', async () => {
+  test('a stamp of plain ASCII is written in bytes alone too, the compaction the instructions name', async () => {
     const { load, calls } = await recording()
-    await renderTedBarcode(ted, load)
-    expect(calls[0]).toMatchObject({ text: ted, eclevel: 5, fixedeclevel: true })
-    expect(calls[0]).not.toHaveProperty('raw')
+    expect(decodePdf417Png(await renderTedBarcode(ted, load))).toBe(ted)
+    expect(calls[0]).toMatchObject({ raw: true, eclevel: 5, fixedeclevel: true })
+    expect(String(calls[0].text)).toMatch(/^\^(901|924)(\^\d{3})+$/)
   })
 
-  test('one too long to fit in bytes keeps it too, and still reads back', async () => {
+  test('one too long to fit in bytes keeps the compaction the library picks, and still reads back', async () => {
     // 1 035 bytes are 864 codewords in bytes alone (the latch, 172 groups of five and three bytes over), one more than a
     // symbol holds beside its error correction; the 1 034 bytes below are 863, and fit.
     const long = `<TED>ñ${'A'.repeat(1023)}</TED>`
@@ -84,14 +85,52 @@ describe('a stamp with a byte above ASCII', () => {
   })
 })
 
-test('the symbol keeps the field geometry: 3 px modules, 6 modules of quiet zone, rows as tall as modules', async () => {
-  const { width, height } = pngLuminance(await renderTedBarcode(ted))
-  expect((width - 36) % 3).toBe(0)
-  expect((height - 36) % 3).toBe(0)
-  const rows = (height - 36) / 3
-  expect(rows).toBeGreaterThanOrEqual(3)
-  expect(rows).toBeLessThanOrEqual(90)
-  expect(width).toBeGreaterThan(height * 4)
+// The geometry of section A.2.5 of the SII's instructions: rows three modules high, a module of 6.7 mils or more,
+// 300 DPI or more.
+describe('the geometry of the symbol', () => {
+  const PIXELS = 4
+  const QUIET = 6 * PIXELS
+  const MILS_PER_POINT = 1000 / 72
+  // The runs of equal pixel rows between the quiet zones: one run for each row of the symbol.
+  const rowHeights = ({ width, height, luminance }: ReturnType<typeof pngLuminance>): readonly number[] => {
+    const row = (y: number) => luminance.slice(y * width, (y + 1) * width).join()
+    const heights: number[] = []
+    for (let y = QUIET; y < height - QUIET; y += 1) {
+      if (y > QUIET && row(y) === row(y - 1)) heights[heights.length - 1] += 1
+      else heights.push(1)
+    }
+    return heights
+  }
+
+  test('4 px modules, 6 modules of quiet zone, 387 modules across and rows three modules high', async () => {
+    const image = pngLuminance(await renderTedBarcode(ted))
+    expect(image.width).toBe(387 * PIXELS)
+    const rows = rowHeights(image)
+    expect(rows.length).toBeGreaterThanOrEqual(3)
+    expect(rows.length).toBeLessThanOrEqual(90)
+    expect(new Set(rows)).toEqual(new Set([3 * PIXELS]))
+    expect(image.height).toBe(rows.length * 3 * PIXELS + 2 * QUIET)
+  })
+
+  test.each([
+    ['the sheet', STAMP.maxWidth],
+    ['the 80 mm roll', ROLL.contentWidth],
+  ])('on %s it is drawn by one factor, with a module over 6.7 mils and over 300 DPI', async (_where, maxWidth) => {
+    const image = pngLuminance(await renderTedBarcode(ted))
+    const drawn = stampSize(image, maxWidth)
+    expect(drawn.width).toBeCloseTo(maxWidth)
+    expect(drawn.height / drawn.width).toBeCloseTo(image.height / image.width)
+    expect(drawn.height).toBeGreaterThanOrEqual(STAMP.minHeight)
+    expect(drawn.height).toBeLessThanOrEqual(STAMP.maxHeight)
+    expect((drawn.width / (image.width / PIXELS)) * MILS_PER_POINT).toBeGreaterThanOrEqual(6.7)
+    expect(image.width / (drawn.width / 72)).toBeGreaterThanOrEqual(300)
+  })
+
+  test('a symbol too high for the stamp box is brought down on both sides', () => {
+    const drawn = stampSize({ width: 1548, height: 1200 })
+    expect(drawn.height).toBeCloseTo(STAMP.maxHeight)
+    expect(drawn.width).toBeCloseTo((STAMP.maxHeight * 1548) / 1200)
+  })
 })
 
 test('without a <TED it is MISSING_FIELD', async () => {
@@ -117,9 +156,10 @@ test('a loader for tests replaces the library', async () => {
   expect(calls).toEqual([
     {
       bcid: 'pdf417',
-      text: ted,
-      scale: 3,
-      height: 10,
+      text: expect.stringMatching(/^(\^\d{3})+$/),
+      raw: true,
+      scale: 4,
+      columns: 18,
       padding: 6,
       includetext: false,
       binarytext: true,
