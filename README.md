@@ -324,13 +324,14 @@ is not a sale (`IndExe` 4 or 5) and every line of a credit note that corrects a 
 a commission on such a credit note is with `INVALID_OPTION`. A given zero is also taken on a priced line with no
 percent of a dispatch guide whose `transferType` is not 1, a transfer that is not a sale; a given -0 is written 0.
 The totals follow `IndExe` as Formato DTE 2.5 reads it, and a line's `IndExe` is 1 to 6 or none, the values the
-schemas admit: any other is refused with `INVALID_OPTION`. `nonBillableAmount` (`MontoNF`, field 125) is the lines with
-`IndExe` 2 less the lines with `IndExe` 6, so it may be negative, and stays out of the total. `depositGuarantee`
-(`GrntDep`, field 120) is the lines with `IndExe` 3, the deposit guarantee of containers, and is added to the total
-(field 124). The format gives it to a 33, 34, 56 and 61 alone: on a dispatch guide (52) or a purchase invoice (46) a
-line with `IndExe` 3 keeps its amount and is in no total, a settlement invoice (43) and an export document refuse such
-a line, and a `depositGuarantee` other than zero is refused on any other type, both with `INVALID_OPTION`; a given
-zero is none. A line with `IndExe` 4 or 5 is in no total.
+schemas admit: any other, `null` included, is refused with `INVALID_OPTION`. `nonBillableAmount` (`MontoNF`, field
+125) is the lines with `IndExe` 2 less the lines with `IndExe` 6, so it may be negative, and stays out of the total.
+`depositGuarantee` (`GrntDep`, field 120) is the lines with `IndExe` 3, the deposit guarantee of containers, and is
+added to the total (field 124). The format gives it to a 33, 34, 56 and 61 alone: on a dispatch guide (52) or a
+purchase invoice (46) a line with `IndExe` 3 keeps its amount and is in no total, and a `depositGuarantee` other than
+zero, or one that is not a number, is refused on any other type with `INVALID_OPTION`; a given zero is none. A
+settlement invoice (43) and an export document refuse a line with `IndExe` 3 with `INVALID_OPTION` too. That is this
+library's choice: the format's `IndExe` row admits the indicator on both. A line with `IndExe` 4 or 5 is in no total.
 A line with a price and no quantity is written with the quantity it is computed with, 1, and so is
 every line of a dispatch guide (52) that brings none. On a purchase invoice (46), or any document with
 `withholdVat: true`, each VAT-affected line carries additional tax code 15, the one the withholding is summed over,
@@ -359,8 +360,8 @@ check stops at the first fault it finds:
 | A credit note that cancels a document or corrects a text, and a debit note that cancels a credit note, have one document reference besides a `SET` one | Formato DTE 2.5, the `CodRef` row | `INVALID_OPTION` (`references[i]`) |
 | A credit note that corrects a text has no global adjustment and no commission | Formato DTE 2.5 field 38 of the detail | `INVALID_OPTION` (`globalAdjustments[0]`, `commissions[0]`) |
 | A line percent of 100 at most on a receipt | `DescuentoPct`, `RecargoPct` of `EnvioBOLETA_v11.xsd` | `INVALID_AMOUNT` (`items[i].discountPercent`, `items[i].surchargePercent`) |
-| A line's `IndExe` is 1 to 6, when one is given | `IndExe` | `INVALID_OPTION` (`items[i].exemptIndicator`) |
-| A deposit guarantee line (`IndExe` 3) on no 43 or export document, and a `depositGuarantee` other than zero only on a 33, 34, 56 or 61 | `Liquidacion`, `Exportaciones`, Formato DTE 2.5 field 120 | `INVALID_OPTION` (`items[i].exemptIndicator`, `totals.depositGuarantee`) |
+| A line's `IndExe` is 1 to 6, when one is given, and not `null` | `IndExe` | `INVALID_OPTION` (`items[i].exemptIndicator`) |
+| A deposit guarantee line (`IndExe` 3) on no 43 or export document, which dte-sdk chooses, and a `depositGuarantee` other than zero only on a 33, 34, 56 or 61 | Formato DTE 2.5 field 120 | `INVALID_OPTION` (`items[i].exemptIndicator`, `totals.depositGuarantee`) |
 | A dispatch guide (52) states its transfer | `IndTraslado`, Formato DTE 2.5 field 7 | `MISSING_FIELD` (`options.transferType`) |
 | Net, exempt, VAT, deposit guarantee and total that are whole numbers, and not negative outside a 43 | `MntNeto`, `MntExe`, `IVA`, `GrntDep`, `MntTotal` | `INVALID_AMOUNT` |
 | An invoice (33) declares its VAT | validation 55 | `MISSING_FIELD` (`totals.vatAmount`) |

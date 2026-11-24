@@ -284,6 +284,23 @@ describe('bookEntryFromDocument', () => {
     expect(createPurchaseSalesBook({ cover, entries: [received] }).totalMismatches).toEqual([])
   })
 
+  // A guarantee of zero is none, so it leaves nothing to negate.
+  test('a negative sign books a credit note whose given deposit guarantee is zero, on both sides', () => {
+    const note = createDocument({
+      ...base,
+      type: 61,
+      items: [{ name: 'Cerveza retornable', quantity: 24, unitPrice: 900 }],
+      references: [{ documentType: 33, folio: '10', date: '2026-10-15', code: 3, reason: 'Devolución' }],
+      totals: { netAmount: 21600, vatRate: 19, vatAmount: 4104, depositGuarantee: 0, totalAmount: 25704 },
+    })
+    expect(note.header.totals.depositGuarantee).toBe(0)
+    for (const side of [sale, purchase]) {
+      const entry = bookEntryFromDocument(note, { ...side, creditNoteSign: 'negative' })
+      expect(entry).toMatchObject({ netAmount: -21600, vatAmount: -4104, totalAmount: -25704 })
+      expect(entry).not.toHaveProperty('containerDeposit')
+    }
+  })
+
   test('rejects an invalid book RUT', () => {
     expectCodeOf(() => bookEntryFromDocument(createDocument(base), { ...sale, bookRut: '1-1' }), 'INVALID_RUT')
   })

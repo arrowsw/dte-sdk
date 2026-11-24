@@ -502,6 +502,22 @@ describe('the deposit guarantee and the non-billable amount', () => {
     expect(toSiiDocument(doc).Encabezado.Totales).not.toHaveProperty('GrntDep')
   })
 
+  const settled = (exemptIndicator: unknown) => ({
+    items: [
+      { ...items[0], settledDocumentType: '33' },
+      { ...items[0], settledDocumentType: '33', exemptIndicator } as unknown as LineItemInput,
+    ],
+  })
+  const foreign = {
+    currency: 'DOLAR USA' as Currency,
+    receiver: { ...receiver, rut: FOREIGN_RECEIVER_RUT, city: 'Lima' },
+  }
+  const exportNote: Partial<DocumentInput> = {
+    ...foreign,
+    references: [{ documentType: 110, folio: 1, date: '2026-11-01', code: 3 }],
+  }
+
+  // The format's `IndExe` row admits the indicator on these types too; dte-sdk refuses the value 3 there.
   test.each([
     [
       43,
@@ -512,36 +528,61 @@ describe('the deposit guarantee and the non-billable amount', () => {
         ],
       },
     ],
-    [110, { currency: 'DOLAR USA' as Currency, receiver: { ...receiver, rut: FOREIGN_RECEIVER_RUT, city: 'Lima' } }],
-  ] as const)('an IndExe 3 line is refused on a %i, whose root declares no GrntDep', (type, extra) => {
+    [110, foreign],
+    [111, exportNote],
+    [112, exportNote],
+  ] as const)('an IndExe 3 line is refused on a %i', (type, extra) => {
     expectError(() => document(type, { items: [items[0], crate], ...extra }), 'INVALID_OPTION', {
       field: 'items[1].exemptIndicator',
     })
   })
 
-  // The schemas enumerate `IndExe` 1 to 6.
-  const settled = (exemptIndicator: number) => ({
-    items: [
-      { ...items[0], settledDocumentType: '33' },
-      { ...items[0], settledDocumentType: '33', exemptIndicator } as unknown as LineItemInput,
-    ],
-  })
-  const foreign = {
-    currency: 'DOLAR USA' as Currency,
-    receiver: { ...receiver, rut: FOREIGN_RECEIVER_RUT, city: 'Lima' },
-  }
+  // The schemas enumerate `IndExe` 1 to 6, and `null` is none of them.
   test.each([
     [33, 0, {}],
     [33, 7, {}],
+    [33, null, {}],
     [52, 1.5, { options: { transferType: 1 } }],
+    [52, null, { options: { transferType: 1 } }],
     [39, 7, { receiver: undefined }],
     [43, 7, settled(7)],
+    [43, null, settled(null)],
     [110, 7, foreign],
-  ] as const)('an IndExe outside 1 to 6 is refused on a %i: %d', (type, exemptIndicator, extra) => {
+    [111, null, exportNote],
+  ] as const)('an IndExe outside 1 to 6 is refused on a %i: %p', (type, exemptIndicator, extra) => {
     const line = { ...items[0], exemptIndicator } as unknown as LineItemInput
     expectError(() => document(type, { items: [items[0], line], ...extra }), 'INVALID_OPTION', {
       field: 'items[1].exemptIndicator',
     })
+  })
+
+  test.each(['1', '2', '3', '4', '5', '6'])('an IndExe given as the text %p is refused on a 33', (exemptIndicator) => {
+    const line = { ...items[0], exemptIndicator } as unknown as LineItemInput
+    expectError(() => document(33, { items: [items[0], line] }), 'INVALID_OPTION', {
+      field: 'items[1].exemptIndicator',
+    })
+  })
+
+  // The checks of an export document's totals do not look at the guarantee, so this one refuses what is not a number.
+  test.each([
+    [110, foreign],
+    [111, exportNote],
+    [112, exportNote],
+    [46, {}],
+    [52, { options: { transferType: 1 } }],
+  ] as const)('a given depositGuarantee that is not a number is refused on a %i', (type, extra) => {
+    const given = type >= 110 ? { exemptAmount: 145000 } : { netAmount: 145000, vatAmount: 27550 }
+    for (const depositGuarantee of [Number.NaN, null, '', false]) {
+      const totals = { ...given, totalAmount: 172550, depositGuarantee } as unknown as DocumentInput['totals']
+      expectError(() => document(type, { totals, ...extra }), 'INVALID_OPTION', { field: 'totals.depositGuarantee' })
+    }
+  })
+
+  test('a given depositGuarantee of zero is none on an export document', () => {
+    const totals = { exemptAmount: 145000, totalAmount: 145000, depositGuarantee: 0 }
+    const note = document(111, { totals, ...exportNote })
+    expect(note.header.totals.totalAmount).toBe(145000)
+    expect(toSiiDocument(note).Encabezado.Totales).not.toHaveProperty('GrntDep')
   })
 
   test.each([

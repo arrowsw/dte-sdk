@@ -16,21 +16,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **What to change:** pass `options.transferType` on every 52: `TRANSFER_TYPES.sale` (1) for a guide that is a
     sale, or the reason of the transfer (2 to 9) for one that is not.
 - **A line's `IndExe` outside 1 to 6 is refused, and so is a line with `IndExe` 3 on a settlement invoice or an export
-  document.** The schemas admit `IndExe` 1 to 6 and no other value, and `createDocument` took any other value and put
-  the line in `MontoNF`. It now refuses it on every type with `INVALID_OPTION` and `items[i].exemptIndicator` in
-  `details.field`, as a receipt already did. A settlement invoice (43) and an export document (110, 111, 112) also
-  refuse a line with `IndExe` 3, the deposit guarantee for containers: their roots, `Liquidacion` and
-  `Exportaciones`, declare no `GrntDep`, and such a line was in none of their totals. On every type the format gives
-  no `GrntDep` to, `createDocument` refuses a given `totals.depositGuarantee` other than zero (`INVALID_OPTION`,
-  `totals.depositGuarantee`).
-  - **What to change:** give a line an `exemptIndicator` from 1 to 6, or none. Issue a guarantee for containers on a
-    33, 34, 56 or 61, not on a 43 or an export document.
+  document.** The schemas admit `IndExe` 1 to 6 and no other value. `createDocument` wrote any other value as it came:
+  on a 33, 34, 46, 52, 56 and 61 it put the line in `MontoNF`, and on a settlement invoice (43) and an export document
+  (110, 111, 112) it left the line out of every total. A receipt already refused it. Every type now refuses it with
+  `INVALID_OPTION` and `items[i].exemptIndicator` in `details.field`, `null` included: every type but a receipt read a
+  `null` indicator as none, and the numeric fields of a line already refused `null`. A settlement invoice and an
+  export document also refuse a line with `IndExe` 3, the deposit guarantee for containers, which was in none of
+  their totals. That is this library's choice, not the format's: Formato DTE 2.5 gives `GrntDep` to neither type, as
+  it gives it to neither a 46 nor a 52, where such a line is accepted, and its `IndExe` row admits the indicator on
+  both (on a settlement invoice "Sólo en caso de Liquidación-Factura que tenga ítems no facturables"). On every type
+  the format gives no `GrntDep` to, `createDocument` refuses a given `totals.depositGuarantee` other than zero, a value
+  that is not a number included (`INVALID_OPTION`, `totals.depositGuarantee`).
+  - **What to change:** give a line an `exemptIndicator` from 1 to 6, or leave it out instead of passing `null`. Issue
+    a guarantee for containers on a 33, 34, 56 or 61, not on a 43 or an export document.
 - **`bookEntryFromDocument` refuses a negative sign on a credit note with a deposit guarantee.** The guarantee of a
   credit note (61) now travels to the purchase and sales book as `containerDeposit` (`DepEnvase`), a `MontoType` of
   `LibroCV_v10.xsd`, from zero up, so `creditNoteSign: 'negative'` cannot negate it with the other amounts. Such a
   note is now refused with `INVALID_OPTION` and `creditNoteSign` in `details.field`. The positive sign, the default,
   carries the guarantee.
-  - **What to change:** book a credit note with `IndExe` 3 lines with the positive sign.
+  - **What to change:** book a credit note with a deposit guarantee with the positive sign.
 
 ### Fixed
 
