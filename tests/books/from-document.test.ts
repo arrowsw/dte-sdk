@@ -247,6 +247,20 @@ describe('bookEntryFromDocument', () => {
     expect(createPurchaseSalesBook({ cover, entries: received }).totalMismatches).toEqual([])
   })
 
+  // The total of a document with a deposit guarantee includes it (Formato DTE 2.5, field 124), and so does the total
+  // of a book line, through `DepEnvase`.
+  test('the deposit guarantee travels as the container deposit, and the book adds up', () => {
+    const document = createDocument({
+      ...base,
+      items: [...base.items, { name: 'Garantía de envases', quantity: 24, unitPrice: 150, exemptIndicator: 3 }],
+    })
+    expect(document.header.totals).toMatchObject({ depositGuarantee: 3600, totalAmount: 122600 })
+    const entry = bookEntryFromDocument(document, sale)
+    expect(entry).toMatchObject({ containerDeposit: 3600, totalAmount: 122600 })
+    expect(createPurchaseSalesBook({ cover: saleCover, entries: [entry] }).totalMismatches).toEqual([])
+    expect(bookEntryFromDocument(createDocument(base), sale)).not.toHaveProperty('containerDeposit')
+  })
+
   test('rejects an invalid book RUT', () => {
     expectCodeOf(() => bookEntryFromDocument(createDocument(base), { ...sale, bookRut: '1-1' }), 'INVALID_RUT')
   })
@@ -273,8 +287,10 @@ describe('guideEntryFromDocument', () => {
     })
   })
 
+  // `createDocument` requires the transfer on a guide; a guide read from XML may come without it.
   test('the transfer defaults to a sale', () => {
-    const document = createDocument({ ...guide, options: {} })
+    const issued = createDocument(guide)
+    const document = { ...issued, header: { ...issued.header, options: {} } }
     expect(guideEntryFromDocument(document).transferType).toBe(1)
   })
 

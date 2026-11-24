@@ -24,7 +24,7 @@ samples. The API is readable English, with bilingual (EN/ES) documentation on
 every field.
 
 - 🧾 **Document types** 33, 34, 39, 41, 43, 46, 52, 56 and 61, and the export documents 110, 111 and 112.
-- 🧮 **Totals done right** — per-line rounding, exempt and non-billable lines,
+- 🧮 **Totals done right** — per-line rounding, exempt and non-billable lines, the deposit guarantee of containers,
   VAT-included prices (`MntBruto`), global discounts, purchase-invoice withholding,
   commissions taken off the total of a settlement invoice, and export amounts in their currency with four decimals,
   converted to pesos exactly.
@@ -323,6 +323,11 @@ is not a sale (`IndExe` 4 or 5) and every line of a credit note that corrects a 
 `TOTAL_MISMATCH` and `expected` 0, and a percent on them is refused with `INVALID_AMOUNT`, as a global adjustment or
 a commission on such a credit note is with `INVALID_OPTION`. A given zero is also taken on a priced line with no
 percent of a dispatch guide whose `transferType` is not 1, a transfer that is not a sale; a given -0 is written 0.
+The totals follow `IndExe` as Formato DTE 2.5 reads it. `nonBillableAmount` (`MontoNF`, field 125) is the lines with
+`IndExe` 2 less the lines with `IndExe` 6, so it may be negative, and stays out of the total. `depositGuarantee`
+(`GrntDep`, field 120) is the lines with `IndExe` 3, the deposit guarantee of containers, and is added to the total
+(field 124); the format gives it to a 33, 34, 56 and 61 alone, so a line with `IndExe` 3, or a `depositGuarantee`, on
+any other type is refused with `INVALID_OPTION`. A line with `IndExe` 4 or 5 is in no total.
 A line with a price and no quantity is written with the quantity it is computed with, 1, and so is
 every line of a dispatch guide (52) that brings none. On a purchase invoice (46), or any document with
 `withholdVat: true`, each VAT-affected line carries additional tax code 15, the one the withholding is summed over,
@@ -351,10 +356,12 @@ check stops at the first fault it finds:
 | A credit note that cancels a document or corrects a text, and a debit note that cancels a credit note, have one document reference besides a `SET` one | Formato DTE 2.5, the `CodRef` row | `INVALID_OPTION` (`references[i]`) |
 | A credit note that corrects a text has no global adjustment and no commission | Formato DTE 2.5 field 38 of the detail | `INVALID_OPTION` (`globalAdjustments[0]`, `commissions[0]`) |
 | A line percent of 100 at most on a receipt | `DescuentoPct`, `RecargoPct` of `EnvioBOLETA_v11.xsd` | `INVALID_AMOUNT` (`items[i].discountPercent`, `items[i].surchargePercent`) |
-| Net, exempt, VAT and total that are whole numbers, and not negative outside a 43 | `MntNeto`, `MntExe`, `IVA`, `MntTotal` | `INVALID_AMOUNT` |
+| A deposit guarantee line (`IndExe` 3) or a `depositGuarantee` only on a 33, 34, 56 or 61 | Formato DTE 2.5 field 120 | `INVALID_OPTION` (`items[i].exemptIndicator`, `totals.depositGuarantee`) |
+| A dispatch guide (52) states its transfer | `IndTraslado`, Formato DTE 2.5 field 7 | `MISSING_FIELD` (`options.transferType`) |
+| Net, exempt, VAT, deposit guarantee and total that are whole numbers, and not negative outside a 43 | `MntNeto`, `MntExe`, `IVA`, `GrntDep`, `MntTotal` | `INVALID_AMOUNT` |
 | An invoice (33) declares its VAT | validation 55 | `MISSING_FIELD` (`totals.vatAmount`) |
 | An exempt invoice (34) has an exempt amount above zero, and no net amount or VAT | validation 57 | `MISSING_FIELD` or `INVALID_AMOUNT` |
-| The total adds up: net + exempt + VAT, less the VAT withheld and the commissions | Formato DTE 2.5 field 124 | `TOTAL_MISMATCH`, with `expected` and `actual` |
+| The total adds up: net + exempt + VAT + the deposit guarantee, less the VAT withheld and the commissions | Formato DTE 2.5 field 124 | `TOTAL_MISMATCH`, with `expected` and `actual` |
 | The period amount is the total plus the non-billable amount | Formato DTE 2.5 field 126 | `TOTAL_MISMATCH` |
 | On an export document, a line amount, an exempt amount and a total from zero up with four decimals at most, and a total that is the exempt amount, or zero without payment | `MontoItem`, `MntExe`, `MntTotal` of `Exportaciones`, Formato DTE 2.5 field 124 | `INVALID_AMOUNT`, `TOTAL_MISMATCH` |
 
@@ -418,9 +425,10 @@ Every field is optional, as the SII's schema declares them: Formato DTE 2.5 mark
 arrival mandatory on a guide, but the resolution makes the departure time optional and lets what is unknown when
 issuing be completed by a later guide. Before stamping, `createDocument` holds both plates to 8 characters, the dates to
 real days from 2003-04-01 to 2050-12-31 (`INVALID_DATE`) and the time to `HH:MM:SS` or `HH:MM` (`INVALID_TIME`).
-`transferType` takes 1 to 9, the values the schema admits: the three types the resolution adds (a transfer of more than
-one day, as a sale or not, and an outsourced transfer) wait until the schema admits them, and `createDocument` refuses
-any other value with `INVALID_OPTION`. The [printed sample](#printed-samples-node) prints the transport area with
+`transferType` (`IndTraslado`) is required on a guide, as Formato DTE 2.5 marks it (field 7), and a guide without it
+is refused with `MISSING_FIELD`. It takes 1 to 9, the values the schema admits: the three types the resolution adds (a
+transfer of more than one day, as a sale or not, and an outsourced transfer) wait until the schema admits them, and
+`createDocument` refuses any other value with `INVALID_OPTION`. The [printed sample](#printed-samples-node) prints the transport area with
 whatever of these fields the document carries.
 
 ### Settlement invoices

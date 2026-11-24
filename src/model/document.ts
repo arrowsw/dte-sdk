@@ -271,11 +271,13 @@ export type Totals = {
   readonly thirdPartyVatAmount?: number
   /** EN: Withholdings; refused on a receipt. ES: `ImptoReten` — Retenciones; se rechazan en una boleta. */
   readonly withholdings?: readonly Withholding[]
+  /** EN: Deposit guarantee for containers or packaging: the sum of the lines with `IndExe` 3 (Formato DTE 2.5, field 120), added to the total; only on a 33, 34, 56 or 61, the types the format gives it to, and refused on any other. ES: `GrntDep` — Garantía por depósito de envases o embalajes: la suma de las líneas con `IndExe` 3 (Formato DTE 2.5, campo 120), que se suma al total; solo en un 33, 34, 56 o 61, los tipos a los que la da el formato, y se rechaza en cualquier otro. */
+  readonly depositGuarantee?: number
   /** EN: Totals of the commission and other charge lines; refused on a receipt. ES: `Comisiones` — Totales de las líneas de comisiones y otros cargos; se rechazan en una boleta. */
   readonly commissions?: CommissionTotals
-  /** EN: Document total: net + VAT + exempt (VAT excluded when withheld), less the commissions and other charges; zero or negative only on a settlement invoice (43), and on an export document the exempt amount, or zero without payment. `createDocument` refuses one that does not add up, unless the totals carry a tax code other than 15. ES: `MntTotal` — Monto total: neto + IVA + exento (sin IVA si está retenido), menos las comisiones y otros cargos; cero o negativo solo en una liquidación factura (43), y en un documento de exportación el monto exento, o cero sin pago. `createDocument` rechaza uno que no cuadra, salvo que los totales traigan un código de impuesto distinto del 15. */
+  /** EN: Document total: net + VAT + exempt (VAT excluded when withheld) + the deposit guarantee, less the commissions and other charges (Formato DTE 2.5, field 124); zero or negative only on a settlement invoice (43), and on an export document the exempt amount, or zero without payment. `createDocument` refuses one that does not add up, unless the totals carry a tax code other than 15. ES: `MntTotal` — Monto total: neto + IVA + exento (sin IVA si está retenido) + la garantía por depósito de envases, menos las comisiones y otros cargos (Formato DTE 2.5, campo 124); cero o negativo solo en una liquidación factura (43), y en un documento de exportación el monto exento, o cero sin pago. `createDocument` rechaza uno que no cuadra, salvo que los totales traigan un código de impuesto distinto del 15. */
   readonly totalAmount: number
-  /** EN: Non-billable amount (lines with `IndExe` 2-6); refused on a settlement invoice (43), whose root has no `MontoNF`. ES: `MontoNF` — Monto no facturable (líneas con `IndExe` 2 a 6); se rechaza en una liquidación factura (43), cuya raíz no tiene `MontoNF`. */
+  /** EN: Non-billable amount: the lines with `IndExe` 2 less the lines with `IndExe` 6 (Formato DTE 2.5, field 125), so it may be negative; refused on a settlement invoice (43), whose root has no `MontoNF`. ES: `MontoNF` — Monto no facturable: las líneas con `IndExe` 2 menos las líneas con `IndExe` 6 (Formato DTE 2.5, campo 125), así que puede ser negativo; se rechaza en una liquidación factura (43), cuya raíz no tiene `MontoNF`. */
   readonly nonBillableAmount?: number
   /** EN: Period amount, written as given: the SII defines it as the total plus the non-billable amount, and `createDocument` refuses any other; on a receipt its tag is `TotalPeriodo`. ES: `MontoPeriodo` (`TotalPeriodo` en boletas) — Monto del período, escrito tal como viene: el SII lo define como el monto total más el monto no facturable, y `createDocument` rechaza cualquier otro; en una boleta su etiqueta es `TotalPeriodo`. */
   readonly periodAmount?: number
@@ -608,7 +610,7 @@ export type HeaderOptions = {
   readonly noDebitReduction?: 1
   /** EN: Dispatch type. ES: `TipoDespacho` — Tipo de despacho (1-3). */
   readonly dispatchType?: DispatchType
-  /** EN: Transfer reason, 1 to 9 as the schema admits; `createDocument` refuses any other. ES: `IndTraslado` — Tipo de traslado, 1 a 9 como admite el esquema; `createDocument` rechaza cualquier otro. */
+  /** EN: Transfer reason, 1 to 9 as the schema admits; required on a dispatch guide (52), as Formato DTE 2.5 marks it (field 7), and `createDocument` refuses a guide without it (`MISSING_FIELD`) and any other value (`INVALID_OPTION`). ES: `IndTraslado` — Tipo de traslado, 1 a 9 como admite el esquema; obligatorio en una guía de despacho (52), como lo marca el Formato DTE 2.5 (campo 7), y `createDocument` rechaza una guía sin él (`MISSING_FIELD`) y cualquier otro valor (`INVALID_OPTION`). */
   readonly transferType?: TransferType
   /** EN: Print format: `N` normal, `T` ticket. ES: `TpoImpresion` — Formato de impresión: `N` normal, `T` ticket. */
   readonly printFormat?: 'N' | 'T'

@@ -135,14 +135,88 @@ describe('calculateTotals', () => {
     expect(calculateTotals([line(500, 1)], { type: 33 })).toEqual({ exemptAmount: 500, totalAmount: 500 })
   })
 
-  test('non-billable lines go to nonBillableAmount and stay out of the total', () => {
-    expect(calculateTotals([line(1000), line(300, 2), line(-50, 6)], { type: 33 })).toEqual({
+  // Formato DTE 2.5, field 125: `MontoNF` is the lines with `IndExe` 2 less the lines with `IndExe` 6, and may be
+  // negative.
+  test('non-billable lines go to nonBillableAmount, less the IndExe 6 ones, and stay out of the total', () => {
+    expect(calculateTotals([line(1000), line(1000, 2), line(400, 6)], { type: 33 })).toEqual({
       netAmount: 1000,
       vatRate: 19,
       vatAmount: 190,
       totalAmount: 1190,
-      nonBillableAmount: 250,
+      nonBillableAmount: 600,
     })
+  })
+
+  test('the non-billable amount is negative when the IndExe 6 lines are larger', () => {
+    expect(calculateTotals([line(1000), line(300, 2), line(500, 6)], { type: 33 })).toEqual({
+      netAmount: 1000,
+      vatRate: 19,
+      vatAmount: 190,
+      totalAmount: 1190,
+      nonBillableAmount: -200,
+    })
+    expect(calculateTotals([line(700, 6)], { type: 39 })).toEqual({ totalAmount: 0, nonBillableAmount: -700 })
+  })
+
+  test('IndExe 2 and 6 lines that cancel out leave no non-billable amount', () => {
+    expect(calculateTotals([line(1000), line(400, 2), line(400, 6)], { type: 33 })).toEqual({
+      netAmount: 1000,
+      vatRate: 19,
+      vatAmount: 190,
+      totalAmount: 1190,
+    })
+  })
+
+  test('lines that are not a sale (IndExe 4) or are to be deducted (IndExe 5) are in no total', () => {
+    expect(calculateTotals([line(1000), line(500, 4), line(200, 5)], { type: 52 })).toEqual({
+      netAmount: 1000,
+      vatRate: 19,
+      vatAmount: 190,
+      totalAmount: 1190,
+    })
+  })
+
+  // Formato DTE 2.5, fields 120 and 124: `GrntDep` is the sum of the lines with `IndExe` 3, and `MntTotal` adds it.
+  test('deposit guarantee lines go to depositGuarantee and into the total, keys in schema order', () => {
+    const totals = calculateTotals([line(1000), line(300, 3), line(200, 3)], { type: 33 })
+    expect(Object.keys(totals)).toEqual(['netAmount', 'vatRate', 'vatAmount', 'depositGuarantee', 'totalAmount'])
+    expect(totals).toEqual({ netAmount: 1000, vatRate: 19, vatAmount: 190, depositGuarantee: 500, totalAmount: 1690 })
+  })
+
+  test.each([34, 56, 61] as const)('a %i reports its deposit guarantee too', (type) => {
+    expect(calculateTotals([line(1000, 1), line(300, 3)], { type })).toEqual({
+      exemptAmount: 1000,
+      depositGuarantee: 300,
+      totalAmount: 1300,
+    })
+  })
+
+  test('a document of deposit guarantee lines alone totals them', () => {
+    expect(calculateTotals([line(300, 3)], { type: 33 })).toEqual({ depositGuarantee: 300, totalAmount: 300 })
+  })
+
+  test('the deposit guarantee comes before the commissions and is added on a withheld VAT', () => {
+    const totals = calculateTotals([line(1000), line(300, 3)], {
+      type: 61,
+      withholdVat: true,
+      commissions: [{ netValue: 100 }],
+    })
+    expect(Object.keys(totals)).toEqual([
+      'netAmount',
+      'vatRate',
+      'vatAmount',
+      'withholdings',
+      'depositGuarantee',
+      'commissions',
+      'totalAmount',
+    ])
+    expect(totals.totalAmount).toBe(1000 + 300 - 100 - 19)
+  })
+
+  // The format gives `GrntDep` to no dispatch guide, purchase invoice or settlement invoice (field 120, code 0), and
+  // `createDocument` refuses an `IndExe` 3 line on them.
+  test.each([46, 52] as const)('a %i has no deposit guarantee to total', (type) => {
+    expect(calculateTotals([line(300, 3)], { type })).toEqual({ vatRate: 19, totalAmount: 0 })
   })
 
   test('purchase invoice withholds the whole VAT', () => {

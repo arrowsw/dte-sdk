@@ -47,6 +47,8 @@ const NOTE_TYPES: readonly DocumentType[] = [56, 61, 111, 112]
 const RECEIVER_REQUIRED_TYPES: readonly DocumentType[] = [33, 34, 43, 46, 52, 56, 61, 110, 111, 112]
 const EXPORT_TYPES: readonly DocumentType[] = [110, 111, 112]
 const TRANSFERABLE_TYPES: readonly DocumentType[] = [33, 34, 43, 46, 52]
+// Formato DTE 2.5, field 120 (`GrntDep`): conditional on these, code 0 on every other type.
+const DEPOSIT_GUARANTEE_TYPES: readonly DocumentType[] = [33, 34, 56, 61]
 
 type NameVariants = { readonly long: string; readonly short: string; readonly printed: string }
 
@@ -131,6 +133,14 @@ export const requiresReceiver = (type: DocumentType): boolean => RECEIVER_REQUIR
  * ES: True cuando el impreso lleva copia cedible y recuadro de acuse de recibo Ley 19.983 (33, 34, 43, 46, 52).
  */
 export const isTransferable = (type: DocumentType): boolean => TRANSFERABLE_TYPES.includes(type)
+
+/**
+ * EN: True for the types that report a deposit guarantee for containers (33, 34, 56, 61): Formato DTE 2.5 gives
+ * `GrntDep` (field 120) to these alone, so only on them is a line with `IndExe` 3 totalled. Internal.
+ * ES: True para los tipos que informan una garantía por depósito de envases (33, 34, 56, 61): el Formato DTE 2.5 da
+ * `GrntDep` (campo 120) solo a ellos, así que solo en ellos se totaliza una línea con `IndExe` 3. Interno.
+ */
+export const carriesDepositGuarantee = (type: DocumentType): boolean => DEPOSIT_GUARANTEE_TYPES.includes(type)
 
 /**
  * EN: Official Spanish name of a document type: `long` (default), `short` (uppercase, no accents) or `printed` (uppercase per the SII printed-samples manual).

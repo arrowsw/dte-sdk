@@ -44,6 +44,8 @@ const issue = (type: 33 | 56 | 61 | 52, folio: number) =>
         type === 33 || type === 52
           ? []
           : [{ documentType: 33, folio: 1, date: '2026-11-01', code: 1, reason: 'Anula' }],
+      // Formato DTE 2.5, field 7: a dispatch guide states its transfer.
+      options: type === 52 ? { transferType: 1 } : undefined,
     },
     caf: type === 33 ? caf33 : cafFor(type),
     certificate,

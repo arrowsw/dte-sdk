@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The non-billable amount takes off the lines with `IndExe` 6.** Formato DTE 2.5 defines `MontoNF` (field 125) as
+  the lines with `IndExe` 2 less the lines with `IndExe` 6, and lets it be negative. `calculateTotals` added the
+  lines with `IndExe` 6, and those with 3, 4 and 5, to the lines with 2: on a 33, a line of 1 000 with `IndExe` 2 and
+  one of 400 with `IndExe` 6 gave `nonBillableAmount` 1 400, where the format gives 600. The lines with `IndExe` 6
+  now come off it, so it is negative when they are larger, as `MontoNF`, a `ValorType`, admits in `DTE_v10.xsd` and
+  `EnvioBOLETA_v11.xsd`. A line that is not a sale (`IndExe` 4) or is to be deducted (5), which `createDocument`
+  writes at zero, is in no total. The period amount that `createDocument` checks (field 126) is the total plus this
+  amount, as before.
+  - **What to change:** nothing in the call. A document or a receipt with lines of `IndExe` 6 now reports a smaller
+    `nonBillableAmount`, which may be negative, so code that reads it as an amount from zero up should take a negative
+    one. Totals given by hand are written as they come.
+- **The deposit guarantee for containers is reported in `GrntDep` and added to the total.** A line with `IndExe` 3 is
+  the guarantee for the deposit of containers or packaging. Formato DTE 2.5 reports their sum in `GrntDep` (field 120)
+  and adds it to `MntTotal` (field 124), and `DTE_v10.xsd` declares `GrntDep` between `CredEC` and `Comisiones`.
+  `calculateTotals` put those lines in `MontoNF` and left them out of the total, so a 33 with a sale of 1 000 and a
+  guarantee of 300 wrote `MntTotal` 1 190 and `MontoNF` 300, where the format gives `GrntDep` 300 and `MntTotal` 1 490.
+  `Totals` gains `depositGuarantee` (`GrntDep`), which `calculateTotals` works out, the codec writes and reads, the
+  check of the total adds and `bookEntryFromDocument` carries to the purchase and sales book as `containerDeposit`
+  (`DepEnvase`), whose total already added it. The format gives `GrntDep` to a 33, 34, 56 and 61 alone (code 0, "no
+  debe ir", on every other type), so on a 46, 52, 43, receipt or export document `createDocument` refuses a line with
+  `IndExe` 3 (`INVALID_OPTION`, `items[i].exemptIndicator`; a receipt already refused it) and a given
+  `depositGuarantee` (`INVALID_OPTION`, `totals.depositGuarantee`), and `calculateTotals` totals it there nowhere.
+  - **What to change:** nothing for a document without `IndExe` 3 lines. On a 33, 34, 56 or 61 with them, the total now
+    includes the guarantee, the XML carries `GrntDep` and no longer carries the guarantee in `MontoNF`; totals given
+    by hand need `depositGuarantee` and a `totalAmount` that includes it, or `createDocument` refuses them with
+    `TOTAL_MISMATCH`. On a 46 or 52, a line with `IndExe` 3 is now refused: drop the indicator or issue the guarantee
+    on the invoice.
+- **A dispatch guide without its transfer type is refused.** Formato DTE 2.5 marks `IndTraslado` (field 7) mandatory
+  on a guide, and `createDocument` issued a 52 without `options.transferType` and read it as a sale. It now refuses
+  one with `MISSING_FIELD` and `options.transferType` in `details.field`. The schema still declares the element
+  optional, since `IdDoc` serves every type, and the certification runner always gives one.
+  - **What to change:** pass `options.transferType` on every 52: `TRANSFER_TYPES.sale` (1) for a guide that is a
+    sale, or the reason of the transfer (2 to 9) for one that is not.
+
 ## [0.15.0] - 2026-11-23
 
 ### Added

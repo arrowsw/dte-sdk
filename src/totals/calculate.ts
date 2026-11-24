@@ -1,5 +1,5 @@
 import { VAT_RATE, WITHHOLDING_TAX_CODES } from '../catalogs/codes'
-import { isExport, isReceipt, type DocumentType } from '../catalogs/document-types'
+import { carriesDepositGuarantee, isExport, isReceipt, type DocumentType } from '../catalogs/document-types'
 import type { CommissionLineInput, GlobalAdjustment, LineItem, Totals } from '../model/document'
 import { divide, held, pow10, unitsOf, ZERO } from './exact'
 import { calculateExportTotals } from './export'
@@ -98,16 +98,34 @@ export type TotalsOptions = {
   readonly withoutPayment?: boolean
 }
 
-type Bases = { readonly affected: number; readonly exempt: number; readonly nonBillable: number }
+type Bases = {
+  readonly affected: number
+  readonly exempt: number
+  readonly nonBillable: number
+  readonly guarantee: number
+}
 
+// Formato DTE 2.5: `MontoNF` is the lines with `IndExe` 2 less the lines with `IndExe` 6 (field 125), and `GrntDep` the
+// lines with `IndExe` 3 (field 120). A line that is not a sale (4) or is to be deducted (5) is in no total.
 const sumBases = (items: readonly Pick<LineItem, 'amount' | 'exemptIndicator'>[]): Bases =>
   items.reduce<Bases>(
     (acc, item) => {
-      if (item.exemptIndicator === undefined) return { ...acc, affected: acc.affected + item.amount }
-      if (item.exemptIndicator === 1) return { ...acc, exempt: acc.exempt + item.amount }
-      return { ...acc, nonBillable: acc.nonBillable + item.amount }
+      switch (item.exemptIndicator) {
+        case undefined:
+          return { ...acc, affected: acc.affected + item.amount }
+        case 1:
+          return { ...acc, exempt: acc.exempt + item.amount }
+        case 2:
+          return { ...acc, nonBillable: acc.nonBillable + item.amount }
+        case 3:
+          return { ...acc, guarantee: acc.guarantee + item.amount }
+        case 6:
+          return { ...acc, nonBillable: acc.nonBillable - item.amount }
+        default:
+          return acc
+      }
     },
-    { affected: 0, exempt: 0, nonBillable: 0 },
+    { affected: 0, exempt: 0, nonBillable: 0, guarantee: 0 },
   )
 
 /**
@@ -162,9 +180,12 @@ const sumCommissions = (lines: NonNullable<TotalsOptions['commissions']>, vatRat
 }
 
 /**
- * EN: Computes `Totales` from detail lines: net, exempt, VAT (derived from the gross when `pricesIncludeVat`),
- * non-billable, withholding for purchase invoices, the summary of commissions and other charges, and the total, which
- * is net + exempt + VAT (left out when withheld) less those charges (Formato DTE 2.5, field 124). Each global
+ * EN: Computes `Totales` from detail lines: net, exempt, VAT (derived from the gross when `pricesIncludeVat`), the
+ * non-billable amount, which is the lines with `IndExe` 2 less the lines with `IndExe` 6 and may be negative (Formato
+ * DTE 2.5, field 125), the deposit guarantee for containers, the lines with `IndExe` 3 (field 120), withholding for
+ * purchase invoices, the summary of commissions and other charges, and the total, which is net + exempt + VAT (left out
+ * when withheld) + the deposit guarantee less those charges (field 124). A line with `IndExe` 4 or 5 is in no total,
+ * and the guarantee is totalled only on a 33, 34, 56 or 61, the types the format gives `GrntDep` to. Each global
  * adjustment is applied to its base in order, as `createDocument` writes it: its value is taken with the two decimals
  * `ValorDR` holds and the amount it applies to as a whole peso, each rounded half away from zero over its decimal
  * digits, and its share, its percent of that amount or its value, is rounded half away from zero to a whole peso. So
@@ -174,9 +195,13 @@ const sumCommissions = (lines: NonNullable<TotalsOptions['commissions']>, vatRat
  * exempt amount, the VAT and the total keep their sign, so the total may be zero or negative, and non-billable lines
  * are not totalled, because `Liquidacion` declares no `MontoNF`. An export document (110, 111, 112) has the totals of
  * `calculateExportTotals`: its exempt amount and its total, in its currency with four decimals.
- * ES: Calcula `Totales` desde las líneas: neto, exento, IVA (derivado del bruto con `pricesIncludeVat`), no facturable,
- * retención en facturas de compra, el resumen de comisiones y otros cargos, y el total, que es neto + exento + IVA (sin
- * el IVA si está retenido) menos esos cargos (Formato DTE 2.5, campo 124). Cada ajuste global se aplica a su base en
+ * ES: Calcula `Totales` desde las líneas: neto, exento, IVA (derivado del bruto con `pricesIncludeVat`), el monto no
+ * facturable, que son las líneas con `IndExe` 2 menos las líneas con `IndExe` 6 y puede ser negativo (Formato DTE 2.5,
+ * campo 125), la garantía por depósito de envases, las líneas con `IndExe` 3 (campo 120), la retención en facturas de
+ * compra, el resumen de comisiones y otros cargos, y el total, que es neto + exento + IVA (sin el IVA si está retenido)
+ * + la garantía por depósito de envases menos esos cargos (campo 124). Una línea con `IndExe` 4 o 5 no entra en ningún
+ * total, y la garantía se totaliza solo en un 33, 34, 56 o 61, los tipos a los que el formato da `GrntDep`. Cada
+ * ajuste global se aplica a su base en
  * orden, como lo escribe `createDocument`: su valor se toma con los dos decimales que admite `ValorDR` y el monto al que
  * se aplica como un peso entero, cada uno redondeado la mitad lejos de cero sobre sus dígitos decimales, y su parte, su
  * porcentaje de ese monto o su valor, se redondea la mitad lejos de cero a un peso entero. Así el 9,2 % de 375 es 35,
@@ -204,6 +229,7 @@ export const calculateTotals = (
   const bases = applyAdjustments(sumBases(items), options.globalAdjustments ?? [])
   const { affected, exempt } = bases
   const nonBillable = settlement ? 0 : bases.nonBillable
+  const guarantee = carriesDepositGuarantee(options.type) ? bases.guarantee : 0
   const charges = sumCommissions(options.commissions ?? [], vatRate)
   const chargesTotal = charges.netValue + charges.exemptValue + charges.vatValue
   const hasCharges = charges.netValue !== 0 || charges.exemptValue !== 0 || charges.vatValue !== 0
@@ -212,13 +238,13 @@ export const calculateTotals = (
   const shown = (amount: number): boolean => (settlement ? amount !== 0 : amount > 0)
   const round = settlement ? roundSigned : Math.round
 
-  if (!shown(affected) && !shown(exempt) && nonBillable === 0 && !hasCharges) {
+  if (!shown(affected) && !shown(exempt) && nonBillable === 0 && guarantee === 0 && !hasCharges) {
     return receipt ? { totalAmount: 0 } : { vatRate, totalAmount: 0 }
   }
 
   const net = options.pricesIncludeVat ? round(affected / (1 + vatRate / 100)) : affected
   const vat = options.pricesIncludeVat ? affected - net : round((net * vatRate) / 100)
-  const total = (withholdVat ? net + exempt : net + vat + exempt) - chargesTotal
+  const total = (withholdVat ? net + exempt : net + vat + exempt) + guarantee - chargesTotal
 
   return {
     ...(shown(net) ? { netAmount: net } : {}),
@@ -228,6 +254,7 @@ export const calculateTotals = (
     ...(withholdVat && vat > 0
       ? { withholdings: [{ taxCode: WITHHOLDING_TAX_CODES.totalVatWithholding, rate: vatRate, amount: vat }] }
       : {}),
+    ...(guarantee > 0 ? { depositGuarantee: guarantee } : {}),
     ...(hasCharges
       ? {
           commissions: {

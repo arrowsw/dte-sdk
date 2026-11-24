@@ -203,6 +203,8 @@ describe('codec round-trip', () => {
             receiver: type === 39 ? undefined : receiver,
             items: type === 33 ? [{ ...items[0], exempt: false }, ...items.slice(1)] : items,
             pricesIncludeVat: gross,
+            // Formato DTE 2.5, field 7: a dispatch guide states its transfer.
+            options: type === 52 ? { transferType: 1 } : undefined,
           })
           expect(fromSiiDocument(toSiiDocument(doc))).toEqual(doc)
         },

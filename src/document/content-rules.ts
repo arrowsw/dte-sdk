@@ -9,10 +9,11 @@ import type { DocumentWarning, Totals } from '../model/document'
 
 const sum = (values: readonly number[]): number => values.reduce((total, value) => total + value, 0)
 
-const AMOUNTS = ['netAmount', 'exemptAmount', 'vatAmount', 'totalAmount'] as const
+const AMOUNTS = ['netAmount', 'exemptAmount', 'vatAmount', 'depositGuarantee', 'totalAmount'] as const
 
-// `MntNeto`, `MntExe`, `IVA` and `MntTotal` are a `MontoType`, a whole number from zero up, in `Documento` and in a
-// receipt, and a `ValorType`, a whole number of either sign, only in `Liquidacion`, the root of a settlement invoice.
+// `MntNeto`, `MntExe`, `IVA`, `GrntDep` and `MntTotal` are a `MontoType`, a whole number from zero up, in `Documento`
+// and in a receipt, and a `ValorType`, a whole number of either sign, only in `Liquidacion`, the root of a settlement
+// invoice, which has no `GrntDep`.
 // Totals worked out from a global discount larger than the lines it applies to come out with a negative total.
 const assertAmounts = (type: DocumentType, totals: Totals): void => {
   for (const field of AMOUNTS) {
@@ -39,14 +40,15 @@ const assertExemptInvoice = (totals: Totals): void => {
 }
 
 // Formato DTE 2.5, field 124: the total is the net amount, the exempt amount and the VAT, plus the additional and
-// specific taxes, less the VAT withheld and the commissions and other charges with their VAT. Code 15, the whole VAT
-// withheld, is the one tax code whose side of the sum dte-sdk knows; with any other in the totals there is no total to
-// compare with.
+// specific taxes and the deposit guarantee for containers, less the VAT withheld and the commissions and other charges
+// with their VAT. Code 15, the whole VAT withheld, is the one tax code whose side of the sum dte-sdk knows; with any
+// other in the totals there is no total to compare with.
 const expectedTotal = (totals: Totals): number | undefined => {
   const withholdings = totals.withholdings ?? []
   if (withholdings.some(({ taxCode }) => taxCode !== WITHHOLDING_TAX_CODES.totalVatWithholding)) return undefined
   const { netValue = 0, exemptValue = 0, vatValue = 0 } = totals.commissions ?? {}
-  const charged = (totals.netAmount ?? 0) + (totals.exemptAmount ?? 0) + (totals.vatAmount ?? 0)
+  const charged =
+    (totals.netAmount ?? 0) + (totals.exemptAmount ?? 0) + (totals.vatAmount ?? 0) + (totals.depositGuarantee ?? 0)
   return charged - sum(withholdings.map(({ amount }) => amount)) - netValue - exemptValue - vatValue
 }
 
@@ -54,15 +56,16 @@ const mismatch = (field: string, expected: number, actual: number): DteError =>
   new DteError('TOTAL_MISMATCH', { field, expected, actual })
 
 /**
- * EN: Refuses totals the SII rejects, in this order: a net amount, an exempt amount, a VAT or a total that is not a
- * whole number, or is negative on any type but a settlement invoice (43); an invoice (33) without its VAT (validation
- * 55); an exempt invoice (34) without an exempt amount above zero, or with a net amount or a VAT other than zero
- * (validation 57); a total that is not the sum Formato DTE 2.5 defines (field 124), checked unless the totals carry a
- * tax code other than 15; and a period amount that is not the total plus the non-billable amount (field 126).
- * ES: Rechaza los totales que el SII rechaza, en este orden: un monto neto, un monto exento, un IVA o un monto total que
- * no es entero, o que es negativo en cualquier tipo salvo la liquidación factura (43); una factura (33) sin IVA
- * (validación 55); una factura exenta (34) sin monto exento mayor que cero, o con monto neto o IVA distintos de cero
- * (validación 57); un monto total que no es la suma que define el Formato DTE 2.5 (campo 124), revisado salvo que los
+ * EN: Refuses totals the SII rejects, in this order: a net amount, an exempt amount, a VAT, a deposit guarantee or a
+ * total that is not a whole number, or is negative on any type but a settlement invoice (43); an invoice (33) without
+ * its VAT (validation 55); an exempt invoice (34) without an exempt amount above zero, or with a net amount or a VAT
+ * other than zero (validation 57); a total that is not the sum Formato DTE 2.5 defines (field 124), checked unless the
+ * totals carry a tax code other than 15; and a period amount that is not the total plus the non-billable amount (field
+ * 126).
+ * ES: Rechaza los totales que el SII rechaza, en este orden: un monto neto, un monto exento, un IVA, una garantía por
+ * depósito de envases o un monto total que no es entero, o que es negativo en cualquier tipo salvo la liquidación
+ * factura (43); una factura (33) sin IVA (validación 55); una factura exenta (34) sin monto exento mayor que cero, o
+ * con monto neto o IVA distintos de cero (validación 57); un monto total que no es la suma que define el Formato DTE 2.5 (campo 124), revisado salvo que los
  * totales traigan un código de impuesto distinto del 15; y un monto del período que no es el total más el monto no
  * facturable (campo 126).
  * @throws {DteError} EN: `INVALID_AMOUNT` and `MISSING_FIELD`, `TOTAL_MISMATCH` with `expected` and `actual`, and the field in `details.field`. ES: `INVALID_AMOUNT` y `MISSING_FIELD`, `TOTAL_MISMATCH` con `expected` y `actual`, y el campo en `details.field`.
