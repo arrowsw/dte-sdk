@@ -22,7 +22,7 @@ export type BookEntryFromDocumentOptions = {
   readonly bookRut: string
   /** EN: Book side. ES: Lado del libro. */
   readonly operation: BookOperation
-  /** EN: `negative` negates exempt, net, VAT and total of a credit note (61). `positive` by default, as the format has it. ES: `negative` niega exento, neto, IVA y total de una nota de crédito (61). `positive` por defecto, como dice el formato. */
+  /** EN: `negative` negates exempt, net, VAT and total of a credit note (61), and refuses one with a deposit guarantee (`GrntDep`), since the book's `DepEnvase` holds no amount below zero. `positive` by default, as the format has it. ES: `negative` niega exento, neto, IVA y total de una nota de crédito (61), y rechaza una con garantía por depósito de envases (`GrntDep`), porque el `DepEnvase` del libro no admite montos bajo cero. `positive` por defecto, como dice el formato. */
   readonly creditNoteSign?: 'positive' | 'negative'
 }
 
@@ -32,23 +32,27 @@ export type BookEntryFromDocumentOptions = {
  * The VAT a purchase invoice withholds goes where each side carries it. A sale line has two fields for it and takes none
  * in `otherTaxes`: `totalVatWithheld` when the whole VAT was withheld (code 15, or a rate that is the rate of the tax)
  * and `partialVatWithheld` when less was. A purchase line takes it in `otherTaxes`, under its code and with its rate.
- * The other taxes of the document travel in `otherTaxes` on both sides. The name is truncated to 50 because the document
- * admits 100 and the book field is optional on electronic documents. `Emisor`, `IndFactCompra` and the voided-document
- * reference are not inferred: spread them into the result when the case needs them.
+ * The other taxes of the document travel in `otherTaxes` on both sides, and its deposit guarantee for containers
+ * (`GrntDep`), which its total includes, in `containerDeposit` (`DepEnvase`). The name is truncated to 50 because the
+ * document admits 100 and the book field is optional on electronic documents. `Emisor`, `IndFactCompra` and the
+ * voided-document reference are not inferred: spread them into the result when the case needs them.
  * ES: Deriva una línea del libro desde un documento de la fase 1. La contraparte es el receptor si el dueño del libro
  * emitió el documento y el emisor en caso contrario, lo que cubre ventas, compras recibidas y facturas de compra (46) en
  * cualquier lado. El IVA que retiene una factura de compra va donde lo lleva cada lado. Una línea de venta tiene dos
  * campos para él y no lo lleva en `otherTaxes`: `totalVatWithheld` si se retuvo todo el IVA (código 15, o una tasa igual
  * a la del impuesto) y `partialVatWithheld` si se retuvo menos. Una línea de compra lo lleva en `otherTaxes`, bajo su
- * código y con su tasa. Los demás impuestos del documento viajan en `otherTaxes` en ambos lados. El nombre se trunca a
+ * código y con su tasa. Los demás impuestos del documento viajan en `otherTaxes` en ambos lados, y su garantía por
+ * depósito de envases (`GrntDep`), que su total incluye, en `containerDeposit` (`DepEnvase`). El nombre se trunca a
  * 50 porque el documento admite 100 y el campo del libro es opcional en documentos electrónicos. `Emisor`,
  * `IndFactCompra` y la referencia al documento anulado no se infieren: se agregan al resultado si el caso los necesita.
- * @throws {DteError} EN: `INVALID_RUT`. ES: `INVALID_RUT`.
+ * @throws {DteError} EN: `INVALID_RUT`; `INVALID_OPTION` with `creditNoteSign` in `details.field` for a `negative` sign on a credit note with a deposit guarantee, which `DepEnvase` (`MontoType`) cannot carry negated. ES: `INVALID_RUT`; `INVALID_OPTION` con `creditNoteSign` en `details.field` ante un signo `negative` en una nota de crédito con garantía por depósito de envases, que `DepEnvase` (`MontoType`) no admite negada.
  */
 export const bookEntryFromDocument = (document: Document, options: BookEntryFromDocumentOptions): BookEntryInput => {
   const { type, folio, issueDate, issuer, receiver, totals } = document.header
   const counterparty = issuer.rut === toSiiRut(options.bookRut, 'bookRut') ? receiver : issuer
   const negate = options.creditNoteSign === 'negative' && type === CREDIT_NOTE_TYPE
+  // `DepEnvase` is a `MontoType` of `LibroCV_v10.xsd`, from zero up: a negated guarantee has no field to go in.
+  if (negate && totals.depositGuarantee) throw new DteError('INVALID_OPTION', { field: 'creditNoteSign' })
   const signed = (value: number): number => (negate ? 0 - value : value)
   // Zero amounts stay absent: the sale defaults put them back, and purchase books omit them.
   const amount = (value: number | undefined): number | undefined => (value ? signed(value) : undefined)
@@ -83,6 +87,7 @@ export const bookEntryFromDocument = (document: Document, options: BookEntryFrom
     totalVatWithheld: withheld(own.filter(whole)),
     partialVatWithheld: withheld(own.filter((item) => !whole(item))),
     settlement: totals.commissions && { issuerRut: issuer.rut, ...totals.commissions },
+    containerDeposit: amount(totals.depositGuarantee),
     totalAmount: signed(totals.totalAmount),
     nonBillableAmount: totals.nonBillableAmount,
     periodAmount: totals.periodAmount,

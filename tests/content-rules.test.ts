@@ -136,6 +136,8 @@ describe('the amounts the types of the totals admit', () => {
     ['netAmount', -1],
     ['exemptAmount', 10.5],
     ['vatAmount', -190],
+    ['depositGuarantee', -300],
+    ['depositGuarantee', 0.5],
     ['totalAmount', -1190],
   ] as const)('a %s of %p is refused on an invoice', (field, amount) => {
     expect(refusal(() => invoice({ totals: { ...totals, [field]: amount } }))).toEqual({
@@ -212,6 +214,15 @@ describe('the sums of the totals', () => {
     expect(invoice({ totals }).header.totals).toEqual(totals)
     expect(refusal(() => invoice({ totals: { ...totals, totalAmount: 1700 } }))).toEqual(
       mismatch('totals.totalAmount', 1690, 1700),
+    )
+  })
+
+  // Formato DTE 2.5, field 124: "Garantía por depósito de envases o embalajes" is one of the amounts added up.
+  test('the deposit guarantee is added to the total', () => {
+    const totals = { netAmount: 1000, vatRate: 19, vatAmount: 190, depositGuarantee: 300, totalAmount: 1490 }
+    expect(invoice({ totals }).header.totals).toEqual(totals)
+    expect(refusal(() => invoice({ totals: { ...totals, totalAmount: 1190 } }))).toEqual(
+      mismatch('totals.totalAmount', 1490, 1190),
     )
   })
 

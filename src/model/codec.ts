@@ -261,6 +261,8 @@ const toSiiTotales = (totals: Totals, receipt: boolean): SiiTotales =>
         IVAProp: totals.ownVatAmount,
         IVATerc: totals.thirdPartyVatAmount,
         ImptoReten: totals.withholdings?.map((w) => ({ TipoImp: w.taxCode, TasaImp: w.rate, MontoImp: w.amount })),
+        // A guarantee of zero is none, as `calculateTotals` leaves it out: no `GrntDep` is written at zero.
+        GrntDep: totals.depositGuarantee || undefined,
         Comisiones:
           totals.commissions === undefined
             ? undefined
@@ -592,6 +594,7 @@ const fromSiiTotales = (totales: SiiTotales): Totals =>
     ownVatAmount: totales.IVAProp,
     thirdPartyVatAmount: totales.IVATerc,
     withholdings: totales.ImptoReten?.map((r) => ({ taxCode: r.TipoImp, rate: r.TasaImp, amount: r.MontoImp })),
+    depositGuarantee: totales.GrntDep,
     commissions:
       totales.Comisiones === undefined
         ? undefined

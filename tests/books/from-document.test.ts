@@ -247,6 +247,60 @@ describe('bookEntryFromDocument', () => {
     expect(createPurchaseSalesBook({ cover, entries: received }).totalMismatches).toEqual([])
   })
 
+  // The total of a document with a deposit guarantee includes it (Formato DTE 2.5, field 124), and so does the total
+  // of a book line, through `DepEnvase`.
+  test('the deposit guarantee travels as the container deposit, and the book adds up', () => {
+    const document = createDocument({
+      ...base,
+      items: [...base.items, { name: 'Garantía de envases', quantity: 24, unitPrice: 150, exemptIndicator: 3 }],
+    })
+    expect(document.header.totals).toMatchObject({ depositGuarantee: 3600, totalAmount: 122600 })
+    const entry = bookEntryFromDocument(document, sale)
+    expect(entry).toMatchObject({ containerDeposit: 3600, totalAmount: 122600 })
+    expect(createPurchaseSalesBook({ cover: saleCover, entries: [entry] }).totalMismatches).toEqual([])
+    expect(bookEntryFromDocument(createDocument(base), sale)).not.toHaveProperty('containerDeposit')
+  })
+
+  // `DepEnvase` is a `MontoType` of `LibroCV_v10.xsd`, from zero up, so a credit note's guarantee cannot be negated.
+  test('a negative sign is refused on a credit note with a deposit guarantee, and a positive one adds up', () => {
+    const note = createDocument({
+      ...base,
+      type: 61,
+      items: [
+        { name: 'Cerveza retornable', quantity: 24, unitPrice: 900 },
+        { name: 'Garantía de envases', quantity: 24, unitPrice: 150, exemptIndicator: 3 },
+      ],
+      references: [{ documentType: 33, folio: '10', date: '2026-10-15', code: 3, reason: 'Devolución' }],
+    })
+    for (const side of [sale, purchase])
+      expect(() => bookEntryFromDocument(note, { ...side, creditNoteSign: 'negative' })).toThrow(
+        expect.objectContaining({ code: 'INVALID_OPTION', details: { field: 'creditNoteSign' } }),
+      )
+    const entry = bookEntryFromDocument(note, sale)
+    expect(entry).toMatchObject({ containerDeposit: 3600, totalAmount: 29304 })
+    expect(createPurchaseSalesBook({ cover: saleCover, entries: [entry] }).totalMismatches).toEqual([])
+    const received = bookEntryFromDocument(note, purchase)
+    const cover = { ...purchaseCover, issuerRut: RECEIVER_RUT }
+    expect(createPurchaseSalesBook({ cover, entries: [received] }).totalMismatches).toEqual([])
+  })
+
+  // A guarantee of zero is none, so it leaves nothing to negate.
+  test('a negative sign books a credit note whose given deposit guarantee is zero, on both sides', () => {
+    const note = createDocument({
+      ...base,
+      type: 61,
+      items: [{ name: 'Cerveza retornable', quantity: 24, unitPrice: 900 }],
+      references: [{ documentType: 33, folio: '10', date: '2026-10-15', code: 3, reason: 'Devolución' }],
+      totals: { netAmount: 21600, vatRate: 19, vatAmount: 4104, depositGuarantee: 0, totalAmount: 25704 },
+    })
+    expect(note.header.totals.depositGuarantee).toBe(0)
+    for (const side of [sale, purchase]) {
+      const entry = bookEntryFromDocument(note, { ...side, creditNoteSign: 'negative' })
+      expect(entry).toMatchObject({ netAmount: -21600, vatAmount: -4104, totalAmount: -25704 })
+      expect(entry).not.toHaveProperty('containerDeposit')
+    }
+  })
+
   test('rejects an invalid book RUT', () => {
     expectCodeOf(() => bookEntryFromDocument(createDocument(base), { ...sale, bookRut: '1-1' }), 'INVALID_RUT')
   })
@@ -273,8 +327,10 @@ describe('guideEntryFromDocument', () => {
     })
   })
 
+  // `createDocument` requires the transfer on a guide; a guide read from XML may come without it.
   test('the transfer defaults to a sale', () => {
-    const document = createDocument({ ...guide, options: {} })
+    const issued = createDocument(guide)
+    const document = { ...issued, header: { ...issued.header, options: {} } }
     expect(guideEntryFromDocument(document).transferType).toBe(1)
   })
 

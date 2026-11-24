@@ -147,9 +147,23 @@ const VARIANTS: Record<Exclude<DocumentType, 39 | 41>, Record<string, Variant>> 
       items: [{ name: 'Cajón', quantity: 10, unitPrice: 8000 }],
       transport: wholeTransport,
     },
+    'a deposit guarantee for containers, and non-billable lines that leave a negative MontoNF': {
+      items: [
+        { name: 'Cerveza retornable', quantity: 24, unitPrice: 900 },
+        { name: 'Garantía de envases', quantity: 24, unitPrice: 150, exemptIndicator: 3 },
+        { name: 'Cargo facturado antes', unitPrice: 300, exemptIndicator: 2 },
+        { name: 'Abono facturado antes', unitPrice: 500, exemptIndicator: 6 },
+      ],
+    },
   },
   34: {
     'exempt lines': { items: [{ name: 'Asesoría exenta', quantity: 2, unit: 'UN', unitPrice: 50000 }] },
+    'a deposit guarantee for containers': {
+      items: [
+        { name: 'Agua mineral', quantity: 12, unitPrice: 700 },
+        { name: 'Garantía de bidón', quantity: 2, unitPrice: 3000, exemptIndicator: 3 },
+      ],
+    },
     'a global discount and a reference': {
       items: [{ name: 'Asesoría exenta', unitPrice: 50000 }],
       globalAdjustments: [{ kind: 'discount', valueType: 'percent', value: 10 }],
@@ -245,6 +259,12 @@ const VARIANTS: Record<Exclude<DocumentType, 39 | 41>, Record<string, Variant>> 
       items: [{ name: 'Chatarra de fierro', quantity: 300, unitPrice: 1200, additionalTaxCodes: [15] }],
     },
     'without withholding': { items: [{ name: 'Chatarra de fierro', unitPrice: 1200 }], withholdVat: false },
+    'a line with a deposit guarantee for containers, which no total takes': {
+      items: [
+        { name: 'Chatarra de fierro', unitPrice: 1200 },
+        { name: 'Garantía de envases', quantity: 10, unitPrice: 150, exemptIndicator: 3 },
+      ],
+    },
     'the lines of a withholding agent, marked alone and with the bases they declare': {
       items: [
         { name: 'Chatarra de fierro', quantity: 300, unitPrice: 1200, withholdingAgent: {} },
@@ -283,6 +303,13 @@ const VARIANTS: Record<Exclude<DocumentType, 39 | 41>, Record<string, Variant>> 
       options: { transferType: 5 },
       transport: { licensePlate: 'XX1234', trailerLicensePlate: 'RR5678', departureDate: '2026-11-15' },
     },
+    'a sale with a line of deposit guarantee for containers, which no total takes': {
+      items: [
+        { name: 'Cerveza retornable', quantity: 24, unitPrice: 900 },
+        { name: 'Garantía de envases', quantity: 24, unitPrice: 150, exemptIndicator: 3 },
+      ],
+      options: { transferType: 1 },
+    },
   },
   56: {
     'a global surcharge, referencing the invoice': {
@@ -294,6 +321,15 @@ const VARIANTS: Record<Exclude<DocumentType, 39 | 41>, Record<string, Variant>> 
       items: [{ name: 'Chatarra de fierro', quantity: 10, unitPrice: 1000, additionalTaxCodes: [15] }],
       references: [purchaseReference],
       withholdVat: true,
+    },
+    // `GrntDep` comes before `Comisiones` in `Totales`.
+    'a deposit guarantee for containers and a commission': {
+      items: [
+        { name: 'Cerveza retornable', quantity: 24, unitPrice: 900 },
+        { name: 'Garantía de envases', quantity: 24, unitPrice: 150, exemptIndicator: 3 },
+      ],
+      commissions: [{ kind: 'commission', description: 'Comisión', netValue: 1000 }],
+      references: [{ ...invoiceReference, code: 3, reason: 'Corrige monto' }],
     },
   },
   61: {
@@ -537,6 +573,7 @@ describe('what the schema refuses in a settlement invoice', () => {
     ['IndMntNeto', '<IndMntNeto>2</IndMntNeto>', '</IdDoc>', 'before'],
     ['Transporte', '<Transporte><Patente>ABCD12</Patente></Transporte>', '<Totales>', 'before'],
     ['MontoNF', '<MontoNF>5</MontoNF>', '</MntTotal>', 'after'],
+    ['GrntDep', '<GrntDep>5</GrntDep>', '<MntTotal>', 'before'],
     ['DescuentoPct', '<DescuentoPct>10</DescuentoPct><DescuentoMonto>1000</DescuentoMonto>', '<MontoItem>', 'before'],
     ['RecargoPct', '<RecargoPct>10</RecargoPct><RecargoMonto>1000</RecargoMonto>', '<MontoItem>', 'before'],
     [

@@ -27,6 +27,11 @@ const items = [
   { name: 'Horas de consultoría', quantity: 3, unitPrice: 15000 },
 ]
 
+// Formato DTE 2.5, field 7: a dispatch guide states its transfer. The tests that issue one on the way to something else
+// issue a sale.
+const saleGuide = (type: DocumentInput['type']): DocumentInput['options'] =>
+  type === 52 ? { transferType: 1 } : undefined
+
 const expectError = (fn: () => unknown, code: string, details?: Record<string, unknown>) => {
   try {
     fn()
@@ -235,6 +240,7 @@ describe('createDocument', () => {
       issuer,
       receiver,
       items: [{ name: 'Pallet', quantity: 2, unit: 'UN', amount: 0, codes: [{ type: 'INT1', value: 'P-1' }] }],
+      options: { transferType: 5 },
     })
     expect(doc.items[0]).toEqual({
       lineNumber: 1,
@@ -390,6 +396,19 @@ describe('the transport fields of 2026', () => {
     },
   )
 
+  // Formato DTE 2.5, field 7: `IndTraslado` is required on a dispatch guide (code 1); `DTE_v10.xsd` makes it optional
+  // because its `IdDoc` serves every type.
+  test('a guide without a transfer type is refused', () => {
+    expectError(() => guide({ licensePlate: 'ABCD12' }, { transferType: undefined }), 'MISSING_FIELD', {
+      field: 'options.transferType',
+    })
+    expectError(
+      () => createDocument({ type: 52, folio: 1, issueDate: '2026-11-15', issuer, receiver, items }),
+      'MISSING_FIELD',
+      { field: 'options.transferType' },
+    )
+  })
+
   test('transfer types 1 and 9 are the bounds the schema admits', () => {
     expect(guide({ licensePlate: 'ABCD12' }, { transferType: 1 }).header.options.transferType).toBe(1)
     expect(guide({ licensePlate: 'ABCD12' }, { transferType: 9 }).header.options.transferType).toBe(9)
@@ -439,6 +458,168 @@ test('withholdVat withholds the whole VAT on a note that affects a purchase invo
     totalAmount: 11900,
   })
   expect(createDocument({ ...base, type: 46, withholdVat: false }).header.totals.totalAmount).toBe(11900)
+})
+
+// Formato DTE 2.5: `GrntDep` is the sum of the lines with `IndExe` 3 (field 120), `MntTotal` adds it (field 124), and
+// `MontoNF` is the lines with `IndExe` 2 less the lines with `IndExe` 6 (field 125).
+describe('the deposit guarantee and the non-billable amount', () => {
+  const document = (type: DocumentInput['type'], extra: Partial<DocumentInput>) =>
+    createDocument({ type, folio: 3, issueDate: '2026-11-15', issuer, receiver, items, ...extra })
+  const crate = { name: 'Garantía de cajón', quantity: 4, unitPrice: 2500, exemptIndicator: 3 } as const
+
+  test('an IndExe 3 line goes to GrntDep and into the total, and is written before MntTotal', () => {
+    const doc = document(33, { items: [...items, crate] })
+    expect(doc.header.totals).toEqual({
+      netAmount: 145000,
+      vatRate: 19,
+      vatAmount: 27550,
+      depositGuarantee: 10000,
+      totalAmount: 182550,
+    })
+    const totales = toSiiDocument(doc).Encabezado.Totales
+    expect(Object.keys(totales)).toEqual(['MntNeto', 'TasaIVA', 'IVA', 'GrntDep', 'MntTotal'])
+    expect(totales).toMatchObject({ GrntDep: 10000, MntTotal: 182550 })
+    expect(fromSiiDocument(toSiiDocument(doc)).header.totals).toEqual(doc.header.totals)
+  })
+
+  test.each([34, 56, 61] as const)('a %i takes it too', (type) => {
+    const references = [{ documentType: 33, folio: 1, date: '2026-11-01', code: 3 }] as const
+    const doc = document(type, { items: [{ ...items[0], exempt: true }, crate], references })
+    expect(doc.header.totals).toEqual({ exemptAmount: 100000, depositGuarantee: 10000, totalAmount: 110000 })
+  })
+
+  // The `IndExe` row admits the indicator on a guide and a purchase invoice, and the column of `GrntDep` is 0 there.
+  test.each([
+    [46, {}],
+    [52, { options: { transferType: 1 } }],
+  ] as const)('an IndExe 3 line on a %i keeps its amount and is in no total', (type, extra) => {
+    const doc = document(type, { items: [items[0], crate], ...extra })
+    expect(doc.items[1]).toMatchObject({ exemptIndicator: 3, amount: 10000 })
+    expect(doc.items[1]).not.toHaveProperty('additionalTaxCodes')
+    expect(doc.header.totals).not.toHaveProperty('depositGuarantee')
+    expect(doc.header.totals).not.toHaveProperty('nonBillableAmount')
+    expect(doc.header.totals).toEqual(document(type, { items: [items[0]], ...extra }).header.totals)
+    expect(toSiiDocument(doc).Encabezado.Totales).not.toHaveProperty('GrntDep')
+  })
+
+  const settled = (exemptIndicator: unknown) => ({
+    items: [
+      { ...items[0], settledDocumentType: '33' },
+      { ...items[0], settledDocumentType: '33', exemptIndicator } as unknown as LineItemInput,
+    ],
+  })
+  const foreign = {
+    currency: 'DOLAR USA' as Currency,
+    receiver: { ...receiver, rut: FOREIGN_RECEIVER_RUT, city: 'Lima' },
+  }
+  const exportNote: Partial<DocumentInput> = {
+    ...foreign,
+    references: [{ documentType: 110, folio: 1, date: '2026-11-01', code: 3 }],
+  }
+
+  // The format's `IndExe` row admits the indicator on these types too; dte-sdk refuses the value 3 there.
+  test.each([
+    [
+      43,
+      {
+        items: [
+          { ...items[0], settledDocumentType: '33' },
+          { ...crate, settledDocumentType: '33' },
+        ],
+      },
+    ],
+    [110, foreign],
+    [111, exportNote],
+    [112, exportNote],
+  ] as const)('an IndExe 3 line is refused on a %i', (type, extra) => {
+    expectError(() => document(type, { items: [items[0], crate], ...extra }), 'INVALID_OPTION', {
+      field: 'items[1].exemptIndicator',
+    })
+  })
+
+  // The schemas enumerate `IndExe` 1 to 6, and `null` is none of them.
+  test.each([
+    [33, 0, {}],
+    [33, 7, {}],
+    [33, null, {}],
+    [52, 1.5, { options: { transferType: 1 } }],
+    [52, null, { options: { transferType: 1 } }],
+    [39, 7, { receiver: undefined }],
+    [43, 7, settled(7)],
+    [43, null, settled(null)],
+    [110, 7, foreign],
+    [111, null, exportNote],
+  ] as const)('an IndExe outside 1 to 6 is refused on a %i: %p', (type, exemptIndicator, extra) => {
+    const line = { ...items[0], exemptIndicator } as unknown as LineItemInput
+    expectError(() => document(type, { items: [items[0], line], ...extra }), 'INVALID_OPTION', {
+      field: 'items[1].exemptIndicator',
+    })
+  })
+
+  test.each(['1', '2', '3', '4', '5', '6'])('an IndExe given as the text %p is refused on a 33', (exemptIndicator) => {
+    const line = { ...items[0], exemptIndicator } as unknown as LineItemInput
+    expectError(() => document(33, { items: [items[0], line] }), 'INVALID_OPTION', {
+      field: 'items[1].exemptIndicator',
+    })
+  })
+
+  // The checks of an export document's totals do not look at the guarantee, so this one refuses what is not a number.
+  test.each([
+    [110, foreign],
+    [111, exportNote],
+    [112, exportNote],
+    [46, {}],
+    [52, { options: { transferType: 1 } }],
+  ] as const)('a given depositGuarantee that is not a number is refused on a %i', (type, extra) => {
+    const given = type >= 110 ? { exemptAmount: 145000 } : { netAmount: 145000, vatAmount: 27550 }
+    for (const depositGuarantee of [Number.NaN, null, '', false]) {
+      const totals = { ...given, totalAmount: 172550, depositGuarantee } as unknown as DocumentInput['totals']
+      expectError(() => document(type, { totals, ...extra }), 'INVALID_OPTION', { field: 'totals.depositGuarantee' })
+    }
+  })
+
+  test('a given depositGuarantee of zero is none on an export document', () => {
+    const totals = { exemptAmount: 145000, totalAmount: 145000, depositGuarantee: 0 }
+    const note = document(111, { totals, ...exportNote })
+    expect(note.header.totals.totalAmount).toBe(145000)
+    expect(toSiiDocument(note).Encabezado.Totales).not.toHaveProperty('GrntDep')
+  })
+
+  test.each([
+    [46, {}],
+    [52, { options: { transferType: 1 } }],
+    [39, { receiver: undefined }],
+  ] as const)('a given depositGuarantee above zero is refused on a %i, and one of zero is none', (type, extra) => {
+    const totals = { netAmount: 145000, vatAmount: 27550, depositGuarantee: 1, totalAmount: 172551 }
+    expectError(() => document(type, { totals, ...extra }), 'INVALID_OPTION', { field: 'totals.depositGuarantee' })
+    const zero = document(type, { totals: { ...totals, depositGuarantee: 0, totalAmount: 172550 }, ...extra })
+    expect(zero.header.totals.totalAmount).toBe(172550)
+    expect(toSiiDocument(zero).Encabezado.Totales).not.toHaveProperty('GrntDep')
+  })
+
+  test.each([33, 56, 61] as const)('a given depositGuarantee of zero writes no GrntDep on a %i', (type) => {
+    const references = [{ documentType: 33, folio: 1, date: '2026-11-01', code: 3 }] as const
+    const totals = { netAmount: 145000, vatRate: 19, vatAmount: 27550, depositGuarantee: 0, totalAmount: 172550 }
+    const sii = toSiiDocument(document(type, { totals, ...(type === 33 ? {} : { references }) }))
+    expect(Object.keys(sii.Encabezado.Totales)).toEqual(['MntNeto', 'TasaIVA', 'IVA', 'MntTotal'])
+    expect(fromSiiDocument(sii).header.totals).toEqual({
+      netAmount: 145000,
+      vatRate: 19,
+      vatAmount: 27550,
+      totalAmount: 172550,
+    })
+  })
+
+  test('IndExe 6 lines are taken off the non-billable amount, which may be negative', () => {
+    const extra = (nonBillable: number, negative: number): LineItemInput[] => [
+      { name: 'Cargo ya facturado', unitPrice: nonBillable, exemptIndicator: 2 },
+      { name: 'Abono ya facturado', unitPrice: negative, exemptIndicator: 6 },
+    ]
+    expect(document(33, { items: [...items, ...extra(1000, 400)] }).header.totals.nonBillableAmount).toBe(600)
+    const negative = document(33, { items: [...items, ...extra(300, 500)] })
+    expect(negative.header.totals).toMatchObject({ totalAmount: 172550, nonBillableAmount: -200 })
+    expect(toSiiDocument(negative).Encabezado.Totales.MontoNF).toBe(-200)
+  })
 })
 
 // Formato DTE 2.5, field 117: the withheld amount is the rate by the sum of the lines that carry the code of the
@@ -691,7 +872,15 @@ describe('the decimals the schema admits', () => {
 // zero, and a receipt follows the same rule all the same.
 describe('a line percent goes with its amount', () => {
   const line = (item: LineItemInput, type: 33 | 34 | 52 = 33) =>
-    createDocument({ type, folio: 7, issueDate: '2026-11-15', issuer, receiver, items: [item] })
+    createDocument({
+      type,
+      folio: 7,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver,
+      items: [item],
+      options: saleGuide(type),
+    })
   const receipt = (item: LineItemInput, type: 39 | 41 = 39) =>
     createDocument({ type, folio: 1, issueDate: '2026-11-15', issuer, items: [item], pricesIncludeVat: type === 39 })
 
@@ -886,12 +1075,9 @@ describe('a given amount on a priced line', () => {
     expect(line({ ...item, amount: 1800 }).items).toEqual(line(item).items)
   })
 
-  test.each<[string, DocumentInput['options']]>([
-    ['with no transfer type', undefined],
-    ['whose transfer is a sale', { transferType: 1 }],
-  ])('a zero is refused on a guide %s', (_label, options) => {
+  test('a zero is refused on a guide whose transfer is a sale', () => {
     expectError(
-      () => line({ name: 'Pallet', quantity: 3, unitPrice: 1000, amount: 0 }, 52, options),
+      () => line({ name: 'Pallet', quantity: 3, unitPrice: 1000, amount: 0 }, 52, { transferType: 1 }),
       'TOTAL_MISMATCH',
       {
         field: 'items[0].amount',
@@ -1025,7 +1211,7 @@ describe('a line that must be zero', () => {
 describe('the unit price of a line', () => {
   const sale = { name: 'Bebida', quantity: 1, unitPrice: 990 }
   const issue = (items: readonly LineItemInput[], type: DocumentInput['type'] = 33) =>
-    createDocument({ type, folio: 7, issueDate: '2026-11-15', issuer, receiver, items })
+    createDocument({ type, folio: 7, issueDate: '2026-11-15', issuer, receiver, items, options: saleGuide(type) })
 
   test('a price of zero is no price: the line is written without one, with the amount it brings', () => {
     const written = issue([sale, { name: 'Regalo', quantity: 2, unitPrice: 0, unitPriceDecimals: 2 }])
@@ -1187,7 +1373,15 @@ describe("the issuer's SII branch code", () => {
 
 describe('the quantity of a priced line', () => {
   const line = (item: DocumentInput['items'][number], type: DocumentInput['type'] = 33) =>
-    createDocument({ type, folio: 7, issueDate: '2026-11-15', issuer, receiver, items: [item] })
+    createDocument({
+      type,
+      folio: 7,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver,
+      items: [item],
+      options: saleGuide(type),
+    })
 
   test('a line with a price and no quantity is written with the quantity it is computed with, 1', () => {
     const doc = line({ name: 'Plan anual', unitPrice: 100000 })
@@ -1526,7 +1720,15 @@ describe('what the schema admits on a settlement invoice (43)', () => {
     'a settledDocumentType on a %p is refused: only Liquidacion declares TpoDocLiq',
     (type) => {
       expectError(
-        () => createDocument({ type, folio: 1, issuer, receiver, items: [{ ...line, exempt: type === 34 }] }),
+        () =>
+          createDocument({
+            type,
+            folio: 1,
+            issuer,
+            receiver,
+            items: [{ ...line, exempt: type === 34 }],
+            options: saleGuide(type),
+          }),
         'INVALID_OPTION',
         { field: 'items[0].settledDocumentType' },
       )
@@ -1647,7 +1849,7 @@ describe('what the schema admits on a receipt (39, 41)', () => {
       exemptAmount: 300,
       vatAmount: 410,
       totalAmount: 2865,
-      nonBillableAmount: 1200,
+      nonBillableAmount: -200,
     })
   })
 
@@ -1702,6 +1904,7 @@ describe('what the schema admits on a receipt (39, 41)', () => {
         issuer,
         receiver,
         items: [{ name: 'Plan anual', unitPrice: 1000, settledDocumentType: type === 43 ? '33' : undefined }],
+        options: saleGuide(type),
       }
       expectError(() => createDocument({ ...document, options: { netAmountsIndicator: 2 } }), 'INVALID_OPTION', {
         field: 'options.netAmountsIndicator',
