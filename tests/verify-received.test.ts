@@ -124,7 +124,7 @@ describe('verifyReceivedDocuments: a valid envelope', () => {
 })
 
 describe('verifyReceivedDocuments: each check on its own', () => {
-  test('each signature reports the certificate it carries: its holder and its validity, for the caller to judge', () => {
+  test('each signature reports the certificate it carries, as the document states it: it can refuse, never vouch', () => {
     const result = verify(envelopeOf([issued(1)]))
     expect(result.envelope?.certificate).toEqual(SIGNER)
     expect(result.documents[0].signature.certificate).toEqual(SIGNER)

@@ -54,26 +54,30 @@ export type VerifyReceivedDocumentsOptions = {
 export type ReceivedSignatureCheck = SignatureVerification & {
   /** EN: A `Signature` with a `SignedInfo` sits under the root; when false every other field is false or null. ES: Hay una `Signature` con `SignedInfo` bajo el raíz; si es false, los demás campos son false o null. */
   readonly found: boolean
-  /** EN: The certificate the signature carries in `KeyInfo`, the one `valid` is about; null without a signature or when it cannot be read. ES: `X509Certificate` — El certificado que trae la firma en `KeyInfo`, aquel del que habla `valid`; null sin firma o si no se puede leer. */
+  /** EN: The certificate the signature carries in `KeyInfo`, the one `valid` is about, as the document states it and with its chain unchecked; null without a signature or when it cannot be read. ES: `X509Certificate` — El certificado que trae la firma en `KeyInfo`, aquel del que habla `valid`, tal como lo declara el documento y sin chequear su cadena; null sin firma o si no se puede leer. */
   readonly certificate: ReceivedSignerCertificate | null
 }
 
 /**
- * EN: The certificate of a received signature: who holds it and between which instants it is valid. The verification
- * has no clock and does not know who should sign, so these are for the caller: the holder against the sender the
- * envelope's cover names (`RutEnvia`) or the signer the company expects, and the validity against the instant the
- * document was signed (`TmstFirma`).
- * ES: El certificado de una firma recibida: quién es su titular y entre qué instantes es válido. La verificación no
- * tiene reloj ni sabe quién debe firmar, así que estos datos son para quien llama: el titular frente al enviador que
- * nombra la carátula del sobre (`RutEnvia`) o al firmante que la empresa espera, y la vigencia frente al instante en que
- * se firmó el documento (`TmstFirma`).
+ * EN: The certificate of a received signature, as the document itself states it. Its chain is not checked: nothing
+ * here says an accredited certifier issued it, and anyone can make a certificate that names any RUT, so the holder is
+ * no proof of who signed. These fields can only refuse a document, never vouch for one: a holder other than the signer
+ * the company expects, or a validity that does not cover the instant the document was signed (`TmstFirma`), which the
+ * verification, with no clock, does not look at. Who signed is settled by the SII, which checks the certificate when
+ * it receives the document (`queryDocumentStatus`).
+ * ES: El certificado de una firma recibida, tal como lo declara el propio documento. Su cadena no se chequea: nada
+ * aquí dice que lo emitió un certificador acreditado, y cualquiera puede armar un certificado que nombre cualquier RUT,
+ * así que el titular no prueba quién firmó. Estos campos solo sirven para rechazar un documento, nunca para avalarlo:
+ * un titular distinto del firmante que la empresa espera, o una vigencia que no cubre el instante en que se firmó el
+ * documento (`TmstFirma`), que la verificación, sin reloj, no mira. Quién firmó lo zanja el SII, que revisa el
+ * certificado cuando recibe el documento (`queryDocumentStatus`).
  */
 export type ReceivedSignerCertificate = {
-  /** EN: Holder RUT, SII shape, or null when the certificate carries none. ES: RUT del titular en forma SII, o null si el certificado no lo trae. */
+  /** EN: The RUT the certificate names as its holder, SII shape, unverified; null when it names none. ES: El RUT que el certificado nombra como su titular, en forma SII, sin verificar; null si no nombra ninguno. */
   readonly holderRut: SiiRut | null
-  /** EN: Validity start. ES: Inicio de vigencia. */
+  /** EN: Validity start, as the certificate states it. ES: Inicio de vigencia, como lo declara el certificado. */
   readonly notBefore: Date
-  /** EN: Validity end. ES: Fin de vigencia. */
+  /** EN: Validity end, as the certificate states it. ES: Fin de vigencia, como lo declara el certificado. */
   readonly notAfter: Date
 }
 
@@ -412,9 +416,10 @@ const checkEnvelope = (xml: string, root: Element): ReceivedSignatureCheck =>
  * `siiKeys`), for the CAFs of `environment` only (production by default). A document that fails a check is a result,
  * not an error; a CAF whose `IDK` has no known key leaves the document `unchecked`. A key larger than any CAF or
  * certificate key (a modulus over 4096 bits or an exponent over 32 bits) fails its check without its signature being
- * tried. Pure: no clock, no network. Not checked: who owns the signing certificate and whether it was valid when the
- * document was signed, which each signature's `certificate` gives the caller to check; and whether the CAF had
- * expired.
+ * tried. Pure: no clock, no network. Not checked: the chain of the signing certificate, so who signed is not
+ * established; whether that certificate was valid when the document was signed, for which each signature reports the
+ * holder and the validity the certificate states (`certificate`), good to refuse a document and never to vouch for
+ * one; and whether the CAF had expired.
  * ES: Verifica los documentos de un `DTE`, `EnvioDTE` o `EnvioBOLETA` tal como llega de un proveedor, y la firma del
  * propio sobre. Cada documento se lee desde su elemento en la entrada parseada, nunca de un trozo del texto: su
  * firma se chequea sobre formas escritas desde ese elemento, y sus campos y su timbre se leen de él. Se chequea: su
@@ -424,9 +429,10 @@ const checkEnvelope = (xml: string, root: Element): ReceivedSignatureCheck =>
  * `environment` (producción por defecto). Un documento que falla un chequeo es un resultado, no un error; un CAF
  * cuyo `IDK` no tiene llave conocida deja el documento `unchecked`. Una llave mayor que cualquier llave de CAF o de
  * certificado (un módulo de más de 4096 bits o un exponente de más de 32 bits) falla su chequeo sin que se pruebe su
- * firma. Pura: sin reloj ni red. No se chequea: de quién es el certificado que firma ni si era válido cuando se firmó
- * el documento, que el `certificate` de cada firma entrega a quien llama para que lo revise; ni si el CAF estaba
- * vencido.
+ * firma. Pura: sin reloj ni red. No se chequea: la cadena del certificado que firma, así que no queda establecido
+ * quién firmó; si ese certificado era válido cuando se firmó el documento, para lo cual cada firma informa el titular
+ * y la vigencia que declara el certificado (`certificate`), que sirven para rechazar un documento y nunca para
+ * avalarlo; ni si el CAF estaba vencido.
  * @throws {DteError} EN: `XML_PARSE_FAILED` for empty or malformed XML, a DOCTYPE, another root, an envelope without exactly one `SetDTE`, a `DTE` out of place or prefixed, or a `DTE` without one unprefixed `Documento`, `Liquidacion` or `Exportaciones`; `ENVELOPE_EMPTY` for an envelope without documents. ES: `XML_PARSE_FAILED` para XML vacío o malformado, un DOCTYPE, otro raíz, un sobre sin exactamente un `SetDTE`, un `DTE` fuera de lugar o con prefijo, o un `DTE` sin un `Documento`, `Liquidacion` o `Exportaciones` sin prefijo; `ENVELOPE_EMPTY` para un sobre sin documentos.
  */
 export const verifyReceivedDocuments = (
