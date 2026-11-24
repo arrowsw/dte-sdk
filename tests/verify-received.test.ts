@@ -36,7 +36,9 @@ const only = (xml: string): ReceivedDocument => {
   return documents[0]
 }
 
-const VALID_SIGNATURE = { found: true, digestValid: true, signatureValid: true, valid: true }
+// The certificate each test signature carries: its holder and its validity, read back from the `KeyInfo`.
+const SIGNER = { holderRut: certificate.rut, notBefore: certificate.notBefore, notAfter: certificate.notAfter }
+const VALID_SIGNATURE = { found: true, certificate: SIGNER, digestValid: true, signatureValid: true, valid: true }
 const VALID_TED = { found: true, signatureValid: true, mismatches: [], valid: true }
 const VALID_CAF = {
   found: true,
@@ -122,6 +124,25 @@ describe('verifyReceivedDocuments: a valid envelope', () => {
 })
 
 describe('verifyReceivedDocuments: each check on its own', () => {
+  test('each signature reports the certificate it carries: its holder and its validity, for the caller to judge', () => {
+    const result = verify(envelopeOf([issued(1)]))
+    expect(result.envelope?.certificate).toEqual(SIGNER)
+    expect(result.documents[0].signature.certificate).toEqual(SIGNER)
+    expect(SIGNER.holderRut).toMatch(/^\d{7,8}-[\dK]$/)
+    // The verification has no clock: a caller compares the validity with the instant the document was signed.
+    expect(SIGNER.notBefore.getTime()).toBeLessThan(FIXED_NOW.getTime())
+    expect(SIGNER.notAfter.getTime()).toBeGreaterThan(FIXED_NOW.getTime())
+  })
+
+  test('a certificate that cannot be read is null, and the signature fails', () => {
+    const broken = issued(1).xml.replace(
+      /<X509Certificate>[^<]*<\/X509Certificate>/,
+      '<X509Certificate>AAAA</X509Certificate>',
+    )
+    const { signature } = only(broken)
+    expect(signature).toMatchObject({ found: true, certificate: null, signatureValid: false, valid: false })
+  })
+
   test('a document changed after it was signed fails its signature, and only that', () => {
     const tampered = issued(1).xml.replace('<GiroRecep>Comercio</GiroRecep>', '<GiroRecep>Industria</GiroRecep>')
     const document = only(tampered)
@@ -154,6 +175,7 @@ describe('verifyReceivedDocuments: each check on its own', () => {
     const document = only(issued(1).xml.replace(/<Signature[\s\S]*<\/Signature>/, ''))
     expect(document.signature).toEqual({
       found: false,
+      certificate: null,
       referenceId: null,
       digestValid: false,
       signatureValid: false,
@@ -294,6 +316,7 @@ describe('verifyReceivedDocuments: each check on its own', () => {
     const result = verify(xml)
     expect(result.envelope).toEqual({
       found: false,
+      certificate: null,
       referenceId: null,
       digestValid: false,
       signatureValid: false,
@@ -340,6 +363,8 @@ describe('verifyReceivedDocuments: the size of a key the document names', () => 
     const xml = signedElsewhere(issued(1), ` xmlns="${SII_NS}" xmlns:xsi="${XSI_NS}"`, undefined, undefined, signer)
     expect(only(xml).signature).toEqual({
       found: true,
+      // A certificate made up for the test, with no RUT in it: it is read whatever the size of its key.
+      certificate: { holderRut: null, notBefore: expect.any(Date), notAfter: expect.any(Date) },
       referenceId: 'DTE_T33F1',
       digestValid: true,
       signatureValid: valid,

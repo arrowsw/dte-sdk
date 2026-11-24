@@ -8,8 +8,9 @@ import {
   type VerificationStatus,
 } from '../caf/sii-signature'
 import { rsaSha1VerifyBase64 } from '../crypto/rsa'
+import { parseCertificatePem } from '../crypto/x509'
 import type { Environment } from '../catalogs/codes'
-import { toSiiRut } from '../model/rut'
+import { toSiiRut, type SiiRut } from '../model/rut'
 import { verifyEnveloped, type SignatureVerification } from '../signature/xmldsig'
 import {
   child,
@@ -53,6 +54,27 @@ export type VerifyReceivedDocumentsOptions = {
 export type ReceivedSignatureCheck = SignatureVerification & {
   /** EN: A `Signature` with a `SignedInfo` sits under the root; when false every other field is false or null. ES: Hay una `Signature` con `SignedInfo` bajo el raíz; si es false, los demás campos son false o null. */
   readonly found: boolean
+  /** EN: The certificate the signature carries in `KeyInfo`, the one `valid` is about; null without a signature or when it cannot be read. ES: `X509Certificate` — El certificado que trae la firma en `KeyInfo`, aquel del que habla `valid`; null sin firma o si no se puede leer. */
+  readonly certificate: ReceivedSignerCertificate | null
+}
+
+/**
+ * EN: The certificate of a received signature: who holds it and between which instants it is valid. The verification
+ * has no clock and does not know who should sign, so these are for the caller: the holder against the sender the
+ * envelope's cover names (`RutEnvia`) or the signer the company expects, and the validity against the instant the
+ * document was signed (`TmstFirma`).
+ * ES: El certificado de una firma recibida: quién es su titular y entre qué instantes es válido. La verificación no
+ * tiene reloj ni sabe quién debe firmar, así que estos datos son para quien llama: el titular frente al enviador que
+ * nombra la carátula del sobre (`RutEnvia`) o al firmante que la empresa espera, y la vigencia frente al instante en que
+ * se firmó el documento (`TmstFirma`).
+ */
+export type ReceivedSignerCertificate = {
+  /** EN: Holder RUT, SII shape, or null when the certificate carries none. ES: RUT del titular en forma SII, o null si el certificado no lo trae. */
+  readonly holderRut: SiiRut | null
+  /** EN: Validity start. ES: Inicio de vigencia. */
+  readonly notBefore: Date
+  /** EN: Validity end. ES: Fin de vigencia. */
+  readonly notAfter: Date
 }
 
 /**
@@ -165,6 +187,7 @@ export type ReceivedDocumentsVerification = {
 
 const NOT_FOUND: ReceivedSignatureCheck = {
   found: false,
+  certificate: null,
   referenceId: null,
   digestValid: false,
   signatureValid: false,
@@ -218,14 +241,28 @@ const namespaceForms = (element: Element): readonly string[] => {
 
 const hasSignature = (root: Element): boolean => child(child(root, 'Signature'), 'SignedInfo') !== undefined
 
+// The certificate under the `Signature` of the root, the first one, which is the one the signature is verified with.
+const signerCertificate = (root: Element): ReceivedSignerCertificate | null => {
+  const base64 = child(root, 'Signature')?.getElementsByTagName('X509Certificate')[0]?.textContent ?? ''
+  try {
+    const { rut, notBefore, notAfter } = parseCertificatePem(
+      `-----BEGIN CERTIFICATE-----\n${base64.replace(/\s+/g, '')}\n-----END CERTIFICATE-----\n`,
+    )
+    return { holderRut: rut, notBefore, notAfter }
+  } catch {
+    return null
+  }
+}
+
 // The result where the document sits, unless the document verifies in one of the other forms.
 const checkSignature = (root: Element, forms: readonly string[], elementTag: string): ReceivedSignatureCheck => {
   if (!hasSignature(root)) return NOT_FOUND
   const [first, ...others] = forms
   const inPlace = verifyEnveloped(first, { elementTag, rootTag: 'DTE' })
-  if (inPlace.valid) return { found: true, ...inPlace }
+  const certificate = signerCertificate(root)
+  if (inPlace.valid) return { found: true, certificate, ...inPlace }
   const alone = others.map((form) => verifyEnveloped(form, { elementTag, rootTag: 'DTE' })).find((r) => r.valid)
-  return { found: true, ...(alone ?? inPlace) }
+  return { found: true, certificate, ...(alone ?? inPlace) }
 }
 
 type Header = ReceivedHeader
@@ -358,7 +395,11 @@ const verifyDocument = ({ element, signed, header }: ReceivedDocumentElements, r
 
 const checkEnvelope = (xml: string, root: Element): ReceivedSignatureCheck =>
   hasSignature(root)
-    ? { found: true, ...verifyEnveloped(xml, { elementTag: 'SetDTE', rootTag: root.tagName }) }
+    ? {
+        found: true,
+        certificate: signerCertificate(root),
+        ...verifyEnveloped(xml, { elementTag: 'SetDTE', rootTag: root.tagName }),
+      }
     : NOT_FOUND
 
 /**
@@ -371,7 +412,9 @@ const checkEnvelope = (xml: string, root: Element): ReceivedSignatureCheck =>
  * `siiKeys`), for the CAFs of `environment` only (production by default). A document that fails a check is a result,
  * not an error; a CAF whose `IDK` has no known key leaves the document `unchecked`. A key larger than any CAF or
  * certificate key (a modulus over 4096 bits or an exponent over 32 bits) fails its check without its signature being
- * tried. Pure: no clock, no network. Not checked: who owns the signing certificate, and whether the CAF had expired.
+ * tried. Pure: no clock, no network. Not checked: who owns the signing certificate and whether it was valid when the
+ * document was signed, which each signature's `certificate` gives the caller to check; and whether the CAF had
+ * expired.
  * ES: Verifica los documentos de un `DTE`, `EnvioDTE` o `EnvioBOLETA` tal como llega de un proveedor, y la firma del
  * propio sobre. Cada documento se lee desde su elemento en la entrada parseada, nunca de un trozo del texto: su
  * firma se chequea sobre formas escritas desde ese elemento, y sus campos y su timbre se leen de él. Se chequea: su
@@ -381,7 +424,9 @@ const checkEnvelope = (xml: string, root: Element): ReceivedSignatureCheck =>
  * `environment` (producción por defecto). Un documento que falla un chequeo es un resultado, no un error; un CAF
  * cuyo `IDK` no tiene llave conocida deja el documento `unchecked`. Una llave mayor que cualquier llave de CAF o de
  * certificado (un módulo de más de 4096 bits o un exponente de más de 32 bits) falla su chequeo sin que se pruebe su
- * firma. Pura: sin reloj ni red. No se chequea: de quién es el certificado que firma, ni si el CAF estaba vencido.
+ * firma. Pura: sin reloj ni red. No se chequea: de quién es el certificado que firma ni si era válido cuando se firmó
+ * el documento, que el `certificate` de cada firma entrega a quien llama para que lo revise; ni si el CAF estaba
+ * vencido.
  * @throws {DteError} EN: `XML_PARSE_FAILED` for empty or malformed XML, a DOCTYPE, another root, an envelope without exactly one `SetDTE`, a `DTE` out of place or prefixed, or a `DTE` without one unprefixed `Documento`, `Liquidacion` or `Exportaciones`; `ENVELOPE_EMPTY` for an envelope without documents. ES: `XML_PARSE_FAILED` para XML vacío o malformado, un DOCTYPE, otro raíz, un sobre sin exactamente un `SetDTE`, un `DTE` fuera de lugar o con prefijo, o un `DTE` sin un `Documento`, `Liquidacion` o `Exportaciones` sin prefijo; `ENVELOPE_EMPTY` para un sobre sin documentos.
  */
 export const verifyReceivedDocuments = (
