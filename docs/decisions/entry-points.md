@@ -150,6 +150,11 @@ Working a line's amounts out over decimal digits and writing each line as field 
 2026-11-23, took `dte-sdk` from 46.71 kB to 47.29 kB, `dte-sdk/portal` from 85.41 kB to 85.92 kB and `dte-sdk/pdf`
 from 19.69 kB to 19.7 kB, all under their limits; the other entries did not move. `dte-sdk/portal` is 0.08 kB under
 its 86 kB limit.
+Drawing the stamp as the SII's instructions ask, breaking a header too long for one line, the decimals of a percent's
+share on an export line, `IVANoRet`, `ValorDROtrMnda`, the certificate of a received signature and the digest of a
+received envelope, on 2026-11-24, took `dte-sdk` from 47.56 kB to 47.91 kB, `dte-sdk/portal`, whose certification
+runner builds documents with the same code, from 85.98 kB to 86.27 kB, over its 86 kB limit, which went to 88 kB, and
+`dte-sdk/pdf` from 19.68 kB to 19.77 kB; the other entries did not move.
 
 ## Why
 
