@@ -297,6 +297,8 @@ export type SiiTotales = {
   readonly IVATerc?: number
   /** EN: Additional taxes and withholdings. ES: `ImptoReten` — Impuestos adicionales y retenciones. */
   readonly ImptoReten?: readonly SiiImptoReten[]
+  /** EN: VAT not withheld (purchase invoices and their notes). ES: `IVANoRet` — IVA no retenido (facturas de compra y sus notas). */
+  readonly IVANoRet?: number
   /** EN: Deposit guarantee for containers or packaging. ES: `GrntDep` — Garantía por depósito de envases o embalajes. */
   readonly GrntDep?: number
   /** EN: Commission totals (settlement invoices). ES: `Comisiones` — Totales de comisiones (liquidación factura). */

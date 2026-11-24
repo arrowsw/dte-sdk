@@ -1590,6 +1590,51 @@ describe('commissions and other charges', () => {
     },
   )
 
+  describe('the VAT not withheld (IVANoRet)', () => {
+    // Formato DTE 2.5, field 118: the VAT less the VAT withheld by product, on a purchase invoice that withholds part
+    // of the VAT and on the notes that reference one.
+    const partial = (vatNotWithheld: number | undefined) => ({
+      netAmount: 10000,
+      vatRate: 19,
+      vatAmount: 1900,
+      withholdings: [{ taxCode: 34, rate: 4, amount: 400 }],
+      vatNotWithheld,
+      totalAmount: 11500,
+    })
+    const purchase = (type: 33 | 46 | 56 | 61, vatNotWithheld: number | undefined) =>
+      createDocument({
+        type,
+        folio: 1,
+        issueDate: '2026-11-15',
+        issuer,
+        receiver,
+        items: [{ name: 'Trigo', quantity: 10, unitPrice: 1000, additionalTaxCodes: [34] }],
+        references: type === 46 || type === 33 ? [] : [{ documentType: 46, folio: 7, date: '2026-11-01', code: 3 }],
+        totals: partial(vatNotWithheld),
+      })
+
+    test.each([46, 56, 61] as const)('a %p carries it, written after the withholdings', (type) => {
+      const doc = purchase(type, 1500)
+      expect(doc.header.totals.vatNotWithheld).toBe(1500)
+      expect(buildDocumentXml(doc)).toContain('</ImptoReten><IVANoRet>1500</IVANoRet><MntTotal>11500</MntTotal>')
+      expect(fromSiiDocument(toSiiDocument(doc)).header.totals).toEqual(doc.header.totals)
+    })
+
+    test('a zero is none, on any type: the format does not register it', () => {
+      expect(buildDocumentXml(purchase(46, 0))).not.toContain('IVANoRet')
+      expect(buildDocumentXml(purchase(33, 0))).not.toContain('IVANoRet')
+      expect(buildDocumentXml(purchase(46, undefined))).not.toContain('IVANoRet')
+    })
+
+    test('any other type has no element for it', () => {
+      expectError(() => purchase(33, 1500), 'INVALID_OPTION', { field: 'totals.vatNotWithheld' })
+    })
+
+    test.each([1500.5, -1, Number.NaN])('%p is not a whole number above zero', (amount) => {
+      expectError(() => purchase(46, amount), 'INVALID_AMOUNT', { field: 'totals.vatNotWithheld' })
+    })
+  })
+
   test('a document admits 30 payment installments, the most the format gives it', () => {
     const payments = (count: number) => Array.from({ length: count }, () => ({ date: '2026-12-01', amount: 1000 }))
     const invoice = (count: number) =>

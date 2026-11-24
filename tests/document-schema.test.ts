@@ -259,6 +259,17 @@ const VARIANTS: Record<Exclude<DocumentType, 39 | 41>, Record<string, Variant>> 
       items: [{ name: 'Chatarra de fierro', quantity: 300, unitPrice: 1200, additionalTaxCodes: [15] }],
     },
     'without withholding': { items: [{ name: 'Chatarra de fierro', unitPrice: 1200 }], withholdVat: false },
+    'withholds part of the VAT, and states the VAT not withheld': {
+      items: [{ name: 'Trigo', quantity: 10, unitPrice: 1000, additionalTaxCodes: [34] }],
+      totals: {
+        netAmount: 10000,
+        vatRate: 19,
+        vatAmount: 1900,
+        withholdings: [{ taxCode: 34, rate: 4, amount: 400 }],
+        vatNotWithheld: 1500,
+        totalAmount: 11500,
+      },
+    },
     'a line with a deposit guarantee for containers, which no total takes': {
       items: [
         { name: 'Chatarra de fierro', unitPrice: 1200 },
