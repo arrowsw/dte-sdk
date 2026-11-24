@@ -83,6 +83,8 @@ export type RollInput = {
   readonly office: string
   /** EN: Resolution line under the stamp. ES: Línea de resolución bajo el timbre. */
   readonly resolution: string
+  /** EN: Legend under the stamp that says where the document is verified. ES: Leyenda bajo el timbre que dice dónde se verifica el documento. */
+  readonly verification: string
   /** EN: Logo, null when none. ES: Logo, null si no hay. */
   readonly logo: PDFImage | null
   /** EN: Stamp, null when it is not printed. ES: Timbre, null cuando no se imprime. */
@@ -301,7 +303,7 @@ const stampRows = (input: RollInput): readonly Row[] => {
     gap(STAMP.legendGap),
     ...wrapped(fonts, 'Timbre Electrónico SII', ROLL_FONT.small, { bold: true, align: 'center' }),
     ...wrapped(fonts, input.resolution, ROLL_FONT.small, { align: 'center' }),
-    ...wrapped(fonts, 'Verifique documento: www.sii.cl', ROLL_FONT.small, { align: 'center' }),
+    ...wrapped(fonts, input.verification, ROLL_FONT.small, { align: 'center' }),
   ]
 }
 

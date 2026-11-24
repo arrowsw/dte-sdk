@@ -74,6 +74,21 @@ export const COLOURS = {
 /** EN: SII office printed under the type box when none is given. ES: Oficina del SII impresa bajo el recuadro cuando no se indica otra. */
 export const DEFAULT_SII_OFFICE = 'S.I.I. - SANTIAGO CENTRO'
 
+/** EN: Site the legend under the stamp names when none is given. ES: Sitio que nombra la leyenda bajo el timbre cuando no se indica otro. */
+export const DEFAULT_VERIFICATION_SITE = 'www.sii.cl'
+
+/**
+ * EN: The legend under the stamp that says where the document is verified: `Verifique documento: {site}`.
+ * ES: La leyenda bajo el timbre que dice dónde se verifica el documento: `Verifique documento: {sitio}`.
+ * @param site EN: the site, up to 80 printable ASCII characters with no space; `www.sii.cl` when omitted. ES: el sitio, hasta 80 caracteres ASCII imprimibles sin espacios; `www.sii.cl` si se omite.
+ * @throws {DteError} EN: `INVALID_OPTION { field: 'verificationSite' }` for anything else. ES: `INVALID_OPTION { field: 'verificationSite' }` ante cualquier otra cosa.
+ */
+export const verificationLine = (site: string = DEFAULT_VERIFICATION_SITE): string => {
+  if (typeof site !== 'string' || !/^[\x21-\x7e]{1,80}$/.test(site))
+    throw new DteError('INVALID_OPTION', { field: 'verificationSite' })
+  return `Verifique documento: ${site}`
+}
+
 /**
  * EN: Resolution line printed under the stamp when none is given, for a year.
  * ES: Línea de resolución impresa bajo el timbre cuando no se indica otra, para un año.

@@ -122,6 +122,22 @@ describe('an invoice', () => {
     await expect(office('')).resolves.toBe('S.I.I. - SANTIAGO CENTRO')
   })
 
+  test('the legend under the stamp names the site the company gives, and www.sii.cl without one', async () => {
+    expect(await pdfText(await render(invoiceDoc))).toContain('Verifique documento: www.sii.cl')
+    const named = await pdfText(await render(invoiceDoc, { verificationSite: 'boletas.ejemplo.cl/consulta' }))
+    expect(named).toContain('Verifique documento: boletas.ejemplo.cl/consulta')
+    expect(named).not.toContain('www.sii.cl')
+  })
+
+  test.each(['', 'con espacio.cl', 'ñandú.cl', 'a'.repeat(81), 42, null])(
+    'a site of %p is no site to print: INVALID_OPTION',
+    async (verificationSite) => {
+      const error = await failure(render(invoiceDoc, { verificationSite }))
+      expect(error.code).toBe('INVALID_OPTION')
+      expect(error.details).toEqual({ field: 'verificationSite' })
+    },
+  )
+
   test('the default resolution takes the year from the system clock when no clock is given', async () => {
     const year = new Date().getFullYear()
     expect(await pdfText(await renderPrintedSample(invoiceDoc))).toContain(`Res. Ex. SII N° 0 del ${year}`)
