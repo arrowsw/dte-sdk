@@ -2076,6 +2076,33 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
     const xml = buildDocumentXml(doc)
     expect(xml).toContain('<PrcItem>94</PrcItem><RecargoPct>10</RecargoPct><MontoItem>103.4</MontoItem>')
     expect(xml).not.toContain('RecargoMonto')
+    // The format asks a percent for its amount (field 34): the caller is told it went without one.
+    expect(doc.warnings).toEqual([{ formatField: 34, field: 'items[0].surchargePercent' }])
+  })
+
+  test('each percent written without its amount is listed in the warnings, and one written with it is not', () => {
+    const doc = exportOf({
+      items: [
+        // 10 % of 100 is a whole 10, written; 3.3 % of 100 is 3.3, left to its percent.
+        { name: 'Queso', quantity: 2, unit: 'KN', unitPrice: 50, discountPercent: 10, surchargePercent: 3.3 },
+        // 5 % of 25 is 1.25, left to its percent.
+        { name: 'Vino', quantity: 1, unit: 'BOT', unitPrice: 25, discountPercent: 5 },
+        { name: 'Pisco', quantity: 1, unit: 'BOT', unitPrice: 40 },
+      ],
+    })
+    expect(
+      doc.items.map(({ discountAmount, surchargeAmount, amount }) => [discountAmount, surchargeAmount, amount]),
+    ).toEqual([
+      [10, undefined, 93.3],
+      [undefined, undefined, 23.75],
+      [undefined, undefined, 40],
+    ])
+    expect(doc.warnings).toEqual([
+      { formatField: 34, field: 'items[0].surchargePercent' },
+      { formatField: 30, field: 'items[1].discountPercent' },
+    ])
+    const whole = exportOf({ items: [{ name: 'Queso', quantity: 2, unit: 'KN', unitPrice: 50, discountPercent: 10 }] })
+    expect(whole.warnings).toBeUndefined()
   })
 
   test.each<[string, LineItemInput]>([

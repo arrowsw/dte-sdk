@@ -727,21 +727,38 @@ export type Header = {
 }
 
 /**
- * EN: What the SII accepts with an objection (reparo), by the number of its validation in "Nuevas validaciones a la
- * IECV, DTE y DJ 3327 y 3328": 10, a total of zero on an invoice, an exempt invoice, a settlement invoice or a purchase
- * invoice (33, 34, 43, 46), and 12, a net amount of zero on an invoice, a settlement invoice or a purchase invoice (33,
- * 43, 46), both in the purchase book of the one who books it; 56, an invoice (33) whose net amount is not above zero.
- * ES: Lo que el SII acepta con reparo, por el número de su validación en "Nuevas validaciones a la IECV, DTE y DJ 3327 y
- * 3328": 10, un monto total en cero en una factura, una factura exenta, una liquidación factura o una factura de compra
- * (33, 34, 43, 46), y 12, un monto neto en cero en una factura, una liquidación factura o una factura de compra (33,
- * 43, 46), ambas en el libro de compras de quien lo registra; 56, una factura (33) cuyo monto neto no es mayor que cero.
+ * EN: What `createDocument` builds and the SII may object to. Of the totals, what the SII accepts with an objection
+ * (reparo), by the number of its validation in "Nuevas validaciones a la IECV, DTE y DJ 3327 y 3328": 10, a total of
+ * zero on an invoice, an exempt invoice, a settlement invoice or a purchase invoice (33, 34, 43, 46), and 12, a net
+ * amount of zero on an invoice, a settlement invoice or a purchase invoice (33, 43, 46), both in the purchase book of
+ * the one who books it; 56, an invoice (33) whose net amount is not above zero. Of a line of an export document, a
+ * percent written without its amount, by the field of the detail of Formato DTE 2.5 that asks a percent for its amount
+ * ("Si va el descuento en %, debe ir el monto correspondiente"): the schema's element holds whole numbers only, so a
+ * share with decimals has no amount to be written as, and the format leaves that amount optional on an export
+ * document.
+ * ES: Lo que `createDocument` arma y el SII puede reparar. De los totales, lo que el SII acepta con reparo, por el
+ * número de su validación en "Nuevas validaciones a la IECV, DTE y DJ 3327 y 3328": 10, un monto total en cero en una
+ * factura, una factura exenta, una liquidación factura o una factura de compra (33, 34, 43, 46), y 12, un monto neto en
+ * cero en una factura, una liquidación factura o una factura de compra (33, 43, 46), ambas en el libro de compras de
+ * quien lo registra; 56, una factura (33) cuyo monto neto no es mayor que cero. De una línea de un documento de
+ * exportación, un porcentaje escrito sin su monto, por el campo del detalle del Formato DTE 2.5 que le pide a un
+ * porcentaje su monto ("Si va el descuento en %, debe ir el monto correspondiente"): el elemento del esquema admite
+ * solo enteros, así que una parte con decimales no tiene monto con que escribirse, y el formato deja ese monto
+ * opcional en un documento de exportación.
  */
-export type DocumentWarning = {
-  /** EN: Number of the SII validation that objects to it. ES: Número de la validación del SII que lo repara. */
-  readonly validation: 10 | 12 | 56
-  /** EN: The total it is about. ES: `MntNeto` o `MntTotal` — El total del que se trata. */
-  readonly field: 'totals.netAmount' | 'totals.totalAmount'
-}
+export type DocumentWarning =
+  | {
+      /** EN: Number of the SII validation that objects to it. ES: Número de la validación del SII que lo repara. */
+      readonly validation: 10 | 12 | 56
+      /** EN: The total it is about. ES: `MntNeto` o `MntTotal` — El total del que se trata. */
+      readonly field: 'totals.netAmount' | 'totals.totalAmount'
+    }
+  | {
+      /** EN: The field of the detail of Formato DTE 2.5 that asks the percent for its amount: 30 for a discount, 34 for a surcharge. ES: `DescuentoMonto` (30) o `RecargoMonto` (34) — El campo del detalle del Formato DTE 2.5 que le pide al porcentaje su monto: 30 para un descuento, 34 para un recargo. */
+      readonly formatField: 30 | 34
+      /** EN: The percent written without its amount: `items[i].discountPercent` or `items[i].surchargePercent`, with the line's position from 0. ES: `DescuentoPct` o `RecargoPct` — El porcentaje escrito sin su monto: `items[i].discountPercent` o `items[i].surchargePercent`, con la posición de la línea desde 0. */
+      readonly field: string
+    }
 
 /**
  * EN: A normalized document, ready to be rendered, stamped and signed. Produced by `createDocument`.
@@ -759,7 +776,7 @@ export type Document = {
   readonly receiptReferences: readonly ReceiptReference[]
   /** EN: Commission lines (settlement invoices only). ES: `Comisiones` — Líneas de comisión (solo 43). */
   readonly commissions: readonly CommissionLine[]
-  /** EN: What the SII will accept with an objection, as `createDocument` found it; absent when there is nothing, and never written to the XML. ES: Lo que el SII aceptará con reparo, tal como lo encontró `createDocument`; ausente si no hay nada, y nunca se escribe en el XML. */
+  /** EN: What the SII may object to, as `createDocument` found it: totals it accepts with an objection, and on an export document each percent of a line written without its amount; absent when there is nothing, and never written to the XML. ES: Lo que el SII puede reparar, tal como lo encontró `createDocument`: totales que acepta con reparo, y en un documento de exportación cada porcentaje de una línea escrito sin su monto; ausente si no hay nada, y nunca se escribe en el XML. */
   readonly warnings?: readonly DocumentWarning[]
 }
 
