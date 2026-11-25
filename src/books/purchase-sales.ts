@@ -31,7 +31,7 @@ const normalizeCover = (cover: PurchaseSalesCoverInput): PurchaseSalesCover => {
     throw new DteError('MISSING_FIELD', { field: 'cover.notificationFolio' })
   if (kind === 'rectification' && cover.rectificationCode === undefined)
     throw new DteError('MISSING_FIELD', { field: 'cover.rectificationCode' })
-  const rectificationCode = kind === 'rectification' ? sanitizeText(cover.rectificationCode) : undefined
+  const rectificationCode = kind === 'rectification' ? sanitizeText(cover.rectificationCode, 'CodAutRec') : undefined
   if (rectificationCode !== undefined) assertMaxLength(rectificationCode, MAX_RECTIFICATION_CODE, 'CodAutRec')
   return {
     ...normalizeBookCover(cover),

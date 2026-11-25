@@ -1424,6 +1424,96 @@ describe('commissions and other charges', () => {
     })
   const charge = { kind: 'otherCharge', description: 'Flete' } as const
 
+  // Formato DTE 2.5, fields 113 and 114: the VAT may be split in own and third-party, each within the VAT.
+  describe('the VAT split in own and third-party (`splitVat`)', () => {
+    test("the VAT of the commissions is the own VAT and the rest is the third parties'", () => {
+      const doc = settle({ splitVat: true })
+      expect(doc.header.totals).toEqual({
+        netAmount: 10000,
+        vatRate: 19,
+        vatAmount: 1900,
+        ownVatAmount: 190,
+        thirdPartyVatAmount: 1710,
+        commissions: { netValue: 1000, vatValue: 190 },
+        totalAmount: 10710,
+      })
+      expect(toSiiDocument(doc).Encabezado.Totales).toMatchObject({ IVA: 1900, IVAProp: 190, IVATerc: 1710 })
+      // Left out, the totals are as they were.
+      expect(settle().header.totals.ownVatAmount).toBeUndefined()
+      expect(settle({ splitVat: false }).header.totals.thirdPartyVatAmount).toBeUndefined()
+    })
+
+    test("without commissions the whole VAT is the third parties', and commissions with the whole VAT leave them none", () => {
+      expect(settle({ splitVat: true, commissions: [] }).header.totals).toMatchObject({
+        vatAmount: 1900,
+        ownVatAmount: 0,
+        thirdPartyVatAmount: 1900,
+      })
+      const whole = settle({
+        splitVat: true,
+        commissions: [{ kind: 'commission', description: 'Todo', netValue: 10000 }],
+      })
+      expect(whole.header.totals).toMatchObject({ vatAmount: 1900, ownVatAmount: 1900, thirdPartyVatAmount: 0 })
+    })
+
+    test('a document without VAT, or whose commissions carry a VAT below zero or above the VAT, has no split', () => {
+      const exempt = settle({
+        splitVat: true,
+        items: [{ name: 'Venta exenta', unitPrice: 10000, settledDocumentType: '34', exemptIndicator: 1 }],
+      })
+      expect(exempt.header.totals.vatAmount).toBeUndefined()
+      expect(exempt.header.totals.ownVatAmount).toBeUndefined()
+      const negative = settle({
+        splitVat: true,
+        commissions: [{ kind: 'commission', description: 'Rebaja', netValue: -1000 }],
+      })
+      expect(negative.header.totals.commissions).toEqual({ netValue: -1000, vatValue: -190 })
+      expect(negative.header.totals.ownVatAmount).toBeUndefined()
+      expect(negative.header.totals.thirdPartyVatAmount).toBeUndefined()
+      const over = settle({
+        splitVat: true,
+        commissions: [{ kind: 'commission', description: 'Mayor', netValue: 10010 }],
+      })
+      expect(over.header.totals.commissions?.vatValue).toBe(1902)
+      expect(over.header.totals.ownVatAmount).toBeUndefined()
+    })
+
+    test('it is refused on any other type and with explicit totals', () => {
+      expectError(
+        () =>
+          createDocument({
+            type: 33,
+            folio: 1,
+            issuer,
+            receiver,
+            items: [{ name: 'X', unitPrice: 1000 }],
+            splitVat: true,
+          }),
+        'INVALID_OPTION',
+        { field: 'splitVat' },
+      )
+      expectError(
+        () =>
+          settle({ splitVat: true, totals: { netAmount: 10000, vatRate: 19, vatAmount: 1900, totalAmount: 11900 } }),
+        'INVALID_OPTION',
+        {
+          field: 'splitVat',
+        },
+      )
+      // False is none, wherever it is given.
+      expect(() =>
+        createDocument({
+          type: 33,
+          folio: 1,
+          issuer,
+          receiver,
+          items: [{ name: 'X', unitPrice: 1000 }],
+          splitVat: false,
+        }),
+      ).not.toThrow()
+    })
+  })
+
   test('the totals carry the sums of the lines and take them off the total', () => {
     const doc = settle()
     expect(doc.commissions).toEqual([

@@ -6,7 +6,6 @@ import {
   ACKNOWLEDGEMENT_TEXT,
   BOX,
   COLOURS,
-  DEFAULT_SII_OFFICE,
   FONT,
   GAP,
   LINE,
@@ -23,6 +22,7 @@ import {
   resolutionLine,
 } from './layout'
 import {
+  amountWriter,
   cityOf,
   dispatchText,
   dottedRut,
@@ -46,6 +46,7 @@ import {
   totalRows,
   transportGroups,
   wrapText,
+  type AmountWriter,
   type Canvas,
   type Field,
   type Fonts,
@@ -71,7 +72,7 @@ export type PrintedLogo = {
  * ES: Opciones comunes a todas las muestras impresas.
  */
 export type PrintedSampleOptions = {
-  /** EN: SII office under the type box; default the office of the issuer's commune (`siiOfficeForCommune`), or `S.I.I. - SANTIAGO CENTRO` when the commune is not in the table. ES: Oficina del SII bajo el recuadro; por defecto la oficina de la comuna del emisor (`siiOfficeForCommune`), o `S.I.I. - SANTIAGO CENTRO` si la comuna no está en la tabla. */
+  /** EN: SII office under the type box; default the office of the issuer's commune (`siiOfficeForCommune`). When the commune is not in the table the line is left out rather than naming an office that may not be the issuer's: give it here. ES: Oficina del SII bajo el recuadro; por defecto la oficina de la comuna del emisor (`siiOfficeForCommune`). Si la comuna no está en la tabla la línea se omite, en vez de nombrar una oficina que puede no ser la del emisor: indíquela aquí. */
   readonly siiOffice?: string
   /** EN: Resolution line under the stamp: a string printed as given, or the company's resolution as data, `{ number, date }` (`NroResol` and `FchResol` as `YYYY-MM-DD`), printed as `resolutionLine` writes it; default `Res. Ex. SII N° 0 del {year}`. ES: Línea de resolución bajo el timbre: un texto que se imprime tal cual, o la resolución de la empresa como dato, `{ number, date }` (`NroResol` y `FchResol` como `AAAA-MM-DD`), que se imprime como la escribe `resolutionLine`; por defecto `Res. Ex. SII N° 0 del {año}`. */
   readonly resolution?: string | { readonly number: number; readonly date: string }
@@ -152,6 +153,7 @@ const DETAIL_COLUMNS = (() => {
 })()
 // The measuring pass wraps descriptions at 37 % of the table, narrower than the column drawn, so the page is never short.
 const MEASURED_DESCRIPTION_WIDTH = Math.round(TABLE_WIDTH * 0.37) - TABLE.padX * 2
+const CODE_WIDTH = DETAIL_COLUMNS.code - TABLE.padX * 2
 const REFERENCE_COLUMNS = (() => {
   const type = Math.round(TABLE_WIDTH * 0.3)
   const folio = Math.round(TABLE_WIDTH * 0.15)
@@ -306,7 +308,8 @@ const drawHeader = (
   }
   ry += GAP.tiny
   drawTextCentered(canvas, `N° ${doc.folio}`, boxX, TYPE_BOX.width, ry, fonts.bold, FONT.small, red)
-  drawTextCentered(canvas, siiOffice, boxX, TYPE_BOX.width, y + boxHeight + GAP.small, fonts.normal, FONT.tiny, black)
+  if (siiOffice !== '')
+    drawTextCentered(canvas, siiOffice, boxX, TYPE_BOX.width, y + boxHeight + GAP.small, fonts.normal, FONT.tiny, black)
   if (page.of > 1) {
     const label = `Página ${page.number} de ${page.of}`
     drawTextCentered(
@@ -373,8 +376,11 @@ const drawReceiver = (canvas: Canvas, doc: PrintableDocument, y: number): number
   drawField(canvas, ['Señor(es): ', receiver.name], left, lineY(y, 0))
   rightAligned('RUT: ', dottedRut(receiver.rut), lineY(y, 0))
   drawField(canvas, ['Dirección: ', receiver.address], left, lineY(y, 1))
-  rightAligned('Comuna: ', receiver.commune, lineY(y, 1))
-  drawField(canvas, ['Giro: ', receiver.activity], left, lineY(y, 2))
+  // The receiver of an export document is abroad, and may name no commune and no line of business: their labels are
+  // left out with them.
+  const exported = isDocumentType(doc.type) && isExport(doc.type)
+  if (!exported || receiver.commune) rightAligned('Comuna: ', receiver.commune, lineY(y, 1))
+  if (!exported || receiver.activity) drawField(canvas, ['Giro: ', receiver.activity], left, lineY(y, 2))
   const city = cityOf(receiver)
   if (city) rightAligned('Ciudad: ', city, lineY(y, 2))
   const foreignId = foreignIdText(doc)
@@ -484,6 +490,8 @@ const drawItemRow = (
   index: number,
   row: ItemLayout,
   y: number,
+  written: AmountWriter,
+  exported: boolean,
 ): void => {
   const { fonts } = canvas
   const black = canvas.paint(COLOURS.black)
@@ -494,8 +502,9 @@ const drawItemRow = (
     description: '',
     quantity: printedQuantity(item.quantity),
     unit: item.unit ?? 'UN',
-    unitPrice: printedUnitPrice(item.unitPrice),
-    amount: item.amount === undefined ? '' : `$${formatAmount(item.amount)}`,
+    unitPrice: printedUnitPrice(item.unitPrice, written),
+    // Pesos print whole; the amount of an export document, in its currency, with the decimals it has.
+    amount: item.amount === undefined ? '' : exported ? written(item.amount) : `$${formatAmount(item.amount)}`,
   }
   let cx = MARGIN
   for (const column of columns) {
@@ -510,16 +519,25 @@ const drawItemRow = (
         drawText(canvas, note, cx + TABLE.padX, ty, fonts.normal, FONT.legal, canvas.paint(COLOURS.darkGrey))
         ty += LINE.tiny
       }
+    } else if (column.key === 'code' && row.codes.length > 1) {
+      // A code wider than its column goes on several lines, from the top as the description does.
+      row.codes.forEach((line, lineIndex) =>
+        drawText(canvas, line, cx + TABLE.padX, y + TABLE.padY + lineIndex * LINE.tiny, fonts.normal, FONT.tiny, black),
+      )
     } else {
+      // A value wider than its column is drawn smaller, so it stays inside it.
       const value = values[column.key]
-      const valueWidth = fonts.normal.widthOfTextAtSize(value, FONT.tiny)
+      const room = column.width - TABLE.padX * 2
+      const natural = fonts.normal.widthOfTextAtSize(value, FONT.tiny)
+      const size = natural > room ? (FONT.tiny * room) / natural : FONT.tiny
+      const valueWidth = Math.min(natural, room)
       const x =
         column.align === 'center'
           ? cx + (column.width - valueWidth) / 2
           : column.align === 'right'
             ? cx + column.width - valueWidth - TABLE.padX
             : cx + TABLE.padX
-      drawText(canvas, value, x, y + (row.height - FONT.tiny) / 2, fonts.normal, FONT.tiny, black)
+      drawText(canvas, value, x, y + (row.height - size) / 2, fonts.normal, size, black)
     }
     cx += column.width
   }
@@ -772,6 +790,8 @@ const sheetBlocks = ({
   const wordLines = words === '' ? [] : wrapText(words, fonts.normal, FONT.small, TABLE_WIDTH)
   const transport = transportLines(doc, fonts)
   const columns = detailColumns(doc)
+  const written = amountWriter(doc)
+  const exported = isDocumentType(doc.type) && isExport(doc.type)
   const references =
     doc.references.length === 0
       ? []
@@ -803,11 +823,11 @@ const sheetBlocks = ({
       ),
     doc.items,
     (item, index) => {
-      const row = itemRow(item, fonts, DETAIL_COLUMNS.description - TABLE.padX * 2)
+      const row = itemRow(item, fonts, DETAIL_COLUMNS.description - TABLE.padX * 2, CODE_WIDTH, written)
       return {
         height: row.height,
-        reserve: itemRow(item, fonts, MEASURED_DESCRIPTION_WIDTH).height,
-        draw: (canvas, y) => drawItemRow(canvas, columns, item, index, row, y),
+        reserve: itemRow(item, fonts, MEASURED_DESCRIPTION_WIDTH, CODE_WIDTH, written).height,
+        draw: (canvas, y) => drawItemRow(canvas, columns, item, index, row, y, written, exported),
       }
     },
     true,
@@ -993,7 +1013,7 @@ const draw = async (
   // A document with no TED says so where the stamp goes; a receipt printed without its stamp on purpose does not.
   const unstamped = doc.tedXml === '' && options.stamp !== false
   const transferable = options.transferable === true && needsTransferableCopy(doc)
-  const office = options.siiOffice ?? siiOfficeForCommune(doc.issuer.commune) ?? DEFAULT_SII_OFFICE
+  const office = options.siiOffice ?? siiOfficeForCommune(doc.issuer.commune) ?? ''
   if (options.paper === 'roll') {
     const rows = buildRoll({ doc, fonts, office, resolution, verification, logo, stamp, unstamped, transferable })
     const height = rollHeight(rows, fonts)
@@ -1036,6 +1056,10 @@ const checkPaperAndStamp = (doc: PrintableDocument, { paper, stamp }: RenderPrin
     throw new DteError('INVALID_OPTION', { field: 'stamp', value: stamp })
   if (stamp === false && !(isDocumentType(doc.type) && isReceipt(doc.type)))
     throw new DteError('INVALID_OPTION', { field: 'stamp', type: doc.type })
+  // The continuous paper is a receipt's: the amounts of an export document, in its currency, and its customs area are
+  // drawn on the sheet alone.
+  if (paper === 'roll' && isDocumentType(doc.type) && isExport(doc.type))
+    throw new DteError('INVALID_OPTION', { field: 'paper', type: doc.type })
 }
 
 /**
@@ -1062,8 +1086,12 @@ const checkPaperAndStamp = (doc: PrintableDocument, { paper, stamp }: RenderPrin
  * `MntMargenCom`) and the deposit guarantee (`GrntDep`), and under them the totals in another currency
  * (`OtraMoneda`), each tax by the name of its code; under an item, its surcharge (`RecargoMonto`), the bases and the
  * price to the final consumer of a withholding agent (`Retenedor`) and its value in another currency
- * (`MontoItemOtrMnda`); and a global discount or surcharge with its description (`GlosaDR`). The customs area
- * (`Aduana`) and the fields of export documents are not printed. And what eases the reading: the issue and due dates with the month in words; who dispatches the goods
+ * (`MontoItemOtrMnda`); and a global discount or surcharge with its description (`GlosaDR`). An export document
+ * (110, 111, 112) prints its amounts in the currency it names (`TpoMoneda`), with the decimals they have and no
+ * words for the total, its payment terms (`FmaPagExp`) in words, and its customs area (`Aduana`) in the transport box,
+ * each code Formato DTE 2.5 asks to print in words by the name its customs table gives it (sale mode and clause,
+ * transport route, ports, units, kinds of package, countries); a dispatch guide prints the customs area it carries
+ * the same way. And what eases the reading: the issue and due dates with the month in words; who dispatches the goods
  * (`TipoDespacho`) in words, under the receiver; the city of the issuer and of the receiver when it is not the commune
  * again; the receiver's RUT with dots; a referenced document that is not a DTE by its name (`Orden de Compra`), and
  * what the document does to the referenced one (`CodRef`) in words before its reason, both wrapped in their columns;
@@ -1104,8 +1132,12 @@ const checkPaperAndStamp = (doc: PrintableDocument, { paper, stamp }: RenderPrin
  * de comercialización (`MntBase`, `MntMargenCom`) y la garantía por depósito de envases (`GrntDep`), y bajo ellos los
  * totales en otra moneda (`OtraMoneda`), cada impuesto con el nombre de su código; bajo un ítem, su recargo
  * (`RecargoMonto`), los montos base y el precio al consumidor final de un agente retenedor (`Retenedor`) y su valor en
- * otra moneda (`MontoItemOtrMnda`); y un descuento o recargo global con su glosa (`GlosaDR`). El área de Aduana y los
- * campos de los documentos de exportación no se imprimen. Y lo que facilita la lectura: las fechas de emisión y de vencimiento con el mes en palabras; quién despacha los bienes (`TipoDespacho`)
+ * otra moneda (`MontoItemOtrMnda`); y un descuento o recargo global con su glosa (`GlosaDR`). Un documento de
+ * exportación (110, 111, 112) imprime sus montos en la moneda que nombra (`TpoMoneda`), con los decimales que tienen y
+ * sin el total en palabras, su forma de pago (`FmaPagExp`) en palabras, y su área de Aduana (`Aduana`) en el recuadro
+ * de transporte, cada código que el Formato DTE 2.5 pide imprimir en palabras con el nombre que le da su tabla de
+ * Aduanas (modalidad y cláusula de venta, vía de transporte, puertos, unidades, tipos de bulto, países); una guía de
+ * despacho imprime igual el área de Aduana que traiga. Y lo que facilita la lectura: las fechas de emisión y de vencimiento con el mes en palabras; quién despacha los bienes (`TipoDespacho`)
  * en palabras, bajo el receptor; la ciudad del emisor y la del receptor cuando no repiten la comuna; el RUT del
  * receptor con puntos; un documento referenciado que no es DTE por su nombre (`Orden de Compra`), y lo que el
  * documento le hace al referenciado (`CodRef`) en palabras antes de su razón, ambos cortados dentro de sus columnas;
@@ -1128,7 +1160,7 @@ const checkPaperAndStamp = (doc: PrintableDocument, { paper, stamp }: RenderPrin
  * @param options EN: office, resolution, logo, clock, `transferable`, `paper` and `stamp`. ES: oficina, resolución, logo, reloj, `transferable`, `paper` y `stamp`.
  * @param load EN: loader of the two libraries, for tests. ES: cargador de las dos librerías, para tests.
  * @returns EN: the PDF bytes. ES: los bytes del PDF.
- * @throws {DteError} EN: `MISSING_FIELD` (field `TipoDTE`) when the type is 0, `INVALID_DOCUMENT_TYPE` (field `TipoDTE`) for an export document (110, 111, 112), whose sample is not drawn yet, `INVALID_OPTION` (`paper` when it is neither `'sheet'` nor `'roll'`; `stamp` when it is not a boolean, or is `false` on a document that is not a receipt; `resolution.number` when a resolution given as data has a number that is not a whole number from 0; `verificationSite` when it is not up to 80 printable ASCII characters with no space), `INVALID_DATE` (field `resolution.date`) when its date is not a real `YYYY-MM-DD`, `ENCODING_UNSUPPORTED_CHAR` for a TED with a code point above U+00FF, `DEPENDENCY_UNAVAILABLE` when a library cannot be loaded, `PDF_RENDER_FAILED` (with `type` and `folio`) when a library throws while drawing, for example on a character outside WinAnsi. ES: `MISSING_FIELD` (campo `TipoDTE`) cuando el tipo es 0, `INVALID_DOCUMENT_TYPE` (campo `TipoDTE`) ante un documento de exportación (110, 111, 112), cuya muestra aún no se dibuja, `INVALID_OPTION` (`paper` si no es `'sheet'` ni `'roll'`; `stamp` si no es booleano, o es `false` en un documento que no es boleta; `resolution.number` si una resolución dada como dato trae un número que no es un entero desde 0; `verificationSite` si no son hasta 80 caracteres ASCII imprimibles sin espacios), `INVALID_DATE` (campo `resolution.date`) si su fecha no es una `AAAA-MM-DD` real, `ENCODING_UNSUPPORTED_CHAR` ante un TED con un code point mayor a U+00FF, `DEPENDENCY_UNAVAILABLE` si una librería no se puede cargar, `PDF_RENDER_FAILED` (con `type` y `folio`) si una librería lanza al dibujar, por ejemplo ante un carácter fuera de WinAnsi.
+ * @throws {DteError} EN: `MISSING_FIELD` (field `TipoDTE`) when the type is 0, `INVALID_OPTION` (`paper` when it is neither `'sheet'` nor `'roll'`, or is `'roll'` on an export document, which is drawn on the sheet alone; `stamp` when it is not a boolean, or is `false` on a document that is not a receipt; `resolution.number` when a resolution given as data has a number that is not a whole number from 0; `verificationSite` when it is not up to 80 printable ASCII characters with no space), `INVALID_DATE` (field `resolution.date`) when its date is not a real `YYYY-MM-DD`, `ENCODING_UNSUPPORTED_CHAR` for a TED with a code point above U+00FF, `DEPENDENCY_UNAVAILABLE` when a library cannot be loaded, `PDF_RENDER_FAILED` (with `type` and `folio`) when a library throws while drawing, for example on a character outside WinAnsi. ES: `MISSING_FIELD` (campo `TipoDTE`) cuando el tipo es 0, `INVALID_OPTION` (`paper` si no es `'sheet'` ni `'roll'`, o es `'roll'` en un documento de exportación, que se dibuja solo en la hoja; `stamp` si no es booleano, o es `false` en un documento que no es boleta; `resolution.number` si una resolución dada como dato trae un número que no es un entero desde 0; `verificationSite` si no son hasta 80 caracteres ASCII imprimibles sin espacios), `INVALID_DATE` (campo `resolution.date`) si su fecha no es una `AAAA-MM-DD` real, `ENCODING_UNSUPPORTED_CHAR` ante un TED con un code point mayor a U+00FF, `DEPENDENCY_UNAVAILABLE` si una librería no se puede cargar, `PDF_RENDER_FAILED` (con `type` y `folio`) si una librería lanza al dibujar, por ejemplo ante un carácter fuera de WinAnsi.
  */
 export const renderPrintedSample = async (
   doc: PrintableDocument,
@@ -1136,10 +1168,6 @@ export const renderPrintedSample = async (
   load: () => Promise<PdfModules> = loadPdfModules,
 ): Promise<Uint8Array> => {
   if (!doc.type) throw new DteError('MISSING_FIELD', { field: 'TipoDTE' })
-  // An export document is in a foreign currency, with decimals and a customs area. The sample draws none of it, and
-  // would print its amounts as pesos, in figures and in words.
-  if (isDocumentType(doc.type) && isExport(doc.type))
-    throw new DteError('INVALID_DOCUMENT_TYPE', { field: 'TipoDTE', type: doc.type })
   checkPaperAndStamp(doc, options)
   const resolution = resolutionOf(options)
   const verification = verificationLine(options.verificationSite)

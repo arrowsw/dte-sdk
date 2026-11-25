@@ -9,11 +9,11 @@ on 2026-11-14 to ship inside the package with their validator as an optional pee
 
 | Entry | Holds | Size | Reaches `node:` |
 |---|---|---|---|
-| `dte-sdk` | Documents (export documents included), stamps, signatures, envelopes, books, verification of received documents, the assignment of invoices, SII web services client over `fetch`, public registry of issuers | 48.03 kB | Not by import: it asks the runtime for `node:crypto` at the first signature |
-| `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.4 kB | Yes, on first use |
-| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 86.5 kB | Yes, on first use |
-| `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 19.8 kB | Yes, on first use |
-| `dte-sdk/catalogs` | The SII's large code tables: the business activities | 10.65 kB | No |
+| `dte-sdk` | Documents (export documents included), stamps, signatures, envelopes, books, verification of received documents, the assignment of invoices, SII web services client over `fetch`, public registry of issuers | 49.55 kB | Not by import: it asks the runtime for `node:crypto` at the first signature |
+| `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.42 kB | Yes, on first use |
+| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 87.07 kB | Yes, on first use |
+| `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 28.21 kB | Yes, on first use |
+| `dte-sdk/catalogs` | The large code tables: the SII's business activities and the customs tables of an export document | 18.03 kB | No |
 | `dte-sdk/schemas` | The SII's schemas as text and the validation of a document against them; `xmllint-wasm` is an optional peer | 24.72 kB | No |
 
 Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
@@ -155,8 +155,25 @@ Breaking a header too long for one line, the decimals of a percent's share on an
 wrapped lines of the issuer, on 2026-11-24, took `dte-sdk` from 47.56 kB to 47.86 kB, `dte-sdk/portal`, whose
 certification runner builds documents with the same code, from 85.98 kB to 86.43 kB, over its 86 kB limit, which went
 to 88 kB, and `dte-sdk/pdf` from 19.68 kB to 19.8 kB; the other entries did not move.
+Writing a character outside ISO-8859-1 in the form it has there, on 2026-11-25, took `dte-sdk` from 47.86 kB to
+48.22 kB, over its 48 kB limit, which went to 50 kB, and `dte-sdk/portal` to 86.75 kB; the item code that wraps in
+its column took `dte-sdk/pdf` to 19.89 kB.
+The VAT of a settlement invoice split in own and third-party, on 2026-11-25, took `dte-sdk` to 48.33 kB, and with the
+customers that take turns in a test set and the check before each upload of the run, `dte-sdk/portal` to 87.02 kB,
+both under their limits.
+The electronic receipts and the images an assignment file carries, on 2026-11-25, took `dte-sdk` to 48.98 kB,
+under its limit; `dte-sdk/portal` measured 86.98 kB and `dte-sdk/pdf` 19.93 kB.
+Reporting who signed a received document, with the check of its certificate against the ones the caller trusts, on
+2026-11-25, took `dte-sdk` to 49.54 kB, under its limit; `dte-sdk/portal` measured 86.99 kB and `dte-sdk/pdf`
+19.93 kB.
+The customs tables of an export document, eight tables of Anexo 51 of the Compendio de Normas Aduaneras with some
+750 rows, on 2026-11-25, took `dte-sdk/catalogs` from 10.65 kB to 17.96 kB, over its 12 kB limit, which went to
+20 kB; no other entry reads them, so none moved.
+The printed sample of an export document, on 2026-11-25, prints each customs code in the words of its table, as the
+format asks, so `dte-sdk/pdf` carries those tables: it went from 19.93 kB to 28.21 kB, over its 20 kB limit, which went
+to 30 kB; `dte-sdk/catalogs` measured 18.03 kB.
 The settlement date of an export invoice paid in advance and the marks of its packages, on 2026-11-25, took
-`dte-sdk` from 47.86 kB to 48.03 kB, over its 48 kB limit, which went to 50 kB, and `dte-sdk/portal` to 86.5 kB.
+`dte-sdk` to 49.55 kB, under its limit, and `dte-sdk/portal` to 87.07 kB.
 
 ## Why
 

@@ -4,7 +4,7 @@ import { BOX, GAP, LINE, resolutionLine } from '../../src/pdf/layout'
 import { parsePrintableDocuments, type PrintableDocument, type PrintableTransport } from '../../src/pdf/parse'
 import { needsTransferableCopy, renderPrintedSample } from '../../src/pdf/render'
 import { FIXED_NOW } from '../support/fixtures'
-import { decodeStampInPdf, pdfImages, pdfPage, pdfText } from '../support/pdf'
+import { decodeStampInPdf, pdfImages, pdfPage, pdfText, pdfTextSizes } from '../support/pdf'
 import { failure } from '../support/portal'
 import {
   basicSetXml,
@@ -111,15 +111,55 @@ describe('an invoice', () => {
     expect(custom).not.toContain('S.I.I. - ÑUÑOA')
   })
 
-  test("without an office the one of the issuer's commune is printed, and Santiago Centro when the table lacks it", async () => {
+  test("without an office the one of the issuer's commune is printed, and none when the table lacks the commune", async () => {
     const office = async (commune: string) =>
       (await pdfText(await render({ ...invoiceDoc, issuer: { ...invoiceDoc.issuer, commune } }))).match(
         /S\.I\.I\. - [^\n]+/,
       )?.[0]
     await expect(office('LAS CONDES')).resolves.toBe('S.I.I. - SANTIAGO ORIENTE')
     await expect(office('Chillán Viejo')).resolves.toBe('S.I.I. - CHILLÁN')
-    await expect(office('Atlantis')).resolves.toBe('S.I.I. - SANTIAGO CENTRO')
-    await expect(office('')).resolves.toBe('S.I.I. - SANTIAGO CENTRO')
+    await expect(office('Atlantis')).resolves.toBeUndefined()
+    await expect(office('')).resolves.toBeUndefined()
+    // The page is as tall without the line: the room under the type box stays.
+    const known = await pdfPage(
+      await render({ ...invoiceDoc, issuer: { ...invoiceDoc.issuer, commune: 'LAS CONDES' } }),
+    )
+    const unknown = await pdfPage(
+      await render({ ...invoiceDoc, issuer: { ...invoiceDoc.issuer, commune: 'Atlantis' } }),
+    )
+    expect(unknown.height).toBe(known.height)
+  })
+
+  test('an item code wider than its column goes on several lines and makes its row taller', async () => {
+    const withCode = (code: string) => render({ ...invoiceDoc, tedXml: '', items: [{ code, name: 'Producto' }] })
+    const short = await pdfPage(await withCode('ABC-123'))
+    const long = await withCode('7801234567890-LOTE-2026-11-A-0001')
+    expect(await pdfText(long)).toContain('78012345678\n90-LOTE-202\n6-11-A-0001\nProducto')
+    expect((await pdfPage(long)).height).toBeGreaterThan(short.height)
+    // A code of several words breaks between them first.
+    const words = await pdfText(await withCode('INT1: 78012345 EAN13: 7801234'))
+    expect(words).toContain('INT1:\n78012345\nEAN13:\n7801234\nProducto')
+  })
+
+  test('a quantity, a price or an amount wider than its column is drawn smaller instead of over the next one', async () => {
+    const item = {
+      code: 'A',
+      name: 'Combustible',
+      quantity: 123456.123456,
+      unitPrice: 987654321.123456,
+      amount: 121932631356500,
+    }
+    const wide = await render({ ...invoiceDoc, tedXml: '', items: [item] })
+    const sizeOf = async (pdf: Uint8Array, text: string) =>
+      (await pdfTextSizes(pdf)).find((drawn) => drawn.text === text)?.size
+    await expect(sizeOf(wide, 'Combustible')).resolves.toBe(8)
+    await expect(sizeOf(wide, '123.456,123456')).resolves.toBeLessThan(8)
+    await expect(sizeOf(wide, '$121.932.631.356.500')).resolves.toBeLessThan(8)
+    // One that fits keeps its size, and the row is as tall either way.
+    const plain = await render({ ...invoiceDoc, tedXml: '', items: [{ ...item, quantity: 12, amount: 1200 }] })
+    await expect(sizeOf(plain, '12')).resolves.toBe(8)
+    await expect(sizeOf(plain, '$1.200')).resolves.toBe(8)
+    expect((await pdfPage(wide)).height).toBe((await pdfPage(plain)).height)
   })
 
   test('a name or an address too long for the width left of the type box wraps instead of running under it', async () => {
@@ -424,14 +464,17 @@ describe('errors', () => {
     expect(error.details).toEqual({ field: 'TipoDTE' })
   })
 
-  test.each([110, 111, 112])('an export document (%p) is refused before a library loads', async (type) => {
-    // Its amounts are in a foreign currency, with decimals: the sample would print them as pesos.
-    const load = jest.fn()
-    const error = await failure(renderPrintedSample({ ...invoiceDoc, type }, {}, load))
-    expect(error.code).toBe('INVALID_DOCUMENT_TYPE')
-    expect(error.details).toEqual({ field: 'TipoDTE', type })
-    expect(load).not.toHaveBeenCalled()
-  })
+  test.each([110, 111, 112])(
+    'an export document (%p) on continuous paper is refused before a library loads',
+    async (type) => {
+      // Its amounts are in a foreign currency and it carries a customs area: the roll draws neither.
+      const load = jest.fn()
+      const error = await failure(renderPrintedSample({ ...invoiceDoc, type }, { paper: 'roll' }, load))
+      expect(error.code).toBe('INVALID_OPTION')
+      expect(error.details).toEqual({ field: 'paper', type })
+      expect(load).not.toHaveBeenCalled()
+    },
+  )
 
   test('a character outside WinAnsi is PDF_RENDER_FAILED with the type and folio', async () => {
     const error = await failure(render({ ...invoiceDoc, items: [{ ...invoiceDoc.items[0], name: '你好' }] }))

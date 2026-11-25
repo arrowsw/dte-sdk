@@ -132,7 +132,7 @@ const validate = (input: BookEntryInput, index: number): void => {
 
 const text = (value: string | undefined, maxLength: number, field: string): string | undefined => {
   if (value === undefined) return undefined
-  const sanitized = sanitizeText(value)
+  const sanitized = sanitizeText(value, field)
   assertMaxLength(sanitized, maxLength, field)
   return sanitized
 }
