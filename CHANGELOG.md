@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The description of `paper` says an export document is refused on continuous paper** (`dte-sdk/pdf`). The option of
+  `renderPrintedSample` still read "Every type admits both", while 0.16.0 draws an export document (110, 111, 112) on
+  the sheet alone and refuses it on `'roll'` (`INVALID_OPTION`, `paper`), as the function's own list of errors says.
+  Only the comment changes.
+
 ## [0.16.0] - 2026-11-25
 
 ### Added
