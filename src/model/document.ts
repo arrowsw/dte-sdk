@@ -457,7 +457,7 @@ export type PackageType = {
   readonly code?: number
   /** EN: Number of packages of this type (1 to 9999999999). ES: `CantBultos` — Cantidad de bultos de este tipo, de 1 a 9999999999. */
   readonly count?: number
-  /** EN: Marks of the packages (max 255). ES: `Marcas` — Identificación de marcas, máximo 255. */
+  /** EN: Marks of the packages (max 255); required on an export invoice (110) for a package that is not a container (codes 73 to 76, and 78). ES: `Marcas` — Identificación de marcas, máximo 255; obligatorias en una factura de exportación (110) para un bulto que no es un contenedor (códigos 73 a 76, y 78). */
   readonly marks?: string
   /** EN: Container id, with its dash and check digit (max 25). ES: `IdContainer` — Id del contenedor, con guion y dígito verificador, máximo 25. */
   readonly containerId?: string
@@ -630,7 +630,7 @@ export type HeaderOptions = {
   readonly paymentTerms?: PaymentTerms
   /** EN: Export payment terms, the code of the customs service's table of payment forms (1 to 99, in digits); on an export document 21, without payment, makes its total zero (Formato DTE 2.5, field 124). ES: `FmaPagExp` — Forma de pago de exportación, el código de la tabla de formas de pago de Aduana (1 a 99, en dígitos); en un documento de exportación el 21, sin pago, deja su total en cero (Formato DTE 2.5, campo 124). */
   readonly exportPaymentTerms?: string
-  /** EN: Settlement date. ES: `FchCancel` — Fecha de cancelación. */
+  /** EN: Settlement date; required on an export invoice (110) paid in advance (`exportPaymentTerms` 32). ES: `FchCancel` — Fecha de cancelación; obligatoria en una factura de exportación (110) pagada por anticipado (`exportPaymentTerms` 32). */
   readonly settlementDate?: string
   /** EN: Settled amount. ES: `MntCancel` — Monto cancelado. */
   readonly settledAmount?: number

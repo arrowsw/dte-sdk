@@ -5,7 +5,7 @@ import { DteError } from '../src/errors'
 import { calculateLineAmount } from '../src/totals/calculate'
 import type { Currency } from '../src/catalogs/codes'
 import { FOREIGN_RECEIVER_RUT } from '../src/catalogs/codes'
-import type { DocumentInput, LineItemInput } from '../src/model/document'
+import type { DocumentInput, LineItemInput, PackageType } from '../src/model/document'
 import { FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from './support/fixtures'
 
 const issuer = {
@@ -2402,6 +2402,32 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
     ['transport.customs.grossWeightUnit', { transport: { customs: { ...customs, grossWeight: 100.5 } } }],
     ['transport.customs.netWeightUnit', { transport: { customs: { ...customs, netWeight: 90.25 } } }],
     ['transport.customs.totalPackages', { transport: { customs: { ...customs, packages: [{ code: 13, count: 2 }] } } }],
+    // Field 15 of the header: the settlement date, when the export is paid in advance (`FmaPagExp` 32, ANTICIPO).
+    ['options.settlementDate', { options: { exportPaymentTerms: '32' } }],
+    // Field 98: the marks of a package that is not a container.
+    [
+      'transport.customs.packages[0].marks',
+      { transport: { customs: { ...customs, totalPackages: 2, packages: [{ code: 80, count: 2 }] } } },
+    ],
+    [
+      'transport.customs.packages[1].marks',
+      {
+        transport: {
+          customs: {
+            ...customs,
+            totalPackages: 2,
+            packages: [
+              { code: 74, count: 1, containerId: 'MSCU1234567' },
+              { code: 22, count: 1, marks: ' ' },
+            ],
+          },
+        },
+      },
+    ],
+    [
+      'transport.customs.packages[0].marks',
+      { transport: { customs: { ...customs, totalPackages: 1, packages: [{ count: 1 }] } } },
+    ],
     ['items[0].quantity', { items: [{ name: 'Granel', unit: 'KN', amount: 10 }] }],
     ['items[0].unit', { items: [{ name: 'Granel', quantity: 1, unitPrice: 10 }] }],
   ])('%s is required on an export invoice', (field, overrides) => {
@@ -2421,6 +2447,37 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
     }
     if (required === undefined) expect(exportOf(bare).header.totals.totalAmount).toBe(100)
     else expectError(() => exportOf(bare), 'MISSING_FIELD', { field: required })
+  })
+
+  test('an export paid in advance carries its settlement date, and any other payment asks for none', () => {
+    const paid = exportOf({ options: { exportPaymentTerms: '32', settlementDate: '2026-11-10' } })
+    expect(paid.header.options).toEqual({ exportPaymentTerms: '32', settlementDate: '2026-11-10' })
+    expect(toSiiDocument(paid).Encabezado.IdDoc).toMatchObject({ FmaPagExp: '32', FchCancel: '2026-11-10' })
+    // Only the payment the customs table calls ANTICIPO: a mix of advance and collection is another code.
+    for (const terms of ['1', '11', '50', '70'])
+      expect(exportOf({ options: { exportPaymentTerms: terms } }).header.options).toEqual({ exportPaymentTerms: terms })
+    // And only the invoice: the format asks it of no note.
+    expect(note(112, { options: { exportPaymentTerms: '32' } }).header.options).toEqual({ exportPaymentTerms: '32' })
+    expect(note(111, { options: { exportPaymentTerms: '32' } }).header.options).toEqual({ exportPaymentTerms: '32' })
+  })
+
+  test('a container needs no marks, and neither does a package of an export note', () => {
+    const packed = (packages: readonly PackageType[]) =>
+      exportOf({ transport: { customs: { ...customs, totalPackages: packages.length, packages } } })
+    for (const code of [73, 74, 75, 76, 78])
+      expect(packed([{ code, count: 1, containerId: 'MSCU1234567' }]).header.transport?.customs?.packages).toEqual([
+        { code, count: 1, containerId: 'MSCU1234567' },
+      ])
+    // 77 is a tank that is no container, by the words of the table itself.
+    expectError(() => packed([{ code: 77, count: 1 }]), 'MISSING_FIELD', {
+      field: 'transport.customs.packages[0].marks',
+    })
+    expect(packed([{ code: 80, count: 4, marks: 'S/M' }]).header.transport?.customs?.packages).toEqual([
+      { code: 80, count: 4, marks: 'S/M' },
+    ])
+    expect(
+      note(112, { transport: { customs: { totalPackages: 1, packages: [{ code: 80, count: 1 }] } } }).header.transport,
+    ).toEqual({ customs: { totalPackages: 1, packages: [{ code: 80, count: 1 }] } })
   })
 
   test('service indicator 6 is excused of nothing: the sale clause is asked for too', () => {
