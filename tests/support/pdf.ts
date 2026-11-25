@@ -19,19 +19,30 @@ const rawStream = (document: PDFDocument, object: PDFObject): PDFRawStream => {
   return stream
 }
 
-/** Every string drawn on a page (the first by default), in drawing order, one per line (WinAnsi read as Latin-1). */
-export const pdfText = async (bytes: Uint8Array, index = 0): Promise<string> => {
+// The content streams of a page (the first by default), decoded and read as Latin-1.
+const pageContent = async (bytes: Uint8Array, index: number): Promise<string> => {
   const document = await PDFDocument.load(bytes)
   const contents = document.getPage(index).node.Contents()
   const parts = contents instanceof PDFArray ? contents.asArray() : contents === undefined ? [] : [contents]
-  const strings: string[] = []
-  for (const part of parts) {
-    const text = Buffer.from(decodePDFRawStream(rawStream(document, part)).decode()).toString('latin1')
-    for (const match of text.matchAll(/<([0-9A-Fa-f]+)>\s*Tj/g))
-      strings.push(Buffer.from(match[1], 'hex').toString('latin1'))
-  }
-  return strings.join('\n')
+  return parts
+    .map((part) => Buffer.from(decodePDFRawStream(rawStream(document, part)).decode()).toString('latin1'))
+    .join('\n')
 }
+
+/** Every string drawn on a page (the first by default), in drawing order, one per line (WinAnsi read as Latin-1). */
+export const pdfText = async (bytes: Uint8Array, index = 0): Promise<string> =>
+  [...(await pageContent(bytes, index)).matchAll(/<([0-9A-Fa-f]+)>\s*Tj/g)]
+    .map((match) => Buffer.from(match[1], 'hex').toString('latin1'))
+    .join('\n')
+
+/** Every string drawn on a page (the first by default) with the font size it was drawn at, in drawing order. */
+export const pdfTextSizes = async (
+  bytes: Uint8Array,
+  index = 0,
+): Promise<readonly { readonly text: string; readonly size: number }[]> =>
+  [
+    ...(await pageContent(bytes, index)).matchAll(/\/\S+\s+([\d.]+)\s+Tf(?:(?!\bTf\b)[\s\S])*?<([0-9A-Fa-f]+)>\s*Tj/g),
+  ].map((match) => ({ text: Buffer.from(match[2], 'hex').toString('latin1'), size: Number(match[1]) }))
 
 export type PdfImage = { readonly width: number; readonly height: number; readonly pixels: Luminance | null }
 

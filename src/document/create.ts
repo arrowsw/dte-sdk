@@ -200,7 +200,7 @@ export type CreateDocumentOptions = {
 // Sanitizes a text field, enforces its schema limit and returns undefined for empty optionals.
 const text = (value: string | undefined, field: LimitedField): string | undefined => {
   if (value === undefined) return undefined
-  const clean = sanitizeText(value)
+  const clean = sanitizeText(value, field)
   if (clean === '') return undefined
   assertMaxLength(clean, FIELD_LIMITS[field], field)
   return clean

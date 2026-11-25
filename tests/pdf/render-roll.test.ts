@@ -336,6 +336,12 @@ describe('a document with little data', () => {
     expect(await pdfImages(broken)).toHaveLength(1)
   })
 
+  test('a commune outside the table prints no office on the roll', async () => {
+    const lost = { ...receiptDoc, issuer: { ...receiptDoc.issuer, commune: 'Atlantis' } }
+    expect(await pdfText(await roll(lost))).not.toContain('S.I.I. -')
+    expect(await pdfText(await roll(lost, { siiOffice: 'S.I.I. - TEMUCO' }))).toContain('S.I.I. - TEMUCO')
+  })
+
   test('the office and the resolution of the options replace the defaults', async () => {
     const text = await pdfText(await roll(receiptDoc, { siiOffice: 'S.I.I. - TEMUCO', resolution: 'Res. 80 de 2014' }))
     expect(text).toContain('S.I.I. - TEMUCO')

@@ -362,7 +362,7 @@ const context = (input: AnswerInput) => {
     ms: now.getTime(),
     stamp: chileTimestamp(now),
     contact: {
-      ...(name ? { NmbContacto: sanitizeText(name) } : {}),
+      ...(name ? { NmbContacto: sanitizeText(name, 'NmbContacto') } : {}),
       ...(phone ? { FonoContacto: phone } : {}),
       ...(mail ? { MailContacto: mail } : {}),
     },
