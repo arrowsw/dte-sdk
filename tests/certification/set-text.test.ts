@@ -13,6 +13,8 @@ import {
   BASIC_SET_TEXT,
   EXEMPT_PURCHASE_BOOK_SET_TEXT,
   EXEMPT_SET_TEXT,
+  EXPORT_ATTENTION_1,
+  EXPORT_ATTENTION_2,
   EXPORT_SET_TEXT,
   FULL_SET_TEXT,
   GUIDE_SET_TEXT,
@@ -32,7 +34,6 @@ describe('the whole download', () => {
       'salesBook',
       'purchaseBook',
       'exemptPurchaseBook',
-      'export',
     ])
     expect(sets.every((set) => set.attentionNumber === ATTENTION)).toBe(true)
     expect(sets[0].name).toBe('BASICO')
@@ -143,30 +144,137 @@ describe('the other case sets', () => {
     expect(set.cases.map((item) => item.documentType)).toEqual([46, 61, 56])
     expect(set.cases[1].items).toEqual([{ name: 'Chatarra de fierro', quantity: 100 }])
   })
+})
 
-  test('export: the export-only lines are kept by label and the set is typed export', () => {
-    const [set] = parseTestSetText(EXPORT_SET_TEXT)
-    expect(set.kind).toBe('export')
-    expect(set.cases[0]).toMatchObject({
-      documentType: 110,
-      currency: 'DOLAR USA',
+describe('the export sets', () => {
+  const [first, second] = parseTestSetText(EXPORT_SET_TEXT)
+  const id1 = (n: number) => `${EXPORT_ATTENTION_1}-${n}`
+  const id2 = (n: number) => `${EXPORT_ATTENTION_2}-${n}`
+  const exportCase = (lines: readonly string[]) =>
+    parseTestSetText(['SET DOCUMENTOS DE EXPORTACION - NUMERO DE ATENCION: 7', 'CASO 7-1', ...lines].join('\n'))[0]
+      .cases[0]
+
+  test('are two sets, each with its attention number, an invoice and two notes, then three invoices', () => {
+    expect([first, second].map((set) => [set.name, set.attentionNumber, set.kind])).toEqual([
+      ['DOCUMENTOS DE EXPORTACION (1)', EXPORT_ATTENTION_1, 'export'],
+      ['DOCUMENTOS DE EXPORTACION (2)', EXPORT_ATTENTION_2, 'export'],
+    ])
+    expect(first.cases.map((testCase) => [testCase.id, testCase.documentType])).toEqual([
+      [id1(1), 110],
+      [id1(2), 112],
+      [id1(3), 111],
+    ])
+    expect(second.cases.map((testCase) => [testCase.id, testCase.documentType])).toEqual([
+      [id2(1), 110],
+      [id2(2), 110],
+      [id2(3), 110],
+    ])
+  })
+
+  test('an invoice keeps its labelled lines, the units of tare and weights, its customs document and its items', () => {
+    expect(first.cases[0]).toMatchObject({
+      currency: 'FRANCO SZ',
       exportFields: {
         'FORMA DE PAGO EXPORTACION': 'ANTICIPO',
-        'MODALIDAD DE VENTA': 'A FIRME',
-        'CLAUSULA DE VENTA': 'CIF',
-        'TOTAL CLAUSULA DE VENTA': '1500.50',
-        'VIA DE TRANSPORTE': 'MARITIMA',
-        'PUERTO DE EMBARQUE': 'VALPARAISO',
-        'PUERTO DE DESEMBARQUE': 'ROTTERDAM',
-        'TIPO DE BULTO': 'PALLET',
-        'TOTAL BULTOS': '4',
-        FLETE: '200',
-        SEGURO: '50',
-        'PAIS RECEPTOR': 'HOLANDA',
-        'COMISIONES EN EL EXTRANJERO': '5',
+        'MODALIDAD DE VENTA': 'EN CONSIGNACION LIBRE',
+        'CLAUSULA DE VENTA': 'S/CL',
+        'TOTAL CLAUSULA DE VENTA': '3523.59',
+        'VIA DE TRANSPORTE': 'FERROVIARIO',
+        'PUERTO DE EMBARQUE': 'PUERTO MONTT',
+        'PUERTO DE DESEMBARQUE': 'NAPOLES',
+        'UNIDAD DE MEDIDA DE TARA': 'KN',
+        'UNIDAD DE PESO BRUTO': 'PAR',
+        'UNIDAD DE PESO NETO': 'PAR',
+        'TIPO DE BULTO': 'PLANCHAS',
+        'TOTAL BULTOS': '69',
+        FLETE: '2069.28',
+        SEGURO: '1215.22',
+        'PAIS RECEPTOR': 'ITALIA',
       },
-      items: [{ name: 'Vino tinto reserva', quantity: 100, unitPrice: 12 }],
+      customsReferences: ['MIC/DTA'],
+      items: [{ name: 'CHATARRA DE ALUMINIO', quantity: 687, unit: 'PAR', unitPrice: 159 }],
     })
+    // The documentary line is not the document of the case, and the instruction lines are nothing.
+    expect(first.cases[0].documentText).toBe('FACTURA DE EXPORTACION ELECTRONICA')
+    expect(Object.keys(first.cases[0].exportFields)).toHaveLength(15)
+  })
+
+  test('a row reads its columns by the header: a discount, a line value, and two customs documents', () => {
+    expect(second.cases[1].items).toEqual([
+      {
+        name: 'CAJAS CIRUELAS TIERNIZADAS SIN CAROZO CALIBRE 60/70',
+        quantity: 1036,
+        unit: 'KN',
+        unitPrice: 194,
+        discount: '5%',
+      },
+      { name: 'CAJAS DE PASAS DE UVA FLAME MORENA SIN SEMILLA MEDIANAS', quantity: 243, unit: 'KN', unitPrice: 132 },
+    ])
+    expect(second.cases[1].exportFields['COMISIONES EN EL EXTRANJERO']).toBe('11')
+    expect(second.cases[1].customsReferences).toEqual(['DUS', 'AWB'])
+    expect(second.cases[0].items).toEqual([{ name: 'ASESORIAS Y PROYECTOS PROFESIONALES', quantity: 1, unitPrice: 94 }])
+    expect(second.cases[0].exportFields['RECARGO EN LA LINEA']).toBe('10')
+    expect(second.cases[2]).toMatchObject({
+      currency: 'DOLAR USA',
+      exportFields: { 'PAIS RECEPTOR': 'VENEZUELA' },
+      customsReferences: ['RESOLUCION SNA'],
+      items: [{ name: 'ALOJAMIENTO HABITACIONES', quantity: 1, unitPrice: 281 }],
+    })
+  })
+
+  test('a note keeps its reference, its reason and the items it names, or none', () => {
+    expect(first.cases[1]).toMatchObject({
+      referencedCase: id1(1),
+      reasonText: 'DEVOLUCION DE MERCADERIA',
+      items: [{ name: 'CHATARRA DE ALUMINIO', quantity: 229 }],
+      customsReferences: [],
+    })
+    expect(first.cases[2]).toMatchObject({ referencedCase: id1(2), reasonText: 'ANULA NOTA DE CREDITO', items: [] })
+  })
+
+  test('numbers take a point or a comma, a cell that is no number keeps a row out, and a row with no header is a quantity', () => {
+    const testCase = exportCase([
+      'Vino  12  BOT  3,5',
+      'ITEM  CANTIDAD  UNIDAD  PRECIO  DESCUENTO  OTRA',
+      'Pisco  2.5  BOT  1.25  10%  x',
+      'Queso  dos  KN  4',
+      'Uva  4  KN  y',
+      'Nada',
+      'ITEM  VALOR',
+      'Embalaje especial  10,75',
+    ])
+    expect(testCase.items).toEqual([
+      { name: 'Vino', quantity: 12 },
+      { name: 'Pisco', quantity: 2.5, unit: 'BOT', unitPrice: 1.25, discount: '10%' },
+      { name: 'Embalaje especial', quantity: 1, unitPrice: 10.75 },
+    ])
+  })
+
+  test('the tolerant labels: a percent after its number, a destination of its own, and a reference that names a case', () => {
+    const testCase = exportCase([
+      'DOCUMENTO  FACTURA DE EXPORTACION ELECTRONICA',
+      '10 % RECARGO EN LA LINEA',
+      'RECARGO EN LA LINEA SIN PORCENTAJE',
+      'PAIS DE DESTINO: ESPAÑA',
+      'UNIDAD DE MEDIDA DEL PESO BRUTO: KN',
+      'UNIDAD TARA KN',
+      'REFERENCIA: CASO 7-0',
+      'REFERENCIA: B/L Y CARTA DE PORTE',
+      'REFERENCIA: RESOLUCION DEL SERVICIO NACIONAL DE ADUANAS',
+    ])
+    expect(testCase.exportFields).toEqual({
+      'RECARGO EN LA LINEA': '10',
+      'PAIS DESTINO': 'ESPAÑA',
+      'UNIDAD DE PESO BRUTO': 'KN',
+      'UNIDAD DE MEDIDA DE TARA': 'KN',
+    })
+    expect(testCase.referencedCase).toBe('7-0')
+    expect(testCase.customsReferences).toEqual(['B/L Y CARTA DE PORTE', 'RESOLUCION DEL SERVICIO NACIONAL DE ADUANAS'])
+  })
+
+  test('the cases of every other set carry no customs references', () => {
+    for (const set of parseTestSetText(FULL_SET_TEXT))
+      for (const testCase of set.cases) expect(testCase).not.toHaveProperty('customsReferences')
   })
 })
 

@@ -13,7 +13,7 @@ export const TEST_SET_KINDS = {
   guide: 'guide',
   /** EN: Purchase invoice and notes (46, 61, 56). ES: `SET FACTURA DE COMPRA` / `SET CASO GENERAL FACTURA COMPRA` — Factura de compra y notas (46, 61, 56). */
   purchase: 'purchase',
-  /** EN: Export documents (110, 111, 112); parsed, never issued. ES: `SET DOCUMENTOS DE EXPORTACION` — Documentos de exportación; se parsea, no se emite. */
+  /** EN: Export documents (110, 111, 112), in two sets with an attention number each; issued when the text holds them. ES: `SET DOCUMENTOS DE EXPORTACION` — Documentos de exportación, en dos sets con un número de atención cada uno; se emiten cuando el texto los trae. */
   export: 'export',
   /** EN: Settlement invoices (43); issued when the text holds it. ES: `SET LIQUIDACION FACTURA` — Liquidaciones factura; se emite cuando el texto lo trae. */
   settlement: 'settlement',
