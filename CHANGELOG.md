@@ -50,6 +50,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   receipts the assignment carries no sworn statement (`DeclaracionJurada`), which the format asks for when the receipt
   is not an electronic one carried in the file, and neither does a later assignment of that file. Each PDF goes in
   base64 on lines of 76 characters. `unstable_verifyAssignment` now verifies each receipt too (`receipts`).
+- **Who signed a received document** (`trustedCertificates` and `signer` of `verifyReceivedDocuments`). A signature
+  that verifies says that whoever holds the key of the certificate it carries signed the element, and anyone can make
+  a certificate that names whoever it likes. Given the certificates of the certification authorities the caller
+  trusts, as PEM or DER, each signature that verifies now reports its `signer` when one of them issued the certificate
+  it verifies with, or is that certificate: the RUT and the name it names, the dates it is in force between, and
+  whether it was in force at the instant the signed element states (`TmstFirma`, `TmstFirmaEnv`), read as Chile time.
+  Only a trusted certificate that is an authority vouches for the ones it issued; any other vouches for itself alone,
+  so trusting one signer's certificate does not trust what its holder issues with it.
+  A certificate no trusted one issued reports no signer, whatever it names, and neither does one with a critical
+  extension other than key usage, basic constraints or name constraints. The RUT is the person's who holds the
+  certificate, seldom the company's: whether that person may sign for the issuer is not checked, and no revocation is
+  looked up. It has not been tried on the certificates of every Chilean authority.
 
 ### Changed
 

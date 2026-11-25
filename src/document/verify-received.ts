@@ -8,9 +8,11 @@ import {
   type VerificationStatus,
 } from '../caf/sii-signature'
 import { rsaSha1VerifyBase64 } from '../crypto/rsa'
+import { trustedHolder, trustStore, type TrustStore } from '../crypto/x509'
 import type { Environment } from '../catalogs/codes'
-import { toSiiRut } from '../model/rut'
-import { verifyEnveloped, type SignatureVerification } from '../signature/xmldsig'
+import { toSiiRut, type SiiRut } from '../model/rut'
+import { verifyEnvelopedWithCertificate, type SignatureVerification } from '../signature/xmldsig'
+import { chileInstant } from '../time/chile'
 import {
   child,
   childElements,
@@ -42,17 +44,44 @@ export type VerifyReceivedDocumentsOptions = {
   readonly environment?: Environment
   /** EN: The SII keys that verify each CAF's `FRMA`, by `IDK`, in place of `SII_CAF_KEYS` (spread it to add one). ES: Las llaves del SII que verifican la `FRMA` de cada CAF, por `IDK`, en lugar de `SII_CAF_KEYS` (para agregar una, expándela). */
   readonly siiKeys?: SiiCafKeys
+  /** EN: The certificates of the certification authorities the caller trusts, each a PEM text (which may hold several) or the DER bytes of one. With them, a signature that verifies reports its `signer` when one of them issued the certificate it verifies with, or is that certificate. Only a certificate that is an authority (basic constraints `cA`, and the signing of certificates in its key usage when it states one) vouches for the ones it issued; any other vouches for itself alone. A document carries the signer's certificate alone, so give the certificate of the authority that issued it. Without them no signer is reported. ES: Los certificados de las entidades certificadoras en que confía quien llama, cada uno un texto PEM (que puede traer varios) o los bytes DER de uno. Con ellos, una firma que verifica informa su `signer` cuando uno de ellos emitió el certificado con que verifica, o es ese certificado. Solo un certificado que es una entidad (restricciones básicas `cA`, y la firma de certificados en su uso de llave cuando declara uno) responde por los que emitió; cualquier otro responde solo por sí mismo. Un documento trae solo el certificado del firmante, así que se entrega el certificado de la entidad que lo emitió. Sin ellos no se informa firmante. */
+  readonly trustedCertificates?: readonly (string | Uint8Array)[]
+}
+
+/**
+ * EN: Who signed, as the certificate the signature verifies with says, once a certificate the caller trusts vouches
+ * for it. The RUT is that of the person who holds the certificate, seldom the company's: whether that person may sign
+ * for the issuer is in the SII's records, and is not checked here. No revocation is looked up.
+ * ES: Quién firmó, según el certificado con que verifica la firma, una vez que un certificado en que confía quien
+ * llama responde por él. El RUT es el de la persona titular del certificado, rara vez el de la empresa: si esa persona
+ * puede firmar por el emisor está en los registros del SII, y no se chequea aquí. No se consulta revocación alguna.
+ */
+export type ReceivedSigner = {
+  /** EN: The RUT the certificate names as its holder, or null when it names none. ES: El RUT que el certificado nombra como su titular, o null si no nombra ninguno. */
+  readonly rut: SiiRut | null
+  /** EN: The holder's name (`CN`), or null. ES: El nombre del titular (`CN`), o null. */
+  readonly name: string | null
+  /** EN: The instant the certificate is in force from, ISO 8601 in UTC. ES: El instante desde el que rige el certificado, ISO 8601 en UTC. */
+  readonly notBefore: string
+  /** EN: The instant the certificate is in force until, ISO 8601 in UTC. ES: El instante hasta el que rige el certificado, ISO 8601 en UTC. */
+  readonly notAfter: string
+  /** EN: The certificate was in force at the instant the signed element states (`TmstFirma`, or `TmstFirmaEnv` of an envelope), read as Chile time; null when it states none that reads. That instant is the signer's own word. ES: El certificado regía en el instante que declara el elemento firmado (`TmstFirma`, o `TmstFirmaEnv` de un sobre), leído como hora de Chile; null si no declara uno legible. Ese instante es la palabra del propio firmante. */
+  readonly inForceWhenSigned: boolean | null
 }
 
 /**
  * EN: An XMLDSig signature, checked. `valid` proves the signed element is intact with respect to the certificate in
- * `KeyInfo`; whether that certificate is the issuer's is not checked.
+ * `KeyInfo`, which anyone can make: only `signer` says an authority the caller trusts issued that certificate. Whether
+ * its holder may sign for the issuer is not checked.
  * ES: Una firma XMLDSig, chequeada. `valid` prueba que el elemento firmado está íntegro respecto del certificado de
- * `KeyInfo`; que ese certificado sea del emisor no se chequea.
+ * `KeyInfo`, que cualquiera puede fabricar: solo `signer` dice que una entidad en que confía quien llama emitió ese
+ * certificado. Que su titular pueda firmar por el emisor no se chequea.
  */
 export type ReceivedSignatureCheck = SignatureVerification & {
   /** EN: A `Signature` with a `SignedInfo` sits under the root; when false every other field is false or null. ES: Hay una `Signature` con `SignedInfo` bajo el raíz; si es false, los demás campos son false o null. */
   readonly found: boolean
+  /** EN: Who signed, when the signature is `valid` and one of `trustedCertificates` vouches for the certificate it verifies with; null otherwise, and always without `trustedCertificates`. ES: Quién firmó, cuando la firma es `valid` y uno de `trustedCertificates` responde por el certificado con que verifica; null si no, y siempre sin `trustedCertificates`. */
+  readonly signer: ReceivedSigner | null
 }
 
 /**
@@ -169,6 +198,27 @@ const NOT_FOUND: ReceivedSignatureCheck = {
   digestValid: false,
   signatureValid: false,
   valid: false,
+  signer: null,
+}
+
+// Who signed: said only of a signature that verifies, and of the very certificate it verified with, when the store
+// vouches for it. `signedAt` is the instant the signed element states.
+const signerOf = (
+  verification: SignatureVerification,
+  certificateBase64: string,
+  store: TrustStore | null,
+  signedAt: string | null,
+): ReceivedSigner | null => {
+  const holder = verification.valid && store !== null ? trustedHolder(certificateBase64, store) : null
+  if (holder === null) return null
+  const at = signedAt === null ? null : chileInstant(signedAt)
+  return {
+    rut: holder.rut,
+    name: holder.name,
+    notBefore: holder.notBefore.toISOString(),
+    notAfter: holder.notAfter.toISOString(),
+    inForceWhenSigned: at === null ? null : at >= holder.notBefore && at <= holder.notAfter,
+  }
 }
 
 const rutKey = (rut: string): string => {
@@ -219,13 +269,23 @@ const namespaceForms = (element: Element): readonly string[] => {
 const hasSignature = (root: Element): boolean => child(child(root, 'Signature'), 'SignedInfo') !== undefined
 
 // The result where the document sits, unless the document verifies in one of the other forms.
-const checkSignature = (root: Element, forms: readonly string[], elementTag: string): ReceivedSignatureCheck => {
+const checkSignature = (
+  root: Element,
+  forms: readonly string[],
+  signed: Element,
+  store: TrustStore | null,
+): ReceivedSignatureCheck => {
   if (!hasSignature(root)) return NOT_FOUND
+  const target = { elementTag: signed.tagName, rootTag: 'DTE' }
   const [first, ...others] = forms
-  const inPlace = verifyEnveloped(first, { elementTag, rootTag: 'DTE' })
-  if (inPlace.valid) return { found: true, ...inPlace }
-  const alone = others.map((form) => verifyEnveloped(form, { elementTag, rootTag: 'DTE' })).find((r) => r.valid)
-  return { found: true, ...(alone ?? inPlace) }
+  // Every form is written from the same element, so each is checked with the same certificate.
+  const inPlace = verifyEnvelopedWithCertificate(first, target)
+  const verification = inPlace.verification.valid
+    ? inPlace.verification
+    : (others.map((form) => verifyEnvelopedWithCertificate(form, target).verification).find((r) => r.valid) ??
+      inPlace.verification)
+  const signer = signerOf(verification, inPlace.certificateBase64, store, textAt(signed, 'TmstFirma'))
+  return { found: true, ...verification, signer }
 }
 
 type Header = ReceivedHeader
@@ -342,8 +402,12 @@ const checkStamp = (
 
 // Everything is read from the element itself: the signature is checked over forms written from it, and the header and
 // the stamp are read from it, so what is checked and what is reported are the same node.
-const verifyDocument = ({ element, signed, header }: ReceivedDocumentElements, rules: StampRules): ReceivedDocument => {
-  const signature = checkSignature(element, namespaceForms(element), signed.tagName)
+const verifyDocument = (
+  { element, signed, header }: ReceivedDocumentElements,
+  rules: StampRules,
+  store: TrustStore | null,
+): ReceivedDocument => {
+  const signature = checkSignature(element, namespaceForms(element), signed, store)
   const { ted, caf } = checkStamp(element, signed, header, rules)
   return {
     xml: writeXml(element),
@@ -356,10 +420,15 @@ const verifyDocument = ({ element, signed, header }: ReceivedDocumentElements, r
   }
 }
 
-const checkEnvelope = (xml: string, root: Element): ReceivedSignatureCheck =>
-  hasSignature(root)
-    ? { found: true, ...verifyEnveloped(xml, { elementTag: 'SetDTE', rootTag: root.tagName }) }
-    : NOT_FOUND
+const checkEnvelope = (xml: string, root: Element, store: TrustStore | null): ReceivedSignatureCheck => {
+  if (!hasSignature(root)) return NOT_FOUND
+  const { verification, certificateBase64 } = verifyEnvelopedWithCertificate(xml, {
+    elementTag: 'SetDTE',
+    rootTag: root.tagName,
+  })
+  const signedAt = textAt(child(root, 'SetDTE'), 'Caratula', 'TmstFirmaEnv')
+  return { found: true, ...verification, signer: signerOf(verification, certificateBase64, store, signedAt) }
+}
 
 /**
  * EN: Verifies the documents of a `DTE`, `EnvioDTE` or `EnvioBOLETA` as received from a supplier, and the envelope's
@@ -371,7 +440,12 @@ const checkEnvelope = (xml: string, root: Element): ReceivedSignatureCheck =>
  * `siiKeys`), for the CAFs of `environment` only (production by default). A document that fails a check is a result,
  * not an error; a CAF whose `IDK` has no known key leaves the document `unchecked`. A key larger than any CAF or
  * certificate key (a modulus over 4096 bits or an exponent over 32 bits) fails its check without its signature being
- * tried. Pure: no clock, no network. Not checked: who owns the signing certificate, and whether the CAF had expired.
+ * tried. A signature that verifies proves no more than that whoever holds the key of the certificate it carries signed
+ * the element, and anyone can make a certificate: with `trustedCertificates`, each signature also reports its `signer`
+ * when one of those certificates issued the one it verifies with, with the RUT and the name it names, the dates it is
+ * in force between and whether it was in force when the element says it was signed. Pure: no clock, no network. Not
+ * checked: whether the signer may sign for the issuer, whether the certificate was revoked, and whether the CAF had
+ * expired.
  * ES: Verifica los documentos de un `DTE`, `EnvioDTE` o `EnvioBOLETA` tal como llega de un proveedor, y la firma del
  * propio sobre. Cada documento se lee desde su elemento en la entrada parseada, nunca de un trozo del texto: su
  * firma se chequea sobre formas escritas desde ese elemento, y sus campos y su timbre se leen de él. Se chequea: su
@@ -381,8 +455,12 @@ const checkEnvelope = (xml: string, root: Element): ReceivedSignatureCheck =>
  * `environment` (producción por defecto). Un documento que falla un chequeo es un resultado, no un error; un CAF
  * cuyo `IDK` no tiene llave conocida deja el documento `unchecked`. Una llave mayor que cualquier llave de CAF o de
  * certificado (un módulo de más de 4096 bits o un exponente de más de 32 bits) falla su chequeo sin que se pruebe su
- * firma. Pura: sin reloj ni red. No se chequea: de quién es el certificado que firma, ni si el CAF estaba vencido.
- * @throws {DteError} EN: `XML_PARSE_FAILED` for empty or malformed XML, a DOCTYPE, another root, an envelope without exactly one `SetDTE`, a `DTE` out of place or prefixed, or a `DTE` without one unprefixed `Documento`, `Liquidacion` or `Exportaciones`; `ENVELOPE_EMPTY` for an envelope without documents. ES: `XML_PARSE_FAILED` para XML vacío o malformado, un DOCTYPE, otro raíz, un sobre sin exactamente un `SetDTE`, un `DTE` fuera de lugar o con prefijo, o un `DTE` sin un `Documento`, `Liquidacion` o `Exportaciones` sin prefijo; `ENVELOPE_EMPTY` para un sobre sin documentos.
+ * firma. Una firma que verifica no prueba más que quien tiene la llave del certificado que trae firmó el elemento, y
+ * cualquiera puede fabricar un certificado: con `trustedCertificates`, cada firma informa además su `signer` cuando uno
+ * de esos certificados emitió aquel con que verifica, con el RUT y el nombre que nombra, las fechas entre las que rige
+ * y si regía cuando el elemento dice que se firmó. Pura: sin reloj ni red. No se chequea: si el firmante puede firmar
+ * por el emisor, si el certificado fue revocado, ni si el CAF estaba vencido.
+ * @throws {DteError} EN: `XML_PARSE_FAILED` for empty or malformed XML, a DOCTYPE, another root, an envelope without exactly one `SetDTE`, a `DTE` out of place or prefixed, or a `DTE` without one unprefixed `Documento`, `Liquidacion` or `Exportaciones`; `ENVELOPE_EMPTY` for an envelope without documents. `INVALID_OPTION { field: 'trustedCertificates', index }` for an entry of `trustedCertificates` that is not a certificate. ES: `XML_PARSE_FAILED` para XML vacío o malformado, un DOCTYPE, otro raíz, un sobre sin exactamente un `SetDTE`, un `DTE` fuera de lugar o con prefijo, o un `DTE` sin un `Documento`, `Liquidacion` o `Exportaciones` sin prefijo; `ENVELOPE_EMPTY` para un sobre sin documentos. `INVALID_OPTION { field: 'trustedCertificates', index }` para una entrada de `trustedCertificates` que no es un certificado.
  */
 export const verifyReceivedDocuments = (
   xml: string,
@@ -390,8 +468,9 @@ export const verifyReceivedDocuments = (
 ): ReceivedDocumentsVerification => {
   const { rootTag, root, documents: read } = readReceivedStructure(xml)
   const rules = { keys: options.siiKeys ?? SII_CAF_KEYS, environment: options.environment ?? 'production' }
-  const documents = read.map((document) => verifyDocument(document, rules))
-  const envelope = rootTag === 'DTE' ? null : checkEnvelope(xml, root)
+  const store = options.trustedCertificates === undefined ? null : trustStore(options.trustedCertificates)
+  const documents = read.map((document) => verifyDocument(document, rules, store))
+  const envelope = rootTag === 'DTE' ? null : checkEnvelope(xml, root, store)
   return {
     root: rootTag,
     envelope,

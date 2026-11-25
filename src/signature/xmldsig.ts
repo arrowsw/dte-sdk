@@ -297,7 +297,19 @@ const referencedElement = (root: Element, referenceId: string | null, elementTag
 export const verifyEnveloped = (
   xml: string,
   target: { readonly elementTag: string; readonly rootTag: string },
-): SignatureVerification => {
+): SignatureVerification => verifyEnvelopedWithCertificate(xml, target).verification
+
+/**
+ * EN: `verifyEnveloped` with the certificate the signature was checked with, the `X509Certificate` of its `KeyInfo` in
+ * base64 without whitespace: what is said about the signer is then said of that very certificate. Internal.
+ * ES: `verifyEnveloped` con el certificado con que se comprobó la firma, el `X509Certificate` de su `KeyInfo` en base64
+ * sin espacios: lo que se diga del firmante se dice entonces de ese mismo certificado. Interno.
+ * @throws {DteError} EN: the codes of `verifyEnveloped`. ES: los códigos de `verifyEnveloped`.
+ */
+export const verifyEnvelopedWithCertificate = (
+  xml: string,
+  target: { readonly elementTag: string; readonly rootTag: string },
+): { readonly verification: SignatureVerification; readonly certificateBase64: string } => {
   const dom = parseXmlDom(xml)
   const root = dom.documentElement
   if (root.tagName !== target.rootTag)
@@ -330,5 +342,8 @@ export const verifyEnveloped = (
     signedWithRsaSha1 &&
     publicKey !== null &&
     rsaSha1VerifyBase64(publicKey, canonicalizeElement(signedInfo), 'utf8', signatureValue)
-  return { referenceId, digestValid, signatureValid, valid: digestValid && signatureValid }
+  return {
+    verification: { referenceId, digestValid, signatureValid, valid: digestValid && signatureValid },
+    certificateBase64,
+  }
 }

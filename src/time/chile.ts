@@ -47,6 +47,32 @@ export const chileDateTimeParts = (now: Date = new Date()): ChileDateTimeParts =
   }
 }
 
+const WALL_CLOCK = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/
+
+// What the wall clock of Chile reads at `instant`, taken as if it were UTC, less the instant: Chile's offset then.
+const chileOffsetAt = (instant: number): number => {
+  const { year, month, day, hour, minute, second } = chileDateTimeParts(new Date(instant))
+  return Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)) - instant
+}
+
+/**
+ * EN: The instant a Chile-local timestamp `YYYY-MM-DDTHH:MM:SS` names (`TmstFirma`, `TmstFirmaEnv`), with the offset
+ * Chile had on that day, summer or winter; what follows the seconds is not read. Null when the text is not one, or
+ * its date is not a real one.
+ * ES: El instante que nombra una marca de tiempo en hora de Chile `AAAA-MM-DDTHH:MM:SS` (`TmstFirma`, `TmstFirmaEnv`),
+ * con el desfase que Chile tenía ese día, de verano o de invierno; lo que sigue a los segundos no se lee. Null si el
+ * texto no es una, o su fecha no es real.
+ */
+export const chileInstant = (timestamp: string): Date | null => {
+  const match = WALL_CLOCK.exec(timestamp)
+  if (match === null || !isIsoDate(timestamp.slice(0, 10))) return null
+  const [year, month, day, hour, minute, second] = match.slice(1).map(Number)
+  const asUtc = Date.UTC(year, month - 1, day, hour, minute, second)
+  // The offset is read at the instant itself: a first guess with the offset of the same reading taken as UTC, then
+  // the offset at that guess, which differs only across a change of season.
+  return new Date(asUtc - chileOffsetAt(asUtc - chileOffsetAt(asUtc)))
+}
+
 /**
  * EN: Today's date in Chile as `YYYY-MM-DD` (the SII `FchEmis`/`FchResol` format).
  * ES: La fecha de hoy en Chile como `AAAA-MM-DD` (formato de `FchEmis`/`FchResol` del SII).

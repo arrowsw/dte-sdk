@@ -9,9 +9,9 @@ on 2026-11-14 to ship inside the package with their validator as an optional pee
 
 | Entry | Holds | Size | Reaches `node:` |
 |---|---|---|---|
-| `dte-sdk` | Documents (export documents included), stamps, signatures, envelopes, books, verification of received documents, the assignment of invoices, SII web services client over `fetch`, public registry of issuers | 48.98 kB | Not by import: it asks the runtime for `node:crypto` at the first signature |
+| `dte-sdk` | Documents (export documents included), stamps, signatures, envelopes, books, verification of received documents, the assignment of invoices, SII web services client over `fetch`, public registry of issuers | 49.54 kB | Not by import: it asks the runtime for `node:crypto` at the first signature |
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.42 kB | Yes, on first use |
-| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 86.98 kB | Yes, on first use |
+| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 86.99 kB | Yes, on first use |
 | `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 19.93 kB | Yes, on first use |
 | `dte-sdk/catalogs` | The SII's large code tables: the business activities | 10.65 kB | No |
 | `dte-sdk/schemas` | The SII's schemas as text and the validation of a document against them; `xmllint-wasm` is an optional peer | 24.72 kB | No |
@@ -163,6 +163,9 @@ customers that take turns in a test set and the check before each upload of the 
 both under their limits.
 The electronic receipts and the images an assignment file carries, on 2026-11-25, took `dte-sdk` to 48.98 kB,
 under its limit; `dte-sdk/portal` measured 86.98 kB and `dte-sdk/pdf` 19.93 kB.
+Reporting who signed a received document, with the check of its certificate against the ones the caller trusts, on
+2026-11-25, took `dte-sdk` to 49.54 kB, under its limit; `dte-sdk/portal` measured 86.99 kB and `dte-sdk/pdf`
+19.93 kB.
 
 ## Why
 
