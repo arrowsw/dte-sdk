@@ -36,7 +36,8 @@ const CUSTOMS = {
   totalPackages: 14,
   packages: [
     { code: 80, count: 12, marks: 'ANDES', containerId: 'MSCU1234567', seal: 'S-99', sealIssuer: 'SAG' },
-    { code: 22, count: 2 },
+    // A container is the one package that needs no marks.
+    { code: 74, count: 2 },
   ],
   freight: 150,
   insurance: 20.5,
@@ -52,7 +53,8 @@ const exported = (overrides: Partial<DocumentInput> = {}, type = 110): Printable
       { name: 'Cajas', quantity: 3, unit: 'U', unitPrice: 10.5, surchargePercent: 10 },
     ],
     exchangeRate: 950.25,
-    options: { exportPaymentTerms: '32', dueDate: '2026-12-15' },
+    // An invoice paid in advance carries the date it was settled.
+    options: { exportPaymentTerms: '32', dueDate: '2026-12-15', settlementDate: '2026-11-10' },
     transport: { customs: CUSTOMS },
     ...overrides,
   })
@@ -76,7 +78,7 @@ describe('an export invoice read for printing', () => {
       ...CUSTOMS,
       packages: [
         { code: 80, count: 12, marks: 'ANDES', containerId: 'MSCU1234567', seal: 'S-99', sealIssuer: 'SAG' },
-        { code: 22, count: 2, marks: '', containerId: '', seal: '', sealIssuer: '' },
+        { code: 74, count: 2, marks: '', containerId: '', seal: '', sealIssuer: '' },
       ],
     })
   })
@@ -154,7 +156,7 @@ describe('an export invoice printed', () => {
       field('Contenedor', 'MSCU1234567'),
       field('Sello', 'S-99'),
       field('Emisor Sello', 'SAG'),
-      field('Bultos', '2 CAJAS DE CARTÓN'),
+      field('Bultos', '2 CONTENEDOR DE 40 PIES DRY'),
       field('Flete', '150'),
       field('Seguro', '20,5'),
       field('País Receptor', 'PAÍSES BAJOS'),

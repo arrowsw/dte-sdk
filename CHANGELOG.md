@@ -123,6 +123,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of the day ("Agregue fecha del día"), and the run dated its documents on the UTC day, which late in the Chilean
   evening is already the next one, and on the last evening of a month the next tax period. The issue date is now the
   Chile day the set is issued on; `TSTED`, `TmstFirma` and `TmstFirmaEnv` are UTC instants, as before.
+- **An export invoice paid in advance needs its settlement date, and a package that is not a container its marks.**
+  Formato DTE 2.5 makes `FchCancel` (field 15 of the header) "Campo Obligatorio para Factura de exportación cuando en
+  Forma de Pago Exportación se indique anticipo", and has the marks (`Marcas`, field 98) identify a package "cuando es
+  distinto de contenedor". `createDocument` issued an export invoice (110) with `exportPaymentTerms` 32, the code the
+  customs table abbreviates `ANTICIPO`, and no `settlementDate`, and one whose packages carried no marks. It now
+  refuses both with `MISSING_FIELD`, naming `options.settlementDate` or `transport.customs.packages[i].marks`. The
+  container types of the customs table (73 to 76, and 78) need no marks, and the export notes (111, 112) are asked for
+  neither.
+  - **What to change:** on a 110 paid in advance, pass `options.settlementDate`; give `marks` to every package that
+    is not a container (`S/M` is what a package without marks is written as).
 
 - **A dispatch guide without its transfer type is refused.** Formato DTE 2.5 marks `IndTraslado` (field 7) mandatory
   on a guide, and `createDocument` issued a 52 without `options.transferType` and read it as a sale. It now refuses
