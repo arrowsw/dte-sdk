@@ -390,9 +390,10 @@ test('an error of a step is reported and rethrown; the company comes from the is
 // The cover of an envelope names the resolution of the company in the environment the envelope goes to, and the SII
 // refuses one that names another. The portal shows it (`fetchCompanyResolution`), so a run that is given none asks.
 describe('the resolution of a run that is given none', () => {
+  // Each page twice: a page that is not the resolution is asked for once more, with a fresh session.
   const resolutionRoutes = (html = companyResolutionPage('14-06-2026', '0')) => [
-    get('ad_empresa1', COMPANY_FORM),
-    post('ad_empresa2', html),
+    get('ad_empresa1', COMPANY_FORM, COMPANY_FORM),
+    post('ad_empresa2', html, html),
   ]
   const down = { url: UPLOAD, method: 'POST' as const, reply: { body: 'down' } }
   // Runs until the first upload fails and gives back the cover of the envelope kept before it.
@@ -415,15 +416,17 @@ describe('the resolution of a run that is given none', () => {
     expect(cover.harness.warnings()).not.toContain('certification resolution not read from the SII')
   })
 
-  test('its number is the one the SII shows too, unless the run is given one', async () => {
-    expect(await coverOf(resolutionRoutes(companyResolutionPage('14-06-2026', '80')))).toMatchObject({ number: '80' })
+  // In the certification environment the number of the resolution is 0, whatever number the page shows: a number comes
+  // only from the caller.
+  test('its number stays 0 whatever the page shows, unless the run is given one', async () => {
+    expect(await coverOf(resolutionRoutes(companyResolutionPage('14-06-2026', '80')))).toMatchObject({
+      date: '2026-06-14',
+      number: '0',
+    })
     expect(await coverOf(resolutionRoutes(companyResolutionPage('14-06-2026', '80')), { number: 7 })).toMatchObject({
       date: '2026-06-14',
       number: '7',
     })
-    // A page with the date and no number: the number of the certification environment, 0.
-    const dated = page('<table><tr><td>Fecha Resoluci&oacute;n</td><td>14-06-2026</td></table>')
-    expect(await coverOf(resolutionRoutes(dated))).toMatchObject({ date: '2026-06-14', number: '0' })
   })
 
   test('a run that is given the date asks for nothing', async () => {
@@ -432,13 +435,29 @@ describe('the resolution of a run that is given none', () => {
   })
 
   test.each([
-    ['shows no date', page('<table><tr><td>Resoluci&oacute;n</td><td>0</td></table>'), false],
-    ['does not know the company', NOT_AUTHORIZED_COMPANY, true],
-    ['answers a page that is not the resolution', page('Actualización de Datos'), true],
-  ])('when the SII %s the run dates it on the day it starts, as before', async (_label, html, warned) => {
+    ['shows no date', page('<table><tr><td>Resoluci&oacute;n</td><td>0</td></table>')],
+    ['shows a date it cannot read as one', companyResolutionPage('14 de junio de 2026', '0')],
+    ['shows a date of another shape', companyResolutionPage('14-6-2026', '0')],
+    ['does not know the company', NOT_AUTHORIZED_COMPANY],
+    ['answers a page that is not the resolution', page('Actualización de Datos')],
+  ])('when the SII %s the run dates it on the day it starts, as before, and says so', async (_label, html) => {
     const cover = await coverOf(resolutionRoutes(html))
     expect(cover).toMatchObject({ date: TODAY, number: '0' })
-    expect(cover.harness.warnings().includes('certification resolution not read from the SII')).toBe(warned)
+    expect(cover.harness.warnings()).toContain('certification resolution not read from the SII')
+  })
+
+  test('a run resumed where no envelope is left to send asks for nothing', async () => {
+    // The pages are there to be asked: `ad_empresa2` is the one the resolution is read from.
+    const harness = await seeded(resolutionRoutes(), stateWith({ plan, stage: 'exchange' }))
+    await runCertification({ ...harness.deps, resolution: undefined }).catch(() => undefined)
+    expect(harness.posted('ad_empresa2')).toEqual([])
+  })
+
+  test("an error that is not the portal's is not taken for a page that could not be read", async () => {
+    // The fake has no route for the page and throws a plain Error, as a bug in the reading would.
+    const harness = await seeded([down], stateWith({ plan, cafs: certificationCafXmls() }))
+    await expect(runCertification({ ...harness.deps, resolution: undefined })).rejects.toThrow(/no route/)
+    expect(harness.warnings()).not.toContain('certification resolution not read from the SII')
   })
 })
 
@@ -448,6 +467,9 @@ test('a resolution left out is dated once for the whole run, whatever day its la
   // The UTC day changes once the first set is in; the third upload fails and ends the run.
   const harness = await seeded(
     [
+      // The portal shows no date for the company, so the run dates the resolution itself.
+      get('ad_empresa1', COMPANY_FORM),
+      post('ad_empresa2', page('<table><tr><td>Resoluci&oacute;n</td><td>0</td></table>')),
       {
         url: UPLOAD,
         method: 'POST' as const,

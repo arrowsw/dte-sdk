@@ -156,7 +156,7 @@ export type WaitForUploadStatusInput = QueryUploadStatusInput & {
   readonly intervalMs?: number
   /** EN: Give up after, ms (600 000). ES: Tiempo máximo de espera, ms (600 000). */
   readonly timeoutMs?: number
-  /** EN: Wait before the first poll, ms: the `retryAfterMs` of the upload's receipt, which is what the SII asks to wait. It counts against `timeoutMs`. None when left out, null or 0. ES: Espera antes del primer sondeo, ms: el `retryAfterMs` del recibo del envío, que es lo que el SII pide esperar. Cuenta contra `timeoutMs`. Ninguna si se omite, es null o es 0. */
+  /** EN: Wait before the first poll, ms: the `retryAfterMs` of the upload's receipt, which is what the SII asks to wait. It is waited whole, whatever `timeoutMs` says, and `timeoutMs` counts from the first poll. None when left out, null or 0. ES: Espera antes del primer sondeo, ms: el `retryAfterMs` del recibo del envío, que es lo que el SII pide esperar. Se espera entera, diga lo que diga `timeoutMs`, y `timeoutMs` se cuenta desde el primer sondeo. Ninguna si se omite, es null o es 0. */
   readonly initialDelayMs?: number | null
 }
 
@@ -465,7 +465,7 @@ const restUploadStatus = async (
  * cuanto procesó el sobre, haya hecho lo que haya hecho con cada documento, así que un `EPR` cuyas cantidades informan
  * documentos rechazados es `partiallyRejected` o `rejected`, y uno solo con reparos es `acceptedWithObjections`.
  * `countsByType` trae las cantidades de cada tipo de documento.
- * @throws {DteError} EN: `SII_QUERY_ERROR { code }`, `SII_TOKEN_INVALID`, `SII_HTTP_ERROR`, `SII_RESPONSE_INVALID`, `SII_SOAP_FAULT`, `INVALID_OPTION { field: 'trackId' | 'channel' }`, `MISSING_FIELD`, `INVALID_RUT`, transport codes. ES: los mismos códigos.
+ * @throws {DteError} EN: `SII_QUERY_ERROR { code }`, `SII_TOKEN_INVALID`, `SII_HTTP_ERROR`, `SII_RESPONSE_INVALID`, `SII_SOAP_FAULT`, `INVALID_OPTION { field: 'trackId' | 'channel' | 'documents' }`, `MISSING_FIELD`, `INVALID_RUT`, transport codes. ES: los mismos códigos.
  */
 export const queryUploadStatus = async (
   sii: SiiClient,
@@ -508,7 +508,8 @@ const pollOnce = (sii: SiiClient, input: QueryUploadStatusInput, overrides: Call
   )
 
 /**
- * EN: Polls `queryUploadStatus` every `intervalMs` until the status is no longer `pending`, up to `timeoutMs`. During a
+ * EN: Polls `queryUploadStatus` every `intervalMs` until the status is no longer `pending`, up to `timeoutMs`, after
+ * waiting `initialDelayMs` when one is given, which is no part of `timeoutMs`. During a
  * wait the polling interval replaces the retry policy: each poll is a single request (the client's and the call's
  * `retry` are ignored), its timeout is the smaller of the normal timeout of the call and the time remaining, and the
  * sleep between polls is the smaller of `intervalMs` and the time remaining, so the wait ends at `timeoutMs` and not
@@ -519,7 +520,8 @@ const pollOnce = (sii: SiiClient, input: QueryUploadStatusInput, overrides: Call
  * `WAIT_TIMEOUT { trackId, attempts, lastCode }` only when `timeoutMs` elapses; `lastCode` is the last status code or
  * query-error code, or the error code of a retryable failure (`REQUEST_TIMEOUT`…), so it tells which. It uses the
  * client's `now` and `sleep`, and stops with `REQUEST_ABORTED` when the caller's `signal` fires.
- * ES: Sondea `queryUploadStatus` cada `intervalMs` hasta que el estado deje de ser `pending`, hasta `timeoutMs`.
+ * ES: Sondea `queryUploadStatus` cada `intervalMs` hasta que el estado deje de ser `pending`, hasta `timeoutMs`, después
+ * de esperar `initialDelayMs` si se entrega, que no es parte de `timeoutMs`.
  * Durante la espera el intervalo de sondeo reemplaza a la política de reintentos: cada sondeo es una sola petición (el
  * `retry` del cliente y el de la llamada se ignoran), su timeout es el menor entre el timeout normal de la llamada y el
  * tiempo que queda, y la pausa entre sondeos es la menor entre `intervalMs` y el tiempo que queda, así que la espera
@@ -531,7 +533,7 @@ const pollOnce = (sii: SiiClient, input: QueryUploadStatusInput, overrides: Call
  * attempts, lastCode }` solo cuando se cumple `timeoutMs`; `lastCode` es el último código de estado o de error de
  * consulta, o el código de error de una falla reintentable (`REQUEST_TIMEOUT`…), así que dice cuál fue. Usa el `now` y
  * el `sleep` del cliente, y se detiene con `REQUEST_ABORTED` cuando se dispara el `signal` del llamador.
- * @throws {DteError} EN: `WAIT_TIMEOUT { trackId, attempts, lastCode }`, `REQUEST_ABORTED`, `INVALID_OPTION { field: 'intervalMs' | 'timeoutMs' }` plus whatever `queryUploadStatus` throws. ES: `WAIT_TIMEOUT { trackId, attempts, lastCode }`, `REQUEST_ABORTED`, `INVALID_OPTION { field: 'intervalMs' | 'timeoutMs' }` más lo que lance `queryUploadStatus`.
+ * @throws {DteError} EN: `WAIT_TIMEOUT { trackId, attempts, lastCode }`, `REQUEST_ABORTED`, `INVALID_OPTION { field: 'intervalMs' | 'timeoutMs' | 'initialDelayMs' }` plus whatever `queryUploadStatus` throws. ES: `WAIT_TIMEOUT { trackId, attempts, lastCode }`, `REQUEST_ABORTED`, `INVALID_OPTION { field: 'intervalMs' | 'timeoutMs' | 'initialDelayMs' }` más lo que lance `queryUploadStatus`.
  */
 export const waitForUploadStatus = async (
   sii: SiiClient,
@@ -542,11 +544,13 @@ export const waitForUploadStatus = async (
   const timeoutMs = positiveOption(input.timeoutMs, DEFAULT_WAIT_MS, 'timeoutMs')
   // An unknown channel is reported by the first poll, which validates it; here it only picks the normal timeout.
   const normalMs = timeoutFor(sii, input.channel === 'rest' ? 'rest' : 'soap', overrides)
-  const deadline = sii.now().getTime() + timeoutMs
   const initialDelayMs = input.initialDelayMs ?? 0
   if (!(Number.isFinite(initialDelayMs) && initialDelayMs >= 0))
     throw new DteError('INVALID_OPTION', { field: 'initialDelayMs' })
-  if (initialDelayMs > 0) await sii.sleep(Math.min(initialDelayMs, timeoutMs), overrides?.signal)
+  // The wait the SII asked for comes first and is no part of the time to give up, which counts from the first
+  // question: a delay as long as `timeoutMs` would otherwise end the wait before it asked once.
+  if (initialDelayMs > 0) await sii.sleep(initialDelayMs, overrides?.signal)
+  const deadline = sii.now().getTime() + timeoutMs
   const poll = async (polled: number, lastCode: string): Promise<UploadStatus> => {
     // An injected `sleep` may ignore the signal, so it is checked here as well as handed to `sleep`.
     if (overrides?.signal?.aborted) throw new DteError('REQUEST_ABORTED', { operation: 'waitForUploadStatus' })

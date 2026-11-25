@@ -9,9 +9,9 @@ on 2026-11-14 to ship inside the package with their validator as an optional pee
 
 | Entry | Holds | Size | Reaches `node:` |
 |---|---|---|---|
-| `dte-sdk` | Documents (export documents included), stamps, signatures, envelopes, books, verification of received documents, the assignment of invoices, SII web services client over `fetch`, public registry of issuers | 49.94 kB | Not by import: it asks the runtime for `node:crypto` at the first signature |
+| `dte-sdk` | Documents (export documents included), stamps, signatures, envelopes, books, verification of received documents, the assignment of invoices, SII web services client over `fetch`, public registry of issuers | 49.9 kB | Not by import: it asks the runtime for `node:crypto` at the first signature |
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 8.66 kB | Yes, on first use |
-| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 87.37 kB | Yes, on first use |
+| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 87.63 kB | Yes, on first use |
 | `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 28.4 kB | Yes, on first use |
 | `dte-sdk/catalogs` | The large code tables: the SII's business activities and the customs tables of an export document | 18.03 kB | No |
 | `dte-sdk/schemas` | The SII's schemas as text and the validation of a document against them; `xmllint-wasm` is an optional peer | 24.72 kB | No |
@@ -182,8 +182,7 @@ carried by a refused upload, on 2026-11-25, took `dte-sdk` to 49.73 kB, under it
 signature of it holds brought that check, and the reading of the CAF's elements it works on, to `dte-sdk/node`: it
 went from 7.4 kB to 8.66 kB, over its 8 kB limit, which went to 10 kB.
 The wait the SII asks for after an upload, the documents its counts leave out and the resolution the certification run
-reads from the portal, on 2026-11-25, took `dte-sdk` to 49.94 kB, 0.06 kB under its limit, and `dte-sdk/portal` to
-87.37 kB.
+reads from the portal, on 2026-11-25, took `dte-sdk` to 49.9 kB, under its limit, and `dte-sdk/portal` to 87.63 kB.
 
 ## Why
 
