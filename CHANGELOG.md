@@ -24,6 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The digest of a received envelope** (`ReceivedEnvelope.digest`). `readReceivedEnvelope` reads the digest of the
   envelope's own signature, and `createReceptionAnswer` quotes it (`Digest`, which `RespuestaEnvioDTE_v10.xsd`
   declares after the id of the envelope).
+- **Who signed a received document** (`trustedCertificates` and `signer` of `verifyReceivedDocuments`). A signature
+  that verifies says that whoever holds the key of the certificate it carries signed the element, and anyone can make
+  a certificate that names whoever it likes. Given the certificates of the certification authorities the caller
+  trusts, as PEM or DER, each signature that verifies now reports its `signer` when one of them issued the certificate
+  it verifies with, or is that certificate: the RUT and the name it names, the dates it is in force between, and
+  whether it was in force at the instant the signed element states (`TmstFirma`, `TmstFirmaEnv`), read as Chile time.
+  A certificate no trusted one issued reports no signer, whatever it names, and neither does one with a critical
+  extension other than key usage, basic constraints or name constraints. The RUT is the person's who holds the
+  certificate, seldom the company's: whether that person may sign for the issuer is not checked, and no revocation is
+  looked up. It has not been tried on the certificates of every Chilean authority.
 
 ### Changed
 
