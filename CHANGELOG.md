@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-25
+
 ### Added
 
 - **The VAT not withheld of a purchase invoice and its notes** (`totals.vatNotWithheld`, `IVANoRet`). Formato DTE 2.5
@@ -142,7 +144,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   neither.
   - **What to change:** on a 110 paid in advance, pass `options.settlementDate`; give `marks` to every package that
     is not a container (`S/M` is what a package without marks is written as).
-
 - **A dispatch guide without its transfer type is refused.** Formato DTE 2.5 marks `IndTraslado` (field 7) mandatory
   on a guide, and `createDocument` issued a 52 without `options.transferType` and read it as a sale. It now refuses
   one with `MISSING_FIELD` and `options.transferType` in `details.field`. The schema still declares the element
@@ -1986,7 +1987,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Jest, ESLint, Prettier, size-limit, Stryker, CI and tag-triggered publish)
   and a single `hello()` export that returns `'dte-sdk is coming'`.
 
-[Unreleased]: https://github.com/arrowsw/dte-sdk/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/arrowsw/dte-sdk/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.16.0
 [0.15.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.15.0
 [0.14.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.14.0
 [0.13.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.13.0
