@@ -171,28 +171,6 @@ export const SALES_BOOK_SET_TEXT = `SET LIBRO DE VENTAS - NUMERO DE ATENCION: ${
 Usar DTEs del SET BASICO
 `
 
-export const EXPORT_SET_TEXT = `SET DOCUMENTOS DE EXPORTACION (1) - NUMERO DE ATENCION: ${ATTENTION}
-CASO ${ATTENTION}-19
-DOCUMENTO                        FACTURA DE EXPORTACION ELECTRONICA
-MONEDA DE LA OPERACION:          DOLAR USA
-FORMA DE PAGO EXPORTACION:       ANTICIPO
-MODALIDAD DE VENTA:              A FIRME
-CLAUSULA DE VENTA:               CIF
-TOTAL CLAUSULA DE VENTA:         1500.50
-VIA DE TRANSPORTE:               MARITIMA
-PUERTO DE EMBARQUE:              VALPARAISO
-PUERTO DE DESEMBARQUE:           ROTTERDAM
-TIPO DE BULTO:                   PALLET
-TOTAL BULTOS:                    4
-FLETE:                           200
-SEGURO:                          50
-PAIS RECEPTOR:                   HOLANDA
-COMISIONES EN EL EXTRANJERO:     5%
-ITEM                             CANTIDAD   PRECIO UNITARIO
-Vino tinto reserva               100        12
---------------------------------------------------
-`
-
 /** The whole download, every set, with the corrupted accent the portal sometimes sends and some junk lines. */
 export const FULL_SET_TEXT = [
   'Postulacion Factura Electronica',
@@ -204,8 +182,128 @@ export const FULL_SET_TEXT = [
   SALES_BOOK_SET_TEXT,
   PURCHASE_BOOK_SET_TEXT,
   EXEMPT_PURCHASE_BOOK_SET_TEXT,
-  EXPORT_SET_TEXT,
   'Fin del set',
+].join('\n')
+
+/** The attention numbers of the two synthetic export sets: each set has its own and goes in its own envelope. */
+export const EXPORT_ATTENTION_1 = '2410021'
+export const EXPORT_ATTENTION_2 = '2410022'
+
+/**
+ * The two export sets (110, 111, 112), written by hand. Nobody here has the literal text of an export set: this is the
+ * best reconstruction of the six cases of a pair of sets the SII reviewed as conformant, their contents kept and their
+ * wording guessed. What is guessed is the wording of the labels (the units of tare and weights, the country line, the
+ * customs document a case names, the line surcharge, the column headers) and the layout; the names of currencies,
+ * ports, countries, clauses, routes, modes, payment terms, units and package types are those of the SII's and the
+ * customs service's tables. The amounts are the cases' own, so the six totals of the conformant documents are known:
+ * 112517.50, 36411 and 36411 in `FRANCO SZ`, and 103.4 and 233792.38 in `YEN` and 281 in `DOLAR USA`; the second
+ * of the second set wrote the 5 % discount of its first line as a whole 10049, where its share is 10049.2. `(**)` marks
+ * the freight and insurance that also go as global surcharges.
+ */
+export const EXPORT_SET_TEXT = [
+  `SET DOCUMENTOS DE EXPORTACION (1) - NUMERO DE ATENCION: ${EXPORT_ATTENTION_1}`,
+  '==========================================',
+  `CASO ${EXPORT_ATTENTION_1}-1`,
+  '==========================================',
+  'DOCUMENTO                        FACTURA DE EXPORTACION ELECTRONICA',
+  'MONEDA DE LA OPERACION:          FRANCO SZ',
+  'FORMA DE PAGO EXPORTACION:       ANTICIPO',
+  'MODALIDAD DE VENTA:              EN CONSIGNACION LIBRE',
+  'CLAUSULA DE VENTA:               S/CL',
+  'TOTAL CLAUSULA DE VENTA:         3523.59',
+  'VIA DE TRANSPORTE:               FERROVIARIO',
+  'PUERTO DE EMBARQUE:              PUERTO MONTT',
+  'PUERTO DE DESEMBARQUE:           NAPOLES',
+  'UNIDAD DE MEDIDA DE TARA:        KN',
+  'UNIDAD PESO BRUTO:               PAR',
+  'UNIDAD PESO NETO:                PAR',
+  'CALCULE LOS VALORES DE TARA, PESO BRUTO Y PESO NETO',
+  'TIPO DE BULTO:                   PLANCHAS',
+  'TOTAL BULTOS:                    69',
+  'FLETE (**):                      2069.28',
+  'SEGURO (**):                     1215.22',
+  'PAIS RECEPTOR Y PAIS DESTINO:    ITALIA',
+  'DOCUMENTO DE REFERENCIA:         MIC/DTA',
+  '',
+  'ITEM                             CANTIDAD   UNIDAD MEDIDA   PRECIO UNITARIO',
+  'CHATARRA DE ALUMINIO             687        PAR             159',
+  '',
+  '(**) INFORME ADEMAS EL FLETE Y EL SEGURO COMO RECARGOS GLOBALES',
+  '--------------------------------------------------',
+  `CASO ${EXPORT_ATTENTION_1}-2`,
+  '==========================================',
+  'DOCUMENTO                        NOTA DE CREDITO DE EXPORTACION ELECTRONICA',
+  `REFERENCIA                       CASO ${EXPORT_ATTENTION_1}-1`,
+  'RAZON REFERENCIA                 DEVOLUCION DE MERCADERIA',
+  '',
+  'ITEM                             CANTIDAD',
+  'CHATARRA DE ALUMINIO             229',
+  '--------------------------------------------------',
+  `CASO ${EXPORT_ATTENTION_1}-3`,
+  '==========================================',
+  'DOCUMENTO                        NOTA DE DEBITO DE EXPORTACION ELECTRONICA',
+  `REFERENCIA                       CASO ${EXPORT_ATTENTION_1}-2`,
+  'RAZON REFERENCIA                 ANULA NOTA DE CREDITO',
+  '--------------------------------------------------',
+  '',
+  `SET DOCUMENTOS DE EXPORTACION (2) - NUMERO DE ATENCION: ${EXPORT_ATTENTION_2}`,
+  '==========================================',
+  `CASO ${EXPORT_ATTENTION_2}-1`,
+  '==========================================',
+  'DOCUMENTO                        FACTURA DE EXPORTACION ELECTRONICA',
+  'MONEDA DE LA OPERACION:          YEN',
+  'FORMA DE PAGO EXPORTACION:       COB1',
+  'CLAUSULA DE VENTA:               CFR',
+  'VIA DE TRANSPORTE:               OLEODUCTOS, GASODUCTOS',
+  'PUERTO DE EMBARQUE:              TALCAHUANO',
+  'PUERTO DE DESEMBARQUE:           MARACAIBO',
+  'PAIS RECEPTOR Y PAIS DESTINO:    VENEZUELA',
+  'DOCUMENTO DE REFERENCIA:         RESOLUCION SNA',
+  '',
+  'ITEM                                     VALOR LINEA',
+  'ASESORIAS Y PROYECTOS PROFESIONALES      94',
+  '%10 RECARGO EN LA LINEA DE ITEM POR COMISIONES EN EL EXTERIOR',
+  '--------------------------------------------------',
+  `CASO ${EXPORT_ATTENTION_2}-2`,
+  '==========================================',
+  'DOCUMENTO                        FACTURA DE EXPORTACION ELECTRONICA',
+  'MONEDA DE LA OPERACION:          YEN',
+  'FORMA DE PAGO EXPORTACION:       COB1',
+  'MODALIDAD DE VENTA:              SIN PAGO',
+  'CLAUSULA DE VENTA:               CFR',
+  'TOTAL CLAUSULA DE VENTA:         5613.15',
+  'VIA DE TRANSPORTE:               OLEODUCTOS, GASODUCTOS',
+  'PUERTO DE EMBARQUE:              TALCAHUANO',
+  'PUERTO DE DESEMBARQUE:           MARACAIBO',
+  'UNIDAD DE MEDIDA DE TARA:        MCUB',
+  'UNIDAD PESO BRUTO:               MCUB',
+  'UNIDAD PESO NETO:                MCUB',
+  'CALCULE LOS VALORES DE TARA, PESO BRUTO Y PESO NETO',
+  'TIPO DE BULTO:                   TRONCOS',
+  'TOTAL BULTOS:                    104',
+  'FLETE (**):                      5251.25',
+  'SEGURO (**):                     4912.68',
+  'COMISIONES EN EL EXTRANJERO:     11% DEL TOTAL CLAUSULA DE VENTA',
+  'PAIS RECEPTOR Y PAIS DESTINO:    VENEZUELA',
+  'DOCUMENTO DE REFERENCIA:         DUS',
+  'DOCUMENTO DE REFERENCIA:         AWB',
+  '',
+  'ITEM                                                      CANTIDAD   UNIDAD MEDIDA   PRECIO UNITARIO   DESCUENTO',
+  'CAJAS CIRUELAS TIERNIZADAS SIN CAROZO CALIBRE 60/70       1036       KN              194               5%',
+  'CAJAS DE PASAS DE UVA FLAME MORENA SIN SEMILLA MEDIANAS   243        KN              132',
+  '',
+  '(**) INFORME ADEMAS EL FLETE Y EL SEGURO COMO RECARGOS GLOBALES',
+  '--------------------------------------------------',
+  `CASO ${EXPORT_ATTENTION_2}-3`,
+  '==========================================',
+  'DOCUMENTO                        FACTURA DE EXPORTACION ELECTRONICA',
+  'MONEDA DE LA OPERACION:          DOLAR USA',
+  'PAIS RECEPTOR Y PAIS DESTINO:    VENEZUELA',
+  'DOCUMENTO DE REFERENCIA:         RESOLUCION SNA',
+  '',
+  'ITEM                             VALOR LINEA',
+  'ALOJAMIENTO HABITACIONES         281',
+  '--------------------------------------------------',
 ].join('\n')
 
 /** The attention number of the synthetic settlement set: the SII numbers each set apart. */

@@ -114,7 +114,14 @@ export {
 } from '../catalogs/certification'
 export type { TestSetKind } from '../catalogs/certification'
 export { parseTestSetText } from '../certification/set-text'
-export type { TestSet, TestCase, TestCaseItem, TestCaseCommission, TestBookDocument } from '../certification/set-text'
+export type {
+  TestSet,
+  TestCase,
+  TestCaseItem,
+  TestCaseCommission,
+  TestBookDocument,
+  CustomsDocument,
+} from '../certification/set-text'
 export { planCertificationSets } from '../certification/set-plan'
 export type {
   CertificationPlan,
@@ -123,6 +130,7 @@ export type {
   GuideSetPlan,
   PurchaseSetPlan,
   SettlementSetPlan,
+  ExportSetPlan,
   PurchaseBookPlan,
   PlannedInvoice,
   PlannedNote,
@@ -131,12 +139,23 @@ export type {
   PlannedSettlement,
   PlannedSettlementLine,
   PlannedCommission,
+  PlannedExport,
+  PlannedExportItem,
+  PlannedExportCustoms,
+  PlannedExportReference,
   SetFolios,
 } from '../certification/set-plan'
 export { createFolioAllocator } from '../certification/folios'
 export type { FolioSource, FolioAllocatorOptions } from '../certification/folios'
-export { issueTestSet, TEST_SET_ENVELOPE_ID } from '../certification/issue-set'
-export type { IssueSetOptions, IssuableSetPlan, IssuedCase, IssuedSet } from '../certification/issue-set'
+export { issueTestSet, TEST_SET_ENVELOPE_ID, DEFAULT_CERTIFICATION_FOREIGN_RECEIVER } from '../certification/issue-set'
+export type {
+  IssueSetOptions,
+  IssuableSetPlan,
+  IssuedCase,
+  IssuedSet,
+  ExportSetOptions,
+  ExportReceiverInput,
+} from '../certification/issue-set'
 export { issueSimulation } from '../certification/simulation'
 export type { IssuedSimulation } from '../certification/simulation'
 export {
@@ -229,6 +248,7 @@ export type {
 } from '../certification/runtime'
 export {
   obtainTestSet,
+  checkExportSets,
   sendTestSet,
   declareTestSets,
   waitForTestSetsApproval,

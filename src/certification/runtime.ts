@@ -5,6 +5,7 @@ import type { IssuerInput, ReceiverInput } from '../model/document'
 import type { PortalClient } from '../portal/client'
 import type { SiiClient } from '../sii/client'
 import type { ExchangeContact } from './exchange'
+import type { ExportSetOptions } from './issue-set'
 import type { CertificationState, CertificationStore, SentSetKey } from './state'
 
 /**
@@ -39,6 +40,8 @@ export type CertificationDependencies = {
   readonly onProgress?: (event: CertificationProgressEvent) => void
   /** EN: The contact the exchange answers name, when any. ES: `NmbContacto`, `MailContacto`, `FonoContacto` — El contacto que nombran las respuestas del intercambio, si hay. */
   readonly contact?: ExchangeContact
+  /** EN: What the export sets need and their text does not give: the exchange rate of each currency (no default: a currency without one stops the run before any folio of the sets is asked for), the foreign customer and the percent of the tare. Unused by a run whose text holds no export set. ES: Lo que necesitan los sets de exportación y su texto no da: el tipo de cambio de cada moneda (sin valor por defecto: una moneda sin él detiene la corrida antes de pedir cualquier folio de los sets), el cliente extranjero y el porcentaje de la tara. No lo usa una corrida cuyo texto no trae sets de exportación. */
+  readonly exportSets?: ExportSetOptions
 }
 
 /**

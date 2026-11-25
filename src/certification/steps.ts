@@ -25,7 +25,7 @@ import {
 } from './folios-step'
 import { fieldDiagnosis, queryFieldUploadState } from './field-status'
 import { uploadForTrackId } from './field-upload'
-import { issueTestSet, type IssuableSetPlan, type IssuedCase } from './issue-set'
+import { issueTestSet, prepareExportSet, type IssuableSetPlan, type IssuedCase } from './issue-set'
 import { issueSimulation } from './simulation'
 import { planCertificationSets } from './set-plan'
 import { parseTestSetText } from './set-text'
@@ -39,6 +39,7 @@ import {
 } from './runtime'
 import {
   createCertificationState,
+  EXPORT_SET_KEYS,
   SENT_SET_KEYS,
   type CertificationState,
   type EnvelopeDiagnosis,
@@ -193,6 +194,7 @@ export const sendTestSet = async (
     folios: registryFolioSource(rt.registry, held),
     resolution: rt.resolution,
     now: rt.now,
+    exportSets: rt.exportSets,
   })
   await rt.store.writeArtefact(`sets-prueba/envio-set-${SET_FILE_NAMES[options.kind]}.xml`, issued.envelope.xml)
   for (const document of issued.cases)
@@ -227,6 +229,27 @@ const SET_FILE_NAMES: Readonly<Record<SentSetKey, string>> = {
   exempt: 'exenta',
   purchase: 'compra',
   settlement: 'liquidacion',
+  export1: 'exportacion-1',
+  export2: 'exportacion-2',
+}
+
+/**
+ * EN: Works out the export sets of the plan not yet sent, before any folio of the sets is asked for: a currency without
+ * its exchange rate in `exportSets`, a name the customs tables do not know, or a document `createDocument` would
+ * refuse, stops the run here, where nothing has been asked of the SII. A plan without export sets loads nothing.
+ * ES: Resuelve los sets de exportación del plan aún no enviados, antes de pedir cualquier folio de los sets: una moneda
+ * sin su tipo de cambio en `exportSets`, un nombre que las tablas de Aduanas no conocen, o un documento que
+ * `createDocument` rechazaría, detiene la corrida aquí, donde nada se ha pedido al SII. Un plan sin sets de
+ * exportación no carga nada.
+ * @throws {DteError} EN: the codes of `prepareExportSet`. ES: los códigos de `prepareExportSet`.
+ */
+export const checkExportSets = async (deps: CertificationDependencies, state: CertificationState): Promise<void> => {
+  const rt = runtime(deps)
+  for (const kind of EXPORT_SET_KEYS) {
+    const plan = state.plan?.[kind]
+    if (plan === undefined || state.sets[kind] !== undefined) continue
+    await prepareExportSet(plan, { issuer: rt.issuer, exportSets: rt.exportSets }, chileDate(rt.now()))
+  }
 }
 
 /**
