@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The digest of a received envelope** (`ReceivedEnvelope.digest`). `readReceivedEnvelope` reads the digest of the
   envelope's own signature, and `createReceptionAnswer` quotes it (`Digest`, which `RespuestaEnvioDTE_v10.xsd`
   declares after the id of the envelope).
+- **The stamp the SII's instructions describe, as an option for the sheet** (`unstable_stampGeometry: 'instructions'`
+  of `renderPrintedSample`, `unstable_geometry` of `renderTedBarcode`; `dte-sdk/pdf`). Section A.2.5 of the
+  instructions asks of the PDF417 rows three modules high, byte compaction and 300 DPI or more, and the stamp of
+  every release so far has rows one module high and is drawn with its width and its height held to the stamp box
+  each on its own. The option draws the symbol of the instructions: eighteen data columns, 387 modules across with
+  its quiet zone, rows three modules high, bytes alone whenever the TED fits, four pixels a module, and one factor
+  for its two sides, which on the 9 cm of the sheet gives a module of 9.2 mils. It is refused on continuous paper,
+  where its module would be under two dots of a 203 DPI printer. The default stamp does not change. It is `unstable_`
+  because no stamp drawn this way has been printed and read back with a scanner yet.
 
 ### Changed
 
