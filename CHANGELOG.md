@@ -32,6 +32,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and sale modes. `customsCode` finds the code of a name or an abbreviation, matched whole by its letters and digits
   alone, and answers `null` when rows of different codes match, as `SAN FRANCISCO` does without the heading of its
   port; `customsName` names a code. They are catalogs: `createDocument` takes any code, as before.
+- **The printed sample of an export document** (`dte-sdk/pdf`). `renderPrintedSample` refused the three export
+  documents (110, 111, 112). It now draws them on the sheet: the amounts in the currency the document names
+  (`TpoMoneda`), with the decimals they have, no peso sign and no total in words; the payment terms of the export
+  (`FmaPagExp`) in words; and the customs area (`Aduana`) in the transport box, each code Formato DTE 2.5 asks to
+  print in words (sale mode and clause, transport route, ports, units, kinds of package, countries) by the name its
+  customs table gives it, and a code the table does not list as written. A receiver abroad that names no commune and
+  no line of business prints neither label. A dispatch guide prints the customs area it carries the same way. The
+  continuous paper stays a receipt's: an export document on `paper: 'roll'` is refused (`INVALID_OPTION`, `paper`).
+  `parsePrintableDocuments` reads the customs area (`transport.customs`), the currency and the payment terms.
 
 ### Changed
 
