@@ -26,8 +26,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `queryDocumentStatus`. The verdict itself does not change.
   - **What to change:** code that builds an `UploadStatus` of its own must give it `unreported`.
 
+- **Credit notes in the folio consumption report.** `ConsumoFolio_v10.xsd` admits three document types in a summary
+  (`TipoConsumoType`): the receipt (39), the exempt receipt (41) and the credit note (61), "Nota de Credito
+  Electronica". `createFolioConsumption` refused a 61 (`INVALID_DOCUMENT_TYPE`). It now reports it, after the
+  receipts, with its net, its VAT and its exempt amount, and counts its folios, used and voided.
+- **The settlement set in the simulation of the certification run.** The simulation issued again the cases of the
+  basic, exempt, guide and purchase sets, and left out the settlement set a run had sent. `issueSimulation` now issues
+  its settlement invoices too, after the others, each as the set issued it less the reference of the test set, and
+  `simulationFolioNeeds` counts their folios. A run without the settlement set sends the simulation it sent before.
+
 ### Changed
 
+- **The sheet draws the stamp the SII's instructions describe.** Section A.2.5 of the SII's instructions asks of the
+  PDF417 stamp byte compaction, rows three modules high and a quarter of an inch clear around it. `renderPrintedSample`
+  drew on the sheet a symbol with rows one module high, stretched to the stamp box, and offered the symbol of the
+  instructions as `unstable_stampGeometry: 'instructions'`. That symbol is now the stamp of the sheet: 387 modules
+  across, 9 cm wide with a module of 9.2 mils, its two sides scaled by one factor, with a quarter of an inch clear above
+  and below it. The earlier stamp stays as `'compact'`: it is the stamp of the continuous paper, where the module of
+  the other is under two dots of a 203 DPI printer, and the one `renderTedBarcode` draws unless told otherwise. The
+  stamp box keeps its 5 to 9 cm by 2 to 4 cm. The room the stamp takes on the sheet grows by 15 points, the clear
+  space, so a document whose lines filled its last page to the end may break to one page more. No stamp drawn this way
+  has been printed and read back with a scanner yet, so the option keeps its `unstable_` name.
+  - **What to change:** nothing to take the new stamp. Pass `unstable_stampGeometry: 'compact'` to keep on the sheet
+    the stamp of 0.16.0. The printed samples of the certification run are drawn with the new one.
 - **The certification run reads the company's resolution from the SII when it is given none.** The cover of an
   envelope names the resolution of the company in the environment it goes to, and the SII refuses an envelope that
   names another ("Error en Carátula"). `runCertification`, given no `resolution`, wrote number 0 and the UTC day the
