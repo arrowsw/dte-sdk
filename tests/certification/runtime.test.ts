@@ -63,6 +63,16 @@ describe('what the run fills in for the operator', () => {
     expect(rt.resolution).toEqual({ number: 0, date: FIXED_NOW.toISOString().slice(0, 10) })
   })
 
+  test('the customers that take turns are none by default, and each takes what it leaves out from the test receiver', async () => {
+    const { deps } = await bare()
+    expect(runtime(deps).receivers).toEqual([])
+    const rt = runtime({ ...deps, receivers: [{ rut: '11111111-1', businessName: 'CLIENTE UNO', commune: '' }, {}] })
+    expect(rt.receivers).toEqual([
+      { ...DEFAULT_CERTIFICATION_RECEIVER, rut: '11111111-1', businessName: 'CLIENTE UNO' },
+      DEFAULT_CERTIFICATION_RECEIVER,
+    ])
+  })
+
   test('the date of a resolution left out is the UTC day, not the Chile day', async () => {
     const { deps } = await bare({ now: () => new Date('2026-11-16T01:30:00Z') })
     expect(runtime(deps).resolution.date).toBe('2026-11-16')

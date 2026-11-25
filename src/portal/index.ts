@@ -223,6 +223,7 @@ export type {
   CertificationDependencies,
   CertificationIssuerInput,
   CertificationProgressEvent,
+  CertificationUpload,
   PollingLabel,
   StepResult,
 } from '../certification/runtime'
