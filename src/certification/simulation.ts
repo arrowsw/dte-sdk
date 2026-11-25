@@ -226,6 +226,7 @@ export const issueSimulation = async (plan: CertificationPlan, options: IssueSet
           items,
           style: 'plain',
           references,
+          unreferencedNote: true,
           totals: generalTotals(totaledItems(type, references, items), undefined),
           record: true,
         })
@@ -270,6 +271,7 @@ export const issueSimulation = async (plan: CertificationPlan, options: IssueSet
         style: 'purchase',
         receiver: issuer,
         references,
+        unreferencedNote: true,
         withholdVat: true,
         totals: purchaseTotals(totaledItems(type, references, items)),
         record: true,

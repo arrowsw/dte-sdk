@@ -19,6 +19,8 @@ const invoice = (extra: Partial<DocumentInput> = {}) =>
   build({ type: 33, items: [{ name: 'Plan anual', unitPrice: 100000 }], ...extra })
 const receipt = (extra: Partial<DocumentInput> = {}) =>
   build({ type: 39, receiver: undefined, items: [{ name: 'Café', quantity: 2, unitPrice: 1500 }], ...extra })
+// Formato DTE 2.5, page 10: a credit note names the document it changes.
+const changes = (code: 2 | 3): DocumentInput['references'] => [{ documentType: 33, folio: 1, date: '2026-11-01', code }]
 const lines = (count: number) =>
   Array.from({ length: count }, (_, index) => ({ name: `Ítem ${index + 1}`, unitPrice: 100 }))
 
@@ -59,7 +61,9 @@ describe('the lines a document admits', () => {
     expect(refusal(() => invoice({ items: [{ name: 'Lote', unitPrice: 1000, discountPercent: 150 }] }))).toEqual(
       refused,
     )
-    expect(refusal(() => build({ type: 61, items: [{ name: 'Ajuste', amount: -5 }] }))).toEqual(refused)
+    expect(refusal(() => build({ type: 61, items: [{ name: 'Ajuste', amount: -5 }], references: changes(3) }))).toEqual(
+      refused,
+    )
     expect(refusal(() => invoice({ items: [{ name: 'Lote', amount: 10.5 }] }))).toEqual(refused)
     const settlement = build({
       type: 43,
@@ -295,7 +299,9 @@ describe('what the SII accepts with an objection', () => {
 
   test('a document it does not object to carries no warnings', () => {
     expect(invoice()).not.toHaveProperty('warnings')
-    expect(build({ type: 61, items: [{ name: 'Corrige texto' }] })).not.toHaveProperty('warnings')
+    expect(build({ type: 61, items: [{ name: 'Corrige texto' }], references: changes(2) })).not.toHaveProperty(
+      'warnings',
+    )
   })
 
   test('10: a settlement invoice whose total is zero', () => {

@@ -430,6 +430,25 @@ describe('the logo', () => {
     expect(images.some((image) => image.pixels === null)).toBe(true)
   })
 
+  // `Buffer.from` of a short base64 text and `fs.readFile` of a small file hand out a view of a larger pool, at an
+  // offset: the image starts where the view does, not where its buffer does.
+  test('a logo given as a view at an offset of a larger buffer is embedded too', async () => {
+    const jpeg = Buffer.from(
+      '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=',
+      'base64',
+    )
+    const view = (image: Uint8Array): Uint8Array => {
+      const pool = new Uint8Array(image.length + 64)
+      pool.set(image, 32)
+      return pool.subarray(32, 32 + image.length)
+    }
+    const withJpeg = await pdfImages(await render(invoiceDoc, { logo: { bytes: view(jpeg), format: 'jpeg' } }))
+    expect(withJpeg).toHaveLength(2)
+    expect(withJpeg.some((image) => image.pixels === null)).toBe(true)
+    const withPng = await pdfImages(await render(invoiceDoc, { logo: { bytes: view(smallPng()), format: 'png' } }))
+    expect(withPng).toHaveLength(2)
+  })
+
   test('bytes the library cannot embed are ignored', async () => {
     const pdf = await render(invoiceDoc, { logo: { bytes: new Uint8Array([1, 2, 3]), format: 'png' } })
     expect(await pdfImages(pdf)).toHaveLength(1)

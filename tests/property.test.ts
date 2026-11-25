@@ -224,6 +224,8 @@ describe('codec round-trip', () => {
             pricesIncludeVat: gross,
             // Formato DTE 2.5, field 7: a dispatch guide states its transfer.
             options: type === 52 ? { transferType: 1 } : undefined,
+            // Formato DTE 2.5, page 10: a debit note names the document it changes.
+            references: type === 56 ? [{ documentType: 33, folio: 1, date: '2026-11-01', code: 3 }] : undefined,
           })
           expect(fromSiiDocument(toSiiDocument(doc))).toEqual(doc)
         },

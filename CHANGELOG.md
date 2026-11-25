@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A credit note and a debit note need the reference of the document they change.** Formato DTE 2.5 makes the zone
+  "Información Referencia" code 1 on both, national (61, 56) and of export (112, 111): "Dato obligatorio. El dato debe
+  estar en el documento siempre". The schema leaves `Referencia` optional, since one root serves every type, and
+  `createDocument` stamped and signed a note with no reference, or with the `SET` reference of a certification set
+  alone, which names no document. It now refuses one with `MISSING_FIELD` and `references` in `details.field`. The
+  simulation of the certification run is unchanged: it still issues with no reference a note whose case is not among
+  its documents.
+  - **What to change:** give every 56, 61, 111 and 112 a reference to the document it changes.
+- **A global discount or surcharge is a value from 0.01 up, and a document carries 20 of them.** `DTE_v10.xsd` and
+  `EnvioBOLETA_v11.xsd` type `ValorDR` as a decimal of two places from 0.01 up, and repeat `DscRcgGlobal` up to 20
+  times. `createDocument` wrote any value: a discount of -5 raised the net by 5, a value under half a cent was written
+  as 0, and a 21st adjustment was written with the rest, each in a file the schema refuses. A value that is not above
+  zero once rounded to its two decimals is now refused with `INVALID_AMOUNT` (`globalAdjustments[i].value`), and more
+  than 20 adjustments with `INVALID_OPTION` (`globalAdjustments`).
+  - **What to change:** say whether an adjustment takes off or adds with its `kind`, never with the sign of its
+    `value`.
+- **The id of an envelope, of a book and of a folio report is a name.** The schemas type the `ID` of `SetDTE`, of
+  `EnvioLibro` and of `DocumentoConsumoFolios` as `xs:ID`. `createEnvelope` (`cover.setId`) and
+  `createPurchaseSalesBook`, `createGuideBook` and `createFolioConsumption` (`id`) wrote whatever they were given:
+  `39-1` or `a b` made a file the schema refuses, and a `<` or a quote broke the attribute the id is written in. An id
+  that is not a letter or an underscore followed by letters, digits, full stops, hyphens and underscores is now
+  refused with `INVALID_OPTION` (`cover.setId`, `id`). The ids the library generates do not change.
+  - **What to change:** rename an id that starts with a digit or holds a space or a colon, or leave it out to have
+    one generated.
+
+### Fixed
+
+- **A folio file saved as the SII serves it is found when the company's name has an Ñ or an accent.** The folio file
+  the SII serves opens with `<?xml version="1.0"?>`, naming no encoding, and its bytes are ISO-8859-1. `findCafFiles`
+  (`dte-sdk/node`) read a file that names no encoding as strict UTF-8 and skipped it when its bytes were not, so the
+  file of a company with an Ñ in its name was never found, with no error to say why. A file that names no encoding is
+  now read as UTF-8 when its bytes are, and as ISO-8859-1 otherwise. A file that names its encoding is read as
+  before, and skipped when its bytes are not that encoding. `findLatestCafFile` and `resolveCafFile` follow.
+- **The refusal of an upload keeps its reason wherever the reply writes it.** `uploadEnvelope`, `uploadBook` and
+  `uploadFolioConsumption` read the reason of a refused file from the `DETAIL/ERROR` lines of the reply alone. A reply
+  with no such line came back as `SII_UPLOAD_REJECTED` with empty `errors`, and one that named the TrackID of an
+  earlier upload outside those lines was a refusal where it is a duplicate. With no `ERROR` line, what the reply says
+  after `STATUS` is now read line by line, less its markup and its `TRACKID` element. A reply with `ERROR` lines is
+  read as before.
+- **A logo handed as a `Buffer` is printed.** `Buffer.from` of a short base64 text and `fs.readFile` of a small file
+  hand out a view of a larger pool, at an offset, and `renderPrintedSample` passed it on as it came: the JPEG reader
+  looked for the image at the start of the pool and found none, so the sample was printed without its logo and with
+  no error. The bytes of a logo are now copied before they are embedded.
+- **Four long names of communes find their SII office.** `siiOfficeForCommune` knew Mariquina, San Vicente, San Fabián
+  and Ñiquén, and gave no office for San José de la Mariquina, San Vicente de Tagua Tagua, San Fabián de Alico and San
+  Gregorio de Ñiquén, as an address writes them, so the printed sample left the office out. `SII_OFFICES` lists them
+  with their communes: 364 names in 40 offices.
+
 ## [0.16.0] - 2026-11-25
 
 ### Added

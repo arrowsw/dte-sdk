@@ -996,10 +996,13 @@ const paginate = (headerEnd: number, blocks: readonly Block[]): readonly (readon
   return pages
 }
 
+// The bytes are copied first: a `Buffer` of a short base64 text or of a small file is a view of a larger pool at an
+// offset, and the JPEG reader looks for the image at the start of the buffer behind the view, where it is not.
 const embedLogo = async (document: PDFDocument, logo: PrintedLogo | undefined): Promise<PDFImage | null> => {
   if (!logo) return null
   try {
-    return logo.format === 'jpeg' ? await document.embedJpg(logo.bytes) : await document.embedPng(logo.bytes)
+    const bytes = Uint8Array.from(logo.bytes)
+    return logo.format === 'jpeg' ? await document.embedJpg(bytes) : await document.embedPng(bytes)
   } catch {
     return null
   }

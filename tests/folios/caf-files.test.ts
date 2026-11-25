@@ -175,13 +175,29 @@ describe('findCafFiles', () => {
     expect(files[3].xml).toBe(accented(''))
   })
 
+  test('a file that names no encoding and is not UTF-8 is read as ISO-8859-1, which the SII writes', async () => {
+    const dir = await temp.make('dte-sdk-caf-')
+    // The declaration of the folio file the SII serves names no encoding, and an Ñ in the company's name is one byte.
+    const served = await putBytes(dir, 'served.xml', latin1(accented('<?xml version="1.0"?>\n')), 3)
+    const bare = await putBytes(dir, 'bare.xml', latin1(accented('')), 2)
+    // Only the attribute named encoding counts, not one whose name ends in it: this file names none.
+    const other = await putBytes(
+      dir,
+      'x-encoding.xml',
+      latin1(accented('<?xml version="1.0" x-encoding="UTF-8"?>\n')),
+      1,
+    )
+    const files = await findCafFiles({ dir, type: 33, issuerRut: ISSUER_RUT, now })
+    expect(files.map((file) => file.path)).toEqual([served, bare, other])
+    expect(files.map((file) => file.caf.issuerName)).toEqual([ACCENTED, ACCENTED, ACCENTED])
+    expect(files[0].xml).toBe(accented('<?xml version="1.0"?>\n'))
+    expect(files[1].xml).toBe(accented(''))
+  })
+
   test('a file whose bytes are not the encoding it declares, or that declares another one, is left out', async () => {
     const dir = await temp.make('dte-sdk-caf-')
-    await putBytes(dir, 'undeclared-latin1.xml', latin1(accented('<?xml version="1.0"?>\n')), 4)
     await putBytes(dir, 'lying.xml', latin1(accented('<?xml version="1.0" encoding="UTF-8"?>\n')), 3)
     await putBytes(dir, 'other.xml', latin1(accented('<?xml version="1.0" encoding="windows-1252"?>\n')), 2)
-    // Only the attribute named encoding counts, not one whose name ends in it.
-    await putBytes(dir, 'x-encoding.xml', latin1(accented('<?xml version="1.0" x-encoding="ISO-8859-1"?>\n')), 1)
     await expect(findCafFiles({ dir, type: 33, issuerRut: ISSUER_RUT, now })).resolves.toEqual([])
   })
 

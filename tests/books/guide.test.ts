@@ -43,6 +43,13 @@ describe.each(['guide-total', 'guide-adjustment'] as const)('sample %s', (name) 
 })
 
 describe('createGuideBook', () => {
+  // `LibroGuia_v10.xsd` types the `ID` of `EnvioLibro` as `xs:ID`, a name.
+  test.each(['1LGD', 'a b', 'x<y', 'a"b', ''])('an id of %j is refused, and a name is kept', (id) => {
+    const book = { cover: guideCover, entries: [entry({ totalAmount: 1 })] }
+    expect(failure({ ...book, id })).toEqual({ code: 'INVALID_OPTION', details: { field: 'id' } })
+    expect(createGuideBook({ ...book, id: 'LGD_2026-10.a' }).id).toBe('LGD_2026-10.a')
+  })
+
   test('defaults to a total and generates the id and timestamp', () => {
     const book = createGuideBook({ cover: guideCover, entries: [entry({ totalAmount: 1 })], now: FIXED_NOW })
     expect(book.cover).toMatchObject({ submission: 'total', notificationFolio: 3 })

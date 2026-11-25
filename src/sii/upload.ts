@@ -84,7 +84,7 @@ type ReceptionBase = {
   readonly receivedAt: string | null
   /** EN: `FILE` or null. ES: `FILE` o null. */
   readonly fileName: string | null
-  /** EN: `DETAIL/ERROR` lines, entities decoded. ES: Líneas `DETAIL/ERROR`, con las entidades decodificadas. */
+  /** EN: `DETAIL/ERROR` lines, entities decoded; in a reply with none, the lines of text that follow `STATUS`, less their markup. ES: Líneas `DETAIL/ERROR`, con las entidades decodificadas; en una respuesta sin ninguna, las líneas de texto que siguen a `STATUS`, sin su marcado. */
   readonly errors: readonly string[]
 }
 
@@ -127,6 +127,21 @@ const trackIdInErrors = (errors: readonly string[]): string => {
   return token === undefined ? '' : token.replace(/[.,;)]+$/, '')
 }
 
+// `DETAIL/ERROR` is where the reply puts the reason of a refusal. A reply with no such line still says why after
+// `STATUS`, in another element or in plain text: each line of that is read, less its markup and the `TRACKID` element,
+// which is data and no reason, so a refusal never comes back with nothing to correct the file with.
+const reasonLines = (text: string): readonly string[] => {
+  const tagged = Array.from(text.matchAll(/<ERROR>([^<]*)<\/ERROR>/gi), (match) => decodeXmlEntities(match[1]).trim())
+  if (tagged.length > 0) return tagged
+  return text
+    .replace(/^[\s\S]*?<\/STATUS>/i, '')
+    .replace(/<TRACKID>[^<]*<\/TRACKID>/gi, '')
+    .replace(/<[^>]*>/g, ' ')
+    .split('\n')
+    .map((line) => decodeXmlEntities(line).replace(/\s+/g, ' ').trim())
+    .filter((line) => line !== '')
+}
+
 // The `TRACKID` element wins; duplicate replies may carry the TrackID only in the text of an error line.
 const trackIdCandidate = (text: string, errors: readonly string[]): string => {
   const tagged = extractTagContent(text, 'TRACKID')?.trim() ?? ''
@@ -151,7 +166,7 @@ export const parseReceptionResponse = (text: string, operation = 'upload'): Rece
   if (!/<RECEPCIONDTE>/i.test(text)) throw invalidResponse(operation, text)
   const status = (extractTagContent(text, 'STATUS') ?? '').trim()
   if (!STATUS_PATTERN.test(status)) throw invalidResponse(operation, text)
-  const errors = Array.from(text.matchAll(/<ERROR>([^<]*)<\/ERROR>/gi), (match) => decodeXmlEntities(match[1]).trim())
+  const errors = reasonLines(text)
   const base: ReceptionBase = {
     status,
     receivedAt: siiTimestampToIso(extractTagContent(text, 'TIMESTAMP')),

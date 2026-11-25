@@ -1159,4 +1159,41 @@ describe('parseReceptionResponse', () => {
   ])('%s is %s', (name, outcome, trackId) => {
     expect(parseReceptionResponse(siiFixture(name))).toMatchObject({ outcome, trackId })
   })
+
+  // The reason of a refusal is what the file is corrected with. `DETAIL/ERROR` is where the reply puts it; a reply
+  // that says it anywhere else after `STATUS` is read too, so a refusal never comes back with no reason.
+  const DETAIL = /<DETAIL>[\s\S]*<\/DETAIL>/
+  const saying = (name: string, after: string): string => siiFixture(name).replace(DETAIL, after)
+
+  test.each([
+    ['in another element', '<GLOSA>SCH-00001: Error de Esquema</GLOSA>'],
+    ['in a DETAIL with no ERROR element', '<DETAIL>\nSCH-00001: Error de Esquema\n</DETAIL>'],
+    ['as plain text', '  SCH-00001: Error de Esquema'],
+    ['in an ERROR element with markup inside', '<DETAIL><ERROR>SCH-00001: <B>Error</B> de  Esquema</ERROR></DETAIL>'],
+  ])('the reason of a refusal written %s after STATUS is read', (_label, after) => {
+    expect(parseReceptionResponse(saying('reception-schema-error.xml', after))).toMatchObject({
+      outcome: 'rejected',
+      errors: ['SCH-00001: Error de Esquema'],
+    })
+  })
+
+  test('each line of such a reason is one error, with its entities decoded, and the TrackID is none of them', () => {
+    const lines =
+      '<GLOSA>Elemento &apos;Detalle&apos; &lt;x&gt;</GLOSA>\n<TRACKID>9876543210</TRACKID>\n<GLOSA>cvc-x</GLOSA>'
+    expect(parseReceptionResponse(saying('reception-schema-error.xml', lines))).toMatchObject({
+      outcome: 'rejected',
+      errors: ["Elemento 'Detalle' <x>", 'cvc-x'],
+    })
+    expect(parseReceptionResponse(saying('reception-schema-error.xml', '')).errors).toEqual([])
+  })
+
+  test('a duplicate whose message is not in an ERROR element still gives back the original TrackID', () => {
+    const message = 'Archivo ya fue enviado 2 veces con Trackid 9876543210. Debe esperar 900 segundos'
+    for (const after of [`<GLOSA>${message}</GLOSA>`, message])
+      expect(parseReceptionResponse(saying('reception-duplicate-99.xml', after))).toMatchObject({
+        outcome: 'duplicate',
+        trackId: '9876543210',
+        errors: [message],
+      })
+  })
 })

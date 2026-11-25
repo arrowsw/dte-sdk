@@ -126,6 +126,8 @@ const MAX_ACTIVITY_CODE = 999_999
 const MAX_LINES = 60
 const MAX_RECEIPT_LINES = 1000
 const MAX_COMMISSIONS = 20
+// `DscRcgGlobal` repeats up to 20 times in `DTE_v10.xsd` and in `EnvioBOLETA_v11.xsd`.
+const MAX_GLOBAL_ADJUSTMENTS = 20
 const MAX_PAYMENTS = 30
 
 // The `IdDoc` fields that `Documento` declares and `Liquidacion`, the root of a settlement invoice, does not.
@@ -202,6 +204,15 @@ const CONTAINER_PACKAGES: readonly unknown[] = [73, 74, 75, 76, 78]
 export type CreateDocumentOptions = {
   /** EN: Clock for the default issue date (tests). ES: Reloj para la fecha de emisión por defecto (tests). */
   readonly now?: Date
+}
+
+/**
+ * EN: What `createDocumentWith` waives. Internal.
+ * ES: Lo que `createDocumentWith` exime. Interno.
+ */
+export type CreateDocumentWaivers = {
+  /** EN: Build a credit or a debit note that references no document: the simulation of the certification run issues one, as field behaviour does, when the case it refers to is not among its documents. ES: `Referencia` — Construir una nota de crédito o de débito que no refiere ningún documento: la simulación de la corrida de certificación emite una, como el comportamiento de campo, cuando el caso al que se refiere no está entre sus documentos. */
+  readonly unreferencedNote?: boolean
 }
 
 // Sanitizes a text field, enforces its schema limit and returns undefined for empty optionals.
@@ -580,9 +591,15 @@ const SINGLE_REFERENCE_CODES: Partial<Record<DocumentType, readonly unknown[]>> 
   112: [1, CORRECTS_TEXT],
 }
 
-const assertSingleReference = (type: DocumentType, references: readonly ReferenceInput[]): void => {
-  const codes = SINGLE_REFERENCE_CODES[type] ?? []
+// Formato DTE 2.5, "OBLIGATORIEDAD DE LA ZONA SEGÚN TIPO DE DOCUMENTO": the zone "Información Referencia" is code 1,
+// "Dato obligatorio. El dato debe estar en el documento siempre", on a credit note and a debit note, national and of
+// export, the types of the table above. The schema leaves `Referencia` optional, as one root serves every type.
+const assertNoteReferences = (type: DocumentType, references: readonly ReferenceInput[], waived: boolean): void => {
+  const note = SINGLE_REFERENCE_CODES[type]
+  const codes = note ?? []
   const documents = references.flatMap((reference, index) => (reference.documentType === 'SET' ? [] : [index]))
+  if (note !== undefined && !waived && documents.length === 0)
+    throw new DteError('MISSING_FIELD', { field: 'references' })
   const single = documents.find((index) => codes.includes(references[index].code))
   const other = documents.find((index) => index !== single)
   if (single !== undefined && other !== undefined) refuse(`references[${other}]`)
@@ -829,15 +846,22 @@ const normalizeReceiptReference = (input: ReceiptReferenceInput, index: number):
     reason: text(input.reason, 'RazonRef'),
   })
 
-const normalizeAdjustment = (input: GlobalAdjustmentInput, index: number): GlobalAdjustment =>
-  compact({
+// `ValorDR` is a `Dec16_2Type` in `DTE_v10.xsd` and a `Dec1Type` in `EnvioBOLETA_v11.xsd`, both from 0.01 up: a value
+// below it, or one its two decimals bring to zero, fails the schema, and a negative one would turn a discount into a
+// surcharge, which is `TpoMov`'s to say.
+const normalizeAdjustment = (input: GlobalAdjustmentInput, index: number): GlobalAdjustment => {
+  const path = `globalAdjustments[${index}].value`
+  const value = rounded(input.value, 'value', path)
+  if (!(value > 0)) throw new DteError('INVALID_AMOUNT', { field: path })
+  return compact({
     lineNumber: index + 1,
     kind: input.kind,
     valueType: input.valueType,
-    value: rounded(input.value, 'value', `globalAdjustments[${index}].value`),
+    value,
     description: text(input.description, 'GlosaDR'),
     exemptIndicator: input.exemptIndicator,
   })
+}
 
 // The schema asks every line for `ValComNeto` and `ValComExe`, so a line needs one of them and gets the other as
 // zero. Its `ValComIVA` is the caller's or, without one, its net value by the VAT rate, left out when that is zero.
@@ -988,6 +1012,134 @@ const otherCurrencyOf = (rate: number | undefined, totals: Totals): OtherCurrenc
       }
 
 /**
+ * EN: `createDocument` with what a caller inside the library may waive. Internal.
+ * ES: `createDocument` con lo que un llamador de dentro de la librería puede eximir. Interno.
+ */
+export const createDocumentWith = (
+  input: DocumentInput,
+  options: CreateDocumentOptions,
+  waivers: CreateDocumentWaivers,
+): Document => {
+  if (!isDocumentType(input.type)) throw new DteError('INVALID_DOCUMENT_TYPE', { type: input.type })
+  if (!Number.isInteger(input.folio) || input.folio <= 0) throw new DteError('INVALID_FOLIO', { folio: input.folio })
+  const type = input.type
+  const receipt = isReceipt(type)
+  const exported = isExport(type)
+  const issueDate = input.issueDate === undefined ? chileDate(options.now) : toIsoDate(input.issueDate, 'issueDate')
+  const issuer = normalizeIssuer(input.issuer, receipt)
+  const receiver = normalizeReceiver(input.receiver, type)
+  if (input.items.length === 0) throw new DteError('MISSING_FIELD', { field: 'items' })
+  if (input.items.length > (receipt ? MAX_RECEIPT_LINES : MAX_LINES)) refuse('items')
+  if (type === 43) assertSettlement(input)
+  if (exported) assertExport(input)
+  else assertNotExport(input)
+  if (receipt) assertReceipt(input)
+  // `IndMntNeto` and `RUTProvSW` are a receipt's: no other document declares them.
+  else if (input.options?.netAmountsIndicator !== undefined) refuse('options.netAmountsIndicator')
+  else if (input.softwareProviderRut !== undefined) refuse('softwareProviderRut')
+  const softwareProviderRut =
+    input.softwareProviderRut === undefined ? undefined : toSiiRut(input.softwareProviderRut, 'softwareProviderRut')
+  if ((input.commissions ?? []).length > MAX_COMMISSIONS) refuse('commissions')
+  if ((input.globalAdjustments ?? []).length > MAX_GLOBAL_ADJUSTMENTS) refuse('globalAdjustments')
+  if ((input.options?.payments ?? []).length > MAX_PAYMENTS) refuse('options.payments')
+  const service = input.options?.serviceIndicator
+  const counted = type === 110 && !SERVICES_WITHOUT_SALE.includes(service)
+  const cited = input.references ?? []
+  assertNoteReferences(type, cited, waivers.unreferencedNote === true)
+  assertExemptIndicators(input)
+  assertVatNotWithheld(input)
+  if (input.splitVat && (type !== 43 || input.totals !== undefined)) refuse('splitVat')
+  assertTransferType(type, input.options?.transferType)
+  // Formato DTE 2.5, field 38 of the detail: every line of a credit note that corrects a text is zero, and a line of a
+  // dispatch guide whose transfer is not a sale may be. Field 7 makes 1 the sale and every value above it a transfer
+  // "por otros motivos que no corresponden a venta", so 9, whose label reads "Venta para exportación", is not a sale
+  // here, as field 38 reads "Guía de despacho NO VENTA (Según campo Indicador Tipo de traslado de bienes del
+  // encabezado)" and `IndExe` 4 calls a sale guide one "con Indicador Tipo de Traslado de Bienes igual a 1".
+  // A `SET` reference names no document, so its code makes no note one that corrects a text, as it counts for no
+  // reference above.
+  const zero =
+    (type === 61 || type === 112) &&
+    cited.some(({ documentType, code }) => documentType !== 'SET' && code === CORRECTS_TEXT)
+  const context: LineContext = {
+    counted,
+    zero,
+    zeroAdmitted: type === 52 && input.options?.transferType !== TRANSFER_TYPES.sale,
+  }
+  // A note written at zero has nothing for a global adjustment to apply to nor a total to take a commission off.
+  if (zero && given(input.globalAdjustments)) refuse('globalAdjustments[0]')
+  if (zero && given(input.commissions)) refuse('commissions[0]')
+  const lines = input.items.map((item, index) => normalizeItem(item, index, type, context))
+  // A receipt's `Referencia` has no date: the invoice shape would fail the receipts schema, and the other way round.
+  if (receipt && cited.length > 0) throw new DteError('INVALID_OPTION', { field: 'references' })
+  if (!receipt && (input.receiptReferences ?? []).length > 0)
+    throw new DteError('INVALID_OPTION', { field: 'receiptReferences' })
+  const references = cited.map(normalizeReference)
+  const receiptReferences = (input.receiptReferences ?? []).map(normalizeReceiptReference)
+  const subtotals = (input.subtotals ?? []).map((subtotal, index) => normalizeSubtotal(subtotal, index, receipt))
+  const globalAdjustments = (input.globalAdjustments ?? []).map(normalizeAdjustment)
+  const commissions = (input.commissions ?? []).map(normalizeCommission)
+  const transport = normalizeTransport(input.transport)
+  if (exported) assertCustoms(transport?.customs, type, service)
+  const exchangeRate = positive(input.exchangeRate, 'rate', 'exchangeRate')
+  const withoutPayment = Number(input.options?.exportPaymentTerms) === WITHOUT_PAYMENT
+  const computed =
+    input.totals ??
+    calculateTotals(lines, {
+      type,
+      pricesIncludeVat: input.pricesIncludeVat,
+      vatRate: VAT_RATE,
+      globalAdjustments,
+      withholdVat: input.withholdVat,
+      // The lines as the caller gave them, checked above: the summary's VAT depends on whether a line states its own.
+      commissions: input.commissions,
+      withoutPayment,
+    })
+  const totals = input.splitVat ? withVatSplit(computed) : computed
+  // Totals the caller gave are the caller's to match with the lines; what the SII checks over the totals themselves is
+  // checked here, on them and on the ones worked out.
+  if (exported) assertExportTotals(totals, withoutPayment)
+  else assertTotals(type, totals)
+  const warnings = [...totalsWarnings(type, totals), ...(exported ? percentWarnings(lines) : [])]
+  const withheld = input.totals === undefined && totals.withholdings !== undefined
+  const items = withheld ? withTotalWithholdingCode(lines) : lines
+  const headerOptions: HeaderOptions = compact({
+    ...input.options,
+    serviceIndicator: input.options?.serviceIndicator ?? (receipt ? SERVICE_INDICATORS.salesAndServices : undefined),
+    grossAmounts:
+      input.options?.grossAmounts ??
+      (input.pricesIncludeVat && !receipt && (totals.netAmount ?? 0) > 0 ? 1 : undefined),
+    // Without `IndMntNeto` Formato de Boletas 4.2 reads a receipt's lines as VAT included; an exempt receipt has none.
+    netAmountsIndicator:
+      input.options?.netAmountsIndicator ??
+      (type === 39 && !input.pricesIncludeVat && (totals.netAmount ?? 0) > 0 ? 2 : undefined),
+  })
+
+  return {
+    id: `DTE_T${type}F${input.folio}`,
+    header: compact({
+      type,
+      folio: input.folio,
+      issueDate,
+      options: headerOptions,
+      issuer,
+      receiver,
+      softwareProviderRut,
+      transport,
+      currency: input.currency,
+      totals,
+      otherCurrency: otherCurrencyOf(exchangeRate, totals),
+    }),
+    items,
+    subtotals,
+    globalAdjustments: globalAdjustments.map((adjustment) => adjustmentInPesos(adjustment, exchangeRate)),
+    references,
+    receiptReferences,
+    commissions,
+    ...(warnings.length > 0 ? { warnings } : {}),
+  }
+}
+
+/**
  * EN: Builds a normalized `Document` from caller input: validates type, folio and dates, normalizes RUTs with rut.ts,
  * sanitizes text and enforces schema lengths (fails early instead of letting the SII reject the whole envelope),
  * numbers lines, computes amounts and totals, applies receipt defaults (final consumer, `IndServicio=3`) and sets
@@ -1099,122 +1251,7 @@ const otherCurrencyOf = (rate: number | undefined, totals: Totals): OtherCurrenc
  * mayor que cero (validación 56); y, en un documento de exportación, cada porcentaje de una línea escrito sin su
  * monto, porque el formato le pide a un porcentaje su monto (campos 30 y 34 del detalle). Cada revisión se detiene en
  * la primera falla que encuentra. Pura: misma entrada, misma salida.
- * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `MISSING_FIELD` (also a commission line with neither a net nor an exempt value, a settlement invoice whose receiver has no `businessActivity`, an `issuer.activityCode` or a `subtotals[i].description` missing on a type that is not a receipt, the `totals.vatAmount` of a 33 or the `totals.exemptAmount` of a 34, the `currency` of an export document and, on a 110, the receiver's `city`, a line's `quantity` and `unit`, the fields of `transport.customs` Formato DTE 2.5 asks for, the marks of each package that is not a container, and `options.settlementDate` when it is paid in advance (`exportPaymentTerms` 32), and the `options.transferType` of a dispatch guide), `FIELD_TOO_LONG`, `INVALID_AMOUNT` (also a quantity, a price, a percentage, an adjustment value or a commission rate with more digits than its schema type holds, an `items[i].amount` that is not a whole number, is negative outside a 43 or has more digits than a number holds, an `items[i].quantity`, `items[i].referenceQuantity` or `items[i].referencePrice` at or below zero, an `items[i].unitPrice` below zero, or any of them above zero and brought to zero by its six decimals, a total its schema type or validation 57 does not admit, a `totals.vatNotWithheld` that is not a whole number above zero, a line discount or surcharge in percent that is negative or whose amount rounds to zero, or above 100 on a receipt, or on a line written at zero, and on an export document an amount below zero or of 100 000 000 000 000 or more, a total given with more than four decimals (a line's amount, the exchange rate, the freight and the insurance are rounded to four), and an exchange rate, freight, insurance or clause total that is not above zero); `TOTAL_MISMATCH` for a `totals.totalAmount` or a `totals.periodAmount` that does not add up, and for an `items[i].amount` on a line with a price that is not the price by the quantity less the discount plus the surcharge (Formato DTE 2.5, field 38 of the detail) nor, on a dispatch guide whose `transferType` is not 1, a zero on a line with no percent, and for one other than zero on a line that is not a sale (`IndExe` 4 or 5) or of a credit note (61, 112) with a reference of `code` 2, with `expected` and `actual`; `INVALID_TIME` for a `transport.departureTime` that is not `HH:MM:SS` or `HH:MM`; `INVALID_OPTION` for `references` on a receipt, `receiptReferences` on any other type, an `items[i].unitPriceDecimals` fewer than the decimals of the price, a `references[i]` beside another document reference on a credit note (61, 112) with a reference of `code` 1 or 2 or on a debit note (56, 111) with one of `code` 1 (a `SET` reference is no document), a `globalAdjustments[0]` or a `commissions[0]` on a credit note that corrects a text, an `items[i].exemptIndicator` outside 1 to 6 (`null` included), or of 3 on a 43 or an export document, a `totals.depositGuarantee` other than zero (a value that is not a number included) on a type other than 33, 34, 56 and 61, a `totals.vatNotWithheld` other than zero on a type other than 46, 56 and 61, an `options.transferType` outside 1 to 9, more than 20 `commissions`, more than 30 `options.payments`, more `items` than the type admits, an `issuer.activityCode` that is not a positive integer of at most six digits, a `settledDocumentType` on a type other than 43, on a 43 whatever `Liquidacion` does not declare, on a receipt whatever its schema does not declare, an `options.netAmountsIndicator` or a `softwareProviderRut` on a type that is not a receipt, on an export document whatever `Exportaciones` does not declare, a service indicator outside 3 to 6, an `exportPaymentTerms` that is not a code of one or two digits, a `currency` outside `CURRENCIES`, a receiver RUT other than 55555555-5, a global adjustment without `exemptIndicator` 1 and a customs code past its digits, and on any other type the fields only an export document carries and the service indicators 5 and 6, with the field in `details.field`. ES: los mismos códigos; `INVALID_AMOUNT` también por una cantidad, un precio, un porcentaje, el valor de un ajuste o la tasa de una comisión con más dígitos de los que admite su tipo del esquema, por un `items[i].amount` que no es entero, es negativo fuera de un 43 o tiene más dígitos de los que guarda un número, por un `items[i].quantity`, `items[i].referenceQuantity` o `items[i].referencePrice` de cero o menos, por un `items[i].unitPrice` menor que cero, o por cualquiera de ellos mayor que cero y llevado a cero por sus seis decimales, por un total que su tipo del esquema o la validación 57 no admite, por un `totals.vatNotWithheld` que no es un entero mayor que cero, por un descuento o recargo de línea en porcentaje negativo o cuyo monto redondea a cero, o mayor que 100 en una boleta, o en una línea que se escribe en cero, y en un documento de exportación por un monto negativo o de 100 000 000 000 000 o más, por un total dado con más de cuatro decimales (el monto de una línea, el tipo de cambio, el flete y el seguro se redondean a cuatro), y por un tipo de cambio, flete, seguro o total de cláusula que no es mayor que cero; `MISSING_FIELD` también por una línea de comisión sin valor neto ni exento, por una liquidación factura cuyo receptor no trae `businessActivity`, por un `issuer.activityCode` o un `subtotals[i].description` ausente en un tipo que no es boleta, por el `totals.vatAmount` de un 33 o el `totals.exemptAmount` de un 34, por la `currency` de un documento de exportación y, en un 110, por la `city` del receptor, la `quantity` y la `unit` de una línea, los campos de `transport.customs` que pide el Formato DTE 2.5, las marcas de cada bulto que no es un contenedor, y `options.settlementDate` cuando se paga por anticipado (`exportPaymentTerms` 32), y por el `options.transferType` de una guía de despacho; `TOTAL_MISMATCH` por un `totals.totalAmount` o un `totals.periodAmount` que no cuadra, y por un `items[i].amount` en una línea con precio que no es el precio por la cantidad menos el descuento más el recargo (Formato DTE 2.5, campo 38 del detalle) ni, en una guía de despacho cuyo `transferType` no es 1, un cero en una línea sin porcentaje, y por uno distinto de cero en una línea que no es venta (`IndExe` 4 o 5) o de una nota de crédito (61, 112) con una referencia de `code` 2, con `expected` y `actual`; `INVALID_TIME` por un `transport.departureTime` que no es `HH:MM:SS` ni `HH:MM`; `INVALID_OPTION` por `references` en una boleta, `receiptReferences` en cualquier otro tipo, un `items[i].unitPriceDecimals` menor que los decimales del precio, una `references[i]` junto a otro documento de referencia en una nota de crédito (61, 112) con una referencia de `code` 1 o 2 o en una nota de débito (56, 111) con una de `code` 1 (una referencia `SET` no es un documento), un `globalAdjustments[0]` o un `commissions[0]` en una nota de crédito que corrige un texto, un `items[i].exemptIndicator` fuera de 1 a 6 (`null` incluido), o 3 en un 43 o un documento de exportación, un `totals.depositGuarantee` distinto de cero (también un valor que no es número) en un tipo distinto de 33, 34, 56 y 61, un `totals.vatNotWithheld` distinto de cero en un tipo distinto de 46, 56 y 61, un `options.transferType` fuera de 1 a 9, más de 20 `commissions`, más de 30 `options.payments`, más `items` de los que admite el tipo, un `issuer.activityCode` que no es un entero positivo de hasta seis dígitos, un `settledDocumentType` en un tipo distinto del 43, en un 43 lo que `Liquidacion` no declara, en una boleta lo que su esquema no declara, un `options.netAmountsIndicator` o un `softwareProviderRut` en un tipo que no es boleta, en un documento de exportación lo que `Exportaciones` no declara, un indicador de servicio fuera de 3 a 6, un `exportPaymentTerms` que no es un código de uno o dos dígitos, una `currency` fuera de `CURRENCIES`, un RUT de receptor distinto de 55555555-5, un ajuste global sin `exemptIndicator` 1 y un código aduanero con más dígitos de los que admite, y en cualquier otro tipo los campos que solo lleva un documento de exportación y los indicadores de servicio 5 y 6, con el campo en `details.field`.
+ * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `MISSING_FIELD` (also a commission line with neither a net nor an exempt value, a settlement invoice whose receiver has no `businessActivity`, an `issuer.activityCode` or a `subtotals[i].description` missing on a type that is not a receipt, the `totals.vatAmount` of a 33 or the `totals.exemptAmount` of a 34, the `currency` of an export document and, on a 110, the receiver's `city`, a line's `quantity` and `unit`, the fields of `transport.customs` Formato DTE 2.5 asks for, the marks of each package that is not a container, and `options.settlementDate` when it is paid in advance (`exportPaymentTerms` 32), the `options.transferType` of a dispatch guide, and the `references` of a credit or a debit note (56, 61, 111, 112), which a `SET` reference alone does not give), `FIELD_TOO_LONG`, `INVALID_AMOUNT` (also a quantity, a price, a percentage, an adjustment value or a commission rate with more digits than its schema type holds, a `globalAdjustments[i].value` that is not above zero once rounded to its two decimals, an `items[i].amount` that is not a whole number, is negative outside a 43 or has more digits than a number holds, an `items[i].quantity`, `items[i].referenceQuantity` or `items[i].referencePrice` at or below zero, an `items[i].unitPrice` below zero, or any of them above zero and brought to zero by its six decimals, a total its schema type or validation 57 does not admit, a `totals.vatNotWithheld` that is not a whole number above zero, a line discount or surcharge in percent that is negative or whose amount rounds to zero, or above 100 on a receipt, or on a line written at zero, and on an export document an amount below zero or of 100 000 000 000 000 or more, a total given with more than four decimals (a line's amount, the exchange rate, the freight and the insurance are rounded to four), and an exchange rate, freight, insurance or clause total that is not above zero); `TOTAL_MISMATCH` for a `totals.totalAmount` or a `totals.periodAmount` that does not add up, and for an `items[i].amount` on a line with a price that is not the price by the quantity less the discount plus the surcharge (Formato DTE 2.5, field 38 of the detail) nor, on a dispatch guide whose `transferType` is not 1, a zero on a line with no percent, and for one other than zero on a line that is not a sale (`IndExe` 4 or 5) or of a credit note (61, 112) with a reference of `code` 2, with `expected` and `actual`; `INVALID_TIME` for a `transport.departureTime` that is not `HH:MM:SS` or `HH:MM`; `INVALID_OPTION` for `references` on a receipt, `receiptReferences` on any other type, an `items[i].unitPriceDecimals` fewer than the decimals of the price, a `references[i]` beside another document reference on a credit note (61, 112) with a reference of `code` 1 or 2 or on a debit note (56, 111) with one of `code` 1 (a `SET` reference is no document), a `globalAdjustments[0]` or a `commissions[0]` on a credit note that corrects a text, an `items[i].exemptIndicator` outside 1 to 6 (`null` included), or of 3 on a 43 or an export document, a `totals.depositGuarantee` other than zero (a value that is not a number included) on a type other than 33, 34, 56 and 61, a `totals.vatNotWithheld` other than zero on a type other than 46, 56 and 61, an `options.transferType` outside 1 to 9, more than 20 `commissions`, more than 20 `globalAdjustments`, more than 30 `options.payments`, more `items` than the type admits, an `issuer.activityCode` that is not a positive integer of at most six digits, a `settledDocumentType` on a type other than 43, on a 43 whatever `Liquidacion` does not declare, on a receipt whatever its schema does not declare, an `options.netAmountsIndicator` or a `softwareProviderRut` on a type that is not a receipt, on an export document whatever `Exportaciones` does not declare, a service indicator outside 3 to 6, an `exportPaymentTerms` that is not a code of one or two digits, a `currency` outside `CURRENCIES`, a receiver RUT other than 55555555-5, a global adjustment without `exemptIndicator` 1 and a customs code past its digits, and on any other type the fields only an export document carries and the service indicators 5 and 6, with the field in `details.field`. ES: los mismos códigos; `INVALID_AMOUNT` también por una cantidad, un precio, un porcentaje, el valor de un ajuste o la tasa de una comisión con más dígitos de los que admite su tipo del esquema, por un `globalAdjustments[i].value` que no es mayor que cero una vez redondeado a sus dos decimales, por un `items[i].amount` que no es entero, es negativo fuera de un 43 o tiene más dígitos de los que guarda un número, por un `items[i].quantity`, `items[i].referenceQuantity` o `items[i].referencePrice` de cero o menos, por un `items[i].unitPrice` menor que cero, o por cualquiera de ellos mayor que cero y llevado a cero por sus seis decimales, por un total que su tipo del esquema o la validación 57 no admite, por un `totals.vatNotWithheld` que no es un entero mayor que cero, por un descuento o recargo de línea en porcentaje negativo o cuyo monto redondea a cero, o mayor que 100 en una boleta, o en una línea que se escribe en cero, y en un documento de exportación por un monto negativo o de 100 000 000 000 000 o más, por un total dado con más de cuatro decimales (el monto de una línea, el tipo de cambio, el flete y el seguro se redondean a cuatro), y por un tipo de cambio, flete, seguro o total de cláusula que no es mayor que cero; `MISSING_FIELD` también por una línea de comisión sin valor neto ni exento, por una liquidación factura cuyo receptor no trae `businessActivity`, por un `issuer.activityCode` o un `subtotals[i].description` ausente en un tipo que no es boleta, por el `totals.vatAmount` de un 33 o el `totals.exemptAmount` de un 34, por la `currency` de un documento de exportación y, en un 110, por la `city` del receptor, la `quantity` y la `unit` de una línea, los campos de `transport.customs` que pide el Formato DTE 2.5, las marcas de cada bulto que no es un contenedor, y `options.settlementDate` cuando se paga por anticipado (`exportPaymentTerms` 32), por el `options.transferType` de una guía de despacho, y por las `references` de una nota de crédito o de débito (56, 61, 111, 112), que una referencia `SET` sola no da; `TOTAL_MISMATCH` por un `totals.totalAmount` o un `totals.periodAmount` que no cuadra, y por un `items[i].amount` en una línea con precio que no es el precio por la cantidad menos el descuento más el recargo (Formato DTE 2.5, campo 38 del detalle) ni, en una guía de despacho cuyo `transferType` no es 1, un cero en una línea sin porcentaje, y por uno distinto de cero en una línea que no es venta (`IndExe` 4 o 5) o de una nota de crédito (61, 112) con una referencia de `code` 2, con `expected` y `actual`; `INVALID_TIME` por un `transport.departureTime` que no es `HH:MM:SS` ni `HH:MM`; `INVALID_OPTION` por `references` en una boleta, `receiptReferences` en cualquier otro tipo, un `items[i].unitPriceDecimals` menor que los decimales del precio, una `references[i]` junto a otro documento de referencia en una nota de crédito (61, 112) con una referencia de `code` 1 o 2 o en una nota de débito (56, 111) con una de `code` 1 (una referencia `SET` no es un documento), un `globalAdjustments[0]` o un `commissions[0]` en una nota de crédito que corrige un texto, un `items[i].exemptIndicator` fuera de 1 a 6 (`null` incluido), o 3 en un 43 o un documento de exportación, un `totals.depositGuarantee` distinto de cero (también un valor que no es número) en un tipo distinto de 33, 34, 56 y 61, un `totals.vatNotWithheld` distinto de cero en un tipo distinto de 46, 56 y 61, un `options.transferType` fuera de 1 a 9, más de 20 `commissions`, más de 20 `globalAdjustments`, más de 30 `options.payments`, más `items` de los que admite el tipo, un `issuer.activityCode` que no es un entero positivo de hasta seis dígitos, un `settledDocumentType` en un tipo distinto del 43, en un 43 lo que `Liquidacion` no declara, en una boleta lo que su esquema no declara, un `options.netAmountsIndicator` o un `softwareProviderRut` en un tipo que no es boleta, en un documento de exportación lo que `Exportaciones` no declara, un indicador de servicio fuera de 3 a 6, un `exportPaymentTerms` que no es un código de uno o dos dígitos, una `currency` fuera de `CURRENCIES`, un RUT de receptor distinto de 55555555-5, un ajuste global sin `exemptIndicator` 1 y un código aduanero con más dígitos de los que admite, y en cualquier otro tipo los campos que solo lleva un documento de exportación y los indicadores de servicio 5 y 6, con el campo en `details.field`.
  */
-export const createDocument = (input: DocumentInput, options: CreateDocumentOptions = {}): Document => {
-  if (!isDocumentType(input.type)) throw new DteError('INVALID_DOCUMENT_TYPE', { type: input.type })
-  if (!Number.isInteger(input.folio) || input.folio <= 0) throw new DteError('INVALID_FOLIO', { folio: input.folio })
-  const type = input.type
-  const receipt = isReceipt(type)
-  const exported = isExport(type)
-  const issueDate = input.issueDate === undefined ? chileDate(options.now) : toIsoDate(input.issueDate, 'issueDate')
-  const issuer = normalizeIssuer(input.issuer, receipt)
-  const receiver = normalizeReceiver(input.receiver, type)
-  if (input.items.length === 0) throw new DteError('MISSING_FIELD', { field: 'items' })
-  if (input.items.length > (receipt ? MAX_RECEIPT_LINES : MAX_LINES)) refuse('items')
-  if (type === 43) assertSettlement(input)
-  if (exported) assertExport(input)
-  else assertNotExport(input)
-  if (receipt) assertReceipt(input)
-  // `IndMntNeto` and `RUTProvSW` are a receipt's: no other document declares them.
-  else if (input.options?.netAmountsIndicator !== undefined) refuse('options.netAmountsIndicator')
-  else if (input.softwareProviderRut !== undefined) refuse('softwareProviderRut')
-  const softwareProviderRut =
-    input.softwareProviderRut === undefined ? undefined : toSiiRut(input.softwareProviderRut, 'softwareProviderRut')
-  if ((input.commissions ?? []).length > MAX_COMMISSIONS) refuse('commissions')
-  if ((input.options?.payments ?? []).length > MAX_PAYMENTS) refuse('options.payments')
-  const service = input.options?.serviceIndicator
-  const counted = type === 110 && !SERVICES_WITHOUT_SALE.includes(service)
-  assertSingleReference(type, input.references ?? [])
-  assertExemptIndicators(input)
-  assertVatNotWithheld(input)
-  if (input.splitVat && (type !== 43 || input.totals !== undefined)) refuse('splitVat')
-  assertTransferType(type, input.options?.transferType)
-  // Formato DTE 2.5, field 38 of the detail: every line of a credit note that corrects a text is zero, and a line of a
-  // dispatch guide whose transfer is not a sale may be. Field 7 makes 1 the sale and every value above it a transfer
-  // "por otros motivos que no corresponden a venta", so 9, whose label reads "Venta para exportación", is not a sale
-  // here, as field 38 reads "Guía de despacho NO VENTA (Según campo Indicador Tipo de traslado de bienes del
-  // encabezado)" and `IndExe` 4 calls a sale guide one "con Indicador Tipo de Traslado de Bienes igual a 1".
-  // A `SET` reference names no document, so its code makes no note one that corrects a text, as it counts for no
-  // reference above.
-  const zero =
-    (type === 61 || type === 112) &&
-    (input.references ?? []).some(({ documentType, code }) => documentType !== 'SET' && code === CORRECTS_TEXT)
-  const context: LineContext = {
-    counted,
-    zero,
-    zeroAdmitted: type === 52 && input.options?.transferType !== TRANSFER_TYPES.sale,
-  }
-  // A note written at zero has nothing for a global adjustment to apply to nor a total to take a commission off.
-  if (zero && given(input.globalAdjustments)) refuse('globalAdjustments[0]')
-  if (zero && given(input.commissions)) refuse('commissions[0]')
-  const lines = input.items.map((item, index) => normalizeItem(item, index, type, context))
-  // A receipt's `Referencia` has no date: the invoice shape would fail the receipts schema, and the other way round.
-  if (receipt && (input.references ?? []).length > 0) throw new DteError('INVALID_OPTION', { field: 'references' })
-  if (!receipt && (input.receiptReferences ?? []).length > 0)
-    throw new DteError('INVALID_OPTION', { field: 'receiptReferences' })
-  const references = (input.references ?? []).map(normalizeReference)
-  const receiptReferences = (input.receiptReferences ?? []).map(normalizeReceiptReference)
-  const subtotals = (input.subtotals ?? []).map((subtotal, index) => normalizeSubtotal(subtotal, index, receipt))
-  const globalAdjustments = (input.globalAdjustments ?? []).map(normalizeAdjustment)
-  const commissions = (input.commissions ?? []).map(normalizeCommission)
-  const transport = normalizeTransport(input.transport)
-  if (exported) assertCustoms(transport?.customs, type, service)
-  const exchangeRate = positive(input.exchangeRate, 'rate', 'exchangeRate')
-  const withoutPayment = Number(input.options?.exportPaymentTerms) === WITHOUT_PAYMENT
-  const computed =
-    input.totals ??
-    calculateTotals(lines, {
-      type,
-      pricesIncludeVat: input.pricesIncludeVat,
-      vatRate: VAT_RATE,
-      globalAdjustments,
-      withholdVat: input.withholdVat,
-      // The lines as the caller gave them, checked above: the summary's VAT depends on whether a line states its own.
-      commissions: input.commissions,
-      withoutPayment,
-    })
-  const totals = input.splitVat ? withVatSplit(computed) : computed
-  // Totals the caller gave are the caller's to match with the lines; what the SII checks over the totals themselves is
-  // checked here, on them and on the ones worked out.
-  if (exported) assertExportTotals(totals, withoutPayment)
-  else assertTotals(type, totals)
-  const warnings = [...totalsWarnings(type, totals), ...(exported ? percentWarnings(lines) : [])]
-  const withheld = input.totals === undefined && totals.withholdings !== undefined
-  const items = withheld ? withTotalWithholdingCode(lines) : lines
-  const headerOptions: HeaderOptions = compact({
-    ...input.options,
-    serviceIndicator: input.options?.serviceIndicator ?? (receipt ? SERVICE_INDICATORS.salesAndServices : undefined),
-    grossAmounts:
-      input.options?.grossAmounts ??
-      (input.pricesIncludeVat && !receipt && (totals.netAmount ?? 0) > 0 ? 1 : undefined),
-    // Without `IndMntNeto` Formato de Boletas 4.2 reads a receipt's lines as VAT included; an exempt receipt has none.
-    netAmountsIndicator:
-      input.options?.netAmountsIndicator ??
-      (type === 39 && !input.pricesIncludeVat && (totals.netAmount ?? 0) > 0 ? 2 : undefined),
-  })
-
-  return {
-    id: `DTE_T${type}F${input.folio}`,
-    header: compact({
-      type,
-      folio: input.folio,
-      issueDate,
-      options: headerOptions,
-      issuer,
-      receiver,
-      softwareProviderRut,
-      transport,
-      currency: input.currency,
-      totals,
-      otherCurrency: otherCurrencyOf(exchangeRate, totals),
-    }),
-    items,
-    subtotals,
-    globalAdjustments: globalAdjustments.map((adjustment) => adjustmentInPesos(adjustment, exchangeRate)),
-    references,
-    receiptReferences,
-    commissions,
-    ...(warnings.length > 0 ? { warnings } : {}),
-  }
-}
+export const createDocument = (input: DocumentInput, options: CreateDocumentOptions = {}): Document =>
+  createDocumentWith(input, options, {})

@@ -33,6 +33,11 @@ const items = [
 const saleGuide = (type: DocumentInput['type']): DocumentInput['options'] =>
   type === 52 ? { transferType: 1 } : undefined
 
+// Formato DTE 2.5, page 10: a credit note and a debit note name the document they change. The tests that issue one on
+// the way to something else reference an invoice.
+const changedDocument = (type: DocumentInput['type']): DocumentInput['references'] =>
+  type === 56 || type === 61 ? [{ documentType: 33, folio: 1, date: '2026-11-01', code: 3 }] : undefined
+
 const expectError = (fn: () => unknown, code: string, details?: Record<string, unknown>) => {
   try {
     fn()
@@ -867,6 +872,51 @@ describe('the decimals the schema admits', () => {
   })
 })
 
+// `DTE_v10.xsd` and `EnvioBOLETA_v11.xsd` admit 20 `DscRcgGlobal` in a document, and their `ValorDR` is a decimal of
+// two places from 0.01 up (`Dec16_2Type`, and `Dec1Type` on a receipt): whether it takes off or adds is `TpoMov`'s to
+// say, never the sign of the value.
+describe('the global discounts and surcharges the schema admits', () => {
+  type Adjustments = NonNullable<DocumentInput['globalAdjustments']>
+  const adjusted = (globalAdjustments: Adjustments, type: DocumentInput['type'] = 33) =>
+    createDocument({
+      type,
+      folio: 7,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver: type === 39 ? undefined : receiver,
+      items: [{ name: 'Lote', unitPrice: 100000 }],
+      globalAdjustments,
+    })
+  const discount = (value: number, valueType: 'amount' | 'percent' = 'amount') =>
+    ({ kind: 'discount', valueType, value }) as const
+
+  test.each([-5, -0.5, 0, 0.004])('a value of %p is refused: ValorDR starts at 0.01', (value) => {
+    for (const type of [33, 39] as const)
+      for (const valueType of ['amount', 'percent'] as const)
+        expectError(() => adjusted([discount(1000), discount(value, valueType)], type), 'INVALID_AMOUNT', {
+          field: 'globalAdjustments[1].value',
+        })
+  })
+
+  test('a negative value is no surcharge: the total is never raised by a discount', () => {
+    expectError(() => adjusted([discount(-5)]), 'INVALID_AMOUNT', { field: 'globalAdjustments[0].value' })
+    expect(adjusted([{ kind: 'surcharge', valueType: 'amount', value: 5 }]).header.totals.netAmount).toBe(100005)
+  })
+
+  test('0.01 is written, and so is a value its two decimals bring to it', () => {
+    expect(adjusted([discount(0.01, 'percent')]).globalAdjustments[0].value).toBe(0.01)
+    expect(adjusted([discount(0.005, 'percent')]).globalAdjustments[0].value).toBe(0.01)
+  })
+
+  test('a document carries 20 of them, and a 21st is refused', () => {
+    const many = (count: number): Adjustments => Array.from({ length: count }, () => discount(1))
+    expect(adjusted(many(20)).globalAdjustments).toHaveLength(20)
+    expect(adjusted(many(20), 39).globalAdjustments).toHaveLength(20)
+    expectError(() => adjusted(many(21)), 'INVALID_OPTION', { field: 'globalAdjustments' })
+    expectError(() => adjusted(many(21), 39), 'INVALID_OPTION', { field: 'globalAdjustments' })
+  })
+})
+
 // Formato DTE 2.5, fields 30 and 34 of the detail: "Si va el descuento en %, debe ir el monto correspondiente", and the
 // same of a surcharge. `DescuentoMonto` and `RecargoMonto` are `MntImpType` in `DTE_v10.xsd`, a positive integer, so a
 // percent whose share of the line rounds to no peso has no amount to go with it. The receipts schema takes an amount of
@@ -1356,6 +1406,38 @@ describe('a note that cancels a document or corrects a text', () => {
   })
 })
 
+// Formato DTE 2.5, "OBLIGATORIEDAD DE LA ZONA SEGÚN TIPO DE DOCUMENTO" (page 10): the zone "Información Referencia" is
+// code 1, "Dato obligatorio. El dato debe estar en el documento siempre", on a credit note and on a debit note, and
+// code 2 on every other type. The schema leaves `Referencia` optional, since one `Documento` serves every type.
+describe('a note names the document it changes', () => {
+  const note = (type: DocumentInput['type'], references?: DocumentInput['references']) =>
+    createDocument({
+      type,
+      folio: 7,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver,
+      items: [{ name: 'Clip', quantity: 1, unitPrice: 1000 }],
+      options: saleGuide(type),
+      references,
+    })
+  const set = { documentType: 'SET' as const, folio: 1, date: '2026-11-15', reason: 'CASO 1' }
+
+  test.each<DocumentInput['type']>([61, 56])('a %p with no reference is refused', (type) => {
+    expectError(() => note(type), 'MISSING_FIELD', { field: 'references' })
+    expectError(() => note(type, []), 'MISSING_FIELD', { field: 'references' })
+  })
+
+  test('the reference of a certification set names no document, so a note with it alone is refused', () => {
+    expectError(() => note(61, [set]), 'MISSING_FIELD', { field: 'references' })
+    expect(note(61, [set, { documentType: 33, folio: 8, date: '2026-11-01', code: 3 }]).references).toHaveLength(2)
+  })
+
+  test.each<DocumentInput['type']>([33, 34, 46, 52])('a %p needs no reference', (type) => {
+    expect(note(type).references).toEqual([])
+  })
+})
+
 // `CdgSIISucur` is a positive integer of at most nine digits in `DTE_v10.xsd` and `EnvioBOLETA_v11.xsd`.
 describe("the issuer's SII branch code", () => {
   const branch = (siiBranchCode: number, type: DocumentInput['type'] = 33) =>
@@ -1382,6 +1464,7 @@ describe('the quantity of a priced line', () => {
       receiver,
       items: [item],
       options: saleGuide(type),
+      references: changedDocument(type),
     })
 
   test('a line with a price and no quantity is written with the quantity it is computed with, 1', () => {
@@ -1880,6 +1963,7 @@ describe('what the schema admits on a settlement invoice (43)', () => {
             receiver,
             items: [{ ...line, exempt: type === 34 }],
             options: saleGuide(type),
+            references: changedDocument(type),
           }),
         'INVALID_OPTION',
         { field: 'items[0].settledDocumentType' },
@@ -2057,6 +2141,7 @@ describe('what the schema admits on a receipt (39, 41)', () => {
         receiver,
         items: [{ name: 'Plan anual', unitPrice: 1000, settledDocumentType: type === 43 ? '33' : undefined }],
         options: saleGuide(type),
+        references: changedDocument(type),
       }
       expectError(() => createDocument({ ...document, options: { netAmountsIndicator: 2 } }), 'INVALID_OPTION', {
         field: 'options.netAmountsIndicator',
@@ -2103,6 +2188,13 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
       references: [{ documentType: 110, folio: 1, date: '2026-11-10', code: 3 }],
       ...overrides,
     })
+
+  // Formato DTE 2.5, page 10: the zone "Información Referencia" is code 1 on the notes of export too.
+  test.each([111, 112] as const)('a %p with no reference is refused, and an export invoice needs none', (type) => {
+    expectError(() => note(type, { references: undefined }), 'MISSING_FIELD', { field: 'references' })
+    expectError(() => note(type, { references: [] }), 'MISSING_FIELD', { field: 'references' })
+    expect(exportOf().references).toEqual([])
+  })
 
   test('an export invoice is exempt as a whole, in its currency, with the decimals of its amounts', () => {
     const doc = exportOf()

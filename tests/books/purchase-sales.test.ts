@@ -47,6 +47,17 @@ describe.each([
 })
 
 describe('createPurchaseSalesBook', () => {
+  // `LibroCV_v10.xsd` types the `ID` of `EnvioLibro` as `xs:ID`, a name.
+  test.each(['1LCV', 'a b', 'x<y', 'a"b', ''])('an id of %j is refused, and a name is kept', (id) => {
+    expect(failure({ cover: saleCover, entries: [invoice], id })).toEqual({
+      code: 'INVALID_OPTION',
+      details: { field: 'id' },
+    })
+    expect(createPurchaseSalesBook({ cover: saleCover, entries: [invoice], id: 'LCV_2026-10.a' }).id).toBe(
+      'LCV_2026-10.a',
+    )
+  })
+
   test('defaults to a monthly total and generates the id and timestamp in Chile time', () => {
     const book = createPurchaseSalesBook({ cover: saleCover, entries: [invoice], now: FIXED_NOW })
     expect(book.cover).toMatchObject({ kind: 'monthly', submission: 'total', operation: 'sale' })

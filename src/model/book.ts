@@ -400,7 +400,7 @@ export type PurchaseSalesBookInput = {
   readonly additionalTaxFactors?: Readonly<Record<number, number>>
   /** EN: Throw `BOOK_TOTAL_MISMATCH` instead of reporting in `totalMismatches`. ES: Lanzar `BOOK_TOTAL_MISMATCH` en vez de informar en `totalMismatches`. */
   readonly strictTotals?: boolean
-  /** EN: Explicit `EnvioLibro/@ID`; generated when absent. ES: `ID` explícito del `EnvioLibro`; se genera si falta. */
+  /** EN: Explicit `EnvioLibro/@ID`; generated when absent. A name, as the schema's `xs:ID` asks: a letter or an underscore, then letters, digits, full stops, hyphens and underscores. ES: `ID` explícito del `EnvioLibro`; se genera si falta. Un nombre, como pide el `xs:ID` del esquema: una letra o un guion bajo, y luego letras, dígitos, puntos, guiones y guiones bajos. */
   readonly id?: string
   /** EN: Clock for the id and `TmstFirma`. ES: Reloj para el id y `TmstFirma`. */
   readonly now?: Date
@@ -547,7 +547,7 @@ export type GuideBookInput = {
   readonly entries?: readonly GuideEntryInput[]
   /** EN: Period totals of earlier submissions; `final` and `adjustment` only. ES: Totales del período de envíos anteriores; solo en `final` y `adjustment`. */
   readonly previousTotals?: GuideTotals
-  /** EN: Explicit `EnvioLibro/@ID`; generated when absent. ES: `ID` explícito del `EnvioLibro`; se genera si falta. */
+  /** EN: Explicit `EnvioLibro/@ID`; generated when absent. A name, as the schema's `xs:ID` asks: a letter or an underscore, then letters, digits, full stops, hyphens and underscores. ES: `ID` explícito del `EnvioLibro`; se genera si falta. Un nombre, como pide el `xs:ID` del esquema: una letra o un guion bajo, y luego letras, dígitos, puntos, guiones y guiones bajos. */
   readonly id?: string
   /** EN: Clock for the id and `TmstFirma`. ES: Reloj para el id y `TmstFirma`. */
   readonly now?: Date
@@ -709,7 +709,7 @@ export type FolioConsumptionInput = {
   readonly entries?: readonly FolioConsumptionEntry[]
   /** EN: Folios voided in the system. ES: Folios anulados en el sistema. */
   readonly voidedFolios?: readonly VoidedFolio[]
-  /** EN: Explicit `DocumentoConsumoFolios/@ID`; generated when absent. ES: `ID` explícito del `DocumentoConsumoFolios`; se genera si falta. */
+  /** EN: Explicit `DocumentoConsumoFolios/@ID`; generated when absent. A name, as the schema's `xs:ID` asks: a letter or an underscore, then letters, digits, full stops, hyphens and underscores. ES: `ID` explícito del `DocumentoConsumoFolios`; se genera si falta. Un nombre, como pide el `xs:ID` del esquema: una letra o un guion bajo, y luego letras, dígitos, puntos, guiones y guiones bajos. */
   readonly id?: string
   /** EN: Clock for the id and `TmstFirmaEnv`. ES: Reloj para el id y `TmstFirmaEnv`. */
   readonly now?: Date

@@ -39,6 +39,14 @@ describe('the SII office of a commune', () => {
     expect(siiOfficeForCommune('Paiguano')).toBe(siiOfficeForCommune('Paihuano'))
   })
 
+  test('the long name of a commune, as an address writes it, gives the office of that commune', () => {
+    expect(siiOfficeForCommune('San José de la Mariquina')).toBe(siiOfficeForCommune('Mariquina'))
+    expect(siiOfficeForCommune('San Vicente de Tagua Tagua')).toBe(siiOfficeForCommune('San Vicente'))
+    expect(siiOfficeForCommune('San Fabián de Alico')).toBe(siiOfficeForCommune('San Fabián'))
+    expect(siiOfficeForCommune('San Gregorio de Ñiquén')).toBe(siiOfficeForCommune('Ñiquén'))
+    expect(siiOfficeForCommune('SAN VICENTE DE TAGUA-TAGUA')).toBe('S.I.I. - RANCAGUA')
+  })
+
   test('no two names of different offices read the same once reduced to letters and digits', () => {
     const reduced = (name: string) =>
       name
@@ -65,11 +73,11 @@ describe('the SII office of a commune', () => {
     expect(siiOfficeForCommune('toString')).toBeNull()
   })
 
-  test('the table: 40 offices, 360 communes, each in one office and written in its normal form', () => {
+  test('the table: 40 offices, 364 communes, each in one office and written in its normal form', () => {
     const offices = Object.keys(SII_OFFICES)
     const communes = Object.values(SII_OFFICES).flat()
     expect(offices).toHaveLength(40)
-    expect(communes).toHaveLength(360)
+    expect(communes).toHaveLength(364)
     expect(new Set(communes).size).toBe(communes.length)
     for (const office of offices) expect(office).toMatch(/^S\.I\.I\. - [A-ZÁÉÍÓÚÑ ]+$/)
     for (const commune of communes) {
