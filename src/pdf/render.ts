@@ -6,7 +6,6 @@ import {
   ACKNOWLEDGEMENT_TEXT,
   BOX,
   COLOURS,
-  DEFAULT_SII_OFFICE,
   FONT,
   GAP,
   LINE,
@@ -71,7 +70,7 @@ export type PrintedLogo = {
  * ES: Opciones comunes a todas las muestras impresas.
  */
 export type PrintedSampleOptions = {
-  /** EN: SII office under the type box; default the office of the issuer's commune (`siiOfficeForCommune`), or `S.I.I. - SANTIAGO CENTRO` when the commune is not in the table. ES: Oficina del SII bajo el recuadro; por defecto la oficina de la comuna del emisor (`siiOfficeForCommune`), o `S.I.I. - SANTIAGO CENTRO` si la comuna no está en la tabla. */
+  /** EN: SII office under the type box; default the office of the issuer's commune (`siiOfficeForCommune`). When the commune is not in the table the line is left out rather than naming an office that may not be the issuer's: give it here. ES: Oficina del SII bajo el recuadro; por defecto la oficina de la comuna del emisor (`siiOfficeForCommune`). Si la comuna no está en la tabla la línea se omite, en vez de nombrar una oficina que puede no ser la del emisor: indíquela aquí. */
   readonly siiOffice?: string
   /** EN: Resolution line under the stamp: a string printed as given, or the company's resolution as data, `{ number, date }` (`NroResol` and `FchResol` as `YYYY-MM-DD`), printed as `resolutionLine` writes it; default `Res. Ex. SII N° 0 del {year}`. ES: Línea de resolución bajo el timbre: un texto que se imprime tal cual, o la resolución de la empresa como dato, `{ number, date }` (`NroResol` y `FchResol` como `AAAA-MM-DD`), que se imprime como la escribe `resolutionLine`; por defecto `Res. Ex. SII N° 0 del {año}`. */
   readonly resolution?: string | { readonly number: number; readonly date: string }
@@ -152,6 +151,7 @@ const DETAIL_COLUMNS = (() => {
 })()
 // The measuring pass wraps descriptions at 37 % of the table, narrower than the column drawn, so the page is never short.
 const MEASURED_DESCRIPTION_WIDTH = Math.round(TABLE_WIDTH * 0.37) - TABLE.padX * 2
+const CODE_WIDTH = DETAIL_COLUMNS.code - TABLE.padX * 2
 const REFERENCE_COLUMNS = (() => {
   const type = Math.round(TABLE_WIDTH * 0.3)
   const folio = Math.round(TABLE_WIDTH * 0.15)
@@ -306,7 +306,8 @@ const drawHeader = (
   }
   ry += GAP.tiny
   drawTextCentered(canvas, `N° ${doc.folio}`, boxX, TYPE_BOX.width, ry, fonts.bold, FONT.small, red)
-  drawTextCentered(canvas, siiOffice, boxX, TYPE_BOX.width, y + boxHeight + GAP.small, fonts.normal, FONT.tiny, black)
+  if (siiOffice !== '')
+    drawTextCentered(canvas, siiOffice, boxX, TYPE_BOX.width, y + boxHeight + GAP.small, fonts.normal, FONT.tiny, black)
   if (page.of > 1) {
     const label = `Página ${page.number} de ${page.of}`
     drawTextCentered(
@@ -510,16 +511,25 @@ const drawItemRow = (
         drawText(canvas, note, cx + TABLE.padX, ty, fonts.normal, FONT.legal, canvas.paint(COLOURS.darkGrey))
         ty += LINE.tiny
       }
+    } else if (column.key === 'code' && row.codes.length > 1) {
+      // A code wider than its column goes on several lines, from the top as the description does.
+      row.codes.forEach((line, lineIndex) =>
+        drawText(canvas, line, cx + TABLE.padX, y + TABLE.padY + lineIndex * LINE.tiny, fonts.normal, FONT.tiny, black),
+      )
     } else {
+      // A value wider than its column is drawn smaller, so it stays inside it.
       const value = values[column.key]
-      const valueWidth = fonts.normal.widthOfTextAtSize(value, FONT.tiny)
+      const room = column.width - TABLE.padX * 2
+      const natural = fonts.normal.widthOfTextAtSize(value, FONT.tiny)
+      const size = natural > room ? (FONT.tiny * room) / natural : FONT.tiny
+      const valueWidth = Math.min(natural, room)
       const x =
         column.align === 'center'
           ? cx + (column.width - valueWidth) / 2
           : column.align === 'right'
             ? cx + column.width - valueWidth - TABLE.padX
             : cx + TABLE.padX
-      drawText(canvas, value, x, y + (row.height - FONT.tiny) / 2, fonts.normal, FONT.tiny, black)
+      drawText(canvas, value, x, y + (row.height - size) / 2, fonts.normal, size, black)
     }
     cx += column.width
   }
@@ -803,10 +813,10 @@ const sheetBlocks = ({
       ),
     doc.items,
     (item, index) => {
-      const row = itemRow(item, fonts, DETAIL_COLUMNS.description - TABLE.padX * 2)
+      const row = itemRow(item, fonts, DETAIL_COLUMNS.description - TABLE.padX * 2, CODE_WIDTH)
       return {
         height: row.height,
-        reserve: itemRow(item, fonts, MEASURED_DESCRIPTION_WIDTH).height,
+        reserve: itemRow(item, fonts, MEASURED_DESCRIPTION_WIDTH, CODE_WIDTH).height,
         draw: (canvas, y) => drawItemRow(canvas, columns, item, index, row, y),
       }
     },
@@ -993,7 +1003,7 @@ const draw = async (
   // A document with no TED says so where the stamp goes; a receipt printed without its stamp on purpose does not.
   const unstamped = doc.tedXml === '' && options.stamp !== false
   const transferable = options.transferable === true && needsTransferableCopy(doc)
-  const office = options.siiOffice ?? siiOfficeForCommune(doc.issuer.commune) ?? DEFAULT_SII_OFFICE
+  const office = options.siiOffice ?? siiOfficeForCommune(doc.issuer.commune) ?? ''
   if (options.paper === 'roll') {
     const rows = buildRoll({ doc, fonts, office, resolution, verification, logo, stamp, unstamped, transferable })
     const height = rollHeight(rows, fonts)

@@ -69,7 +69,7 @@ export type RollInput = {
   readonly doc: PrintableDocument
   /** EN: Fonts, to wrap text. ES: Fuentes, para cortar el texto. */
   readonly fonts: Fonts
-  /** EN: SII office under the type box. ES: Oficina del SII bajo el recuadro. */
+  /** EN: SII office under the type box; empty prints none. ES: Oficina del SII bajo el recuadro; vacía no imprime ninguna. */
   readonly office: string
   /** EN: Resolution line under the stamp. ES: Línea de resolución bajo el timbre. */
   readonly resolution: string
@@ -317,7 +317,7 @@ export const buildRoll = (input: RollInput): readonly Row[] => {
   return [
     typeBox(doc, fonts),
     gap(ROLL.gap / 2),
-    ...wrapped(fonts, input.office, ROLL_FONT.body, { bold: true, align: 'center' }),
+    ...(input.office === '' ? [] : wrapped(fonts, input.office, ROLL_FONT.body, { bold: true, align: 'center' })),
     ...(logo === null ? [] : [gap(ROLL.gap), logoRow()]),
     gap(ROLL.gap),
     ...issuerRows(doc, fonts),

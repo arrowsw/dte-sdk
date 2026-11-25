@@ -56,10 +56,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`sanitizeText` keeps the dashes and the spaces a text editor writes.** It dropped every dash but two and the minus
   sign, so a pasted `−5` read `5`, and the typographic spaces, so two words ran together. Each dash from U+2010 to
   U+2015 and U+2212 is now a hyphen, and each typographic space a plain space.
+- **`sanitizeText` writes a character outside ISO-8859-1 in the form it has there, and refuses one whose loss would
+  change the text.** It removed every character outside ISO-8859-1 in silence, so `Škoda` read `koda` and `Ω-3` read
+  `-3`. A letter now keeps its base letter (`š` is `s`, `ł` is `l`, `œ` is `oe`), a ligature or a compatibility form
+  is spelled out (`ﬁ` is `fi`, `™` is `TM`, `№` is `No`), `€` is `EUR`, a bullet is `*`, `≤` and `≥` are `<=` and
+  `>=`, an arrow is `->`, and a base letter typed with a combining accent is composed first, so its `ñ` stays. A
+  letter, a digit, a currency sign or a math sign with no such form is refused with `ENCODING_UNSUPPORTED_CHAR`, and
+  so is a superscript, a subscript or a fraction outside ISO-8859-1, which spelled out beside other digits would read
+  as another number; `details` carries `field`, `index` and `codePoint`. Decoration (an emoji, a star, a check mark)
+  and what cannot be seen (a zero-width space) are dropped, as before.
+  - **What to change:** a text with a letter of another script was issued without it and is now refused: write it in
+    Latin letters before issuing, or catch `ENCODING_UNSUPPORTED_CHAR`. `sanitizeText` takes the name of the field as
+    a second argument, for the error.
 - **A commune is matched to its SII office by its letters and digits alone.** `siiOfficeForCommune` ignored case and
   accents only, so `Til Til`, `Tal-Tal` and `OHiggins` found no office and the printed sample fell back to Santiago
   Centro. Spaces, hyphens and apostrophes no longer count, and `SII_OFFICES` gains five spellings in use of names it
   already listed (Aisén, Coihaique, Llaillay, Marchigüe, Paiguano): 360 names in 40 offices.
+- **A commune outside the table prints no SII office.** Under the type box the printed sample named
+  `S.I.I. - SANTIAGO CENTRO` when `siiOfficeForCommune` did not know the issuer's commune, an office that may not be
+  the issuer's. The line is now left out, on the sheet and on the roll, and the room under the box stays.
+  - **What to change:** pass `siiOffice` when the issuer's commune is written in a way the table does not know.
 - **A document admits 30 payment installments.** `MntPagos` repeats up to 30 times (Formato DTE 2.5), and
   `createDocument` wrote any number. More than 30 are refused with `INVALID_OPTION` and `options.payments`.
 - **The documents of a test set are dated on the Chile day.** The SII's instructions for the test set ask for the date
@@ -107,6 +123,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The issuer's name, activity and address wrap in the header of the printed sample.** Each was drawn on one line
   whatever its length, so a name of a hundred characters ran under the type box. They wrap to the width left of the
   box; a text that fits is one line, as before.
+- **An item code wider than its column is printed inside it.** The detail of a printed sample drew the code on one
+  line, so one of some twelve characters or more ran over the description, and `VlrCodigo` admits 35. It now wraps to
+  its column, between words first, and its row grows with it. A quantity, a price or an amount wider than its column
+  is drawn smaller, so it stays inside it.
 - **The non-billable amount takes off the lines with `IndExe` 6.** Formato DTE 2.5 defines `MontoNF` (field 125) as
   the lines with `IndExe` 2 less the lines with `IndExe` 6, and lets it be negative. `calculateTotals` added the
   lines with `IndExe` 6, and those with 3, 4 and 5, to the lines with 2: on a 33, a line of 1 000 with `IndExe` 2 and

@@ -151,7 +151,10 @@ const RECEIVER_ACTIVITY_LENGTH = 40
 const withActivityCut = (receiver: ReceiverInput): ReceiverInput =>
   receiver.businessActivity === undefined
     ? receiver
-    : { ...receiver, businessActivity: sanitizeText(receiver.businessActivity).slice(0, RECEIVER_ACTIVITY_LENGTH) }
+    : {
+        ...receiver,
+        businessActivity: sanitizeText(receiver.businessActivity, 'GiroRecep').slice(0, RECEIVER_ACTIVITY_LENGTH),
+      }
 
 /**
  * EN: The issuer written as the receiver of its own documents (purchase invoices, internal transfers).
