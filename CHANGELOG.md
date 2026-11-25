@@ -24,6 +24,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The digest of a received envelope** (`ReceivedEnvelope.digest`). `readReceivedEnvelope` reads the digest of the
   envelope's own signature, and `createReceptionAnswer` quotes it (`Digest`, which `RespuestaEnvioDTE_v10.xsd`
   declares after the id of the envelope).
+- **A check before every upload of the certification run** (`beforeUpload`, `dte-sdk/portal`). The run hands it each
+  file it is about to upload (a test set, the simulation, a book) after keeping it as an artefact and before sending
+  it. A check that throws stops the step there, with nothing sent: the step ends as it does when an upload fails. It is
+  where to hold a file against the SII's schema with `validateAgainstSchema` of `dte-sdk/schemas`, the check the SII
+  runs first on an upload.
+- **Several customers for the test sets** (`receivers`, `dte-sdk/portal`). The SII's instructions for the test set ask
+  for a different RUT on each invoice ("Utilice RUT distintos para las distintas facturas"), and every document of a
+  set named the one `receiver`. With `receivers`, the invoices and the guides of a set name those customers in turn,
+  and a note names the customer of the document it refers to. Without it the run names `receiver`, as before.
+- **The VAT of a settlement invoice split in own and third-party** (`splitVat`, `IVAProp` and `IVATerc`). Formato DTE
+  2.5 lets a company that sells on behalf of a principal split the VAT (fields 113 and 114), each part within the VAT.
+  With `splitVat`, a settlement invoice (43) writes the VAT of its commissions as the own VAT and the rest as the third
+  parties'; one without VAT, or whose commissions carry a VAT below zero or above the VAT, has no split. The
+  settlement set of the certification run turns it on.
+- **An assignment file that carries the debtor's electronic receipts** (`receipts`, `documentImage`, `receiptImage` of
+  `unstable_createAssignment`). `DTECedido_v10.xsd` lets the zone of the assigned document carry the electronic
+  receipts of the goods or services (`Recibo`, Ley 19.983), the document as a PDF (`ImagenDTE`) and the receipts that
+  are not electronic as a PDF (`ImagenAR`). `receipts` takes the `EnvioRecibos` files as the debtor sent them, or lone
+  `Recibo` elements: every receipt that names the document is carried as it was signed, with the namespaces it had in
+  scope, so its signature still verifies in the file, and one that does not verify is refused. Each receipt is read
+  from the very text that is verified and carried, and must hold one `DocumentoRecibo` and its signature and nothing
+  else, so the fields that name the document are the ones the signature covers; a file in which two elements would
+  carry the same ID, as two receipts numbered alike do, is refused (`INVALID_OPTION`, `field: 'ID'`). With electronic
+  receipts the assignment carries no sworn statement (`DeclaracionJurada`), which the format asks for when the receipt
+  is not an electronic one carried in the file, and neither does a later assignment of that file. Each PDF goes in
+  base64 on lines of 76 characters. `unstable_verifyAssignment` now verifies each receipt too (`receipts`).
 - **Who signed a received document** (`trustedCertificates` and `signer` of `verifyReceivedDocuments`). A signature
   that verifies says that whoever holds the key of the certificate it carries signed the element, and anyone can make
   a certificate that names whoever it likes. Given the certificates of the certification authorities the caller
@@ -54,12 +80,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`sanitizeText` keeps the dashes and the spaces a text editor writes.** It dropped every dash but two and the minus
   sign, so a pasted `−5` read `5`, and the typographic spaces, so two words ran together. Each dash from U+2010 to
   U+2015 and U+2212 is now a hyphen, and each typographic space a plain space.
+- **`sanitizeText` writes a character outside ISO-8859-1 in the form it has there, and refuses one whose loss would
+  change the text.** It removed every character outside ISO-8859-1 in silence, so `Škoda` read `koda` and `Ω-3` read
+  `-3`. A letter now keeps its base letter (`š` is `s`, `ł` is `l`, `œ` is `oe`), a ligature or a compatibility form
+  is spelled out (`ﬁ` is `fi`, `™` is `TM`, `№` is `No`), `€` is `EUR`, a bullet is `*`, `≤` and `≥` are `<=` and
+  `>=`, an arrow is `->`, and a base letter typed with a combining accent is composed first, so its `ñ` stays. A
+  letter, a digit, a currency sign or a math sign with no such form is refused with `ENCODING_UNSUPPORTED_CHAR`, and
+  so is a superscript, a subscript or a fraction outside ISO-8859-1, which spelled out beside other digits would read
+  as another number; `details` carries `field`, `index` and `codePoint`. Decoration (an emoji, a star, a check mark)
+  and what cannot be seen (a zero-width space) are dropped, as before.
+  - **What to change:** a text with a letter of another script was issued without it and is now refused: write it in
+    Latin letters before issuing, or catch `ENCODING_UNSUPPORTED_CHAR`. `sanitizeText` takes the name of the field as
+    a second argument, for the error.
 - **A commune is matched to its SII office by its letters and digits alone.** `siiOfficeForCommune` ignored case and
   accents only, so `Til Til`, `Tal-Tal` and `OHiggins` found no office and the printed sample fell back to Santiago
   Centro. Spaces, hyphens and apostrophes no longer count, and `SII_OFFICES` gains five spellings in use of names it
   already listed (Aisén, Coihaique, Llaillay, Marchigüe, Paiguano): 360 names in 40 offices.
+- **A commune outside the table prints no SII office.** Under the type box the printed sample named
+  `S.I.I. - SANTIAGO CENTRO` when `siiOfficeForCommune` did not know the issuer's commune, an office that may not be
+  the issuer's. The line is now left out, on the sheet and on the roll, and the room under the box stays.
+  - **What to change:** pass `siiOffice` when the issuer's commune is written in a way the table does not know.
 - **A document admits 30 payment installments.** `MntPagos` repeats up to 30 times (Formato DTE 2.5), and
   `createDocument` wrote any number. More than 30 are refused with `INVALID_OPTION` and `options.payments`.
+- **The documents of a test set are dated on the Chile day.** The SII's instructions for the test set ask for the date
+  of the day ("Agregue fecha del día"), and the run dated its documents on the UTC day, which late in the Chilean
+  evening is already the next one, and on the last evening of a month the next tax period. The issue date is now the
+  Chile day the set is issued on; `TSTED`, `TmstFirma` and `TmstFirmaEnv` are UTC instants, as before.
 
 - **A dispatch guide without its transfer type is refused.** Formato DTE 2.5 marks `IndTraslado` (field 7) mandatory
   on a guide, and `createDocument` issued a 52 without `options.transferType` and read it as a sale. It now refuses
@@ -101,6 +147,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The issuer's name, activity and address wrap in the header of the printed sample.** Each was drawn on one line
   whatever its length, so a name of a hundred characters ran under the type box. They wrap to the width left of the
   box; a text that fits is one line, as before.
+- **An item code wider than its column is printed inside it.** The detail of a printed sample drew the code on one
+  line, so one of some twelve characters or more ran over the description, and `VlrCodigo` admits 35. It now wraps to
+  its column, between words first, and its row grows with it. A quantity, a price or an amount wider than its column
+  is drawn smaller, so it stays inside it.
 - **The non-billable amount takes off the lines with `IndExe` 6.** Formato DTE 2.5 defines `MontoNF` (field 125) as
   the lines with `IndExe` 2 less the lines with `IndExe` 6, and lets it be negative. `calculateTotals` added the
   lines with `IndExe` 6, and those with 3, 4 and 5, to the lines with 2: on a 33, a line of 1 000 with `IndExe` 2 and

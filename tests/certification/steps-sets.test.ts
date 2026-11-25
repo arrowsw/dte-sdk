@@ -9,6 +9,7 @@ import {
   sendTestSet,
   waitForTestSetsApproval,
 } from '../../src/certification/steps'
+import type { CertificationUpload } from '../../src/certification/runtime'
 import { DteError } from '../../src/errors'
 import { cafFingerprint } from '../../src/folios/registry'
 import { fullPlan } from '../support/certification-fixtures'
@@ -1031,6 +1032,59 @@ describe('sendTestSet', () => {
     expect(stats.totalSent).toBe(plan.basic!.invoices.length)
     expect(harness.steps()).toEqual(['SET_START', 'SET_OK'])
     expect(harness.urls()).toEqual([UPLOAD])
+  })
+
+  test('beforeUpload is handed the envelope after it is kept and before it is sent', async () => {
+    const harness = await certificationHarness([uploadRoute(reception())])
+    const seen: { upload: CertificationUpload; urls: readonly string[]; kept: string | null }[] = []
+    const beforeUpload = async (upload: CertificationUpload) => {
+      seen.push({
+        upload,
+        urls: harness.urls(),
+        kept: await harness.store.readArtefact('sets-prueba/envio-set-basico.xml'),
+      })
+    }
+    const state = stateWith({ plan, cafs: certificationCafXmls() })
+    const result = await sendTestSet({ ...harness.deps, beforeUpload }, state, { kind: 'basic' })
+    expect(result.outcome).toBe('sent')
+    expect(seen).toHaveLength(1)
+    expect(seen[0].upload.kind).toBe('testSet')
+    expect(seen[0].upload.name).toBe('basic')
+    expect(seen[0].upload.xml).toBe(seen[0].kept)
+    expect(seen[0].upload.xml).toContain('<SetDTE ID="DTE_SetDoc">')
+    expect(seen[0].urls).toEqual([])
+    expect(harness.urls()).toEqual([UPLOAD])
+  })
+
+  test('a beforeUpload that throws sends nothing: the step ends as a failed upload does', async () => {
+    const harness = await certificationHarness([uploadRoute(reception())])
+    const state = stateWith({ plan, cafs: certificationCafXmls() })
+    const refuse = (): void => {
+      throw new DteError('INVALID_OPTION', { field: 'schema' })
+    }
+    const error = await failure(sendTestSet({ ...harness.deps, beforeUpload: refuse }, state, { kind: 'guide' }))
+    expect(error.code).toBe('INVALID_OPTION')
+    expect(harness.urls()).toEqual([])
+    expect(harness.steps()).toEqual(['SET_START', 'SET_ERROR'])
+    // The envelope is there to look at, and its folios count as used.
+    expect(await harness.store.listArtefacts()).toContain('sets-prueba/envio-set-guia.xml')
+    expect((await harness.store.load())?.usedFolios).toHaveLength(plan.guide!.guides.length)
+    expect((await harness.store.load())?.sets).toEqual({})
+    const stats = await harness.registry.stats({ companyRut: '76543210-3', type: 52, environment: 'certification' })
+    expect(stats.totalSent).toBe(plan.guide!.guides.length)
+  })
+
+  test('the customers of the dependencies take turns in the set, each completed from the test receiver', async () => {
+    const harness = await certificationHarness([uploadRoute(reception())])
+    const receivers = [{ rut: '11111111-1', businessName: 'CLIENTE UNO' }, { rut: '14625621-K' }]
+    const state = stateWith({ plan, cafs: certificationCafXmls() })
+    await sendTestSet({ ...harness.deps, receivers }, state, { kind: 'basic' })
+    const envelope = (await harness.store.readArtefact('sets-prueba/envio-set-basico.xml'))!
+    const named = [...envelope.matchAll(/<RUTRecep>([^<]+)<\/RUTRecep><RznSocRecep>([^<]+)</g)].map(
+      (match) => `${match[1]} ${match[2]}`,
+    )
+    expect(named.slice(0, 3)).toEqual(['11111111-1 CLIENTE UNO', '14625621-K CLIENTE TEST', '11111111-1 CLIENTE UNO'])
+    expect(new Set(named)).toEqual(new Set(['11111111-1 CLIENTE UNO', '14625621-K CLIENTE TEST']))
   })
 
   test('a failed upload still marks the folios as sent, then throws', async () => {
