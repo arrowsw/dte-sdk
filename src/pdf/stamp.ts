@@ -51,25 +51,27 @@ const STAMP_OPTIONS = {
 } as const
 
 /**
- * EN: **Unstable**: no stamp drawn this way has been printed and read back with a scanner yet, so it may change in any
- * release, a patch included.
- * A way to draw the stamp other than the one of every release so far. `'instructions'` follows what section A.2.5 of
- * the SII's instructions asks of the symbol and the default does not: rows three modules high, where the default's are
- * one; byte compaction alone whenever the TED fits in it; and a raster of four pixels a module, over 300 DPI at the
- * size a sheet draws it at. It has eighteen data columns, 387 modules across with a quiet zone of six on each side:
- * 9 cm across gives a module of 9.2 mils. It is for the sheet; on the continuous paper its module is under two dots of
- * a 203 DPI printer, which the default's is not.
- * ES: **Inestable**: ningún timbre dibujado así se ha impreso y leído de vuelta con un lector todavía, así que puede
- * cambiar en cualquier versión, incluso un patch.
- * Una forma de dibujar el timbre distinta de la de todas las versiones hasta ahora. `'instructions'` sigue lo que la
- * sección A.2.5 del instructivo del SII pide del símbolo y el valor por defecto no: filas de tres módulos de alto,
- * donde las del valor por defecto son de uno; solo compactación de bytes siempre que el TED quepa en ella; y una trama
- * de cuatro píxeles por módulo, sobre 300 DPI al tamaño con que lo dibuja una hoja. Tiene dieciocho columnas de datos,
- * 387 módulos de ancho con una zona de silencio de seis a cada lado: 9 cm de ancho dan un módulo de 9,2 mils. Es para
- * la hoja; en el papel continuo su módulo queda bajo dos puntos de una impresora de 203 DPI, y el del valor por
- * defecto no.
+ * EN: **Unstable**: no stamp drawn as `'instructions'` has been printed and read back with a scanner yet, so the two
+ * may change in any release, a patch included.
+ * The two ways the stamp is drawn. `'instructions'` follows what section A.2.5 of the SII's instructions asks of the
+ * symbol: rows three modules high; byte compaction alone whenever the TED fits in it; and a raster of four pixels a
+ * module, over 300 DPI at the size a sheet draws it at. It has eighteen data columns, 387 modules across with a quiet
+ * zone of six on each side: 9 cm across gives a module of 9.2 mils. It is the stamp of the sheet. `'compact'` is the
+ * stamp of every release up to 0.16.0: rows one module high, stretched to the stamp box, and the compaction the
+ * library picks for a TED of plain ASCII. It is the stamp of the continuous paper, where the module of
+ * `'instructions'` is under two dots of a 203 DPI printer, and the one `renderTedBarcode` draws unless told otherwise.
+ * ES: **Inestable**: ningún timbre dibujado como `'instructions'` se ha impreso y leído de vuelta con un lector
+ * todavía, así que las dos pueden cambiar en cualquier versión, incluso un patch.
+ * Las dos formas en que se dibuja el timbre. `'instructions'` sigue lo que la sección A.2.5 del instructivo del SII
+ * pide del símbolo: filas de tres módulos de alto; solo compactación de bytes siempre que el TED quepa en ella; y una
+ * trama de cuatro píxeles por módulo, sobre 300 DPI al tamaño con que lo dibuja una hoja. Tiene dieciocho columnas de
+ * datos, 387 módulos de ancho con una zona de silencio de seis a cada lado: 9 cm de ancho dan un módulo de 9,2 mils.
+ * Es el timbre de la hoja. `'compact'` es el timbre de todas las versiones hasta la 0.16.0: filas de un módulo de alto,
+ * estiradas a la caja del timbre, y la compactación que elige la librería para un TED de ASCII puro. Es el timbre del
+ * papel continuo, donde el módulo de `'instructions'` queda bajo dos puntos de una impresora de 203 DPI, y el que
+ * dibuja `renderTedBarcode` si no se le dice otra cosa.
  */
-export type StampGeometry = 'instructions'
+export type StampGeometry = 'instructions' | 'compact'
 
 // The symbol of `'instructions'`: no height is given, so the rows keep the library's own proportion, three modules.
 const INSTRUCTIONS_OPTIONS = {
@@ -129,6 +131,13 @@ const rawCodewords = (bytes: Uint8Array, always: boolean): string | null => {
 }
 
 /**
+ * EN: True for a geometry the stamp is drawn with. Internal.
+ * ES: True para una geometría con que se dibuja el timbre. Interno.
+ */
+export const isStampGeometry = (value: unknown): value is StampGeometry =>
+  value === 'instructions' || value === 'compact'
+
+/**
  * EN: Renders the stamp with an already loaded barcode module. Internal: `renderPrintedSample` shares it.
  * ES: Genera el timbre con un módulo de códigos de barras ya cargado. Interno: lo comparte `renderPrintedSample`.
  */
@@ -138,8 +147,9 @@ export const renderTedBarcodeWith = async (
   geometry?: StampGeometry,
 ): Promise<Uint8Array> => {
   if (!tedXml.includes('<TED')) throw new DteError('MISSING_FIELD', { field: 'TED' })
-  const options = geometry === undefined ? STAMP_OPTIONS : INSTRUCTIONS_OPTIONS
-  const raw = rawCodewords(encodeLatin1(tedXml), geometry !== undefined)
+  const instructions = geometry === 'instructions'
+  const options = instructions ? INSTRUCTIONS_OPTIONS : STAMP_OPTIONS
+  const raw = rawCodewords(encodeLatin1(tedXml), instructions)
   return new Uint8Array(
     await barcode.toBuffer(raw === null ? { ...options, text: tedXml } : { ...options, text: raw, raw: true }),
   )
@@ -155,7 +165,7 @@ export const renderTedBarcodeWith = async (
  * lo usa directo.
  * @param tedXml EN: the `<TED>…</TED>` XML, verbatim from the signed document. ES: el XML `<TED>…</TED>`, textual del documento firmado.
  * @param load EN: loader of the barcode library, for tests. ES: cargador de la librería de códigos de barras, para tests.
- * @param options EN: `unstable_geometry`, to draw the symbol as `StampGeometry` says; whoever draws it then scales its two sides by one factor. ES: `unstable_geometry`, para dibujar el símbolo como dice `StampGeometry`; quien lo dibuja escala entonces sus dos lados por un mismo factor.
+ * @param options EN: `unstable_geometry`, how the symbol is drawn (`StampGeometry`); `'compact'` by default, the stamp of every release, which a layout made for it stretches to its box. Whoever draws `'instructions'` scales its two sides by one factor. ES: `unstable_geometry`, cómo se dibuja el símbolo (`StampGeometry`); por defecto `'compact'`, el timbre de todas las versiones, que una diagramación hecha para él estira a su caja. Quien dibuja `'instructions'` escala sus dos lados con un solo factor.
  * @throws {DteError} EN: `INVALID_OPTION` (field `unstable_geometry`) for a geometry that is not one, `MISSING_FIELD` (field `TED`) without a `<TED`, `ENCODING_UNSUPPORTED_CHAR` for a code point above U+00FF, `DEPENDENCY_UNAVAILABLE` when the library cannot be loaded. ES: `MISSING_FIELD` (campo `TED`) sin `<TED`, `ENCODING_UNSUPPORTED_CHAR` ante un code point mayor a U+00FF, `DEPENDENCY_UNAVAILABLE` si la librería no se puede cargar.
  */
 export const renderTedBarcode = async (
@@ -163,7 +173,7 @@ export const renderTedBarcode = async (
   load: () => Promise<BarcodeModule> = loadBarcodeModule,
   options: { readonly unstable_geometry?: StampGeometry } = {},
 ): Promise<Uint8Array> => {
-  if (options.unstable_geometry !== undefined && options.unstable_geometry !== 'instructions')
+  if (options.unstable_geometry !== undefined && !isStampGeometry(options.unstable_geometry))
     throw new DteError('INVALID_OPTION', { field: 'unstable_geometry' })
   return renderTedBarcodeWith(await load(), tedXml, options.unstable_geometry)
 }
