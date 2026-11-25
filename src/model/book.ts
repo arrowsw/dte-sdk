@@ -621,19 +621,21 @@ export type FolioConsumptionCover = {
 }
 
 /**
- * EN: Document types of the report: 39 and 41, per the 2020 format.
- * ES: `TipoDocumento` — Tipos de documento del reporte: 39 y 41, según el formato de 2020.
+ * EN: Document types of the report, the three `ConsumoFolio_v10.xsd` admits (`TipoConsumoType`): the receipt (39), the
+ * exempt receipt (41) and the credit note (61).
+ * ES: `TipoDocumento` — Tipos de documento del reporte, los tres que admite `ConsumoFolio_v10.xsd` (`TipoConsumoType`):
+ * la boleta (39), la boleta exenta (41) y la nota de crédito (61).
  */
-export type FolioConsumptionType = 39 | 41
+export type FolioConsumptionType = 39 | 41 | 61
 
 /**
- * EN: One receipt issued.
- * ES: Una boleta emitida.
+ * EN: One receipt or credit note issued.
+ * ES: Una boleta o una nota de crédito emitida.
  */
 export type FolioConsumptionEntry = {
   /** EN: Document type. ES: `TipoDocumento` — Tipo de documento. */
   readonly type: FolioConsumptionType
-  /** EN: Folio. ES: Folio de la boleta. */
+  /** EN: Folio. ES: Folio del documento. */
   readonly folio: number
   /** EN: Issue date; defines `from` and `to` when they are absent. ES: Fecha de emisión; define `from` y `to` si faltan. */
   readonly issueDate?: string
