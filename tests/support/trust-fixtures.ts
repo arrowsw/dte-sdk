@@ -45,9 +45,21 @@ export type Authority = {
 const derOf = (certificate: forge.pki.Certificate): Uint8Array =>
   Uint8Array.from(Buffer.from(forge.asn1.toDer(forge.pki.certificateToAsn1(certificate)).getBytes(), 'binary'))
 
-/** A self-signed certification authority named `name`; `variant` tells apart two of the same name. */
-export const authority = (name: string, variant = ''): Authority =>
-  once(`authority ${name} ${variant}`, () => {
+const AUTHORITY_EXTENSIONS: readonly Record<string, unknown>[] = [
+  { name: 'basicConstraints', cA: true, critical: true },
+  { name: 'keyUsage', keyCertSign: true, cRLSign: true, critical: true },
+]
+
+/**
+ * A self-signed certificate named `name` that issues others; `variant` tells apart two of the same name, and
+ * `extensions` replaces the ones that make it an authority.
+ */
+export const authority = (
+  name: string,
+  variant = '',
+  extensions: readonly Record<string, unknown>[] = AUTHORITY_EXTENSIONS,
+): Authority =>
+  once(`authority ${name} ${variant} ${JSON.stringify(extensions)}`, () => {
     const keys = forge.pki.rsa.generateKeyPair({ bits: 1024, e: 0x10001 })
     const certificate = forge.pki.createCertificate()
     certificate.publicKey = keys.publicKey
@@ -60,10 +72,7 @@ export const authority = (name: string, variant = ''): Authority =>
     ]
     certificate.setSubject(subject)
     certificate.setIssuer(subject)
-    certificate.setExtensions([
-      { name: 'basicConstraints', cA: true, critical: true },
-      { name: 'keyUsage', keyCertSign: true, cRLSign: true, critical: true },
-    ])
+    certificate.setExtensions([...extensions])
     certificate.sign(keys.privateKey, forge.md.sha256.create())
     return {
       name,
@@ -120,3 +129,15 @@ export const signerOf = (spec: SignerSpec): { readonly certificate: Certificate;
       }
     },
   )
+
+/** A signer's certificate and key taken as an issuer: what its holder would use to issue certificates of its own. */
+export const asIssuer = (signer: { readonly certificate: Certificate; readonly pem: string }): Authority => {
+  const certificate = forge.pki.certificateFromPem(signer.pem)
+  return {
+    name: String(certificate.subject.getField('CN')?.value),
+    pem: signer.pem,
+    der: derOf(certificate),
+    certificate,
+    privateKey: forge.pki.privateKeyFromPem(signer.certificate.privateKeyPem),
+  }
+}

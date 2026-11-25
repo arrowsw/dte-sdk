@@ -9,7 +9,7 @@ on 2026-11-14 to ship inside the package with their validator as an optional pee
 
 | Entry | Holds | Size | Reaches `node:` |
 |---|---|---|---|
-| `dte-sdk` | Documents (export documents included), stamps, signatures, envelopes, books, verification of received documents, the assignment of invoices, SII web services client over `fetch`, public registry of issuers | 48.46 kB | Not by import: it asks the runtime for `node:crypto` at the first signature |
+| `dte-sdk` | Documents (export documents included), stamps, signatures, envelopes, books, verification of received documents, the assignment of invoices, SII web services client over `fetch`, public registry of issuers | 48.49 kB | Not by import: it asks the runtime for `node:crypto` at the first signature |
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.4 kB | Yes, on first use |
 | `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 86.41 kB | Yes, on first use |
 | `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 19.83 kB | Yes, on first use |
@@ -156,7 +156,7 @@ wrapped lines of the issuer, on 2026-11-24, took `dte-sdk` from 47.56 kB to 47.8
 certification runner builds documents with the same code, from 85.98 kB to 86.43 kB, over its 86 kB limit, which went
 to 88 kB, and `dte-sdk/pdf` from 19.68 kB to 19.8 kB; the other entries did not move.
 Reporting who signed a received document, with the check of its certificate against the ones the caller trusts, on
-2026-11-25, took `dte-sdk` from 47.86 kB to 48.46 kB, over its 48 kB limit, which went to 50 kB; `dte-sdk/portal`
+2026-11-25, took `dte-sdk` from 47.86 kB to 48.49 kB, over its 48 kB limit, which went to 50 kB; `dte-sdk/portal`
 measured 86.41 kB and `dte-sdk/pdf` 19.83 kB.
 
 ## Why

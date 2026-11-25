@@ -12,7 +12,7 @@ import { issueDocument } from '../src/document/issue'
 import type { Certificate } from '../src/certificate/certificate'
 import { signEnveloped } from '../src/signature/xmldsig'
 import { fixtureText, FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from './support/fixtures'
-import { authority, signerOf } from './support/trust-fixtures'
+import { asIssuer, authority, signerOf, type Authority } from './support/trust-fixtures'
 import {
   certificate,
   envelopeAround,
@@ -982,6 +982,33 @@ describe('verifyReceivedDocuments: who signed', () => {
     expect(signerWith(signedBy(underImpostor), [impostor.pem]).signer).toEqual(PERSON)
     // Issued by another authority than the trusted one.
     expect(signerWith(signedBy(person), [authorityB.pem]).signer).toBeNull()
+  })
+
+  // Trusting one signer's certificate is not trusting whatever its holder signs with it.
+  test('a trusted certificate that is not an authority vouches for itself alone', () => {
+    const trusted = signerOf({ issuer: authorityB, rut: '14625621-K' })
+    const minted = signerOf({ issuer: asIssuer(trusted), rut: '11111111-1', name: 'OTRA PERSONA' })
+    expect(signerWith(signedBy(trusted), [trusted.pem]).signer).toMatchObject({ rut: '14625621-K' })
+    expect(signerWith(signedBy(minted), [trusted.pem])).toMatchObject({ ...VALID_SIGNATURE, signer: null })
+    // The same certificate issued by a real authority of that name is taken, so the refusal is of the issuer.
+    const real = authority('PEDRO PRUEBA SOTO', 'authority')
+    const underReal = signerOf({ issuer: real, rut: '11111111-1', name: 'OTRA PERSONA' })
+    expect(signerWith(signedBy(underReal), [real.pem]).signer).toMatchObject({ rut: '11111111-1' })
+  })
+
+  test('an authority is one by its basic constraints, and by its key usage when it states one', () => {
+    const issuedBy = (issuer: Authority) => signerWith(signedBy(signerOf({ issuer, rut: '14625621-K' })), [issuer.pem])
+    // No key usage: the basic constraints say it.
+    expect(issuedBy(authority('ENTIDAD SIMPLE', '', [{ name: 'basicConstraints', cA: true }])).signer).toEqual(PERSON)
+    // A key usage that leaves out the signing of certificates.
+    const noSigning = [
+      { name: 'basicConstraints', cA: true },
+      { name: 'keyUsage', digitalSignature: true },
+    ]
+    expect(issuedBy(authority('ENTIDAD SIN FIRMA', '', noSigning)).signer).toBeNull()
+    // Basic constraints that say it is not one, and none at all.
+    expect(issuedBy(authority('NO ES ENTIDAD', '', [{ name: 'basicConstraints', cA: false }])).signer).toBeNull()
+    expect(issuedBy(authority('SIN RESTRICCIONES', '', [])).signer).toBeNull()
   })
 
   test('a certificate with a critical extension the check does not know reports no signer', () => {

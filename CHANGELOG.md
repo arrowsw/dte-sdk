@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   trusts, as PEM or DER, each signature that verifies now reports its `signer` when one of them issued the certificate
   it verifies with, or is that certificate: the RUT and the name it names, the dates it is in force between, and
   whether it was in force at the instant the signed element states (`TmstFirma`, `TmstFirmaEnv`), read as Chile time.
+  Only a trusted certificate that is an authority vouches for the ones it issued; any other vouches for itself alone,
+  so trusting one signer's certificate does not trust what its holder issues with it.
   A certificate no trusted one issued reports no signer, whatever it names, and neither does one with a critical
   extension other than key usage, basic constraints or name constraints. The RUT is the person's who holds the
   certificate, seldom the company's: whether that person may sign for the issuer is not checked, and no revocation is

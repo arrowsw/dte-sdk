@@ -8,7 +8,7 @@ import {
   type VerificationStatus,
 } from '../caf/sii-signature'
 import { rsaSha1VerifyBase64 } from '../crypto/rsa'
-import { trustedHolder, trustStore } from '../crypto/x509'
+import { trustedHolder, trustStore, type TrustStore } from '../crypto/x509'
 import type { Environment } from '../catalogs/codes'
 import { toSiiRut, type SiiRut } from '../model/rut'
 import { verifyEnvelopedWithCertificate, type SignatureVerification } from '../signature/xmldsig'
@@ -44,7 +44,7 @@ export type VerifyReceivedDocumentsOptions = {
   readonly environment?: Environment
   /** EN: The SII keys that verify each CAF's `FRMA`, by `IDK`, in place of `SII_CAF_KEYS` (spread it to add one). ES: Las llaves del SII que verifican la `FRMA` de cada CAF, por `IDK`, en lugar de `SII_CAF_KEYS` (para agregar una, expándela). */
   readonly siiKeys?: SiiCafKeys
-  /** EN: The certificates of the certification authorities the caller trusts, each a PEM text (which may hold several) or the DER bytes of one. With them, a signature that verifies reports its `signer` when one of them issued the certificate it verifies with, or is that certificate. A document carries the signer's certificate alone, so give the certificate of the authority that issued it. Without them no signer is reported. ES: Los certificados de las entidades certificadoras en que confía quien llama, cada uno un texto PEM (que puede traer varios) o los bytes DER de uno. Con ellos, una firma que verifica informa su `signer` cuando uno de ellos emitió el certificado con que verifica, o es ese certificado. Un documento trae solo el certificado del firmante, así que se entrega el certificado de la entidad que lo emitió. Sin ellos no se informa firmante. */
+  /** EN: The certificates of the certification authorities the caller trusts, each a PEM text (which may hold several) or the DER bytes of one. With them, a signature that verifies reports its `signer` when one of them issued the certificate it verifies with, or is that certificate. Only a certificate that is an authority (basic constraints `cA`, and the signing of certificates in its key usage when it states one) vouches for the ones it issued; any other vouches for itself alone. A document carries the signer's certificate alone, so give the certificate of the authority that issued it. Without them no signer is reported. ES: Los certificados de las entidades certificadoras en que confía quien llama, cada uno un texto PEM (que puede traer varios) o los bytes DER de uno. Con ellos, una firma que verifica informa su `signer` cuando uno de ellos emitió el certificado con que verifica, o es ese certificado. Solo un certificado que es una entidad (restricciones básicas `cA`, y la firma de certificados en su uso de llave cuando declara uno) responde por los que emitió; cualquier otro responde solo por sí mismo. Un documento trae solo el certificado del firmante, así que se entrega el certificado de la entidad que lo emitió. Sin ellos no se informa firmante. */
   readonly trustedCertificates?: readonly (string | Uint8Array)[]
 }
 
@@ -200,8 +200,6 @@ const NOT_FOUND: ReceivedSignatureCheck = {
   valid: false,
   signer: null,
 }
-
-type TrustStore = ReturnType<typeof trustStore>
 
 // Who signed: said only of a signature that verifies, and of the very certificate it verified with, when the store
 // vouches for it. `signedAt` is the instant the signed element states.
