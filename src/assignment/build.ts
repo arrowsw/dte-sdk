@@ -161,7 +161,7 @@ const el = (tag: string, value: string | number): string => `<${tag}>${escapeXml
 
 // A free text, sanitized as every text of a document is, then held to its bounds: an empty one is missing.
 const text = (value: string, field: string, max: number, min = 1): string => {
-  const clean = sanitizeText(value)
+  const clean = sanitizeText(value, field)
   if (clean === '') throw new DteError('MISSING_FIELD', { field })
   assertMaxLength(clean, max, field)
   return clean.length < min ? refuse(field, `shorter than ${min} characters`) : clean
@@ -169,7 +169,7 @@ const text = (value: string, field: string, max: number, min = 1): string => {
 
 // An optional text: absent or blank writes nothing.
 const optional = (tag: string, value: string | undefined, max: number): string =>
-  value === undefined || sanitizeText(value) === '' ? '' : el(tag, text(value, tag, max))
+  value === undefined || sanitizeText(value, tag) === '' ? '' : el(tag, text(value, tag, max))
 
 const dateIn = (value: string, field: string): string => {
   const date = toIsoDate(value, field)

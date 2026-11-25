@@ -75,7 +75,7 @@ const normalizeEntry = (input: GuideEntryInput, submission: BookSubmission, inde
   })
   if (input.voided === 'folio' || input.voided === 'guide')
     return { ...shared, taxRate: 0, vatAmount: 0, totalAmount: 0 }
-  const name = input.receiverName === undefined ? undefined : sanitizeText(input.receiverName)
+  const name = input.receiverName === undefined ? undefined : sanitizeText(input.receiverName, 'RznSoc')
   if (name !== undefined) assertMaxLength(name, MAX_NAME, 'RznSoc')
   const net = input.netAmount ?? 0
   const taxRate = input.taxRate ?? 0
