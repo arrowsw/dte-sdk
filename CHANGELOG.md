@@ -56,6 +56,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and Ñiquén, and gave no office for San José de la Mariquina, San Vicente de Tagua Tagua, San Fabián de Alico and San
   Gregorio de Ñiquén, as an address writes them, so the printed sample left the office out. `SII_OFFICES` lists them
   with their communes: 364 names in 40 offices.
+- **The description of `paper` says an export document is refused on continuous paper** (`dte-sdk/pdf`). The option of
+  `renderPrintedSample` still read "Every type admits both", while 0.16.0 draws an export document (110, 111, 112) on
+  the sheet alone and refuses it on `'roll'` (`INVALID_OPTION`, `paper`), as the function's own list of errors says.
+  Only the comment changes.
 
 ## [0.16.0] - 2026-11-25
 
