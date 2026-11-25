@@ -7,7 +7,8 @@ import { siiRutOrNull, toSiiRut, type SiiRut } from '../model/rut'
 import { signEnveloped, type SignatureVerification } from '../signature/xmldsig'
 import { assertMaxLength, sanitizeText } from '../text/sanitize'
 import { chileTimestamp, toIsoDate } from '../time/chile'
-import { child, textAt } from '../xml/elements'
+import { child, childElements, textAt } from '../xml/elements'
+import { parseXmlDom } from '../xml/parse'
 import { escapeXmlText } from '../xml/escape'
 import { readAssignmentFile, readGoodsReceipts, SII_NS, unstable_verifyAssignment, verifyGoodsReceipt } from './read'
 
@@ -291,30 +292,26 @@ const signersOf = (terms: AssignmentTerms): readonly Signer[] => {
 const receiptsOf = (texts: readonly string[] | undefined, document: AssignedDocument): readonly string[] => {
   if (texts === undefined) return []
   if (!Array.isArray(texts)) refuse('receipts', 'expected a list of texts')
-  // Each `Recibo` with its `DocumentoRecibo`; one without it names no document.
-  const found = texts
+  // The fields are read from the `DocumentoRecibo` the signature covers: `readGoodsReceipts` hands each `Recibo` read
+  // from the text that is verified and carried, with that element as its first child.
+  const naming = texts
     .flatMap((text) => readGoodsReceipts(String(text)))
-    .flatMap((receipt) => {
-      const body = child(receipt.element, 'DocumentoRecibo')
-      return body === undefined ? [] : [{ receipt, body }]
+    .filter((receipt) => {
+      const [body] = childElements(receipt.element)
+      return (
+        textAt(body, 'TipoDoc') === String(document.type) &&
+        textAt(body, 'Folio') === String(document.folio) &&
+        siiRutOrNull(textAt(body, 'RUTEmisor')) === document.issuerRut &&
+        siiRutOrNull(textAt(body, 'RUTRecep')) === document.receiverRut
+      )
     })
-  const naming = found.filter(
-    ({ body }) =>
-      textAt(body, 'TipoDoc') === String(document.type) &&
-      textAt(body, 'Folio') === String(document.folio) &&
-      siiRutOrNull(textAt(body, 'RUTEmisor')) === document.issuerRut &&
-      siiRutOrNull(textAt(body, 'RUTRecep')) === document.receiverRut,
-  )
   if (naming.length === 0) refuse('receipts', 'no receipt names the assigned document')
-  if (naming.some(({ receipt }) => !verifyGoodsReceipt(receipt).valid))
+  if (naming.some((receipt) => !verifyGoodsReceipt(receipt).valid))
     throw new DteError('SIGNATURE_INVALID', { field: 'Recibo' })
-  // The same receipt given twice is carried once; two different ones under one ID would leave the file with an ID
-  // that names two elements.
-  const receipts = Array.from(new Map(naming.map((one) => [one.receipt.text, one])).values())
-  if (new Set(receipts.map(({ body }) => body.getAttribute('ID'))).size !== receipts.length)
-    refuse('receipts', 'two receipts carry the same ID')
+  // The same receipt given twice is carried once.
+  const receipts = Array.from(new Set(naming.map((receipt) => receipt.text)))
   if (receipts.length > MAX_RECEIPTS) refuse('receipts', `a file carries up to ${MAX_RECEIPTS} receipts`)
-  return receipts.map(({ receipt }) => receipt.text)
+  return receipts
 }
 
 // A PDF carried in the zone of the assigned document, in base64 on short lines.
@@ -419,12 +416,23 @@ const failedZone = (verification: ReturnType<typeof unstable_verifyAssignment>):
   return checks.find(([, check]) => !check.valid)?.[0] ?? null
 }
 
+// Every `ID` and `Id` attribute under `element`, itself included.
+const idsOf = (element: Element): readonly string[] => [
+  ...['ID', 'Id'].flatMap((name) => (element.hasAttribute(name) ? [element.getAttribute(name) as string] : [])),
+  ...childElements(element).flatMap(idsOf),
+]
+
 // What is handed back verifies, or nothing is. Every signature of the file is checked where it stands, as the reader of
 // whoever receives it will: a zone whose ID an embedded document also uses, which leaves two elements for one
 // reference, is found here and not at the SII.
 const verified = (file: string): string => {
   const failed = failedZone(unstable_verifyAssignment(file))
   if (failed !== null) throw new DteError('SIGNATURE_INVALID', { field: failed })
+  // The schemas type every `ID`, and every `Id` of a signature, as `xs:ID`: each names one element of the file. The
+  // checks above read each zone on its own, so an ID a carried receipt shares with the document, with another receipt
+  // or with an assignment is found here, over the whole file.
+  const ids = idsOf(parseXmlDom(file).documentElement)
+  if (new Set(ids).size !== ids.length) refuse('ID', 'two elements of the file carry the same ID')
   return file
 }
 
@@ -469,7 +477,7 @@ const verified = (file: string): string => {
  * de sus 512 caracteres; y el certificado de un firmante que no nombra ningún RUT no se compara con el del firmante.
  * @param input EN: the signed document, the parties, the amount, the last due date and the certificates. ES: el documento firmado, las partes, el monto, el último vencimiento y los certificados.
  * @returns EN: the signed `AEC`. ES: el `AEC` firmado.
- * @throws {DteError} EN: `XML_PARSE_FAILED` for a document that is not one signed `DTE` declaring the SII namespace; `SIGNATURE_INVALID` when its signature does not verify; `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `INVALID_AMOUNT` (`MntTotal`, `amount`), `MISSING_FIELD` and `FIELD_TOO_LONG` with the field in `details.field`; `INVALID_OPTION` for an assignor that is not the creditor (`assignor.rut`), no signers or more than three, a signer's certificate of another RUT (`assignor.signers`) and a text shorter than the schema allows; and for the file built, `SIGNATURE_INVALID` with the zone in `details.field` when one of its signatures does not verify, or `XML_PARSE_FAILED` when it cannot be read back. Also `XML_PARSE_FAILED` for a text of `receipts` that is neither an `EnvioRecibos` nor a `Recibo`; `SIGNATURE_INVALID` with `field: 'Recibo'` for a receipt that names the document and does not verify; `INVALID_OPTION` with `receipts` (not a list, no receipt names the document, two receipts with one ID, more than 40), `documentImage` or `receiptImage` (not the bytes of a PDF, or a `receiptImage` over 4,000,000 bytes). ES: los mismos códigos. También `XML_PARSE_FAILED` para un texto de `receipts` que no es un `EnvioRecibos` ni un `Recibo`; `SIGNATURE_INVALID` con `field: 'Recibo'` para un recibo que nombra al documento y no verifica; `INVALID_OPTION` con `receipts` (no es una lista, ningún recibo nombra al documento, dos recibos con un mismo ID, más de 40), `documentImage` o `receiptImage` (no son los bytes de un PDF, o un `receiptImage` de más de 4.000.000 de bytes).
+ * @throws {DteError} EN: `XML_PARSE_FAILED` for a document that is not one signed `DTE` declaring the SII namespace; `SIGNATURE_INVALID` when its signature does not verify; `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `INVALID_AMOUNT` (`MntTotal`, `amount`), `MISSING_FIELD` and `FIELD_TOO_LONG` with the field in `details.field`; `INVALID_OPTION` for an assignor that is not the creditor (`assignor.rut`), no signers or more than three, a signer's certificate of another RUT (`assignor.signers`) and a text shorter than the schema allows; and for the file built, `SIGNATURE_INVALID` with the zone in `details.field` when one of its signatures does not verify, or `XML_PARSE_FAILED` when it cannot be read back. Also `XML_PARSE_FAILED` for a text of `receipts` that is neither an `EnvioRecibos` nor a `Recibo`; `SIGNATURE_INVALID` with `field: 'Recibo'` for a receipt that names the document and does not verify; `INVALID_OPTION` with `receipts` (not a list, no receipt names the document, more than 40), `documentImage` or `receiptImage` (not the bytes of a PDF, or a `receiptImage` over 4,000,000 bytes), or `ID` when two elements of the file would carry the same ID, as two receipts numbered alike do. ES: los mismos códigos. También `XML_PARSE_FAILED` para un texto de `receipts` que no es un `EnvioRecibos` ni un `Recibo`; `SIGNATURE_INVALID` con `field: 'Recibo'` para un recibo que nombra al documento y no verifica; `INVALID_OPTION` con `receipts` (no es una lista, ningún recibo nombra al documento, más de 40), `documentImage` o `receiptImage` (no son los bytes de un PDF, o un `receiptImage` de más de 4.000.000 de bytes), o `ID` cuando dos elementos del archivo llevarían el mismo ID, como dos recibos numerados igual.
  */
 export const unstable_createAssignment = (input: AssignmentInput): string => {
   const dte = String(input.document).replace(PROLOG, '').trim()

@@ -630,17 +630,6 @@ describe('the receipts and the images of the assigned document', () => {
       code: 'SIGNATURE_INVALID',
       details: { field: 'Recibo' },
     })
-    // Two receptions that numbered their receipts alike: one ID would name two elements of the file.
-    const again = receiptsFile(new Date(FIXED_NOW.getTime() + 60_000))
-    expect(refusal([received, again])).toMatchObject({
-      code: 'INVALID_OPTION',
-      details: { field: 'receipts', reason: 'two receipts carry the same ID' },
-    })
-    // A Recibo without its DocumentoRecibo names no document.
-    expect(refusal(['<Recibo xmlns="http://www.sii.cl/SiiDte" version="1.0"><Otro/></Recibo>']).details).toEqual({
-      field: 'receipts',
-      reason: 'no receipt names the assigned document',
-    })
     expect(refusal(['<Otro xmlns="http://www.sii.cl/SiiDte"/>'])).toMatchObject({
       code: 'XML_PARSE_FAILED',
       details: { field: 'Recibo' },
@@ -650,6 +639,81 @@ describe('the receipts and the images of the assigned document', () => {
       refusal([received.replace('<EnvioRecibos xmlns="http://www.sii.cl/SiiDte"', '<EnvioRecibos xmlns="urn:other"')])
         .code,
     ).toBe('XML_PARSE_FAILED')
+  })
+
+  // A `Recibo` holds one `DocumentoRecibo` and the signature over it: the fields read are the ones the signature covers.
+  test('a Recibo of any other shape is refused', () => {
+    const recibo = resignedReceipt(/<Recibo [\s\S]*?<\/Recibo>/.exec(received)![0], 1)
+    const body = /<DocumentoRecibo [\s\S]*?<\/DocumentoRecibo>/.exec(recibo)![0]
+    const signature = /<Signature [\s\S]*?<\/Signature>/.exec(recibo)![0]
+    const open = '<Recibo xmlns="http://www.sii.cl/SiiDte" version="1.0">'
+    const refusal = (text: string) => caught(() => unstable_createAssignment(firstAssignment({ receipts: [text] })))
+    const shapes = [
+      `${open}</Recibo>`,
+      `${open}${body}</Recibo>`,
+      `${open}${signature}${body}</Recibo>`,
+      `${open}${body}${signature}<Otro/></Recibo>`,
+      `${open}${body.replace('<DocumentoRecibo ', '<DocumentoRecibo xmlns="urn:other" ')}${signature}</Recibo>`,
+      `${open}${body}<Signature/></Recibo>`,
+      `${open}${body.replace(/DocumentoRecibo/g, 'Documento')}${signature}</Recibo>`,
+    ]
+    for (const shape of shapes)
+      expect(refusal(shape)).toMatchObject({
+        code: 'XML_PARSE_FAILED',
+        details: { field: 'Recibo', reason: 'expected a Recibo with one DocumentoRecibo and its Signature' },
+      })
+    // A body that names the document, unsigned, put before the signed body of another document: the signature covers
+    // the second, and the fields would be read from the first.
+    const other = /<Recibo [\s\S]*?<\/Recibo>/g
+    const [, exemptReceipt] = Array.from(received.matchAll(other), (match) => match[0])
+    const wrapped = exemptReceipt
+      .replace(
+        '<Recibo ',
+        '<Recibo xmlns="http://www.sii.cl/SiiDte" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ',
+      )
+      .replace('<DocumentoRecibo ', () => `${body.replace('ID="REC-1"', 'ID="X"')}<DocumentoRecibo `)
+    expect(refusal(wrapped).code).toBe('XML_PARSE_FAILED')
+  })
+
+  // What is checked and what is carried are read from one text: a file written so that its elements and the texts cut
+  // from it pair off differently gains nothing by it.
+  test('a file whose elements and texts pair off differently carries no receipt it did not check', () => {
+    const [mine, exemptReceipt] = Array.from(received.matchAll(/<Recibo [\s\S]*?<\/Recibo>/g), (match) => match[0])
+    // The receipt of the exempt invoice hidden in a comment, where only a cut of the text finds it, and an element that
+    // names the assigned document closed as `</Recibo >`, which the cut does not find.
+    const crafted = received
+      .replace(exemptReceipt, '')
+      .replace(mine, () => `<!-- ${exemptReceipt} -->${mine.replace(/<\/Recibo>$/, '</Recibo >')}`)
+    expect(caught(() => unstable_createAssignment(firstAssignment({ receipts: [crafted] }))).details).toEqual({
+      field: 'receipts',
+      reason: 'no receipt names the assigned document',
+    })
+  })
+
+  // `xs:ID`: an ID names one element of the whole file.
+  test('a receipt whose ID another element of the file carries is refused', () => {
+    const first = /<Recibo [\s\S]*?<\/Recibo>/.exec(received)![0]
+    const refusal = (receipts: readonly string[]) =>
+      caught(() => unstable_createAssignment(firstAssignment({ receipts })))
+    const repeated = {
+      code: 'INVALID_OPTION',
+      details: { field: 'ID', reason: 'two elements of the file carry the same ID' },
+    }
+    // Two receptions that numbered their receipts alike.
+    expect(refusal([received, receiptsFile(new Date(FIXED_NOW.getTime() + 60_000))])).toMatchObject(repeated)
+    // The ID of the document, and the one the assignment will take: each is verified on its own, so only the whole
+    // file shows the repeat.
+    expect(refusal([resignedReceipt(first, 'DTE_T33F7')])).toMatchObject(repeated)
+    expect(refusal([resignedReceipt(first, 'Cesion_T33F7_1')])).toMatchObject(repeated)
+    // The ID of a zone verified where the receipt sits fails that zone's signature first.
+    expect(refusal([resignedReceipt(first, 'DTECedido_T33F7')])).toMatchObject({
+      code: 'SIGNATURE_INVALID',
+      details: { field: 'DocumentoDTECedido' },
+    })
+    expect(refusal([resignedReceipt(first, 'AEC_T33F7_1')])).toMatchObject({ code: 'SIGNATURE_INVALID' })
+    // A signature's `Id` is an ID too.
+    const withId = resignedReceipt(first, 2).replace('<Signature xmlns', '<Signature Id="REC-1" xmlns')
+    expect(refusal([received, withId])).toMatchObject(repeated)
   })
 
   test('more than 40 receipts of the document are refused', () => {

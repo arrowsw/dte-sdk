@@ -29,7 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   receipts of the goods or services (`Recibo`, Ley 19.983), the document as a PDF (`ImagenDTE`) and the receipts that
   are not electronic as a PDF (`ImagenAR`). `receipts` takes the `EnvioRecibos` files as the debtor sent them, or lone
   `Recibo` elements: every receipt that names the document is carried as it was signed, with the namespaces it had in
-  scope, so its signature still verifies in the file, and one that does not verify is refused. With electronic
+  scope, so its signature still verifies in the file, and one that does not verify is refused. Each receipt is read
+  from the very text that is verified and carried, and must hold one `DocumentoRecibo` and its signature and nothing
+  else, so the fields that name the document are the ones the signature covers; a file in which two elements would
+  carry the same ID, as two receipts numbered alike do, is refused (`INVALID_OPTION`, `field: 'ID'`). With electronic
   receipts the assignment carries no sworn statement (`DeclaracionJurada`), which the format asks for when the receipt
   is not an electronic one carried in the file, and neither does a later assignment of that file. Each PDF goes in
   base64 on lines of 76 characters. `unstable_verifyAssignment` now verifies each receipt too (`receipts`).

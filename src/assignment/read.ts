@@ -90,22 +90,37 @@ const textsOf = (xml: string, tag: string, elements: readonly Element[]): readon
 
 const zone = (element: Element, text: string): AssignmentZone => ({ element, text: standalone(element, text) })
 
-// The `Recibo` elements among `elements`, each with its text cut from `xml`.
-const receiptZones = (xml: string, elements: readonly Element[]): readonly AssignmentZone[] => {
-  const texts = textsOf(xml, 'Recibo', elements)
-  return elements.map((element, index) => zone(element, texts[index]))
+// One `Recibo` read again from its own text, so the element that is checked and the text that is verified and carried
+// are one thing: whatever the text was cut from, nothing is read from anywhere else. Its only children are its
+// `DocumentoRecibo` and the signature over it, so the fields read are the ones the signature covers.
+const receiptZone = (text: string): AssignmentZone => {
+  const element = parseXmlDom(text).documentElement
+  const [body, signature, ...rest] = childElements(element)
+  const shaped =
+    rest.length === 0 &&
+    body?.tagName === 'DocumentoRecibo' &&
+    body.namespaceURI === SII_NS &&
+    signature?.tagName === 'Signature' &&
+    signature.namespaceURI === XMLDSIG_NS
+  return shaped ? { element, text } : refuse('Recibo', 'expected a Recibo with one DocumentoRecibo and its Signature')
 }
+
+// The `Recibo` elements among `elements`: each text cut from `xml`, then read on its own.
+const receiptZones = (xml: string, elements: readonly Element[]): readonly AssignmentZone[] =>
+  textsOf(xml, 'Recibo', elements).map((text, index) => receiptZone(standalone(elements[index], text)))
 
 /**
  * EN: The electronic receipts of goods or services (`Recibo`, Ley 19.983) in a text: an `EnvioRecibos` file as it was
  * received, or a lone `Recibo`, unprefixed and in the SII's namespace. Each is cut from the text as it came, with the
- * namespace declarations it inherits written on its start tag, so its signature verifies wherever it is carried. No
- * DOCTYPE is read. Internal.
+ * namespace declarations it inherits written on its start tag, so its signature verifies wherever it is carried, and
+ * then read again from that text alone: its element is the one of the text that is verified and carried. A `Recibo`
+ * holds one `DocumentoRecibo` and its signature, and nothing else. No DOCTYPE is read. Internal.
  * ES: Los recibos electrónicos de mercaderías o servicios (`Recibo`, Ley 19.983) de un texto: un archivo `EnvioRecibos`
  * tal como se recibió, o un `Recibo` solo, sin prefijo y en el namespace del SII. Cada uno se corta del texto tal como
  * vino, con las declaraciones de namespace que hereda escritas en su etiqueta de inicio, así su firma verifica donde
- * sea que se lleve. No se lee ningún DOCTYPE. Interno.
- * @throws {DteError} EN: `XML_PARSE_FAILED` for malformed XML, a DOCTYPE or a root that is neither. ES: `XML_PARSE_FAILED` para XML malformado, un DOCTYPE o una raíz que no es ninguno de los dos.
+ * sea que se lleve, y luego se lee de nuevo desde ese solo texto: su elemento es el del texto que se verifica y se
+ * lleva. Un `Recibo` tiene un `DocumentoRecibo` y su firma, y nada más. No se lee ningún DOCTYPE. Interno.
+ * @throws {DteError} EN: `XML_PARSE_FAILED` for malformed XML, a DOCTYPE, a root that is neither, or a `Recibo` of another shape. ES: `XML_PARSE_FAILED` para XML malformado, un DOCTYPE, una raíz que no es ninguno de los dos, o un `Recibo` de otra forma.
  */
 export const readGoodsReceipts = (xml: string): readonly AssignmentZone[] => {
   if (/<!DOCTYPE/i.test(xml)) refuse('DOCTYPE', 'a DOCTYPE is not read')
