@@ -26,8 +26,6 @@ type StatusEntry = { readonly cls: UploadStatusClass; readonly message: string }
 
 const QUERY_ERROR_MESSAGE = 'Error de consulta del SII, reintentar más tarde'
 
-// `RPT`, `VOF` and `RCO` are glossed as the SII's OpenAPI of its receipts API lists the states of an upload ("API SII -
-// V1", 1.0.5): "Envio Repetido Rechazado", "No se encontro el archivo .xml" and "Rechazado por consistencia".
 const UPLOAD_STATUS: Readonly<Record<string, StatusEntry>> = {
   EPR: { cls: 'accepted', message: 'Envío procesado' },
   LOK: { cls: 'accepted', message: 'Envío de libro aceptado' },
@@ -41,12 +39,12 @@ const UPLOAD_STATUS: Readonly<Record<string, StatusEntry>> = {
   PDR: { cls: 'pending', message: 'Envío en proceso, validando' },
   LSO: { cls: 'pending', message: 'Schema de libro correcto, procesando contenido' },
   '0': { cls: 'pending', message: 'Enviado al SII, pendiente de validación' },
-  RPT: { cls: 'rejected', message: 'Envío repetido rechazado' },
+  RPT: { cls: 'rejected', message: 'Rechazado por schema' },
   RFR: { cls: 'rejected', message: 'Rechazado por error en firma' },
-  VOF: { cls: 'rejected', message: 'No se encontró el archivo .xml' },
+  VOF: { cls: 'rejected', message: 'Error interno del SII' },
   RCT: { cls: 'rejected', message: 'Rechazado por error en carátula' },
   RCH: { cls: 'rejected', message: 'Rechazado' },
-  RCO: { cls: 'rejected', message: 'Rechazado por consistencia' },
+  RCO: { cls: 'rejected', message: 'Envío rechazado' },
   RSC: { cls: 'rejected', message: 'Rechazado por error en schema' },
   RLV: { cls: 'rejected', message: 'Rechazado, error en documento' },
   LNC: { cls: 'rejected', message: 'Tipo de envío de libro no corresponde' },
@@ -67,8 +65,16 @@ const UPLOAD_STATUS: Readonly<Record<string, StatusEntry>> = {
   '-14': { cls: 'queryError', message: 'Error en el XML de retorno del SII, reintentar más tarde' },
 }
 
+// The receipts REST API answers a state with no gloss, so the gloss of a state on that channel is the one the SII's
+// OpenAPI of that API gives it ("API SII - V1", 1.0.5): "RCH - Rechazado por errores en informacion", "RCO - Rechazado
+// por consistencia", "VOF - No se encontro el archivo .xml" and "RPT - Envio Repetido Rechazado". That file describes
+// the REST channel alone; on SOAP the SII sends its own gloss, and the table above stands for a state without one.
 const REST_OVERRIDES: Readonly<Record<string, StatusEntry>> = {
   RLV: { cls: 'accepted', message: 'Aceptado, documentos válidos' },
+  RCH: { cls: 'rejected', message: 'Rechazado por errores en información' },
+  RCO: { cls: 'rejected', message: 'Rechazado por consistencia' },
+  VOF: { cls: 'rejected', message: 'No se encontró el archivo .xml' },
+  RPT: { cls: 'rejected', message: 'Envío repetido rechazado' },
 }
 
 const lookup = (code: string, channel: UploadChannel): StatusEntry | undefined =>

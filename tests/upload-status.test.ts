@@ -76,18 +76,19 @@ describe('upload status (QueryEstUp / REST)', () => {
   })
 
   // The SII's OpenAPI of its receipts API ("API SII - V1", 1.0.5) lists the states of an upload with their meaning:
-  // "RPT - Envio Repetido Rechazado", "VOF - No se encontro el archivo .xml", "RCO - Rechazado por consistencia".
-  test('a repeated upload, a file not found and a consistency rejection are named as the SII names them', () => {
-    for (const channel of ['soap', 'rest'] as const) {
-      expect(uploadStatusMessage('RPT', channel)).toBe('Envío repetido rechazado')
-      expect(uploadStatusMessage('VOF', channel)).toBe('No se encontró el archivo .xml')
-      expect(uploadStatusMessage('RCO', channel)).toBe('Rechazado por consistencia')
-    }
-    expect(['RPT', 'VOF', 'RCO'].map((code) => classifyUploadStatus(code))).toEqual([
-      'rejected',
-      'rejected',
-      'rejected',
-    ])
+  // "RCH - Rechazado por errores en informacion", "RCO - Rechazado por consistencia", "VOF - No se encontro el archivo
+  // .xml", "RPT - Envio Repetido Rechazado". It describes the REST channel, which answers a state with no gloss.
+  test('on the REST channel a state is glossed as the SII lists it, and on SOAP the catalog keeps its own', () => {
+    expect(uploadStatusMessage('RPT', 'rest')).toBe('Envío repetido rechazado')
+    expect(uploadStatusMessage('VOF', 'rest')).toBe('No se encontró el archivo .xml')
+    expect(uploadStatusMessage('RCO', 'rest')).toBe('Rechazado por consistencia')
+    expect(uploadStatusMessage('RCH', 'rest')).toBe('Rechazado por errores en información')
+    expect(uploadStatusMessage('RPT')).toBe('Rechazado por schema')
+    expect(uploadStatusMessage('VOF', 'soap')).toBe('Error interno del SII')
+    expect(uploadStatusMessage('RCO', 'soap')).toBe('Envío rechazado')
+    expect(uploadStatusMessage('RCH', 'soap')).toBe('Rechazado')
+    for (const code of ['RPT', 'VOF', 'RCO', 'RCH'])
+      expect([classifyUploadStatus(code, 'rest'), classifyUploadStatus(code, 'soap')]).toEqual(['rejected', 'rejected'])
   })
 
   test('negative codes are retryable, everything else is not', () => {

@@ -1,7 +1,8 @@
 import type { CertificationStage } from '../catalogs/certification'
-import { errorMessage } from '../errors'
+import { errorMessage, isDteError } from '../errors'
 import type { PrintedSampleFile } from '../pdf/samples'
 import { fetchCompanyResolution } from '../portal/company'
+import { toIsoDate } from '../time/chile'
 import { runBooks } from './books-step'
 import { runExchange } from './exchange-step'
 import { prepareFolios } from './folios-step'
@@ -85,10 +86,16 @@ const ORDER: readonly CertificationStage[] = [
 const past = (stage: CertificationStage, other: CertificationStage): boolean =>
   ORDER.indexOf(stage) > ORDER.indexOf(other)
 
+// The stages that still send an envelope, and so write a cover.
+const WRITES_COVER: readonly CertificationStage[] = ['testSets', 'books', 'simulation']
+const NOT_READ = 'certification resolution not read from the SII'
+
 // The cover of an envelope names the resolution of the company in the environment it goes to, and the SII refuses an
-// envelope that names another ("Error en Carátula"). The portal shows the one of the certification environment, so a
-// run that is given no date reads it there, with its number unless one was given. When the portal shows none, or the
-// page cannot be read, the run goes on as it did: number 0 and the UTC day it starts on.
+// envelope that names another ("Error en Carátula"). The portal shows the date of the one of the certification
+// environment, so a run that is given no date reads it there; its number is the caller's, or 0, which is the number
+// of that environment whatever the page shows. When the portal shows no date, shows one that is not a date, or its
+// page cannot be read, the run goes on as it did, with the UTC day it starts on, and says so in the client's logger:
+// the reading never stops a run. An error that is not the portal's is no unreadable page, and is not swallowed.
 const resolutionOf = async (
   rt: Runtime,
   resolution: CertificationDependencies['resolution'],
@@ -97,12 +104,14 @@ const resolutionOf = async (
   if (resolution?.date) return rt.resolution
   try {
     const shown = await fetchCompanyResolution(rt.portal, { companyRut, environment: 'certification' })
-    if (shown.resolutionDate === null) return rt.resolution
-    return { number: resolution?.number ?? shown.resolutionNumber ?? 0, date: shown.resolutionDate }
+    if (shown.resolutionDate !== null)
+      return { number: rt.resolution.number, date: toIsoDate(shown.resolutionDate, 'resolution.date') }
+    rt.portal.logger.warn(NOT_READ, { reason: 'the page shows no date' })
   } catch (error) {
-    rt.portal.logger.warn('certification resolution not read from the SII', { error: errorMessage(error) })
-    return rt.resolution
+    if (!isDteError(error)) throw error
+    rt.portal.logger.warn(NOT_READ, { error: errorMessage(error) })
   }
+  return rt.resolution
 }
 
 /**
@@ -136,12 +145,14 @@ export const runCertification = async (
   options: RunCertificationOptions = {},
 ): Promise<RunCertificationResult> => {
   const rt = runtime(dependencies)
-  // A resolution left out is settled once, when the run starts: every envelope of the run carries it, whatever day its
-  // step begins on.
   const companyRut = rt.portal.companyRut ?? rt.issuer.rut
-  const resolution = await resolutionOf(rt, dependencies.resolution, companyRut)
-  const deps: CertificationDependencies = { ...dependencies, resolution }
   let state = (await rt.store.load()) ?? createCertificationState(companyRut, rt.now())
+  // A resolution left out is settled once, when the run starts: every envelope of the run carries it, whatever day its
+  // step begins on. A run resumed where no envelope is left to send asks the portal for nothing.
+  const resolution = WRITES_COVER.includes(state.stage)
+    ? await resolutionOf(rt, dependencies.resolution, companyRut)
+    : rt.resolution
+  const deps: CertificationDependencies = { ...dependencies, resolution }
   const stop = (stopped: RunStop, detail?: string): RunCertificationResult => ({
     state,
     stopped,
