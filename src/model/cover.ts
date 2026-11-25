@@ -29,7 +29,7 @@ export type EnvelopeCoverInput = {
   readonly resolutionNumber: number
   /** EN: Explicit signing timestamp; defaults to now in Chile. ES: `TmstFirmaEnv` — Marca de tiempo explícita; por defecto ahora en hora de Chile. */
   readonly signedAt?: string
-  /** EN: Explicit `SetDTE` ID; generated when omitted. ES: ID explícito del `SetDTE`; se genera si se omite. */
+  /** EN: Explicit `SetDTE` ID; generated when omitted. A name, as the schema's `xs:ID` asks: a letter or an underscore, then letters, digits, full stops, hyphens and underscores. ES: ID explícito del `SetDTE`; se genera si se omite. Un nombre, como pide el `xs:ID` del esquema: una letra o un guion bajo, y luego letras, dígitos, puntos, guiones y guiones bajos. */
   readonly setId?: string
 }
 

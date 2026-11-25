@@ -16,6 +16,7 @@ import { assertMaxLength, sanitizeText } from '../text/sanitize'
 import { assertBookZones, buildBookXml, normalizeBookCover } from './common'
 import { normalizeBookEntry } from './entry'
 import { accumulateBookTotals, normalizeBookTotals, sumBookEntries } from './totals'
+import { givenOrGeneratedId } from '../xml/id'
 
 const ROOT_TAG = 'LibroCompraVenta'
 const SIGNED_TAG = 'EnvioLibro'
@@ -100,7 +101,7 @@ export const createPurchaseSalesBook = (input: PurchaseSalesBookInput): Purchase
   const periodTotals = cover.submission === 'partial' || period.length === 0 ? null : period
   assertCommonUseFactor(periodTotals, input.commonUseVatFactor)
   return {
-    id: input.id ?? generateSetId('LCV', input.now),
+    id: givenOrGeneratedId(input.id, 'id', () => generateSetId('LCV', input.now)),
     cover,
     entries,
     segmentTotals:

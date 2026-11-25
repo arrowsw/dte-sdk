@@ -1,5 +1,5 @@
 import { parseCaf, type Caf } from '../caf/parse'
-import { cafEnvironment } from '../caf/sii-signature'
+import { cafEnvironment, SII_CAF_KEYS, verifyCafSignature, type SiiCafKeys } from '../caf/sii-signature'
 import { availableFolios, isCafExpired } from '../caf/validity'
 import type { Environment } from '../catalogs/codes'
 import { isDocumentType, type DocumentType } from '../catalogs/document-types'
@@ -112,12 +112,41 @@ const DECLARED_ENCODING = /^\s*<\?xml\s(?:[^>"']|"[^">]*"|'[^'>]*')*?(?<=\s)enco
 const LATIN1_NAMES: ReadonlySet<string> = new Set(['iso-8859-1', 'iso8859-1', 'iso_8859-1', 'latin1', 'latin-1'])
 const UTF8_NAMES: ReadonlySet<string> = new Set(['utf-8', 'utf8'])
 
-// A file's text as its XML declaration says: ISO-8859-1, which the SII writes, as such, and UTF-8, or no encoding named,
-// as strict UTF-8, which refuses bytes that are not. Any other encoding, or bytes that are not the one named, is null:
-// a wrong guess changes the `<CAF>` block the SII signed, and every stamp made with it. A UTF-8 byte order mark is
-// dropped.
-const decodeFile = (read: Uint8Array): string | null => {
-  const bytes = UTF8_BOM.every((byte, index) => read[index] === byte) ? read.subarray(3) : read
+// ISO-8859-1 is a guess for a file that names no encoding, and any other single-byte encoding gives other bytes than
+// the ones the SII signed. So the guess is taken only while the SII's signature of the CAF read that way does not fail:
+// it proves the reading for the keys of both environments, and a key that is neither's says nothing, so its file stays.
+const ENVIRONMENTS: readonly Environment[] = ['certification', 'production']
+const signedAsLatin1 = (bytes: Uint8Array, siiKeys: SiiCafKeys): string | null => {
+  const xml = decodeLatin1(bytes)
+  try {
+    const holds = ENVIRONMENTS.some((environment) => verifyCafSignature(xml, { environment, siiKeys }) !== 'invalid')
+    return holds ? xml : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * EN: The text of a CAF file, or null when its bytes cannot be read without a guess that may be wrong. ISO-8859-1,
+ * which the SII writes, is read as such when the XML declaration names it, and UTF-8 as strict UTF-8, which refuses
+ * bytes that are not: a wrong reading changes the `<CAF>` block the SII signed, and every stamp made with it. Any
+ * other encoding named, or bytes that are not the one named, is null. A file that names no encoding, as the one the
+ * SII serves, is UTF-8 when its bytes are; when they are not it is read as ISO-8859-1, and kept only if the SII's
+ * signature of the CAF read that way does not fail. A UTF-8 byte order mark is dropped, and a file that opens with one
+ * is UTF-8 or null. Internal.
+ * ES: El texto de un archivo CAF, o null si sus bytes no se pueden leer sin una suposición que puede estar mala.
+ * ISO-8859-1, que es lo que escribe el SII, se lee como tal cuando la declaración XML la nombra, y UTF-8 de forma
+ * estricta, que rechaza bytes que no lo son: una lectura equivocada cambia el bloque `<CAF>` que firmó el SII, y cada
+ * timbre hecho con él. Otra codificación nombrada, o bytes que no son la nombrada, es null. Un archivo que no nombra
+ * ninguna, como el que entrega el SII, es UTF-8 si sus bytes lo son; si no lo son se lee como ISO-8859-1, y se conserva
+ * solo si la firma del SII sobre el CAF leído así no falla. Una marca de orden de bytes UTF-8 se descarta, y un archivo
+ * que parte con una es UTF-8 o null. Interno.
+ * @param read EN: the bytes of the file. ES: los bytes del archivo.
+ * @param siiKeys EN: the SII's keys by `IDK`; the library's own by default. ES: `IDK` — las llaves del SII por `IDK`; por defecto las de la librería.
+ */
+export const decodeCafFile = (read: Uint8Array, siiKeys: SiiCafKeys = SII_CAF_KEYS): string | null => {
+  const marked = UTF8_BOM.every((byte, index) => read[index] === byte)
+  const bytes = marked ? read.subarray(3) : read
   const named = DECLARED_ENCODING.exec(decodeLatin1(bytes.subarray(0, 200)))?.[2]
     .trim()
     .toLowerCase()
@@ -126,7 +155,7 @@ const decodeFile = (read: Uint8Array): string | null => {
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
   } catch {
-    return null
+    return named === undefined && !marked ? signedAsLatin1(bytes, siiKeys) : null
   }
 }
 
@@ -153,7 +182,7 @@ const xmlFiles = async ({ fs, path }: NodeFsModules, dir: string, depth: number)
 // includes those. A key that is neither environment's says nothing, so its CAF stays.
 const usableCaf = async ({ fs }: NodeFsModules, file: string, search: Search): Promise<CafFile | null> => {
   try {
-    const xml = decodeFile(await fs.readFile(file))
+    const xml = decodeCafFile(await fs.readFile(file))
     if (xml === null) return null
     const caf = parseCaf(xml)
     if (caf.documentType !== search.type || caf.issuerRut !== search.rut) return null
@@ -183,8 +212,10 @@ const searchCafs = async (search: Search, load: () => Promise<NodeFsModules>): P
  * lies: a shared folder may hold CAFs of other companies, and a stamp signed with one makes the SII reject the whole
  * envelope) and it has not expired, with the one-day margin of `isCafExpired`; with `includeExpired` the expired ones come
  * too, marked `expired`. Only `.xml` files count, each read in the encoding its XML declaration names: ISO-8859-1 as
- * such, UTF-8 or no encoding named as UTF-8, strictly, so a file whose bytes are not that encoding, or that names
- * another, is skipped rather than misread. A folder or file that cannot be read is skipped, and a directory that does
+ * such and UTF-8 strictly, so a file whose bytes are not the encoding it names, or that names another, is skipped
+ * rather than misread. A file that names none, as the one the SII serves, is read as UTF-8 when its bytes are, and
+ * otherwise as ISO-8859-1 while the SII's signature of the CAF read that way does not fail, so a file in another
+ * encoding is skipped too. A folder or file that cannot be read is skipped, and a directory that does
  * not exist gives an empty list. With `environment`, a CAF signed by the SII key of the other environment is not
  * usable either: a folder that holds the CAFs of both never hands the ones of one to the other.
  * ES: Todos los archivos CAF utilizables de un tipo y empresa bajo un directorio, del más nuevo al más viejo (por fecha de
@@ -192,8 +223,10 @@ const searchCafs = async (search: Search, load: () => Promise<NodeFsModules>): P
  * (leído del archivo, nunca de dónde está: una carpeta compartida puede tener CAF de otras empresas, y un timbre firmado
  * con uno hace que el SII rechace el sobre entero) y no ha vencido, con el margen de un día de `isCafExpired`; con
  * `includeExpired` vienen también los vencidos, marcados `expired`. Solo cuentan los archivos `.xml`, cada uno leído en la
- * codificación que nombra su declaración XML: ISO-8859-1 como tal, UTF-8 o ninguna como UTF-8, de forma estricta, así que
- * un archivo cuyos bytes no son esa codificación, o que nombra otra, se salta en vez de leerse mal. Una carpeta o archivo
+ * codificación que nombra su declaración XML: ISO-8859-1 como tal y UTF-8 de forma estricta, así que un archivo cuyos
+ * bytes no son la codificación que nombra, o que nombra otra, se salta en vez de leerse mal. Uno que no nombra ninguna,
+ * como el que entrega el SII, se lee como UTF-8 si sus bytes lo son, y si no como ISO-8859-1 mientras la firma del SII
+ * sobre el CAF leído así no falle, así que un archivo en otra codificación también se salta. Una carpeta o archivo
  * que no se pueda leer se salta, y un directorio que no existe da una lista vacía. Con `environment`, un CAF firmado
  * por la llave del SII del otro ambiente tampoco es utilizable: una carpeta que tiene los CAF de ambos nunca entrega los
  * de uno al otro.

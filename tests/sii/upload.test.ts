@@ -226,6 +226,27 @@ describe('uploadEnvelope through DTEUpload', () => {
     })
   })
 
+  // A refusal with no `DETAIL/ERROR` line would come back with nothing to correct the file with. Its details carry an
+  // excerpt of the reply, as those of a reply that cannot be read do: its secrets redacted, its first 2 000 characters.
+  test('a refusal carries an excerpt of the reply, with the reason wherever the reply writes it', async () => {
+    const reply = siiFixture('reception-schema-error.xml').replace(
+      /<DETAIL>[\s\S]*<\/DETAIL>/,
+      `<GLOSA>SCH-00001: Error de Esquema</GLOSA>\n<TOKEN>ABCDEF123456</TOKEN>\n${'x'.repeat(5000)}`,
+    )
+    const { sii } = cachedSii(cgi({ body: reply }))
+    const error = (await uploadEnvelope(sii, dte).catch((caught: unknown) => caught)) as DteError
+    expect(error.code).toBe('SII_UPLOAD_REJECTED')
+    expect(error.details.errors).toEqual([])
+    expect(error.details.body).toContain('<GLOSA>SCH-00001: Error de Esquema</GLOSA>')
+    expect(error.details.body).not.toContain('ABCDEF123456')
+    expect(error.details.body).toHaveLength(2000)
+    expect(error.message).not.toContain('SCH-00001')
+    const lined = await uploadEnvelope(cachedSii(cgi(reception('reception-schema-error.xml'))).sii, dte).catch(
+      (caught: unknown) => caught,
+    )
+    expect((lined as DteError).details.body).toContain('<ERROR>SCH-00001: Error de Esquema</ERROR>')
+  })
+
   test('the message of a rejection is generic: the file name, the errors and the gloss live in details', async () => {
     const { sii } = cachedSii(cgi(reception('reception-schema-error.xml')))
     const error = await uploadEnvelope(sii, dte).catch((caught: unknown) => caught)
@@ -1158,5 +1179,33 @@ describe('parseReceptionResponse', () => {
     ['reception-not-authenticated.xml', 'notAuthenticated', null],
   ])('%s is %s', (name, outcome, trackId) => {
     expect(parseReceptionResponse(siiFixture(name))).toMatchObject({ outcome, trackId })
+  })
+
+  // The reason of a refusal is what the file is corrected with. `DETAIL/ERROR` is where the reply puts it, and those
+  // lines alone decide what the reply is: a reason written anywhere else changes neither the outcome nor the TrackID.
+  const DETAIL = /<DETAIL>[\s\S]*<\/DETAIL>/
+  const saying = (name: string, after: string): string => siiFixture(name).replace(DETAIL, after)
+
+  test.each([
+    ['in another element', '<GLOSA>SCH-00001: Error de Esquema</GLOSA>'],
+    ['in a DETAIL with no ERROR element', '<DETAIL>\nSCH-00001: Error de Esquema\n</DETAIL>'],
+    ['as plain text', '  SCH-00001: Error de Esquema'],
+  ])('a reason written %s is no error line, and the reply is read as one without it', (_label, after) => {
+    const said = parseReceptionResponse(saying('reception-schema-error.xml', after))
+    expect(said).toEqual(parseReceptionResponse(saying('reception-schema-error.xml', '')))
+    expect(said).toMatchObject({ outcome: 'rejected', errors: [] })
+  })
+
+  test('a TrackID named outside the ERROR lines and the TRACKID element makes no duplicate', () => {
+    const named = '<DETAIL>Esquema invalido, ver trackid 444</DETAIL>'
+    expect(parseReceptionResponse(saying('reception-schema-error.xml', named))).toMatchObject({
+      outcome: 'rejected',
+      trackId: null,
+    })
+    const message = '<GLOSA>Archivo ya fue enviado 2 veces con Trackid 9876543210</GLOSA>'
+    expect(parseReceptionResponse(saying('reception-duplicate-99.xml', message))).toMatchObject({
+      outcome: 'rejected',
+      trackId: null,
+    })
   })
 })

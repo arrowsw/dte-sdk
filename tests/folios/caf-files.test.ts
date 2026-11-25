@@ -1,12 +1,19 @@
 import { mkdir, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { FolioScope } from '../../src/folios/ledger'
-import { cafFileScope, findCafFiles, findLatestCafFile, resolveCafFile } from '../../src/folios/node-caf-files'
+import {
+  cafFileScope,
+  decodeCafFile,
+  findCafFiles,
+  findLatestCafFile,
+  resolveCafFile,
+} from '../../src/folios/node-caf-files'
 import { cafFingerprint, createMemoryFolioRegistry } from '../../src/folios/registry'
 import { loadNodeFs, type NodeFsModules } from '../../src/sii/node-fs'
 import { cafXml } from '../support/certification-harness'
 import { FIXED_NOW, fixtureText, ISSUER_RUT, RECEIVER_RUT } from '../support/fixtures'
 import { failure } from '../support/portal'
+import { signedCafXml, TEST_SII_KEYS } from '../support/received-fixtures'
 import { createTempDirs } from '../support/temp-dir'
 
 const temp = createTempDirs()
@@ -40,6 +47,48 @@ const accented = (declaration: string): string =>
   `${declaration}${cafXml(33).replace('<RS>COMERCIAL ANDINA SPA</RS>', `<RS>${ACCENTED}</RS>`)}`
 const latin1 = (text: string): Uint8Array => Uint8Array.from(text, (char) => char.charCodeAt(0))
 const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text)
+
+// A file that names no encoding and is not UTF-8 may be in any single-byte encoding. Only ISO-8859-1 gives back the
+// bytes the SII signed, so the SII's own signature of the CAF says whether the guess was right.
+describe('decodeCafFile', () => {
+  const signed = signedCafXml({ businessName: ACCENTED })
+  const served = `<?xml version="1.0"?>\n${signed}`
+  // The same text as another single-byte encoding writes it: Ñ and Ú are 0x84 and 0xF2 in Mac Roman.
+  const macRoman = (text: string): Uint8Array =>
+    latin1(text).map((byte) => (byte === 0xd1 ? 0x84 : byte === 0xda ? 0xf2 : byte))
+
+  test('the file the SII serves, in ISO-8859-1 with no encoding named, is read as the SII signed it', () => {
+    expect(decodeCafFile(latin1(served), TEST_SII_KEYS)).toBe(served)
+    expect(decodeCafFile(latin1(signed), TEST_SII_KEYS)).toBe(signed)
+  })
+
+  test('the same file in another single-byte encoding is not read: the signature fails on those bytes', () => {
+    expect(decodeCafFile(macRoman(served), TEST_SII_KEYS)).toBeNull()
+  })
+
+  test('a UTF-8 file with one stray byte is not read as ISO-8859-1', () => {
+    const stray = Uint8Array.from([...utf8(served), ...latin1('<!-- ñ -->')])
+    expect(decodeCafFile(stray, TEST_SII_KEYS)).toBeNull()
+  })
+
+  test('a file that opens with a UTF-8 byte order mark is UTF-8 or nothing', () => {
+    expect(decodeCafFile(Uint8Array.from([0xef, 0xbb, 0xbf, ...utf8(served)]), TEST_SII_KEYS)).toBe(served)
+    expect(decodeCafFile(Uint8Array.from([0xef, 0xbb, 0xbf, ...latin1(served)]), TEST_SII_KEYS)).toBeNull()
+  })
+
+  test('a CAF changed after the SII signed it is not read, and one of a key that is not known is', () => {
+    expect(decodeCafFile(latin1(served.replace('<TD>33</TD>', '<TD>34</TD>')), TEST_SII_KEYS)).toBeNull()
+    const unknown = signedCafXml({ businessName: ACCENTED, keyId: 7 })
+    expect(decodeCafFile(latin1(unknown), TEST_SII_KEYS)).toBe(unknown)
+  })
+
+  test("bytes that are no CAF are not read, and the keys are the SII's own unless others are given", () => {
+    expect(decodeCafFile(latin1('<nota>Ñandú</nota>'), TEST_SII_KEYS)).toBeNull()
+    expect(decodeCafFile(latin1('Ñandú'), TEST_SII_KEYS)).toBeNull()
+    // The test SII signed it, not the SII.
+    expect(decodeCafFile(latin1(served))).toBeNull()
+  })
+})
 
 describe('findCafFiles', () => {
   test('lists the CAFs of the type and issuer, newest first, from every folder below the directory', async () => {
@@ -175,13 +224,41 @@ describe('findCafFiles', () => {
     expect(files[3].xml).toBe(accented(''))
   })
 
+  // The folio file the SII serves names no encoding, and an Ñ in the company's name is one byte. ISO-8859-1 is a guess
+  // for such a file, so it is taken only while the SII's signature of the CAF read that way does not fail. The key of
+  // these files is neither environment's, which says nothing.
+  test('a file that names no encoding and is not UTF-8 is read as ISO-8859-1, which the SII writes', async () => {
+    const dir = await temp.make('dte-sdk-caf-')
+    const unchecked = (declaration: string): string => accented(declaration).replace('<IDK>100</IDK>', '<IDK>7</IDK>')
+    const served = await putBytes(dir, 'served.xml', latin1(unchecked('<?xml version="1.0"?>\n')), 3)
+    const bare = await putBytes(dir, 'bare.xml', latin1(unchecked('')), 2)
+    // Only the attribute named encoding counts, not one whose name ends in it: this file names none.
+    const other = await putBytes(
+      dir,
+      'x-encoding.xml',
+      latin1(unchecked('<?xml version="1.0" x-encoding="UTF-8"?>\n')),
+      1,
+    )
+    const files = await findCafFiles({ dir, type: 33, issuerRut: ISSUER_RUT, now })
+    expect(files.map((file) => file.path)).toEqual([served, bare, other])
+    expect(files.map((file) => file.caf.issuerName)).toEqual([ACCENTED, ACCENTED, ACCENTED])
+    expect(files[0].xml).toBe(unchecked('<?xml version="1.0"?>\n'))
+    expect(files[1].xml).toBe(unchecked(''))
+  })
+
+  test('such a file is left out when the SII signature of what was read fails, or when it opens with a UTF-8 mark', async () => {
+    const dir = await temp.make('dte-sdk-caf-')
+    // The fixture's `FRMA` is not the SII's over this `DA`, and its key is the SII's 100.
+    await putBytes(dir, 'unsigned.xml', latin1(accented('<?xml version="1.0"?>\n')), 2)
+    const unchecked = accented('').replace('<IDK>100</IDK>', '<IDK>7</IDK>')
+    await putBytes(dir, 'marked.xml', Uint8Array.from([0xef, 0xbb, 0xbf, ...latin1(unchecked)]), 1)
+    await expect(findCafFiles({ dir, type: 33, issuerRut: ISSUER_RUT, now })).resolves.toEqual([])
+  })
+
   test('a file whose bytes are not the encoding it declares, or that declares another one, is left out', async () => {
     const dir = await temp.make('dte-sdk-caf-')
-    await putBytes(dir, 'undeclared-latin1.xml', latin1(accented('<?xml version="1.0"?>\n')), 4)
     await putBytes(dir, 'lying.xml', latin1(accented('<?xml version="1.0" encoding="UTF-8"?>\n')), 3)
     await putBytes(dir, 'other.xml', latin1(accented('<?xml version="1.0" encoding="windows-1252"?>\n')), 2)
-    // Only the attribute named encoding counts, not one whose name ends in it.
-    await putBytes(dir, 'x-encoding.xml', latin1(accented('<?xml version="1.0" x-encoding="ISO-8859-1"?>\n')), 1)
     await expect(findCafFiles({ dir, type: 33, issuerRut: ISSUER_RUT, now })).resolves.toEqual([])
   })
 

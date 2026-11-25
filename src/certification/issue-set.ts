@@ -2,6 +2,7 @@ import { TEST_SET_REFERENCE_TYPE } from '../catalogs/certification'
 import { SII_RUT, type DispatchType, type TransferType } from '../catalogs/codes'
 import type { DocumentType } from '../catalogs/document-types'
 import type { Certificate } from '../certificate/certificate'
+import { createDocumentWith } from '../document/create'
 import { issueDocument } from '../document/issue'
 import type { SignedDocument } from '../document/sign'
 import { createEnvelope } from '../envelope/create'
@@ -397,6 +398,8 @@ export type IssueDocumentSpec = {
   readonly commissions?: readonly CommissionLineInput[]
   /** EN: Split the VAT of a settlement invoice in own and third-party. ES: `IVAProp`, `IVATerc` — Separar el IVA de una liquidación factura en propio y de terceros. */
   readonly splitVat?: boolean
+  /** EN: A note of the simulation: issued with no reference when the case it refers to is not among the simulation's documents, as field behaviour does, where `createDocument` refuses one. ES: `Referencia` — Una nota de la simulación: se emite sin referencia cuando el caso al que se refiere no está entre los documentos de la simulación, como el comportamiento de campo, donde `createDocument` la rechaza. */
+  readonly unreferencedNote?: boolean
   /** EN: Keep a record of the document for the notes that reference it. ES: Guardar un registro del documento para las notas que lo refieren. */
   readonly record: boolean
 }
@@ -437,7 +440,7 @@ export const issueCertificationDocument = async (
   })
   const at = context.clock()
   const signed = issueDocument({
-    document,
+    document: createDocumentWith(document, { now: at }, { unreferencedNote: input.unreferencedNote }),
     caf,
     certificate: context.options.certificate,
     now: at,

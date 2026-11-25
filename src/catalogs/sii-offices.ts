@@ -1,24 +1,27 @@
 /**
  * EN: The SII office of each commune, keyed by the legend printed under the type box of a printed sample
  * (`S.I.I. - {office}`), each with the communes it serves, written lowercase, without accents and with single spaces:
- * 360 commune names in 40 offices. The first 306, in 37 offices, were gathered from the SII office directory
+ * 364 commune names in 40 offices. The first 306, in 37 offices, were gathered from the SII office directory
  * (sii.cl/ayudas/asistencia/oficinas) as field behaviour keeps them, spelling variants included. The other 49 are the
  * official communes that list left out, placed by the jurisdiction of the SII unit that serves each: under the office
  * the table already gives to the commune where that unit sits, or under a new office named after it (Talcahuano,
  * Panguipulli, Chaitén); an official spelling of a name already listed (Llay-Llay, Treguaco, Mostazal, Saavedra) goes
  * with that name. A commune two units serve (Quemchi) goes with the unit that sits in it, else with the one that
- * serves fewer communes. The last 5 are other spellings in use of names already listed, each with that name: Aisén,
- * Coihaique, Llaillay, Marchigüe and Paiguano.
+ * serves fewer communes. The last 9 are other names in use of communes already listed, each with that commune: five
+ * spellings (Aisén, Coihaique, Llaillay, Marchigüe and Paiguano) and four long names an address writes (San José de la
+ * Mariquina, San Vicente de Tagua Tagua, San Fabián de Alico and San Gregorio de Ñiquén).
  * ES: La oficina del SII de cada comuna, por la leyenda que va bajo el recuadro de una muestra impresa
  * (`S.I.I. - {oficina}`), cada una con las comunas que atiende, escritas en minúsculas, sin tildes y con un solo espacio:
- * 360 nombres de comuna en 40 oficinas. Los primeros 306, en 37 oficinas, se reunieron del directorio de oficinas del
+ * 364 nombres de comuna en 40 oficinas. Los primeros 306, en 37 oficinas, se reunieron del directorio de oficinas del
  * SII (sii.cl/ayudas/asistencia/oficinas) como los guarda el comportamiento de campo, variantes de escritura incluidas.
  * Los otros 49 son las comunas oficiales que esa lista omitía, ubicadas por la jurisdicción de la unidad del SII que
  * atiende a cada una: bajo la oficina que la tabla ya da a la comuna donde está esa unidad, o bajo una oficina nueva con
  * su nombre (Talcahuano, Panguipulli, Chaitén); una escritura oficial de un nombre ya listado (Llay-Llay, Treguaco,
  * Mostazal, Saavedra) va con ese nombre. Una comuna que atienden dos unidades (Quemchi) va con la unidad que está en
- * ella, si no con la que atiende menos comunas. Los últimos 5 son otras escrituras en uso de nombres ya listados, cada
- * una con ese nombre: Aisén, Coihaique, Llaillay, Marchigüe y Paiguano.
+ * ella, si no con la que atiende menos comunas. Los últimos 9 son otros nombres en uso de comunas ya listadas, cada
+ * uno con esa comuna: cinco escrituras (Aisén, Coihaique, Llaillay, Marchigüe y Paiguano) y cuatro nombres largos que
+ * escribe una dirección (San José de la Mariquina, San Vicente de Tagua Tagua, San Fabián de Alico y San Gregorio de
+ * Ñiquén).
  */
 export const SII_OFFICES: Readonly<Record<string, readonly string[]>> = {
   'S.I.I. - ARICA': ['arica', 'camarones', 'putre', 'general lagos'],
@@ -154,6 +157,7 @@ export const SII_OFFICES: Readonly<Record<string, readonly string[]>> = {
     'peralillo',
     'placilla',
     'pumanque',
+    'san vicente de tagua tagua',
   ],
   'S.I.I. - TALCA': [
     'talca',
@@ -272,6 +276,7 @@ export const SII_OFFICES: Readonly<Record<string, readonly string[]>> = {
     'lago ranco',
     'mariquina',
     'lanco',
+    'san jose de la mariquina',
   ],
   'S.I.I. - PUERTO MONTT': [
     'puerto montt',
@@ -357,6 +362,8 @@ export const SII_OFFICES: Readonly<Record<string, readonly string[]>> = {
     'san fabian',
     'san nicolas',
     'treguaco',
+    'san fabian de alico',
+    'san gregorio de niquen',
   ],
   'S.I.I. - TALCAHUANO': ['talcahuano', 'hualpen'],
   'S.I.I. - PANGUIPULLI': ['panguipulli'],

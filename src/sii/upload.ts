@@ -373,6 +373,8 @@ const readCgiAnswer = (job: UploadJob, response: HttpResponse, text: string): Up
             fileName: job.fileName,
             operation: job.operation,
             message: receptionStatusMessage(reception.status),
+            // The reply itself, redacted and cut: a refusal with no `DETAIL/ERROR` line says why somewhere else.
+            body: bodyExcerpt(text),
           }),
       reception.status,
     )
@@ -530,7 +532,7 @@ export const performUpload = (sii: SiiClient, job: UploadJob, overrides?: CallOv
  * envía como bytes ISO-8859-1, así que debe abrir con una declaración XML que nombre ISO-8859-1 (en cualquier caja y con
  * cualquier tipo de comillas); el espacio antes de ella se descarta y cualquier otra cosa se rechaza antes de enviar
  * nada.
- * @throws {DteError} EN: `SII_UPLOAD_REJECTED { status (a number), errors }`, `SII_TOKEN_INVALID`, `SII_HTTP_ERROR`, `SII_RESPONSE_INVALID`, `INVALID_OPTION { field: 'channel' | 'xml' }`, `INVALID_OPTION { field: 'companyRut' | 'senderRut' }` when the cover of the file names another company or another sender (nothing is sent), `MISSING_FIELD`, `INVALID_RUT`, `ENCODING_UNSUPPORTED_CHAR`, transport codes. ES: los mismos códigos; `INVALID_OPTION { field: 'companyRut' | 'senderRut' }` cuando la carátula del archivo nombra otra empresa u otro remitente (no se envía nada).
+ * @throws {DteError} EN: `SII_UPLOAD_REJECTED { status (a number), errors, body }`, `SII_TOKEN_INVALID`, `SII_HTTP_ERROR`, `SII_RESPONSE_INVALID`, `INVALID_OPTION { field: 'channel' | 'xml' }`, `INVALID_OPTION { field: 'companyRut' | 'senderRut' }` when the cover of the file names another company or another sender (nothing is sent), `MISSING_FIELD`, `INVALID_RUT`, `ENCODING_UNSUPPORTED_CHAR`, transport codes. ES: los mismos códigos; `INVALID_OPTION { field: 'companyRut' | 'senderRut' }` cuando la carátula del archivo nombra otra empresa u otro remitente (no se envía nada).
  */
 export const uploadEnvelope = async (
   sii: SiiClient,

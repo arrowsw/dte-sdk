@@ -18,6 +18,7 @@ import { toSiiRut } from '../model/rut'
 import { signEnveloped, verifyEnveloped, type SignatureVerification, type XmlSignature } from '../signature/xmldsig'
 import { chileTimestamp, toIsoDate } from '../time/chile'
 import { assertBookAmount, assertBookFolio, assertResolutionNumber, buildBookXml } from './common'
+import { givenOrGeneratedId } from '../xml/id'
 
 const ROOT_TAG = 'ConsumoFolios'
 const SIGNED_TAG = 'DocumentoConsumoFolios'
@@ -134,7 +135,8 @@ export const createFolioConsumption = (input: FolioConsumptionInput): FolioConsu
       voided.filter((item) => item.type === type),
     ),
   )
-  return { id: input.id ?? generateSetId('RCOF', input.now), cover, summaries }
+  const id = givenOrGeneratedId(input.id, 'id', () => generateSetId('RCOF', input.now))
+  return { id, cover, summaries }
 }
 
 /**

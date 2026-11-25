@@ -6,6 +6,7 @@ import { DteError } from '../errors'
 import type { EnvelopeCover, EnvelopeCoverInput, EnvelopeSubtotal } from '../model/cover'
 import { toSiiRut } from '../model/rut'
 import { chileDateTimeParts, chileTimestamp, toIsoDate } from '../time/chile'
+import { givenOrGeneratedId } from '../xml/id'
 
 /**
  * EN: `dte` → `EnvioDTE` (invoices, guides, notes…); `receipt` → `EnvioBOLETA` (39, 41).
@@ -71,7 +72,7 @@ const rank = (type: number): number => {
  * ES: Agrupa documentos firmados bajo una carátula: valida el tipo de sobre, se atiene a los 2.000 documentos que admite
  * un `EnvioDTE` y los 500 de un `EnvioBOLETA`, normaliza RUT y fecha de resolución, cuenta documentos por tipo
  * (`SubTotDTE`, con 33/61/56 primero en `EnvioDTE`) y genera el id del set.
- * @throws {DteError} EN: `ENVELOPE_EMPTY`, `ENVELOPE_KIND_MISMATCH`, `INVALID_RUT`, `INVALID_DATE`, `INVALID_OPTION` (a resolution number that is not an integer from 0 to 999999, and more documents than the kind admits, with `documents` in `details.field`). ES: los mismos códigos; `INVALID_OPTION` por un número de resolución que no es un entero de 0 a 999999, y por más documentos de los que admite el tipo de sobre, con `documents` en `details.field`.
+ * @throws {DteError} EN: `ENVELOPE_EMPTY`, `ENVELOPE_KIND_MISMATCH`, `INVALID_RUT`, `INVALID_DATE`, `INVALID_OPTION` (a resolution number that is not an integer from 0 to 999999, more documents than the kind admits, with `documents` in `details.field`, and a `cover.setId` that is not a name the schema's `xs:ID` admits or is the id of a document of the envelope). ES: los mismos códigos; `INVALID_OPTION` por un número de resolución que no es un entero de 0 a 999999, por más documentos de los que admite el tipo de sobre, con `documents` en `details.field`, y por un `cover.setId` que no es un nombre que admita el `xs:ID` del esquema o que es el id de un documento del sobre.
  */
 export const createEnvelope = ({ kind, documents, cover, now }: CreateEnvelopeInput): Envelope => {
   if (documents.length === 0) throw new DteError('ENVELOPE_EMPTY', { kind })
@@ -82,9 +83,15 @@ export const createEnvelope = ({ kind, documents, cover, now }: CreateEnvelopeIn
   }
   assertResolutionNumber(cover.resolutionNumber)
   const subtotals = countByType(documents)
+  const setId = givenOrGeneratedId(cover.setId, 'cover.setId', () =>
+    generateSetId(kind === 'receipt' ? 'ENVIOBOLETA' : 'DTE_SetDoc', now),
+  )
+  // An `xs:ID` names one element of a file: the set cannot take the id of a document it carries.
+  if (documents.some((document) => document.id === setId))
+    throw new DteError('INVALID_OPTION', { field: 'cover.setId' })
   return {
     kind,
-    setId: cover.setId ?? generateSetId(kind === 'receipt' ? 'ENVIOBOLETA' : 'DTE_SetDoc', now),
+    setId,
     cover: {
       issuerRut: toSiiRut(cover.issuerRut, 'cover.issuerRut'),
       senderRut: toSiiRut(cover.senderRut, 'cover.senderRut'),

@@ -66,6 +66,20 @@ describe('compactFolioRanges', () => {
 })
 
 describe('createFolioConsumption', () => {
+  // `ConsumoFolio_v10.xsd` types the `ID` of `DocumentoConsumoFolios` as `xs:ID`, a name.
+  test.each(['1RCOF', 'a b', 'x<y', 'a"b', ''])('an id of %j is refused, and a name is kept', (id) => {
+    const report = { cover: reportCover, entries: [receipt] }
+    expect(failure({ ...report, id })).toEqual({ code: 'INVALID_OPTION', details: { field: 'id' } })
+    expect(createFolioConsumption({ ...report, id: 'RCOF_2026-10.a' }).id).toBe('RCOF_2026-10.a')
+  })
+
+  test('an id of null is one left out, as before: an id is generated', () => {
+    const id = null as unknown as undefined
+    expect(createFolioConsumption({ ...{ cover: reportCover, entries: [receipt], now: FIXED_NOW }, id }).id).toBe(
+      'RCOF_15_11_2026_15_30_00_000',
+    )
+  })
+
   test('the dates come from the lines, the sequence defaults to 1 and the id and timestamp are generated', () => {
     const report = createFolioConsumption({
       cover: reportCover,

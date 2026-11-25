@@ -114,6 +114,59 @@ describe('createEnvelope', () => {
     expect(envelope.cover.signedAt).toBe('2026-01-01T00:00:00')
   })
 
+  // `EnvioDTE_v10.xsd` and `EnvioBOLETA_v11.xsd` type the `ID` of `SetDTE` as `xs:ID`, a name: it starts with a letter
+  // or an underscore and goes on with letters, digits, full stops, hyphens and underscores. Anything else fails the
+  // schema once the documents inside are stamped, and a `<` or a quote would break the attribute it is written in.
+  test.each(['39-1', '1abc', 'a b', 'a:b', 'x<y', 'a"b', "a'b", 'a&b', ''])('a set id of %j is refused', (setId) => {
+    for (const [kind, documents] of [
+      ['dte', [issue(33, 1)]],
+      ['receipt', [receipt(1)]],
+    ] as const) {
+      const refused = () => createEnvelope({ kind, documents, cover: { ...cover, setId }, now: FIXED_NOW })
+      expect(refused).toThrow(expect.objectContaining({ code: 'INVALID_OPTION', details: { field: 'cover.setId' } }))
+    }
+  })
+
+  test.each([7, {}])('a set id that is no text, as %j, is refused', (given) => {
+    const setId = given as unknown as string
+    const refused = () => createEnvelope({ kind: 'dte', documents: [issue(33, 1)], cover: { ...cover, setId } })
+    expect(refused).toThrow(expect.objectContaining({ code: 'INVALID_OPTION', details: { field: 'cover.setId' } }))
+  })
+
+  test('a set id of null is one left out, as before: an id is generated', () => {
+    const setId = null as unknown as undefined
+    const envelope = createEnvelope({
+      kind: 'dte',
+      documents: [issue(33, 1)],
+      cover: { ...cover, setId },
+      now: FIXED_NOW,
+    })
+    expect(envelope.setId).toBe('DTE_SetDoc_15_11_2026_15_30_00_000')
+  })
+
+  // An `xs:ID` names one element of the file: the id of the set cannot be the id of a document it carries, or the
+  // signature of the envelope would point at two elements and the file would fail the schema.
+  test('a set id that is the id of a document of the envelope is refused', () => {
+    const documents = [issue(33, 1), issue(33, 5)]
+    expect(documents[1].id).toBe('DTE_T33F5')
+    const refused = () => createEnvelope({ kind: 'dte', documents, cover: { ...cover, setId: 'DTE_T33F5' } })
+    expect(refused).toThrow(expect.objectContaining({ code: 'INVALID_OPTION', details: { field: 'cover.setId' } }))
+    expect(createEnvelope({ kind: 'dte', documents, cover: { ...cover, setId: 'DTE_T33F6' } }).setId).toBe('DTE_T33F6')
+  })
+
+  test.each(['SetDoc', '_set.1-a', 'Envío_1', 'DTE_SetDoc_15_11_2026_15_30_00_000'])(
+    'a set id of %j is kept',
+    (setId) => {
+      const envelope = createEnvelope({
+        kind: 'dte',
+        documents: [issue(33, 1)],
+        cover: { ...cover, setId },
+        now: FIXED_NOW,
+      })
+      expect(envelope.setId).toBe(setId)
+    },
+  )
+
   test('receipt envelope always targets the SII and uses the ENVIOBOLETA prefix', () => {
     const envelope = createEnvelope({
       kind: 'receipt',
