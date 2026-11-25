@@ -35,6 +35,8 @@ export type AssignmentFile = {
   readonly document: AssignmentZone
   /** EN: The `DTECedido`. ES: El `DTECedido`. */
   readonly assignedDocument: AssignmentZone
+  /** EN: The electronic receipts of the goods the assigned document's zone carries, in the order of the file. ES: `Recibo` — Los recibos electrónicos de las mercaderías que lleva el área del documento cedido, en el orden del archivo. */
+  readonly receipts: readonly AssignmentZone[]
   /** EN: The `Cesion` elements, in the order of the file. ES: Los elementos `Cesion`, en el orden del archivo. */
   readonly assignments: readonly AssignmentZone[]
 }
@@ -88,6 +90,54 @@ const textsOf = (xml: string, tag: string, elements: readonly Element[]): readon
 
 const zone = (element: Element, text: string): AssignmentZone => ({ element, text: standalone(element, text) })
 
+// One `Recibo` read again from its own text, so the element that is checked and the text that is verified and carried
+// are one thing: whatever the text was cut from, nothing is read from anywhere else. Its only children are its
+// `DocumentoRecibo` and the signature over it, so the fields read are the ones the signature covers.
+const receiptZone = (text: string): AssignmentZone => {
+  const element = parseXmlDom(text).documentElement
+  const [body, signature, ...rest] = childElements(element)
+  const shaped =
+    rest.length === 0 &&
+    body?.tagName === 'DocumentoRecibo' &&
+    body.namespaceURI === SII_NS &&
+    signature?.tagName === 'Signature' &&
+    signature.namespaceURI === XMLDSIG_NS
+  return shaped ? { element, text } : refuse('Recibo', 'expected a Recibo with one DocumentoRecibo and its Signature')
+}
+
+// The `Recibo` elements among `elements`: each text cut from `xml`, then read on its own.
+const receiptZones = (xml: string, elements: readonly Element[]): readonly AssignmentZone[] =>
+  textsOf(xml, 'Recibo', elements).map((text, index) => receiptZone(standalone(elements[index], text)))
+
+/**
+ * EN: The electronic receipts of goods or services (`Recibo`, Ley 19.983) in a text: an `EnvioRecibos` file as it was
+ * received, or a lone `Recibo`, unprefixed and in the SII's namespace. Each is cut from the text as it came, with the
+ * namespace declarations it inherits written on its start tag, so its signature verifies wherever it is carried, and
+ * then read again from that text alone: its element is the one of the text that is verified and carried. A `Recibo`
+ * holds one `DocumentoRecibo` and its signature, and nothing else. No DOCTYPE is read. Internal.
+ * ES: Los recibos electrónicos de mercaderías o servicios (`Recibo`, Ley 19.983) de un texto: un archivo `EnvioRecibos`
+ * tal como se recibió, o un `Recibo` solo, sin prefijo y en el namespace del SII. Cada uno se corta del texto tal como
+ * vino, con las declaraciones de namespace que hereda escritas en su etiqueta de inicio, así su firma verifica donde
+ * sea que se lleve, y luego se lee de nuevo desde ese solo texto: su elemento es el del texto que se verifica y se
+ * lleva. Un `Recibo` tiene un `DocumentoRecibo` y su firma, y nada más. No se lee ningún DOCTYPE. Interno.
+ * @throws {DteError} EN: `XML_PARSE_FAILED` for malformed XML, a DOCTYPE, a root that is neither, or a `Recibo` of another shape. ES: `XML_PARSE_FAILED` para XML malformado, un DOCTYPE, una raíz que no es ninguno de los dos, o un `Recibo` de otra forma.
+ */
+export const readGoodsReceipts = (xml: string): readonly AssignmentZone[] => {
+  if (/<!DOCTYPE/i.test(xml)) refuse('DOCTYPE', 'a DOCTYPE is not read')
+  const root = parseXmlDom(xml).documentElement
+  const named = (tag: string): boolean => root.tagName === tag && root.namespaceURI === SII_NS
+  if (named('Recibo')) return receiptZones(xml, [root])
+  if (!named('EnvioRecibos')) refuse('Recibo', 'expected an EnvioRecibos or a Recibo in the SII namespace')
+  return receiptZones(xml, childrenNamed(onlyChild(root, 'SetRecibos'), 'Recibo'))
+}
+
+/**
+ * EN: Verifies the signature of one electronic receipt over its `DocumentoRecibo`, as it stands in its text. Internal.
+ * ES: Verifica la firma de un recibo electrónico sobre su `DocumentoRecibo`, tal como está en su texto. Interno.
+ */
+export const verifyGoodsReceipt = (receipt: AssignmentZone): SignatureVerification =>
+  verifyEnveloped(receipt.text, { elementTag: 'DocumentoRecibo', rootTag: 'Recibo' })
+
 /**
  * EN: Reads an assignment file into its signed zones, strictly: an unprefixed `AEC` in the SII's namespace, with one
  * `DocumentoAEC`, its `Cesiones` holding one `DTECedido` and at least one `Cesion`, and the `DTECedido` one
@@ -107,7 +157,8 @@ export const readAssignmentFile = (xml: string): AssignmentFile => {
   if (root.tagName !== 'AEC' || root.namespaceURI !== SII_NS) refuse('AEC', 'expected an AEC in the SII namespace')
   const transfers = onlyChild(onlyChild(root, 'DocumentoAEC'), 'Cesiones')
   const assignedDocument = onlyChild(transfers, 'DTECedido')
-  const document = onlyChild(onlyChild(assignedDocument, 'DocumentoDTECedido'), 'DTE')
+  const assignedZone = onlyChild(assignedDocument, 'DocumentoDTECedido')
+  const document = onlyChild(assignedZone, 'DTE')
   const assignments = childrenNamed(transfers, 'Cesion')
   if (assignments.length === 0) refuse('Cesion', 'expected at least one Cesion')
   const [assignedText] = textsOf(xml, 'DTECedido', [assignedDocument])
@@ -117,6 +168,7 @@ export const readAssignmentFile = (xml: string): AssignmentFile => {
     root,
     document: zone(document, documentText),
     assignedDocument: zone(assignedDocument, assignedText),
+    receipts: receiptZones(assignedText, childrenNamed(assignedZone, 'Recibo')),
     assignments: assignments.map((element, index) => zone(element, assignmentTexts[index])),
   }
 }
@@ -130,6 +182,8 @@ export type AssignmentVerification = {
   readonly document: SignatureVerification
   /** EN: The signature over the zone of the assigned document. ES: `DocumentoDTECedido` — La firma sobre el área del documento cedido. */
   readonly assignedDocument: SignatureVerification
+  /** EN: The signature of each electronic receipt of the goods the zone carries, as the debtor signed it, in the order of the file; empty when it carries none. ES: `Recibo` — La firma de cada recibo electrónico de las mercaderías que lleva el área, como lo firmó el deudor, en el orden del archivo; vacío si no lleva ninguno. */
+  readonly receipts: readonly SignatureVerification[]
   /** EN: Each assignment's signatures, one per authorized signer, in the order of the file. ES: `DocumentoCesion` — Las firmas de cada cesión, una por persona autorizada, en el orden del archivo. */
   readonly assignments: readonly (readonly SignatureVerification[])[]
   /** EN: The signature over the whole file. ES: `DocumentoAEC` — La firma sobre todo el archivo. */
@@ -165,14 +219,14 @@ const assignmentSignatures = (assignment: AssignmentZone): readonly SignatureVer
 /**
  * EN: **Unstable**: it is held to the files the builders write, none of which has been registered at the SII yet, so
  * its shape may change in any release, a patch included.
- * Verifies every signature of an assignment file (AEC): the assigned document's own, the one over its zone, each
- * signature of each assignment and the one over the whole file. Each zone is checked as it stands in the file, with
+ * Verifies every signature of an assignment file (AEC): the assigned document's own, the one over its zone, the one of
+ * each electronic receipt the zone carries, each signature of each assignment and the one over the whole file. Each zone is checked as it stands in the file, with
  * the namespaces it inherits there, so a result is the one a verifier of the whole file reaches. Pure: no clock and no
  * network. Whose certificates they are is not checked.
  * ES: **Inestable**: se rige por los archivos que arman los constructores, ninguno de los cuales se ha registrado aún en
  * el SII, así que su forma puede cambiar en cualquier versión, incluso un patch.
- * Verifica cada firma de un archivo de cesión (AEC): la del propio documento cedido, la de su área, cada firma de
- * cada cesión y la de todo el archivo. Cada zona se revisa como está en el archivo, con los namespaces que hereda ahí,
+ * Verifica cada firma de un archivo de cesión (AEC): la del propio documento cedido, la de su área, la de cada recibo
+ * electrónico que lleva el área, cada firma de cada cesión y la de todo el archivo. Cada zona se revisa como está en el archivo, con los namespaces que hereda ahí,
  * así un resultado es el que obtiene quien verifica el archivo completo. Pura: sin reloj ni red. No revisa de quién
  * son los certificados.
  * @param xml EN: the file as text. ES: el archivo como texto.
@@ -186,8 +240,9 @@ export const unstable_verifyAssignment = (xml: string): AssignmentVerification =
     elementTag: 'DocumentoDTECedido',
     rootTag: 'DTECedido',
   })
+  const receipts = file.receipts.map(verifyGoodsReceipt)
   const assignments = file.assignments.map(assignmentSignatures)
   const whole = verifyEnveloped(xml, { elementTag: 'DocumentoAEC', rootTag: 'AEC' })
-  const all = [document, assignedDocument, ...assignments.flat(), whole]
-  return { document, assignedDocument, assignments, file: whole, valid: all.every((check) => check.valid) }
+  const all = [document, assignedDocument, ...receipts, ...assignments.flat(), whole]
+  return { document, assignedDocument, receipts, assignments, file: whole, valid: all.every((check) => check.valid) }
 }

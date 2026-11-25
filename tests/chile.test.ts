@@ -1,5 +1,6 @@
 import {
   chileDate,
+  chileInstant,
   chileTimestamp,
   chileDateTimeParts,
   toIsoDate,
@@ -39,6 +40,41 @@ describe('Chile time', () => {
     expect(Object.keys(chileDateTimeParts())).toEqual(['year', 'month', 'day', 'hour', 'minute', 'second'])
     expect(chileDate()).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     expect(chileTimestamp()).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/)
+  })
+})
+
+describe('chileInstant', () => {
+  test('reads a Chile-local timestamp with the offset of its day, summer or winter', () => {
+    // Summer time, UTC-3.
+    expect(chileInstant('2026-11-15T15:30:00')?.toISOString()).toBe('2026-11-15T18:30:00.000Z')
+    expect(chileInstant('2026-12-31T21:00:00')?.toISOString()).toBe('2027-01-01T00:00:00.000Z')
+    // Winter time, UTC-4.
+    expect(chileInstant('2026-07-01T12:00:00')?.toISOString()).toBe('2026-07-01T16:00:00.000Z')
+    expect(chileInstant('2026-06-30T23:59:59')?.toISOString()).toBe('2026-07-01T03:59:59.000Z')
+  })
+
+  test('it is the inverse of chileTimestamp, on both sides of each change of season', () => {
+    const instants = [
+      '2026-04-04T12:00:00.000Z',
+      '2026-04-05T02:59:59.000Z',
+      '2026-04-05T04:00:00.000Z',
+      '2026-04-05T12:00:00.000Z',
+      '2026-09-05T12:00:00.000Z',
+      '2026-09-06T03:59:59.000Z',
+      '2026-09-06T04:00:00.000Z',
+      '2026-09-06T12:00:00.000Z',
+    ]
+    for (const instant of instants) expect(chileInstant(chileTimestamp(new Date(instant)))?.toISOString()).toBe(instant)
+  })
+
+  test('what follows the seconds is not read, and a text that is not a timestamp or names no real date is null', () => {
+    expect(chileInstant('2026-11-15T15:30:00.250')?.toISOString()).toBe('2026-11-15T18:30:00.000Z')
+    expect(chileInstant('2026-11-15T15:30:00Z')?.toISOString()).toBe('2026-11-15T18:30:00.000Z')
+    expect(chileInstant('2026-11-15 15:30:00')).toBeNull()
+    expect(chileInstant('2026-11-15')).toBeNull()
+    expect(chileInstant('2026-13-45T00:00:00')).toBeNull()
+    expect(chileInstant('2026-02-30T00:00:00')).toBeNull()
+    expect(chileInstant('')).toBeNull()
   })
 })
 
