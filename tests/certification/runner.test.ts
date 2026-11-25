@@ -45,7 +45,7 @@ import {
 } from '../support/exchange-fixtures'
 import { detailAnswer, EMPTY_OK } from '../support/gwt-answers'
 import { failure } from '../support/portal'
-import { page } from '../support/portal-pages'
+import { COMPANY_FORM, companyResolutionPage, NOT_AUTHORIZED_COMPANY, page } from '../support/portal-pages'
 import { ISSUER_RUT } from '../support/fixtures'
 
 const plan = fullPlan()
@@ -385,6 +385,61 @@ test('an error of a step is reported and rethrown; the company comes from the is
   expect(await harness.store.load()).toBeNull()
   const nameless = { ...harness.deps, portal: { ...harness.deps.portal, companyRut: null } }
   expect((await failure(runCertification(nameless))).details).toEqual({ field: 'companyRut' })
+})
+
+// The cover of an envelope names the resolution of the company in the environment the envelope goes to, and the SII
+// refuses one that names another. The portal shows it (`fetchCompanyResolution`), so a run that is given none asks.
+describe('the resolution of a run that is given none', () => {
+  const resolutionRoutes = (html = companyResolutionPage('14-06-2026', '0')) => [
+    get('ad_empresa1', COMPANY_FORM),
+    post('ad_empresa2', html),
+  ]
+  const down = { url: UPLOAD, method: 'POST' as const, reply: { body: 'down' } }
+  // Runs until the first upload fails and gives back the cover of the envelope kept before it.
+  const coverOf = async (routes: Parameters<typeof certificationHarness>[0], resolution?: object) => {
+    const harness = await seeded([...routes, down], stateWith({ plan, cafs: certificationCafXmls() }))
+    await failure(runCertification({ ...harness.deps, resolution }))
+    const basic = (await harness.store.readArtefact('sets-prueba/envio-set-basico.xml'))!
+    return {
+      harness,
+      date: /<FchResol>([^<]*)<\/FchResol>/.exec(basic)![1],
+      number: /<NroResol>([^<]*)<\/NroResol>/.exec(basic)![1],
+      asked: harness.urls().filter((url) => url.includes('ad_empresa')).length,
+    }
+  }
+
+  test('it is the one the SII shows for the company in the certification environment', async () => {
+    const cover = await coverOf(resolutionRoutes())
+    expect(cover).toMatchObject({ date: '2026-06-14', number: '0', asked: 2 })
+    expect(cover.harness.posted('ad_empresa2')).toEqual([{ RUT_EMP: '76543210', DV_EMP: '3', ACEPTAR: 'Ingresar' }])
+    expect(cover.harness.warnings()).not.toContain('certification resolution not read from the SII')
+  })
+
+  test('its number is the one the SII shows too, unless the run is given one', async () => {
+    expect(await coverOf(resolutionRoutes(companyResolutionPage('14-06-2026', '80')))).toMatchObject({ number: '80' })
+    expect(await coverOf(resolutionRoutes(companyResolutionPage('14-06-2026', '80')), { number: 7 })).toMatchObject({
+      date: '2026-06-14',
+      number: '7',
+    })
+    // A page with the date and no number: the number of the certification environment, 0.
+    const dated = page('<table><tr><td>Fecha Resoluci&oacute;n</td><td>14-06-2026</td></table>')
+    expect(await coverOf(resolutionRoutes(dated))).toMatchObject({ date: '2026-06-14', number: '0' })
+  })
+
+  test('a run that is given the date asks for nothing', async () => {
+    const cover = await coverOf(resolutionRoutes(), { date: '2026-01-01' })
+    expect(cover).toMatchObject({ date: '2026-01-01', number: '0', asked: 0 })
+  })
+
+  test.each([
+    ['shows no date', page('<table><tr><td>Resoluci&oacute;n</td><td>0</td></table>'), false],
+    ['does not know the company', NOT_AUTHORIZED_COMPANY, true],
+    ['answers a page that is not the resolution', page('Actualización de Datos'), true],
+  ])('when the SII %s the run dates it on the day it starts, as before', async (_label, html, warned) => {
+    const cover = await coverOf(resolutionRoutes(html))
+    expect(cover).toMatchObject({ date: TODAY, number: '0' })
+    expect(cover.harness.warnings().includes('certification resolution not read from the SII')).toBe(warned)
+  })
 })
 
 test('a resolution left out is dated once for the whole run, whatever day its later envelopes are made on', async () => {

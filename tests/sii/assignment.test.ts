@@ -60,6 +60,7 @@ describe('unstable_uploadAssignment', () => {
       channel: 'soap',
       fileName: 'AEC.xml',
       duplicate: false,
+      retryAfterMs: null,
       raw: expect.stringContaining('<RECEPCIONAEC>'),
     })
     expect(memory.records()).toEqual([

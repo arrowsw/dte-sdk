@@ -12,7 +12,16 @@ import { withToken } from './auth'
 import { redactText } from './capture'
 import { resolveCompanyRut, resolveSenderRut, retryFor, timeoutFor, type CallOverrides, type SiiClient } from './client'
 import { buildMultipartBody, generateBoundary, multipartContentType, type MultipartField } from './multipart'
-import { bodyExcerpt, httpError, isNoAnswer, isSuccess, parseJson, retryOptions, siiTimestampToIso } from './operation'
+import {
+  bodyExcerpt,
+  httpError,
+  isNoAnswer,
+  isSuccess,
+  parseJson,
+  retryAfterMs,
+  retryOptions,
+  siiTimestampToIso,
+} from './operation'
 import { withRetry } from './retry'
 import { send } from './send'
 import type { TokenChannel } from './token-cache'
@@ -35,6 +44,8 @@ export type UploadReceipt = {
   readonly fileName: string
   /** EN: true when the SII reported the file as already uploaded and returned the original TrackID. ES: true si el SII lo reportó como duplicado y devolvió el TrackID original. */
   readonly duplicate: boolean
+  /** EN: How long the SII asks to wait before the status of this upload is asked, in milliseconds, or null when its answer names no wait. The receipts REST API sends it; `waitForUploadStatus` takes it as `initialDelayMs`. ES: `X-Retry-After` — Cuánto pide esperar el SII antes de consultar el estado de este envío, en milisegundos, o null si su respuesta no nombra una espera. La envía la API REST de boletas; `waitForUploadStatus` la recibe como `initialDelayMs`. */
+  readonly retryAfterMs: number | null
   /** EN: Raw SII response, as received (the archive port gets a redacted copy). ES: Respuesta cruda del SII, tal como llegó (el puerto de archivo recibe una copia con los secretos tachados). */
   readonly raw: string
 }
@@ -489,6 +500,7 @@ const attemptUpload = async (
     channel: job.channel,
     fileName: job.fileName,
     duplicate: verdict.duplicate,
+    retryAfterMs: retryAfterMs(response.headers),
     raw: text,
   }
 }

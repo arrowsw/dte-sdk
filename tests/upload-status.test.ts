@@ -71,9 +71,23 @@ describe('upload status (QueryEstUp / REST)', () => {
   test('messages are Spanish glosses', () => {
     expect(uploadStatusMessage('EPR')).toBe('Envío procesado')
     expect(uploadStatusMessage('RCT')).toBe('Rechazado por error en carátula')
-    expect(uploadStatusMessage('RCO')).toBe('Envío rechazado')
     expect(uploadStatusMessage('-11')).toBe('Error de consulta del SII, reintentar más tarde')
     expect(uploadStatusMessage('ZZZ')).toBe('Estado desconocido: ZZZ')
+  })
+
+  // The SII's OpenAPI of its receipts API ("API SII - V1", 1.0.5) lists the states of an upload with their meaning:
+  // "RPT - Envio Repetido Rechazado", "VOF - No se encontro el archivo .xml", "RCO - Rechazado por consistencia".
+  test('a repeated upload, a file not found and a consistency rejection are named as the SII names them', () => {
+    for (const channel of ['soap', 'rest'] as const) {
+      expect(uploadStatusMessage('RPT', channel)).toBe('Envío repetido rechazado')
+      expect(uploadStatusMessage('VOF', channel)).toBe('No se encontró el archivo .xml')
+      expect(uploadStatusMessage('RCO', channel)).toBe('Rechazado por consistencia')
+    }
+    expect(['RPT', 'VOF', 'RCO'].map((code) => classifyUploadStatus(code))).toEqual([
+      'rejected',
+      'rejected',
+      'rejected',
+    ])
   })
 
   test('negative codes are retryable, everything else is not', () => {

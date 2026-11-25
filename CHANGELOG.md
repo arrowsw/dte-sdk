@@ -7,8 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The wait the SII asks for after an upload** (`UploadReceipt.retryAfterMs`, `initialDelayMs` of
+  `waitForUploadStatus`). The SII's receipts API answers an upload with the header `X-Retry-After`, the seconds to wait
+  before asking for its status, and its OpenAPI says of them: "Es "muy importante" respetar estos segundos". The
+  receipt of an upload dropped that header, and `waitForUploadStatus` asked at once and then every five seconds. The
+  receipt now carries the wait in milliseconds, or null when the answer names none, and `waitForUploadStatus` takes it
+  as `initialDelayMs`: it waits that long before its first poll, within `timeoutMs`.
+  - **What to change:** nothing in a call. Code that builds an `UploadReceipt` of its own, as a test double does, must
+    give it `retryAfterMs`.
+- **The documents the counts of an upload leave out** (`documents` of `queryUploadStatus` and `waitForUploadStatus`,
+  `UploadStatus.unreported`). The verdict of an upload is settled with the counts the SII reports, type by type. Those
+  counts may cover fewer documents than the envelope carried, and the verdict says nothing of a document they leave
+  out: an envelope of four invoices and three credit notes whose counts report the four invoices alone reads
+  `accepted`. Given the number of documents of the envelope, the status now says how many the counts do not cover
+  (`unreported`, null without `documents` or without counts), so that each of them can be asked for with
+  `queryDocumentStatus`. The verdict itself does not change.
+  - **What to change:** code that builds an `UploadStatus` of its own must give it `unreported`.
+
 ### Changed
 
+- **The certification run reads the company's resolution from the SII when it is given none.** The cover of an
+  envelope names the resolution of the company in the environment it goes to, and the SII refuses an envelope that
+  names another ("Error en Carátula"). `runCertification`, given no `resolution`, wrote number 0 and the UTC day the
+  run started on, which is the company's resolution only on the day it was enrolled. Given no date, the run now reads
+  the one the portal shows for the company in the certification environment (`fetchCompanyResolution`, two requests
+  when the run starts), with its number unless `resolution.number` is given. When the portal shows no date, does not
+  know the company, or answers a page that cannot be read, the run goes on as before, and the last two leave a
+  warning in the portal client's logger. A run given `resolution.date` asks for nothing, and a step run on its own
+  keeps its default. It has not been run against the portal for a company in certification.
+  - **What to change:** nothing. Pass `resolution` to keep the run from asking.
+- **`RPT`, `VOF` and `RCO` are glossed as the SII lists them.** The SII's OpenAPI of its receipts API lists the states
+  of an upload: "RPT - Envio Repetido Rechazado", "VOF - No se encontro el archivo .xml", "RCO - Rechazado por
+  consistencia". `uploadStatusMessage` read them "Rechazado por schema", "Error interno del SII" and "Envío
+  rechazado", so a repeated upload was reported as a schema failure. Their class, `rejected`, does not change, and a
+  gloss the SII sends still comes first.
 - **A credit note and a debit note need the reference of the document they change.** Formato DTE 2.5 makes the zone
   "Información Referencia" code 1 on both, national (61, 56) and of export (112, 111): "Dato obligatorio. El dato debe
   estar en el documento siempre". The schema leaves `Referencia` optional, since one root serves every type, and
