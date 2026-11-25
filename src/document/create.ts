@@ -407,6 +407,15 @@ const assertExemptIndicators = ({ type, items, totals }: DocumentInput): void =>
 // registra si es igual a 0". `DTE_v10.xsd` declares it in `Documento` alone, a whole number from one up.
 const CARRIES_VAT_NOT_WITHHELD: readonly DocumentType[] = [46, 56, 61]
 
+// Formato DTE 2.5, fields 113 and 114: a company that sells on behalf of a principal may split the VAT in its own and
+// the third parties', each within the VAT ("< que IVA"). On a settlement invoice the own VAT is the VAT of the
+// commissions and the rest is the third parties'. No VAT, or a commissions' VAT outside zero to the VAT, has no split.
+const withVatSplit = (totals: Totals): Totals => {
+  const vat = totals.vatAmount ?? 0
+  const own = totals.commissions?.vatValue ?? 0
+  return vat > 0 && own >= 0 && own <= vat ? { ...totals, ownVatAmount: own, thirdPartyVatAmount: vat - own } : totals
+}
+
 const assertVatNotWithheld = ({ type, totals }: DocumentInput): void => {
   const amount = totals?.vatNotWithheld
   if (amount === undefined || amount === 0) return
@@ -1106,6 +1115,7 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
   assertSingleReference(type, input.references ?? [])
   assertExemptIndicators(input)
   assertVatNotWithheld(input)
+  if (input.splitVat && (type !== 43 || input.totals !== undefined)) refuse('splitVat')
   assertTransferType(type, input.options?.transferType)
   // Formato DTE 2.5, field 38 of the detail: every line of a credit note that corrects a text is zero, and a line of a
   // dispatch guide whose transfer is not a sale may be. Field 7 makes 1 the sale and every value above it a transfer
@@ -1139,7 +1149,7 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
   if (exported) assertCustoms(transport?.customs, type, service)
   const exchangeRate = positive(input.exchangeRate, 'rate', 'exchangeRate')
   const withoutPayment = Number(input.options?.exportPaymentTerms) === WITHOUT_PAYMENT
-  const totals =
+  const computed =
     input.totals ??
     calculateTotals(lines, {
       type,
@@ -1151,6 +1161,7 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
       commissions: input.commissions,
       withoutPayment,
     })
+  const totals = input.splitVat ? withVatSplit(computed) : computed
   // Totals the caller gave are the caller's to match with the lines; what the SII checks over the totals themselves is
   // checked here, on them and on the ones worked out.
   if (exported) assertExportTotals(totals, withoutPayment)
