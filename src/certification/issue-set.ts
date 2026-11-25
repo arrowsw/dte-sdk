@@ -16,6 +16,7 @@ import type {
   ReferenceInput,
 } from '../model/document'
 import { sanitizeText } from '../text/sanitize'
+import { chileDate } from '../time/chile'
 import { calculateLineAmount, type LineAmount } from '../totals/calculate'
 import type { FolioSource } from './folios'
 import type {
@@ -40,6 +41,8 @@ export type IssueSetOptions = {
   readonly issuer: IssuerInput
   /** EN: The customer every document names; purchase invoices and internal transfers name the issuer instead. ES: El cliente que nombra cada documento; las facturas de compra y los traslados internos nombran al emisor. */
   readonly receiver: ReceiverInput
+  /** EN: The customers the invoices and the guides of a set name in turn, the first again after the last, as the SII's instructions for the test set ask ("Utilice RUT distintos para las distintas facturas"); a note names the customer of the document it refers to. Without it, or empty, every document names `receiver`. ES: `Receptor` — Los clientes que las facturas y las guías de un set nombran por turno, el primero de nuevo tras el último, como piden las instrucciones del SII para el set de pruebas ("Utilice RUT distintos para las distintas facturas"); una nota nombra al cliente del documento que refiere. Sin ella, o vacía, cada documento nombra a `receiver`. */
+  readonly receivers?: readonly ReceiverInput[]
   /** EN: The signing certificate. ES: El certificado de firma. */
   readonly certificate: Certificate
   /** EN: Where folios and their CAFs come from. ES: De dónde salen los folios y sus CAF. */
@@ -88,9 +91,8 @@ export const TEST_SET_ENVELOPE_ID = 'DTE_SetDoc'
 
 const GLOBAL_DISCOUNT_DESCRIPTION = 'DESCUENTO GLOBAL ITEMES AFECTOS'
 
-// The test sets are dated and stamped on the UTC clock: the issue date is the UTC day of the run and every stamp is the
-// UTC instant with its milliseconds, without a zone.
-const utcDate = (at: Date): string => at.toISOString().slice(0, 10)
+// The test sets are dated on the Chile day of the run ("Agregue fecha del día", the SII's instructions for the set) and
+// stamped on the UTC clock: every stamp is the UTC instant with its milliseconds, without a zone.
 const utcTimestamp = (at: Date): string => at.toISOString().replace('Z', '')
 const NO_AMOUNT_LINE: PlannedItem = { name: 'SIN MONTO', quantity: 1, unitPrice: 0 }
 const CORRECTION = 'CORRECCION'
@@ -112,6 +114,8 @@ export type IssuedRecord = {
   readonly date: string
   /** EN: The planned items the document was issued from. ES: Los ítems planificados con que se emitió el documento. */
   readonly items: readonly PlannedItem[]
+  /** EN: The customer the document named, when it is not the one of the options. ES: `Receptor` — El cliente que nombró el documento, cuando no es el de las opciones. */
+  readonly receiver?: ReceiverInput
 }
 
 /**
@@ -225,6 +229,13 @@ const documentReference = (referenced: IssuedRecord, note: PlannedNote): Referen
   code: note.referenceCode,
   reason: note.reasonText,
 })
+
+// The customer of the document at `turn` among those of a set that take one in turn; none without `receivers`, which
+// leaves the customer of the options.
+const receiverInTurn = (options: IssueSetOptions, turn: number): ReceiverInput | undefined =>
+  options.receivers === undefined || options.receivers.length === 0
+    ? undefined
+    : options.receivers[turn % options.receivers.length]
 
 const referencedRecord = (context: IssueContext, note: PlannedNote): IssuedRecord => {
   const record = note.referencedCase === null ? undefined : context.records.get(note.referencedCase)
@@ -381,6 +392,8 @@ export type IssueDocumentSpec = {
   readonly lines?: readonly LineItemInput[]
   /** EN: Commission and other charge lines. ES: `Comisiones` — Líneas de comisiones y otros cargos. */
   readonly commissions?: readonly CommissionLineInput[]
+  /** EN: Split the VAT of a settlement invoice in own and third-party. ES: `IVAProp`, `IVATerc` — Separar el IVA de una liquidación factura en propio y de terceros. */
+  readonly splitVat?: boolean
   /** EN: Keep a record of the document for the notes that reference it. ES: Guardar un registro del documento para las notas que lo refieren. */
   readonly record: boolean
 }
@@ -417,6 +430,7 @@ export const issueCertificationDocument = async (
     options: input.options,
     totals: input.totals,
     withholdVat: input.withholdVat,
+    splitVat: input.splitVat,
   })
   const at = context.clock()
   const signed = issueDocument({
@@ -429,7 +443,10 @@ export const issueCertificationDocument = async (
   const issued: IssuedCase = { caseId: input.caseId, type: input.type, folio, document: signed }
   context.issued.push(issued)
   if (input.record)
-    context.records.set(input.caseId, { type: input.type, folio, date: context.date, items: input.items })
+    context.records.set(
+      input.caseId,
+      compact({ type: input.type, folio, date: context.date, items: input.items, receiver: input.receiver }),
+    )
   return issued
 }
 
@@ -447,13 +464,13 @@ const issueInvoicesAndNotes = async (
   const bareZero = kind !== 'exempt'
   if (invoices.length === 0) throw new DteError('MISSING_FIELD', { field: 'invoices', kind })
 
-  for (const invoice of invoices) {
+  for (const [turn, invoice] of invoices.entries()) {
     await issueCertificationDocument(context, {
       caseId: invoice.caseId,
       type: invoiceType,
       items: invoice.items,
       style,
-      receiver,
+      receiver: receiver ?? receiverInTurn(context.options, turn),
       references: [setReference(invoice.caseId, context.date)],
       globalDiscountPercent: invoice.globalDiscountPercent,
       options: kind === 'basic' ? { saleTransactionType: 1 } : undefined,
@@ -465,16 +482,14 @@ const issueInvoicesAndNotes = async (
   const creditItems = kind === 'basic' ? basicCreditItems : kind === 'exempt' ? exemptCreditItems : purchaseCreditItems
   for (const note of creditNotes) {
     const items = creditItems(context, note)
-    const references = [
-      setReference(note.caseId, context.date),
-      documentReference(referencedRecord(context, note), note),
-    ]
+    const referenced = referencedRecord(context, note)
+    const references = [setReference(note.caseId, context.date), documentReference(referenced, note)]
     await issueCertificationDocument(context, {
       caseId: note.caseId,
       type: 61,
       items,
       style,
-      receiver,
+      receiver: receiver ?? referenced.receiver,
       references,
       withholdVat: kind === 'purchase' ? true : undefined,
       totals: bareZero ? zeroTotals(totaledItems(61, references, items)) : undefined,
@@ -489,13 +504,14 @@ const issueInvoicesAndNotes = async (
         : kind === 'exempt'
           ? exemptDebitItems(context, note)
           : purchaseDebitItems(context, note)
+    const referenced = referencedRecord(context, note)
     await issueCertificationDocument(context, {
       caseId: note.caseId,
       type: 56,
       items,
       style,
-      receiver,
-      references: [setReference(note.caseId, context.date), documentReference(referencedRecord(context, note), note)],
+      receiver: receiver ?? referenced.receiver,
+      references: [setReference(note.caseId, context.date), documentReference(referenced, note)],
       withholdVat: kind === 'purchase' ? true : undefined,
       totals: bareZero ? zeroTotals(items) : undefined,
       priceDecimals: SET_PRICE_DECIMALS,
@@ -519,14 +535,17 @@ export const isInternalTransfer = (guide: PlannedGuide): boolean => guide.transf
 
 const issueGuides = async (context: IssueContext, plan: GuideSetPlan): Promise<void> => {
   if (plan.guides.length === 0) throw new DteError('MISSING_FIELD', { field: 'guides', kind: plan.kind })
-  for (const guide of plan.guides) {
+  // An internal transfer names the issuer and takes no turn.
+  const turnOf = (index: number): number =>
+    plan.guides.slice(0, index).filter((guide) => !isInternalTransfer(guide)).length
+  for (const [index, guide] of plan.guides.entries()) {
     const internal = isInternalTransfer(guide)
     await issueCertificationDocument(context, {
       caseId: guide.caseId,
       type: 52,
       items: guide.items,
       style: 'guide',
-      receiver: internal ? issuerAsReceiver(context.options.issuer) : undefined,
+      receiver: internal ? issuerAsReceiver(context.options.issuer) : receiverInTurn(context.options, turnOf(index)),
       references: [setReference(guide.caseId, context.date)],
       options: guideOptions(guide),
       totals: internal ? { vatRate: 19, totalAmount: 0 } : undefined,
@@ -553,7 +572,8 @@ const commissionLine = (planned: PlannedCommission): CommissionLineInput =>
   })
 
 // A settlement invoice is issued to the run's customer, the principal it settles with: its lines carry their amount as
-// the set gives it, with no price, and its commissions are taken off its total. No note references it.
+// the set gives it, with no price, its commissions are taken off its total, and its VAT is split in the own VAT, that
+// of the commissions, and the third parties'. No note references it.
 const issueSettlements = async (context: IssueContext, plan: SettlementSetPlan): Promise<void> => {
   if (plan.settlements.length === 0) throw new DteError('MISSING_FIELD', { field: 'settlements', kind: plan.kind })
   for (const settlement of plan.settlements) {
@@ -563,6 +583,7 @@ const issueSettlements = async (context: IssueContext, plan: SettlementSetPlan):
       items: [],
       lines: settlement.lines.map(settlementLine),
       commissions: settlement.commissions.map(commissionLine),
+      splitVat: true,
       style: 'plain',
       references: [setReference(settlement.caseId, context.date)],
       record: false,
@@ -609,9 +630,11 @@ export const signCertificationEnvelope = (
  * withholding; an internal transfer names the issuer and totals 0. A settlement set issues one settlement invoice (43)
  * per case, in the set's order and in one envelope: it names the customer of the options, the principal it settles
  * with, and carries the SET reference, its lines with their quantity, amount, settled document type and exempt mark,
- * and its commissions, whose totals are worked out by phase 1 and taken off the total. The set is dated and stamped on
- * the UTC clock: the issue date is the UTC day the run starts on, and `TSTED`, `TmstFirma` and `TmstFirmaEnv` are UTC
- * instants with milliseconds. Late in the Chilean evening that is already the next day.
+ * and its commissions, whose totals are worked out by phase 1 and taken off the total, with the VAT split in own and
+ * third-party (`splitVat`). With `receivers`, the invoices and the guides that do not name the issuer name those
+ * customers in turn, and a note names the customer of the document it refers to. The issue date is the Chile day the
+ * run starts on, as the SII's instructions ask ("Agregue fecha del día"); `TSTED`, `TmstFirma` and `TmstFirmaEnv` are
+ * UTC instants with milliseconds.
  * ES: Emite cada documento del plan de un set y firma su sobre. Primero las facturas (o guías), luego las notas de
  * crédito, luego las de débito, cada una con su referencia SET (`SET`, folio 1, la fecha de emisión, `CASO <id>`) y,
  * en las notas, otra al documento del caso referido con el código y la razón del set. Las facturas del set básico
@@ -619,9 +642,11 @@ export const signCertificationEnvelope = (
  * llevan la retención; un traslado interno nombra al emisor y totaliza 0. Un set de liquidación emite una liquidación
  * factura (43) por caso, en el orden del set y en un solo sobre: nombra al cliente de las opciones, el mandante con
  * quien se liquida, y lleva su referencia SET, sus líneas con su cantidad, monto, tipo de documento liquidado y marca de
- * exenta, y sus comisiones, cuyos totales calcula la fase 1 y se restan del total. El set se fecha y se marca con el
- * reloj UTC: la fecha de emisión es el día UTC en que parte la corrida, y `TSTED`, `TmstFirma` y `TmstFirmaEnv` son
- * instantes UTC con milisegundos. Tarde en la noche de Chile eso ya es el día siguiente.
+ * exenta, y sus comisiones, cuyos totales calcula la fase 1 y se restan del total, con el IVA separado en propio y de
+ * terceros (`splitVat`). Con `receivers`, las facturas y las guías que no nombran al emisor nombran a esos clientes
+ * por turno, y una nota nombra al cliente del documento que refiere. La fecha de emisión es el día de Chile en que
+ * parte la corrida, como piden las instrucciones del SII ("Agregue fecha del día"); `TSTED`, `TmstFirma` y
+ * `TmstFirmaEnv` son instantes UTC con milisegundos.
  * @param plan EN: a set plan of `planCertificationSets`. ES: un plan de set de `planCertificationSets`.
  * @param options EN: issuer, receiver, certificate, folios, resolution, clock. ES: emisor, receptor, certificado, folios, resolución, reloj.
  * @throws {DteError} EN: `MISSING_FIELD` (`invoices`, `guides` or `settlements` on an empty plan, `referencedCase` on a note whose case was not issued before it), `FOLIO_OUT_OF_RANGE` from the folio source, and the phase 1 codes. ES: `MISSING_FIELD` (`invoices`, `guides` o `settlements` en un plan vacío, `referencedCase` en una nota cuyo caso no se emitió antes), `FOLIO_OUT_OF_RANGE` de la fuente de folios, y los códigos de la fase 1.
@@ -631,7 +656,7 @@ export const issueTestSet = async (plan: IssuableSetPlan, options: IssueSetOptio
   const context: IssueContext = {
     options,
     clock,
-    date: utcDate(clock()),
+    date: chileDate(clock()),
     stamp: utcTimestamp,
     records: new Map(),
     issued: [],
