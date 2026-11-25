@@ -417,6 +417,36 @@ describe('needsTransferableCopy', () => {
   })
 })
 
+// An option until a stamp drawn this way is printed and read back with a scanner.
+describe('the stamp of the instructions, on the sheet', () => {
+  const instructions = { unstable_stampGeometry: 'instructions' } as const
+
+  test('it is the symbol of 387 modules, drawn with its own proportion, and reads back as the TED', async () => {
+    const pdf = await render(invoiceDoc, instructions)
+    const [image] = await pdfImages(pdf)
+    expect(image.width).toBe(387 * 4)
+    expect(await decodeStampInPdf(pdf)).toBe(invoice.ted.xml)
+    expect(await pdfText(pdf)).toContain('Timbre Electrónico SII')
+    // The stamp of every release so far is another image, and the page is as tall with either: the room of the stamp
+    // box is the same.
+    const usual = await render(invoiceDoc)
+    expect((await pdfImages(usual))[0].width).not.toBe(image.width)
+    expect((await pdfPage(pdf)).height).toBe((await pdfPage(usual)).height)
+  })
+
+  test('it is refused on continuous paper, and so is a geometry that is not one, before a library loads', async () => {
+    const load = jest.fn()
+    const onRoll = await failure(renderPrintedSample(invoiceDoc, { ...instructions, paper: 'roll' }, load))
+    expect(onRoll.code).toBe('INVALID_OPTION')
+    expect(onRoll.details).toEqual({ field: 'unstable_stampGeometry' })
+    const other = await failure(
+      renderPrintedSample(invoiceDoc, { unstable_stampGeometry: 'tall' as 'instructions' }, load),
+    )
+    expect(other.details).toEqual({ field: 'unstable_stampGeometry' })
+    expect(load).not.toHaveBeenCalled()
+  })
+})
+
 describe('errors', () => {
   test('a document without type is MISSING_FIELD', async () => {
     const error = await failure(render({ ...invoiceDoc, type: 0 }))

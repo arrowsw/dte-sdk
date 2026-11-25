@@ -1,4 +1,5 @@
-import { byteCompactionCodewords, renderTedBarcode, type BarcodeModule } from '../../src/pdf/stamp'
+import { STAMP, stampSize } from '../../src/pdf/layout'
+import { byteCompactionCodewords, loadBarcodeModule, renderTedBarcode, type BarcodeModule } from '../../src/pdf/stamp'
 import { decodePdf417Png, pdf417ErrorCorrectionLevel, pngLuminance } from '../support/pdf417'
 import { failure } from '../support/portal'
 import { invoice } from '../support/printed-fixtures'
@@ -143,4 +144,92 @@ test('when the library cannot be loaded it is DEPENDENCY_UNAVAILABLE', async () 
   } finally {
     jest.dontMock('bwip-js')
   }
+})
+
+// The symbol of section A.2.5 of the SII's instructions, an option until one is printed and read back: rows three
+// modules high, a module of 6.7 mils or more, 300 DPI or more.
+describe('the geometry of the instructions', () => {
+  const PIXELS = 4
+  const QUIET = 6 * PIXELS
+  const MILS_PER_POINT = 1000 / 72
+  const instructions = { unstable_geometry: 'instructions' } as const
+  const drawn = (text: string, load = loadBarcodeModule) => renderTedBarcode(text, load, instructions)
+  // The runs of equal pixel rows between the quiet zones: one run for each row of the symbol.
+  const rowHeights = ({ width, height, luminance }: ReturnType<typeof pngLuminance>): readonly number[] => {
+    const row = (y: number) => luminance.slice(y * width, (y + 1) * width).join()
+    const heights: number[] = []
+    for (let y = QUIET; y < height - QUIET; y += 1) {
+      if (y > QUIET && row(y) === row(y - 1)) heights[heights.length - 1] += 1
+      else heights.push(1)
+    }
+    return heights
+  }
+
+  test('4 px modules, 6 modules of quiet zone, 387 modules across and rows three modules high', async () => {
+    const image = pngLuminance(await drawn(ted))
+    expect(image.width).toBe(387 * PIXELS)
+    const rows = rowHeights(image)
+    expect(rows.length).toBeGreaterThanOrEqual(3)
+    expect(rows.length).toBeLessThanOrEqual(90)
+    expect(new Set(rows)).toEqual(new Set([3 * PIXELS]))
+    expect(image.height).toBe(rows.length * 3 * PIXELS + 2 * QUIET)
+    // The default's rows are one module high, and its symbol is the one of every release so far.
+    const usual = pngLuminance(await renderTedBarcode(ted))
+    expect(usual.width).not.toBe(image.width)
+  })
+
+  test('it reads back as the text that was signed, at level 5, with and without accents', async () => {
+    const accented = '<TED><DD><RSR>Peña y Muñoz</RSR></DD></TED>'
+    for (const text of [ted, accented]) {
+      const png = await drawn(text)
+      expect(decodePdf417Png(png)).toBe(text)
+      expect(pdf417ErrorCorrectionLevel(png)).toBe(5)
+    }
+  })
+
+  test('a stamp of plain ASCII is written in bytes alone too, the compaction the instructions name', async () => {
+    const { load, calls } = await recording()
+    await drawn(ted, load)
+    expect(calls[0]).toMatchObject({ raw: true, eclevel: 5, fixedeclevel: true, scale: 4, columns: 18, padding: 6 })
+    expect(calls[0]).not.toHaveProperty('height')
+    expect(String(calls[0].text)).toMatch(/^\^(901|924)(\^\d{3})+$/)
+    // The default hands the text over as it is, with its own scale and height.
+    await renderTedBarcode(ted, load)
+    expect(calls[1]).toMatchObject({ scale: 3, height: 10, text: ted })
+    expect(calls[1]).not.toHaveProperty('columns')
+  })
+
+  test('one too long to fit in bytes keeps the compaction the library picks, and still reads back', async () => {
+    // 1 035 bytes are 864 codewords in bytes alone, one more than a symbol holds beside its error correction.
+    const long = `<TED>${'A'.repeat(1024)}</TED>`
+    const { load, calls } = await recording()
+    expect(decodePdf417Png(await drawn(long, load))).toBe(long)
+    expect(calls[0]).not.toHaveProperty('raw')
+    await drawn(`<TED>${'A'.repeat(1023)}</TED>`, load)
+    expect(calls[1]).toMatchObject({ raw: true })
+  })
+
+  test('on the sheet it is drawn by one factor, with a module over 6.7 mils and over 300 DPI', async () => {
+    const image = pngLuminance(await drawn(ted))
+    const size = stampSize(image)
+    expect(size.width).toBeCloseTo(STAMP.maxWidth)
+    expect(size.height / size.width).toBeCloseTo(image.height / image.width)
+    expect(size.height).toBeLessThanOrEqual(STAMP.maxHeight)
+    expect((size.width / (image.width / PIXELS)) * MILS_PER_POINT).toBeGreaterThanOrEqual(6.7)
+    expect(image.width / (size.width / 72)).toBeGreaterThanOrEqual(300)
+  })
+
+  test('a symbol too high for the stamp box is brought down on both sides', () => {
+    const size = stampSize({ width: 1548, height: 1200 })
+    expect(size.height).toBeCloseTo(STAMP.maxHeight)
+    expect(size.width).toBeCloseTo((STAMP.maxHeight * 1548) / 1200)
+  })
+
+  test('a geometry that is not one is refused before the library loads', async () => {
+    const load = jest.fn()
+    const error = await failure(renderTedBarcode(ted, load, { unstable_geometry: 'tall' as 'instructions' }))
+    expect(error.code).toBe('INVALID_OPTION')
+    expect(error.details).toEqual({ field: 'unstable_geometry' })
+    expect(load).not.toHaveBeenCalled()
+  })
 })

@@ -24,6 +24,7 @@ export type {
   PrintableWithholding,
 } from './parse'
 export { renderTedBarcode } from './stamp'
+export type { StampGeometry } from './stamp'
 export { resolutionLine } from './layout'
 export { needsTransferableCopy, renderPrintedSample } from './render'
 export type { PrintedLogo, PrintedSampleOptions, RenderPrintedSampleOptions } from './render'
