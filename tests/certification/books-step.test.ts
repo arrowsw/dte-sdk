@@ -220,6 +220,34 @@ test('the happy path: history, period, four books sent and kept, the SOAP look, 
   ).toEqual(['2026', '2025'])
 })
 
+test('beforeUpload is handed every book before it is sent, and a book it refuses is left as a failed one', async () => {
+  const harness = await certificationHarness([
+    ...EMPTY_HISTORY,
+    entry,
+    avance2([rowsPage(), booksForm(), KEPT, ALL_APPROVED]),
+    post('pe_avance3', DECLARATION_ANSWERS.success),
+    uploads(reception('101'), reception('103'), reception('104')),
+    estUpAlways('LSO'),
+  ])
+  const seen: string[] = []
+  const beforeUpload = (upload: { kind: string; name: string; xml: string }): void => {
+    seen.push(`${upload.kind} ${upload.name} ${/<(LibroCompraVenta|LibroGuia)[ >]/.exec(upload.xml)?.[1]}`)
+    if (upload.name === 'salesBook') throw new DteError('INVALID_OPTION', { field: 'schema' })
+  }
+  const result = await runBooks({ ...harness.deps, beforeUpload }, booksState())
+  expect(seen).toEqual([
+    'book purchaseBook LibroCompraVenta',
+    'book salesBook LibroCompraVenta',
+    'book guideBook LibroGuia',
+    'book exemptPurchaseBook LibroCompraVenta',
+  ])
+  // The sales book never left: three uploads, its error among the events, and no result kept for it.
+  expect(harness.urls().filter((url) => url === UPLOAD)).toHaveLength(3)
+  expect(harness.events).toContainEqual({ step: 'BOOK_ERROR', book: 'salesBook', error: expect.any(String) })
+  expect(Object.keys(result.state.books.results).sort()).toEqual(['exemptPurchaseBook', 'guideBook', 'purchaseBook'])
+  expect(await harness.store.listArtefacts()).toContain('libro-ventas.xml')
+})
+
 test('a book the portal shows approved is skipped; without an exempt plan there are three books; with every book approved nothing is sent', async () => {
   const harness = await certificationHarness([
     ...EMPTY_HISTORY,

@@ -168,11 +168,11 @@ export const markSent = async (
 
 /**
  * EN: Sends one test set: issues it with the folios of the state's CAFs through the registry, keeps the envelope and
- * every document as artefacts (phase 5a reads them), uploads it, marks the folios sent whatever happened, and records
- * the track id and the Chile date of the send.
+ * every document as artefacts (phase 5a reads them), hands the envelope to `beforeUpload` when there is one, uploads
+ * it, marks the folios sent whatever happened, and records the track id and the Chile date of the send.
  * ES: Envía un set de pruebas: lo emite con los folios de los CAF del estado a través del registro, guarda el sobre y
- * cada documento como artefactos (la fase 5a los lee), lo sube, marca los folios enviados pase lo que pase, y registra
- * el track id y la fecha de Chile del envío.
+ * cada documento como artefactos (la fase 5a los lee), entrega el sobre a `beforeUpload` si hay uno, lo sube, marca
+ * los folios enviados pase lo que pase, y registra el track id y la fecha de Chile del envío.
  * @throws {DteError} EN: `MISSING_FIELD { field: 'plan', kind }` without the set's plan; the 5b-1, folio and upload codes. ES: `MISSING_FIELD { field: 'plan', kind }` sin el plan del set; los códigos de 5b-1, de folios y de envío.
  */
 export const sendTestSet = async (
@@ -188,6 +188,7 @@ export const sendTestSet = async (
   const issued = await issueTestSet(plan, {
     issuer: rt.issuer,
     receiver: rt.receiver,
+    receivers: rt.receivers,
     certificate: rt.certificate,
     folios: registryFolioSource(rt.registry, held),
     resolution: rt.resolution,
@@ -202,6 +203,7 @@ export const sendTestSet = async (
   const sentAt = rt.now().toISOString()
   const usedFolios = [...state.usedFolios, ...issued.cases.map((c) => ({ type: c.type, folio: c.folio }))]
   try {
+    await rt.beforeUpload?.({ kind: 'testSet', name: options.kind, xml: issued.envelope.xml })
     const trackId = await uploadForTrackId(
       (overrides) => uploadEnvelope(rt.sii, { envelope: issued.envelope }, overrides),
       'uploadEnvelope',
@@ -514,6 +516,7 @@ export const sendSimulation = async (
   const sentAt = rt.now().toISOString()
   const usedFolios = [...prepared.state.usedFolios, ...issued.cases.map((c) => ({ type: c.type, folio: c.folio }))]
   try {
+    await rt.beforeUpload?.({ kind: 'simulation', name: 'simulation', xml: issued.envelope.xml })
     const trackId = await uploadForTrackId(
       (overrides) => uploadEnvelope(rt.sii, { envelope: issued.envelope }, overrides),
       'uploadEnvelope',

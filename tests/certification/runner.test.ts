@@ -410,8 +410,9 @@ test('a resolution left out is dated once for the whole run, whatever day its la
   const basic = (await harness.store.readArtefact('sets-prueba/envio-set-basico.xml'))!
   const guide = (await harness.store.readArtefact('sets-prueba/envio-set-guia.xml'))!
   expect(basic).toContain('<FchResol>2026-11-15</FchResol>')
-  // Made after midnight UTC: its documents carry the new day, its resolution the day the run began.
-  expect(guide).toContain('<FchEmis>2026-11-16</FchEmis>')
+  // Made after midnight UTC, still the 15th in Chile: its documents carry the Chile day, its resolution the UTC day the
+  // run began.
+  expect(guide).toContain('<FchEmis>2026-11-15</FchEmis>')
   expect(guide).toContain('<FchResol>2026-11-15</FchResol>')
 })
 

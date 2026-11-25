@@ -9,9 +9,9 @@ on 2026-11-14 to ship inside the package with their validator as an optional pee
 
 | Entry | Holds | Size | Reaches `node:` |
 |---|---|---|---|
-| `dte-sdk` | Documents (export documents included), stamps, signatures, envelopes, books, verification of received documents, the assignment of invoices, SII web services client over `fetch`, public registry of issuers | 48.22 kB | Not by import: it asks the runtime for `node:crypto` at the first signature |
-| `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.4 kB | Yes, on first use |
-| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 86.75 kB | Yes, on first use |
+| `dte-sdk` | Documents (export documents included), stamps, signatures, envelopes, books, verification of received documents, the assignment of invoices, SII web services client over `fetch`, public registry of issuers | 48.33 kB | Not by import: it asks the runtime for `node:crypto` at the first signature |
+| `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.42 kB | Yes, on first use |
+| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 87.02 kB | Yes, on first use |
 | `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 19.89 kB | Yes, on first use |
 | `dte-sdk/catalogs` | The SII's large code tables: the business activities | 10.65 kB | No |
 | `dte-sdk/schemas` | The SII's schemas as text and the validation of a document against them; `xmllint-wasm` is an optional peer | 24.72 kB | No |
@@ -158,6 +158,9 @@ to 88 kB, and `dte-sdk/pdf` from 19.68 kB to 19.8 kB; the other entries did not 
 Writing a character outside ISO-8859-1 in the form it has there, on 2026-11-25, took `dte-sdk` from 47.86 kB to
 48.22 kB, over its 48 kB limit, which went to 50 kB, and `dte-sdk/portal` to 86.75 kB; the item code that wraps in
 its column took `dte-sdk/pdf` to 19.89 kB.
+The VAT of a settlement invoice split in own and third-party, on 2026-11-25, took `dte-sdk` to 48.33 kB, and with the
+customers that take turns in a test set and the check before each upload of the run, `dte-sdk/portal` to 87.02 kB,
+both under their limits.
 
 ## Why
 
