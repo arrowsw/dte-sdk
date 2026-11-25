@@ -9,7 +9,9 @@ import {
   type IssuedSet,
 } from '../../src/certification/issue-set'
 import { planCertificationSets, type ExportSetPlan, type PlannedExport } from '../../src/certification/set-plan'
+import { simulationFolioNeeds } from '../../src/certification/folios-step'
 import { parseTestSetText } from '../../src/certification/set-text'
+import { issueSimulation } from '../../src/certification/simulation'
 import { verifyDocumentSignature } from '../../src/document/sign'
 import { verifyEnvelopeSignature } from '../../src/envelope/sign'
 import { verifyTed } from '../../src/ted/build'
@@ -597,5 +599,44 @@ describe('what the run gives an export set', () => {
       field: 'referencedCase',
       caseId: id1(2),
     })
+  })
+})
+
+// The simulation issues again the cases of the sets the run sent. A run that sent the export sets issues their
+// documents again too: each as its set issued it, less the reference of the test set.
+describe('the export sets in the simulation', () => {
+  test('each document comes again, a note still names its invoice, and no document carries the SET reference', async () => {
+    const one = await issueTestSet(first, options())
+    const two = await issueTestSet(second, options())
+    const simulation = await issueSimulation({ export1: first, export2: second }, options())
+    expect(simulation.cases.map((issued) => [issued.caseId, issued.type])).toEqual(
+      [...one.cases, ...two.cases].map((issued) => [issued.caseId, issued.type]),
+    )
+    expect(simulation.types).toEqual([110, 112, 111])
+    const originals = [...one.cases, ...two.cases].map((issued) => issued.document)
+    simulation.cases.forEach((issued, index) => {
+      const references = issued.document.references
+      expect(references.some((reference) => reference.documentType === 'SET')).toBe(false)
+      expect(references).toHaveLength(originals[index].references.length - 1)
+      expect(issued.document.header.totals).toEqual(originals[index].header.totals)
+      expect(issued.document.items).toEqual(originals[index].items)
+    })
+    // The credit note refers to the invoice the simulation issued, and the debit note to that credit note.
+    expect(simulation.cases[1].document.references[0]).toMatchObject({
+      documentType: 110,
+      folio: String(simulation.cases[0].folio),
+      code: 3,
+    })
+    expect(simulation.cases[2].document.references[0]).toMatchObject({ documentType: 112, code: 1 })
+    expect(verifyEnvelopeSignature(simulation.envelope.xml).valid).toBe(true)
+    expect(await validateAgainstXsd(simulation.envelope.xml, 'EnvioDTE')).toEqual([])
+  })
+
+  test('its folios are counted with those of the other sets, and a simulation without them is as before', async () => {
+    expect(simulationFolioNeeds({ export1: first, export2: second })).toEqual({ 110: 4, 111: 1, 112: 1 })
+    expect(simulationFolioNeeds({ export2: second })).toEqual({ 110: 3 })
+    expect(simulationFolioNeeds(fullPlan())).not.toHaveProperty('110')
+    const error = await failure(issueSimulation({ export1: first }, options({})))
+    expect(error.details).toMatchObject({ field: 'exportSets.exchangeRates' })
   })
 })

@@ -527,6 +527,7 @@ export const sendSimulation = async (
     certificate: rt.certificate,
     folios: registryFolioSource(rt.registry, held),
     resolution: rt.resolution,
+    exportSets: rt.exportSets,
     now: rt.now,
   })
   await rt.store.writeArtefact(SIMULATION_ARTEFACT, issued.envelope.xml)

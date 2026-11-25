@@ -1000,13 +1000,20 @@ export const prepareExportSet = async (
   return [...context.drafts.values()]
 }
 
-// An export set: every document worked out first, then each issued in the set's order with its folio, a note
-// referring to the folio its document took.
-const issueExports = async (context: IssueContext, plan: ExportSetPlan): Promise<void> => {
+/**
+ * EN: Issues the documents of an export set: every one worked out first, then each in the set's order with its folio,
+ * a note referring to the folio its document took. The simulation issues them without the reference of the test set,
+ * which is the first of each. Internal.
+ * ES: Emite los documentos de un set de exportación: primero se resuelven todos, luego cada uno en el orden del set
+ * con su folio, y una nota refiere el folio que tomó su documento. La simulación los emite sin la referencia del set
+ * de pruebas, que es la primera de cada uno. Interno.
+ */
+export const issueExports = async (context: IssueContext, plan: ExportSetPlan, simulated = false): Promise<void> => {
   const drafts = await prepareExportSet(plan, context.options, context.date)
   for (const draft of drafts) {
     const { planned } = draft
     const referenced = planned.reference === undefined ? undefined : context.records.get(planned.reference.caseId)
+    const references = exportReferences(draft, context.date, referenced)
     await issueCertificationDocument(context, {
       caseId: planned.caseId,
       type: planned.type,
@@ -1014,7 +1021,7 @@ const issueExports = async (context: IssueContext, plan: ExportSetPlan): Promise
       lines: draft.lines,
       style: 'plain',
       receiver: draft.receiver,
-      references: exportReferences(draft, context.date, referenced),
+      references: simulated ? references.slice(1) : references,
       globalAdjustments: draft.globalAdjustments,
       transport: draft.transport,
       options: draft.options,
