@@ -391,7 +391,21 @@ const PDF_EXPORTS = [
   'writePrintedSamples',
 ] as const
 
-const CATALOGS_EXPORTS = ['BUSINESS_ACTIVITIES', 'businessActivity', 'isBusinessActivityCode'] as const
+const CATALOGS_EXPORTS = [
+  'BUSINESS_ACTIVITIES',
+  'businessActivity',
+  'isBusinessActivityCode',
+  'CUSTOMS_COUNTRIES',
+  'CUSTOMS_PACKAGE_TYPES',
+  'CUSTOMS_PAYMENT_TERMS',
+  'CUSTOMS_PORTS',
+  'CUSTOMS_SALE_CLAUSES',
+  'CUSTOMS_SALE_MODES',
+  'CUSTOMS_TRANSPORT_ROUTES',
+  'CUSTOMS_UNITS',
+  'customsCode',
+  'customsName',
+] as const
 
 const SCHEMAS_EXPORTS = [
   'SCHEMA_SOURCES',
