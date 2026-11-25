@@ -252,13 +252,18 @@ export const itemNotes = (item: PrintableItem): readonly string[] => {
   ].filter(Boolean)
 }
 
-export const itemRow = (item: PrintableItem, fonts: Fonts, descriptionWidth: number) => {
+// One row of the detail: the description and the code wrapped to their columns, and the height of the taller of the two.
+export const itemRow = (item: PrintableItem, fonts: Fonts, descriptionWidth: number, codeWidth: number) => {
   const lines = [item.name, ...descriptionLines(item)].flatMap((line) =>
     wrapText(line, fonts.normal, FONT.tiny, descriptionWidth),
   )
   const notes = itemNotes(item)
-  const height = Math.max(TABLE.rowHeight, (lines.length + notes.length) * LINE.tiny + TABLE.padY * 2)
-  return { lines, notes, height }
+  const codes = wrapText(item.code, fonts.normal, FONT.tiny, codeWidth)
+  const height = Math.max(
+    TABLE.rowHeight,
+    Math.max(lines.length + notes.length, codes.length) * LINE.tiny + TABLE.padY * 2,
+  )
+  return { lines, notes, codes, height }
 }
 
 const SLAUGHTER_BASE = 'Monto Base Faenamiento Carne'
