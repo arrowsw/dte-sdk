@@ -11,7 +11,8 @@ export type BarcodeModule = {
     readonly bcid: string
     readonly text: string
     readonly scale: number
-    readonly height: number
+    readonly height?: number
+    readonly columns?: number
     readonly padding: number
     readonly includetext: boolean
     readonly binarytext: boolean
@@ -42,6 +43,39 @@ const STAMP_OPTIONS = {
   bcid: 'pdf417',
   scale: 3,
   height: 10,
+  padding: 6,
+  includetext: false,
+  binarytext: true,
+  eclevel: 5,
+  fixedeclevel: true,
+} as const
+
+/**
+ * EN: **Unstable**: no stamp drawn this way has been printed and read back with a scanner yet, so it may change in any
+ * release, a patch included.
+ * A way to draw the stamp other than the one of every release so far. `'instructions'` follows what section A.2.5 of
+ * the SII's instructions asks of the symbol and the default does not: rows three modules high, where the default's are
+ * one; byte compaction alone whenever the TED fits in it; and a raster of four pixels a module, over 300 DPI at the
+ * size a sheet draws it at. It has eighteen data columns, 387 modules across with a quiet zone of six on each side:
+ * 9 cm across gives a module of 9.2 mils. It is for the sheet; on the continuous paper its module is under two dots of
+ * a 203 DPI printer, which the default's is not.
+ * ES: **Inestable**: ningún timbre dibujado así se ha impreso y leído de vuelta con un lector todavía, así que puede
+ * cambiar en cualquier versión, incluso un patch.
+ * Una forma de dibujar el timbre distinta de la de todas las versiones hasta ahora. `'instructions'` sigue lo que la
+ * sección A.2.5 del instructivo del SII pide del símbolo y el valor por defecto no: filas de tres módulos de alto,
+ * donde las del valor por defecto son de uno; solo compactación de bytes siempre que el TED quepa en ella; y una trama
+ * de cuatro píxeles por módulo, sobre 300 DPI al tamaño con que lo dibuja una hoja. Tiene dieciocho columnas de datos,
+ * 387 módulos de ancho con una zona de silencio de seis a cada lado: 9 cm de ancho dan un módulo de 9,2 mils. Es para
+ * la hoja; en el papel continuo su módulo queda bajo dos puntos de una impresora de 203 DPI, y el del valor por
+ * defecto no.
+ */
+export type StampGeometry = 'instructions'
+
+// The symbol of `'instructions'`: no height is given, so the rows keep the library's own proportion, three modules.
+const INSTRUCTIONS_OPTIONS = {
+  bcid: 'pdf417',
+  scale: 4,
+  columns: 18,
   padding: 6,
   includetext: false,
   binarytext: true,
@@ -84,9 +118,10 @@ export const byteCompactionCodewords = (bytes: Uint8Array): readonly number[] =>
 // A stamp with a byte above ASCII, an `ñ` in a name another issuer signed, is written in bytes alone. Mixed with text
 // compaction, such a byte travels behind a shift that readers are known to lose, and the stamp then reads as another
 // text than the one that was signed. A stamp of plain ASCII, as every one dte-sdk issues, keeps the compaction the
-// library picks, and so does one too long to fit in bytes.
-const rawCodewords = (bytes: Uint8Array): string | null => {
-  if (bytes.every((byte) => byte < 0x80)) return null
+// library picks, and so does one too long to fit in bytes. The geometry of the instructions writes every stamp that
+// fits in bytes alone, the compaction they name.
+const rawCodewords = (bytes: Uint8Array, always: boolean): string | null => {
+  if (!always && bytes.every((byte) => byte < 0x80)) return null
   const codewords = byteCompactionCodewords(bytes)
   return codewords.length > MAX_DATA_CODEWORDS
     ? null
@@ -97,13 +132,16 @@ const rawCodewords = (bytes: Uint8Array): string | null => {
  * EN: Renders the stamp with an already loaded barcode module. Internal: `renderPrintedSample` shares it.
  * ES: Genera el timbre con un módulo de códigos de barras ya cargado. Interno: lo comparte `renderPrintedSample`.
  */
-export const renderTedBarcodeWith = async (barcode: BarcodeModule, tedXml: string): Promise<Uint8Array> => {
+export const renderTedBarcodeWith = async (
+  barcode: BarcodeModule,
+  tedXml: string,
+  geometry?: StampGeometry,
+): Promise<Uint8Array> => {
   if (!tedXml.includes('<TED')) throw new DteError('MISSING_FIELD', { field: 'TED' })
-  const raw = rawCodewords(encodeLatin1(tedXml))
+  const options = geometry === undefined ? STAMP_OPTIONS : INSTRUCTIONS_OPTIONS
+  const raw = rawCodewords(encodeLatin1(tedXml), geometry !== undefined)
   return new Uint8Array(
-    await barcode.toBuffer(
-      raw === null ? { ...STAMP_OPTIONS, text: tedXml } : { ...STAMP_OPTIONS, text: raw, raw: true },
-    ),
+    await barcode.toBuffer(raw === null ? { ...options, text: tedXml } : { ...options, text: raw, raw: true }),
   )
 }
 
@@ -117,9 +155,15 @@ export const renderTedBarcodeWith = async (barcode: BarcodeModule, tedXml: strin
  * lo usa directo.
  * @param tedXml EN: the `<TED>…</TED>` XML, verbatim from the signed document. ES: el XML `<TED>…</TED>`, textual del documento firmado.
  * @param load EN: loader of the barcode library, for tests. ES: cargador de la librería de códigos de barras, para tests.
- * @throws {DteError} EN: `MISSING_FIELD` (field `TED`) without a `<TED`, `ENCODING_UNSUPPORTED_CHAR` for a code point above U+00FF, `DEPENDENCY_UNAVAILABLE` when the library cannot be loaded. ES: `MISSING_FIELD` (campo `TED`) sin `<TED`, `ENCODING_UNSUPPORTED_CHAR` ante un code point mayor a U+00FF, `DEPENDENCY_UNAVAILABLE` si la librería no se puede cargar.
+ * @param options EN: `unstable_geometry`, to draw the symbol as `StampGeometry` says; whoever draws it then scales its two sides by one factor. ES: `unstable_geometry`, para dibujar el símbolo como dice `StampGeometry`; quien lo dibuja escala entonces sus dos lados por un mismo factor.
+ * @throws {DteError} EN: `INVALID_OPTION` (field `unstable_geometry`) for a geometry that is not one, `MISSING_FIELD` (field `TED`) without a `<TED`, `ENCODING_UNSUPPORTED_CHAR` for a code point above U+00FF, `DEPENDENCY_UNAVAILABLE` when the library cannot be loaded. ES: `MISSING_FIELD` (campo `TED`) sin `<TED`, `ENCODING_UNSUPPORTED_CHAR` ante un code point mayor a U+00FF, `DEPENDENCY_UNAVAILABLE` si la librería no se puede cargar.
  */
 export const renderTedBarcode = async (
   tedXml: string,
   load: () => Promise<BarcodeModule> = loadBarcodeModule,
-): Promise<Uint8Array> => renderTedBarcodeWith(await load(), tedXml)
+  options: { readonly unstable_geometry?: StampGeometry } = {},
+): Promise<Uint8Array> => {
+  if (options.unstable_geometry !== undefined && options.unstable_geometry !== 'instructions')
+    throw new DteError('INVALID_OPTION', { field: 'unstable_geometry' })
+  return renderTedBarcodeWith(await load(), tedXml, options.unstable_geometry)
+}

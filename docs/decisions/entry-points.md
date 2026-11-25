@@ -12,7 +12,7 @@ on 2026-11-14 to ship inside the package with their validator as an optional pee
 | `dte-sdk` | Documents (export documents included), stamps, signatures, envelopes, books, verification of received documents, the assignment of invoices, SII web services client over `fetch`, public registry of issuers | 49.55 kB | Not by import: it asks the runtime for `node:crypto` at the first signature |
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.42 kB | Yes, on first use |
 | `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 87.07 kB | Yes, on first use |
-| `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 28.21 kB | Yes, on first use |
+| `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 28.37 kB | Yes, on first use |
 | `dte-sdk/catalogs` | The large code tables: the SII's business activities and the customs tables of an export document | 18.03 kB | No |
 | `dte-sdk/schemas` | The SII's schemas as text and the validation of a document against them; `xmllint-wasm` is an optional peer | 24.72 kB | No |
 
@@ -174,6 +174,8 @@ format asks, so `dte-sdk/pdf` carries those tables: it went from 19.93 kB to 28.
 to 30 kB; `dte-sdk/catalogs` measured 18.03 kB.
 The settlement date of an export invoice paid in advance and the marks of its packages, on 2026-11-25, took
 `dte-sdk` to 49.55 kB, under its limit, and `dte-sdk/portal` to 87.07 kB.
+The stamp of the SII's instructions as an option for the sheet, on 2026-11-25, took `dte-sdk/pdf` to 28.37 kB,
+under its limit; the other entries did not move.
 
 ## Why
 

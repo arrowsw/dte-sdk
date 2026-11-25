@@ -13,6 +13,7 @@ import {
   PAGE,
   ROLL,
   STAMP,
+  stampSize,
   verificationLine,
   TABLE,
   TRANSFER_REASON_NAMES,
@@ -54,7 +55,7 @@ import {
 import { longDate } from './words'
 import type { PrintableCommission, PrintableDocument, PrintableItem, PrintableReference } from './parse'
 import { buildRoll, drawRoll, rollHeight } from './roll'
-import { loadBarcodeModule, renderTedBarcodeWith, type BarcodeModule } from './stamp'
+import { loadBarcodeModule, renderTedBarcodeWith, type BarcodeModule, type StampGeometry } from './stamp'
 
 /**
  * EN: A logo for the top left of the sample.
@@ -95,6 +96,8 @@ export type RenderPrintedSampleOptions = PrintedSampleOptions & {
   readonly paper?: 'sheet' | 'roll'
   /** EN: Print the PDF417 stamp and its legends; default true. `false` is allowed only for receipts, 39 and 41, whose printed stamp is optional from 1 January 2026 (Res. Ex. SII N° 207 of 2025); the legends go with it, and the XML keeps its `TED`. ES: Imprimir el timbre PDF417 y sus leyendas; por defecto true. `false` solo se admite en boletas, 39 y 41, cuyo timbre impreso es opcional desde el 1 de enero de 2026 (Res. Ex. SII N° 207 de 2025); las leyendas se van con él, y el XML conserva su `TED`. */
   readonly stamp?: boolean
+  /** EN: **Unstable**: draw the stamp as `StampGeometry` says instead of the way of every release so far; `'instructions'` is the symbol section A.2.5 of the SII's instructions describes, drawn with one factor for its two sides. For the sheet alone: refused on continuous paper. No stamp drawn this way has been printed and read back with a scanner yet. ES: **Inestable**: dibujar el timbre como dice `StampGeometry` en vez de como en todas las versiones hasta ahora; `'instructions'` es el símbolo que describe la sección A.2.5 del instructivo del SII, dibujado con un solo factor para sus dos lados. Solo para la hoja: se rechaza en papel continuo. Ningún timbre dibujado así se ha impreso y leído de vuelta con un lector todavía. */
+  readonly unstable_stampGeometry?: StampGeometry
 }
 
 /**
@@ -656,13 +659,29 @@ const drawAcknowledgement = (canvas: Canvas, legendLines: readonly string[], y: 
   return y + boxHeight
 }
 
-const drawStamp = (canvas: Canvas, image: PDFImage, y: number, resolution: string, verification: string): number => {
-  const black = canvas.paint(COLOURS.black)
-  const natural = image.scale(1)
+// The size the stamp of every release so far is drawn at: its width and its height held to the stamp box each on its
+// own.
+const fieldStampSize = (natural: { readonly width: number; readonly height: number }) => {
   const targetWidth = Math.max(STAMP.minWidth, Math.min(STAMP.maxWidth, natural.width))
   const scale = targetWidth / natural.width
-  const width = Math.round(targetWidth)
-  const height = Math.max(STAMP.minHeight, Math.min(STAMP.maxHeight, Math.round(natural.height * scale)))
+  return {
+    width: Math.round(targetWidth),
+    height: Math.max(STAMP.minHeight, Math.min(STAMP.maxHeight, Math.round(natural.height * scale))),
+  }
+}
+
+const drawStamp = (
+  canvas: Canvas,
+  image: PDFImage,
+  y: number,
+  resolution: string,
+  verification: string,
+  geometry: StampGeometry | undefined,
+): number => {
+  const black = canvas.paint(COLOURS.black)
+  const natural = image.scale(1)
+  // The symbol of the instructions keeps its proportion: both sides by one factor.
+  const { width, height } = geometry === undefined ? fieldStampSize(natural) : stampSize(natural)
   const x = MARGIN + STAMP.marginLeft
   let yy = y + GAP.section
   canvas.page.drawImage(image, { x, y: canvas.height - yy - height, width, height })
@@ -736,6 +755,7 @@ type SheetInput = {
   readonly resolution: string
   readonly verification: string
   readonly transferable: boolean
+  readonly stampGeometry: StampGeometry | undefined
 }
 
 // A table: its title and column head, kept with its first row, and one block per row. A page that opens with a row
@@ -774,6 +794,7 @@ const sheetBlocks = ({
   resolution,
   verification,
   transferable,
+  stampGeometry,
 }: SheetInput): readonly Block[] => {
   const legendLines = transferable ? wrapText(ACKNOWLEDGEMENT_TEXT, fonts.normal, FONT.legal, BOX_INNER_WIDTH) : []
   const transferReason = doc.type === 52 ? doc.transferReason : null
@@ -920,7 +941,7 @@ const sheetBlocks = ({
           {
             height: GAP.section + STAMP.maxHeight + STAMP.legendGap + LINE.legal * 3,
             gap: 0,
-            draw: (canvas: Canvas, y: number) => drawStamp(canvas, stamp, y, resolution, verification),
+            draw: (canvas: Canvas, y: number) => drawStamp(canvas, stamp, y, resolution, verification, stampGeometry),
           },
         ]
       : []),
@@ -1009,7 +1030,7 @@ const draw = async (
   const stamp =
     doc.tedXml === '' || options.stamp === false
       ? null
-      : await document.embedPng(await renderTedBarcodeWith(modules.barcode, doc.tedXml))
+      : await document.embedPng(await renderTedBarcodeWith(modules.barcode, doc.tedXml, options.unstable_stampGeometry))
   // A document with no TED says so where the stamp goes; a receipt printed without its stamp on purpose does not.
   const unstamped = doc.tedXml === '' && options.stamp !== false
   const transferable = options.transferable === true && needsTransferableCopy(doc)
@@ -1021,7 +1042,16 @@ const draw = async (
     drawRoll({ page: roll, fonts, height, paint: ([r, g, b]) => pdf.rgb(r, g, b) }, rows)
     return document.save()
   }
-  const blocks = sheetBlocks({ doc, fonts, stamp, unstamped, resolution, verification, transferable })
+  const blocks = sheetBlocks({
+    doc,
+    fonts,
+    stamp,
+    unstamped,
+    resolution,
+    verification,
+    transferable,
+    stampGeometry: options.unstable_stampGeometry,
+  })
   const single = paginate(headerBottom(doc, fonts, logo, MARGIN, false), blocks)
   // A document of several pages numbers them under the SII office, so its header may be taller.
   const pages = single.length === 1 ? single : paginate(headerBottom(doc, fonts, logo, MARGIN, true), blocks)
@@ -1049,7 +1079,11 @@ const draw = async (
 }
 
 // `paper` is one of two values and the stamp may be left out only on a receipt (Res. Ex. SII N° 207 of 2025).
-const checkPaperAndStamp = (doc: PrintableDocument, { paper, stamp }: RenderPrintedSampleOptions): void => {
+const checkPaperAndStamp = (doc: PrintableDocument, options: RenderPrintedSampleOptions): void => {
+  const { paper, stamp, unstable_stampGeometry: geometry } = options
+  // The geometry of the instructions is for the sheet: on the roll its module is under two dots of a 203 DPI printer.
+  if (geometry !== undefined && (geometry !== 'instructions' || paper === 'roll'))
+    throw new DteError('INVALID_OPTION', { field: 'unstable_stampGeometry' })
   if (paper !== undefined && paper !== 'sheet' && paper !== 'roll')
     throw new DteError('INVALID_OPTION', { field: 'paper', value: paper })
   if (stamp !== undefined && typeof stamp !== 'boolean')
