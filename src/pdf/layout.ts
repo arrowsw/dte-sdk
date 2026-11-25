@@ -72,9 +72,6 @@ export const COLOURS = {
   lightGrey: [0.88, 0.88, 0.88],
 } as const
 
-/** EN: SII office printed under the type box when none is given. ES: Oficina del SII impresa bajo el recuadro cuando no se indica otra. */
-export const DEFAULT_SII_OFFICE = 'S.I.I. - SANTIAGO CENTRO'
-
 /** EN: Site the legend under the stamp names when none is given. ES: Sitio que nombra la leyenda bajo el timbre cuando no se indica otro. */
 export const DEFAULT_VERIFICATION_SITE = 'www.sii.cl'
 

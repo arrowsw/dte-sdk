@@ -457,7 +457,7 @@ export type PackageType = {
   readonly code?: number
   /** EN: Number of packages of this type (1 to 9999999999). ES: `CantBultos` — Cantidad de bultos de este tipo, de 1 a 9999999999. */
   readonly count?: number
-  /** EN: Marks of the packages (max 255). ES: `Marcas` — Identificación de marcas, máximo 255. */
+  /** EN: Marks of the packages (max 255); required on an export invoice (110) for a package that is not a container (codes 73 to 76, and 78). ES: `Marcas` — Identificación de marcas, máximo 255; obligatorias en una factura de exportación (110) para un bulto que no es un contenedor (códigos 73 a 76, y 78). */
   readonly marks?: string
   /** EN: Container id, with its dash and check digit (max 25). ES: `IdContainer` — Id del contenedor, con guion y dígito verificador, máximo 25. */
   readonly containerId?: string
@@ -630,7 +630,7 @@ export type HeaderOptions = {
   readonly paymentTerms?: PaymentTerms
   /** EN: Export payment terms, the code of the customs service's table of payment forms (1 to 99, in digits); on an export document 21, without payment, makes its total zero (Formato DTE 2.5, field 124). ES: `FmaPagExp` — Forma de pago de exportación, el código de la tabla de formas de pago de Aduana (1 a 99, en dígitos); en un documento de exportación el 21, sin pago, deja su total en cero (Formato DTE 2.5, campo 124). */
   readonly exportPaymentTerms?: string
-  /** EN: Settlement date. ES: `FchCancel` — Fecha de cancelación. */
+  /** EN: Settlement date; required on an export invoice (110) paid in advance (`exportPaymentTerms` 32). ES: `FchCancel` — Fecha de cancelación; obligatoria en una factura de exportación (110) pagada por anticipado (`exportPaymentTerms` 32). */
   readonly settlementDate?: string
   /** EN: Settled amount. ES: `MntCancel` — Monto cancelado. */
   readonly settledAmount?: number
@@ -813,6 +813,8 @@ export type DocumentInput = {
   readonly pricesIncludeVat?: boolean
   /** EN: Withhold the whole VAT (`ImptoReten` 15, total without VAT); true by default on purchase invoices, settable on the notes that affect one, and refused on a receipt when true. ES: `ImptoReten` — Retener todo el IVA (código 15, total sin IVA); true por defecto en facturas de compra (46), se puede fijar en las notas que las afectan, y en true se rechaza en una boleta. */
   readonly withholdVat?: boolean
+  /** EN: On a settlement invoice (43), write the VAT split in own and third-party, as Formato DTE 2.5 lets a company that sells on behalf of a principal do (fields 113 and 114): the VAT of the commissions is the own VAT and the rest of the VAT is the third parties'. A document without VAT has no split, and neither has one whose commissions' VAT is negative or above the VAT, since the format holds each part within the VAT. Refused on any other type and with explicit `totals`, which carry `ownVatAmount` and `thirdPartyVatAmount` themselves. ES: `IVAProp`, `IVATerc` — En una liquidación factura (43), escribir el IVA separado en propio y de terceros, como el Formato DTE 2.5 permite a una empresa que vende por cuenta de un mandante (campos 113 y 114): el IVA de las comisiones es el IVA propio y el resto del IVA es el de terceros. Un documento sin IVA no lleva separación, ni uno cuyo IVA de comisiones es negativo o mayor que el IVA, porque el formato mantiene cada parte dentro del IVA. Se rechaza en cualquier otro tipo y con `totals` explícitos, que llevan ellos mismos `ownVatAmount` y `thirdPartyVatAmount`. */
+  readonly splitVat?: boolean
   /** EN: Explicit totals (advanced), written as given; computed when omitted. ES: `Totales` — Totales explícitos (uso avanzado), escritos tal como vienen; se calculan si se omiten. */
   readonly totals?: Totals
   /** EN: Currency of the amounts of an export document, required there and refused on any other type. ES: `TpoMoneda` — Moneda de los montos de un documento de exportación, obligatoria en él y rechazada en cualquier otro tipo. */

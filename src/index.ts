@@ -243,6 +243,7 @@ export type {
   ReceivedDocumentsVerification,
   ReceivedDocument,
   ReceivedSignatureCheck,
+  ReceivedSigner,
   ReceivedTedCheck,
   ReceivedCafCheck,
   TedMismatch,

@@ -19,6 +19,7 @@ import {
   stampingRoutes,
   stateWith,
   TODAY,
+  UPLOAD,
   uploadRoute,
 } from '../support/certification-harness'
 import {
@@ -72,6 +73,28 @@ describe('sendSimulation', () => {
     expect(harness.steps().filter((step) => step === 'CAF_OK')).toHaveLength(6)
     expect(harness.steps().slice(-2)).toEqual(['SIM_SENDING', 'SIM_OK'])
     expect(harness.events[0]).toEqual({ step: 'SIM_START' })
+  })
+
+  test('beforeUpload is handed the envelope of the simulation, and one that throws sends nothing', async () => {
+    const harness = await certificationHarness([...stampingRoutes(), uploadRoute(reception('777'))])
+    const seen: { kind: string; name: string; xml: string }[] = []
+    const result = await sendSimulation(
+      { ...harness.deps, beforeUpload: (upload) => void seen.push(upload) },
+      stateWith({ plan, cafs: [] }),
+    )
+    expect(result.outcome).toBe('sent')
+    expect(seen.map(({ kind, name }) => [kind, name])).toEqual([['simulation', 'simulation']])
+    expect(seen[0].xml).toBe(await harness.store.readArtefact('simulacion/envio-simulacion.xml'))
+    const refusing = await certificationHarness([...stampingRoutes(), uploadRoute(reception('778'))])
+    const refuse = (): Promise<void> => Promise.reject(new DteError('INVALID_OPTION', { field: 'schema' }))
+    const error = await failure(
+      sendSimulation({ ...refusing.deps, beforeUpload: refuse }, stateWith({ plan, cafs: [] })),
+    )
+    expect(error.code).toBe('INVALID_OPTION')
+    expect(refusing.urls().filter((url) => url === UPLOAD)).toEqual([])
+    const saved = (await refusing.store.load())!
+    expect(saved.simulation).toBeUndefined()
+    expect(saved.usedFolios.length).toBeGreaterThan(10)
   })
 
   test('the sets’ CAFs are never reused, and a failed send still marks the folios', async () => {

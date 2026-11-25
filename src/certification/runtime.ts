@@ -24,6 +24,10 @@ export type CertificationDependencies = {
   readonly issuer: CertificationIssuerInput
   /** EN: The receiver of the documents of the run; the test receiver of `DEFAULT_CERTIFICATION_RECEIVER` by default, field by field. ES: `Receptor` — El receptor de los documentos de la corrida; por defecto el receptor de prueba de `DEFAULT_CERTIFICATION_RECEIVER`, campo por campo. */
   readonly receiver?: Partial<ReceiverInput>
+  /** EN: The customers the invoices and the guides of a test set name in turn, as the SII's instructions for the set ask ("Utilice RUT distintos para las distintas facturas"); a note names the customer of the document it refers to. Each takes what it leaves out from `DEFAULT_CERTIFICATION_RECEIVER`. Without it, or empty, every document of a set names `receiver`. ES: `Receptor` — Los clientes que las facturas y las guías de un set de pruebas nombran por turno, como piden las instrucciones del SII para el set ("Utilice RUT distintos para las distintas facturas"); una nota nombra al cliente del documento que refiere. Cada uno toma lo que omite de `DEFAULT_CERTIFICATION_RECEIVER`. Sin ella, o vacía, cada documento de un set nombra a `receiver`. */
+  readonly receivers?: readonly Partial<ReceiverInput>[]
+  /** EN: Called with every file the run is about to upload (a test set, the simulation, a book), after it is kept as an artefact and before it is sent. Throwing stops the step there: nothing reaches the SII, and the step ends as it does when an upload fails, with the folios of the file counted as used. It is where to check the file against the SII's schema (`validateAgainstSchema` of `dte-sdk/schemas`). ES: Se llama con cada archivo que la corrida está por subir (un set de pruebas, la simulación, un libro), después de guardarlo como artefacto y antes de enviarlo. Lanzar detiene el paso ahí: nada llega al SII, y el paso termina como cuando falla una subida, con los folios del archivo contados como usados. Es donde revisar el archivo contra el esquema del SII (`validateAgainstSchema` de `dte-sdk/schemas`). */
+  readonly beforeUpload?: (upload: CertificationUpload) => void | Promise<void>
   readonly certificate: Certificate
   /** EN: The resolution of the certification environment; number 0 and today's UTC date by default. ES: `NroResol`, `FchResol` — La resolución del ambiente de certificación; por defecto número 0 y la fecha UTC de hoy. */
   readonly resolution?: { readonly number?: number; readonly date?: string }
@@ -35,6 +39,19 @@ export type CertificationDependencies = {
   readonly onProgress?: (event: CertificationProgressEvent) => void
   /** EN: The contact the exchange answers name, when any. ES: `NmbContacto`, `MailContacto`, `FonoContacto` — El contacto que nombran las respuestas del intercambio, si hay. */
   readonly contact?: ExchangeContact
+}
+
+/**
+ * EN: A file the certification run is about to upload.
+ * ES: Un archivo que la corrida de certificación está por subir.
+ */
+export type CertificationUpload = {
+  /** EN: What the file is: a test set, the simulation or a book. ES: Qué es el archivo: un set de pruebas, la simulación o un libro. */
+  readonly kind: 'testSet' | 'simulation' | 'book'
+  /** EN: Which one: the key of the set (`basic`, `guide`, …), `simulation`, or the key of the book (`salesBook`, `purchaseBook`, `exemptPurchaseBook`, `guideBook`). ES: Cuál: la clave del set (`basic`, `guide`, …), `simulation`, o la clave del libro (`salesBook`, `purchaseBook`, `exemptPurchaseBook`, `guideBook`). */
+  readonly name: string
+  /** EN: The file as it will be uploaded. ES: El archivo tal como se subirá. */
+  readonly xml: string
 }
 
 /**
@@ -132,9 +149,10 @@ export type StepResult<Outcome extends string> = {
  * EN: The dependencies with their defaults resolved. Internal to the steps.
  * ES: Las dependencias con sus valores por defecto resueltos. Interno de los pasos.
  */
-export type Runtime = Omit<CertificationDependencies, 'issuer' | 'receiver' | 'resolution'> & {
+export type Runtime = Omit<CertificationDependencies, 'issuer' | 'receiver' | 'receivers' | 'resolution'> & {
   readonly issuer: IssuerInput
   readonly receiver: ReceiverInput
+  readonly receivers: readonly ReceiverInput[]
   readonly resolution: { readonly number: number; readonly date: string }
   readonly now: () => Date
   readonly sleep: (ms: number) => Promise<void>
@@ -181,6 +199,7 @@ export const runtime = (deps: CertificationDependencies): Runtime => {
     ...deps,
     issuer: completeIssuer(deps.issuer),
     receiver: { ...DEFAULT_CERTIFICATION_RECEIVER, ...given(deps.receiver ?? {}) },
+    receivers: (deps.receivers ?? []).map((receiver) => ({ ...DEFAULT_CERTIFICATION_RECEIVER, ...given(receiver) })),
     // The date of a resolution left out is the UTC day of the moment the step starts.
     resolution: completeResolution(deps.resolution, now()),
     now,

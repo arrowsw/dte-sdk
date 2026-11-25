@@ -5,7 +5,7 @@ import { DteError } from '../src/errors'
 import { calculateLineAmount } from '../src/totals/calculate'
 import type { Currency } from '../src/catalogs/codes'
 import { FOREIGN_RECEIVER_RUT } from '../src/catalogs/codes'
-import type { DocumentInput, LineItemInput } from '../src/model/document'
+import type { DocumentInput, LineItemInput, PackageType } from '../src/model/document'
 import { FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from './support/fixtures'
 
 const issuer = {
@@ -1424,6 +1424,96 @@ describe('commissions and other charges', () => {
     })
   const charge = { kind: 'otherCharge', description: 'Flete' } as const
 
+  // Formato DTE 2.5, fields 113 and 114: the VAT may be split in own and third-party, each within the VAT.
+  describe('the VAT split in own and third-party (`splitVat`)', () => {
+    test("the VAT of the commissions is the own VAT and the rest is the third parties'", () => {
+      const doc = settle({ splitVat: true })
+      expect(doc.header.totals).toEqual({
+        netAmount: 10000,
+        vatRate: 19,
+        vatAmount: 1900,
+        ownVatAmount: 190,
+        thirdPartyVatAmount: 1710,
+        commissions: { netValue: 1000, vatValue: 190 },
+        totalAmount: 10710,
+      })
+      expect(toSiiDocument(doc).Encabezado.Totales).toMatchObject({ IVA: 1900, IVAProp: 190, IVATerc: 1710 })
+      // Left out, the totals are as they were.
+      expect(settle().header.totals.ownVatAmount).toBeUndefined()
+      expect(settle({ splitVat: false }).header.totals.thirdPartyVatAmount).toBeUndefined()
+    })
+
+    test("without commissions the whole VAT is the third parties', and commissions with the whole VAT leave them none", () => {
+      expect(settle({ splitVat: true, commissions: [] }).header.totals).toMatchObject({
+        vatAmount: 1900,
+        ownVatAmount: 0,
+        thirdPartyVatAmount: 1900,
+      })
+      const whole = settle({
+        splitVat: true,
+        commissions: [{ kind: 'commission', description: 'Todo', netValue: 10000 }],
+      })
+      expect(whole.header.totals).toMatchObject({ vatAmount: 1900, ownVatAmount: 1900, thirdPartyVatAmount: 0 })
+    })
+
+    test('a document without VAT, or whose commissions carry a VAT below zero or above the VAT, has no split', () => {
+      const exempt = settle({
+        splitVat: true,
+        items: [{ name: 'Venta exenta', unitPrice: 10000, settledDocumentType: '34', exemptIndicator: 1 }],
+      })
+      expect(exempt.header.totals.vatAmount).toBeUndefined()
+      expect(exempt.header.totals.ownVatAmount).toBeUndefined()
+      const negative = settle({
+        splitVat: true,
+        commissions: [{ kind: 'commission', description: 'Rebaja', netValue: -1000 }],
+      })
+      expect(negative.header.totals.commissions).toEqual({ netValue: -1000, vatValue: -190 })
+      expect(negative.header.totals.ownVatAmount).toBeUndefined()
+      expect(negative.header.totals.thirdPartyVatAmount).toBeUndefined()
+      const over = settle({
+        splitVat: true,
+        commissions: [{ kind: 'commission', description: 'Mayor', netValue: 10010 }],
+      })
+      expect(over.header.totals.commissions?.vatValue).toBe(1902)
+      expect(over.header.totals.ownVatAmount).toBeUndefined()
+    })
+
+    test('it is refused on any other type and with explicit totals', () => {
+      expectError(
+        () =>
+          createDocument({
+            type: 33,
+            folio: 1,
+            issuer,
+            receiver,
+            items: [{ name: 'X', unitPrice: 1000 }],
+            splitVat: true,
+          }),
+        'INVALID_OPTION',
+        { field: 'splitVat' },
+      )
+      expectError(
+        () =>
+          settle({ splitVat: true, totals: { netAmount: 10000, vatRate: 19, vatAmount: 1900, totalAmount: 11900 } }),
+        'INVALID_OPTION',
+        {
+          field: 'splitVat',
+        },
+      )
+      // False is none, wherever it is given.
+      expect(() =>
+        createDocument({
+          type: 33,
+          folio: 1,
+          issuer,
+          receiver,
+          items: [{ name: 'X', unitPrice: 1000 }],
+          splitVat: false,
+        }),
+      ).not.toThrow()
+    })
+  })
+
   test('the totals carry the sums of the lines and take them off the total', () => {
     const doc = settle()
     expect(doc.commissions).toEqual([
@@ -2402,6 +2492,32 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
     ['transport.customs.grossWeightUnit', { transport: { customs: { ...customs, grossWeight: 100.5 } } }],
     ['transport.customs.netWeightUnit', { transport: { customs: { ...customs, netWeight: 90.25 } } }],
     ['transport.customs.totalPackages', { transport: { customs: { ...customs, packages: [{ code: 13, count: 2 }] } } }],
+    // Field 15 of the header: the settlement date, when the export is paid in advance (`FmaPagExp` 32, ANTICIPO).
+    ['options.settlementDate', { options: { exportPaymentTerms: '32' } }],
+    // Field 98: the marks of a package that is not a container.
+    [
+      'transport.customs.packages[0].marks',
+      { transport: { customs: { ...customs, totalPackages: 2, packages: [{ code: 80, count: 2 }] } } },
+    ],
+    [
+      'transport.customs.packages[1].marks',
+      {
+        transport: {
+          customs: {
+            ...customs,
+            totalPackages: 2,
+            packages: [
+              { code: 74, count: 1, containerId: 'MSCU1234567' },
+              { code: 22, count: 1, marks: ' ' },
+            ],
+          },
+        },
+      },
+    ],
+    [
+      'transport.customs.packages[0].marks',
+      { transport: { customs: { ...customs, totalPackages: 1, packages: [{ count: 1 }] } } },
+    ],
     ['items[0].quantity', { items: [{ name: 'Granel', unit: 'KN', amount: 10 }] }],
     ['items[0].unit', { items: [{ name: 'Granel', quantity: 1, unitPrice: 10 }] }],
   ])('%s is required on an export invoice', (field, overrides) => {
@@ -2421,6 +2537,37 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
     }
     if (required === undefined) expect(exportOf(bare).header.totals.totalAmount).toBe(100)
     else expectError(() => exportOf(bare), 'MISSING_FIELD', { field: required })
+  })
+
+  test('an export paid in advance carries its settlement date, and any other payment asks for none', () => {
+    const paid = exportOf({ options: { exportPaymentTerms: '32', settlementDate: '2026-11-10' } })
+    expect(paid.header.options).toEqual({ exportPaymentTerms: '32', settlementDate: '2026-11-10' })
+    expect(toSiiDocument(paid).Encabezado.IdDoc).toMatchObject({ FmaPagExp: '32', FchCancel: '2026-11-10' })
+    // Only the payment the customs table calls ANTICIPO: a mix of advance and collection is another code.
+    for (const terms of ['1', '11', '50', '70'])
+      expect(exportOf({ options: { exportPaymentTerms: terms } }).header.options).toEqual({ exportPaymentTerms: terms })
+    // And only the invoice: the format asks it of no note.
+    expect(note(112, { options: { exportPaymentTerms: '32' } }).header.options).toEqual({ exportPaymentTerms: '32' })
+    expect(note(111, { options: { exportPaymentTerms: '32' } }).header.options).toEqual({ exportPaymentTerms: '32' })
+  })
+
+  test('a container needs no marks, and neither does a package of an export note', () => {
+    const packed = (packages: readonly PackageType[]) =>
+      exportOf({ transport: { customs: { ...customs, totalPackages: packages.length, packages } } })
+    for (const code of [73, 74, 75, 76, 78])
+      expect(packed([{ code, count: 1, containerId: 'MSCU1234567' }]).header.transport?.customs?.packages).toEqual([
+        { code, count: 1, containerId: 'MSCU1234567' },
+      ])
+    // 77 is a tank that is no container, by the words of the table itself.
+    expectError(() => packed([{ code: 77, count: 1 }]), 'MISSING_FIELD', {
+      field: 'transport.customs.packages[0].marks',
+    })
+    expect(packed([{ code: 80, count: 4, marks: 'S/M' }]).header.transport?.customs?.packages).toEqual([
+      { code: 80, count: 4, marks: 'S/M' },
+    ])
+    expect(
+      note(112, { transport: { customs: { totalPackages: 1, packages: [{ code: 80, count: 1 }] } } }).header.transport,
+    ).toEqual({ customs: { totalPackages: 1, packages: [{ code: 80, count: 1 }] } })
   })
 
   test('service indicator 6 is excused of nothing: the sale clause is asked for too', () => {

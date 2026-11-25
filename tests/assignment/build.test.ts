@@ -4,10 +4,12 @@ import {
   unstable_createReassignment,
   isAssignableDocumentType,
   MAX_ASSIGNMENTS,
+  type AssignmentInput,
 } from '../../src/assignment/build'
 import { unstable_verifyAssignment } from '../../src/assignment/read'
 import { sha1Base64 } from '../../src/crypto/digest'
 import { rsaPublicKeyPartsFromCertificatePem, rsaSha1VerifyBase64 } from '../../src/crypto/rsa'
+import { createGoodsReceipts, type DocumentDecisions, type GoodsReceiptDecision } from '../../src/document/answer'
 import { verifyDocumentSignature } from '../../src/document/sign'
 import { DteError } from '../../src/errors'
 import { encodeLatin1 } from '../../src/text/latin1'
@@ -25,6 +27,7 @@ import {
   receiverParty,
   resignedDocument,
   resignedFile,
+  resignedReceipt,
   secondFinancier,
 } from '../support/assignment-fixtures'
 import { FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from '../support/fixtures'
@@ -528,6 +531,245 @@ describe('unstable_createAssignment', () => {
         code: 'FIELD_TOO_LONG',
         details: { field: 'DeclaracionJurada', maxLength: 512 },
       })
+    })
+  })
+})
+
+// `DTECedido_v10.xsd`: the zone of the assigned document carries, after the document, its image, the electronic
+// receipts of the goods (Ley 19.983), the image of the receipts that are not electronic, and the stamp.
+describe('the receipts and the images of the assigned document', () => {
+  // What the debtor sends: the receiver of the invoice answers the envelope that carried it and an exempt one.
+  const debtor = certificateOf(RECEIVER_RUT)
+  const receiptsFile = (
+    at: Date = FIXED_NOW,
+    documents: DocumentDecisions<GoodsReceiptDecision> = () => ({}),
+  ): string =>
+    createGoodsReceipts(envelopeXml([invoice, exemptInvoice]), {
+      companyRut: RECEIVER_RUT,
+      certificate: debtor,
+      documents,
+      now: at,
+    })
+  const received = receiptsFile()
+  const pdf = (size: number): Uint8Array => {
+    const bytes = new Uint8Array(size).fill(0x20)
+    bytes.set([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34])
+    return bytes
+  }
+  const zoneOf = (xml: string): string => /<DocumentoDTECedido[\s\S]*?<\/DocumentoDTECedido>/.exec(xml)![0]
+
+  describe('with the electronic receipts the debtor sent', () => {
+    const xml = unstable_createAssignment(firstAssignment({ receipts: [received] }))
+
+    test('the file is an AEC the SII schema takes, and every signature verifies, the receipt`s own in place too', async () => {
+      expect(await validateAgainstXsd(xml, 'AEC')).toEqual([])
+      const verification = unstable_verifyAssignment(xml)
+      expect(verification.valid).toBe(true)
+      expect(verification.receipts.map((receipt) => [receipt.valid, receipt.referenceId])).toEqual([[true, 'REC-1']])
+      expect(inPlace(xml)).toEqual([
+        { id: 'DTE_T33F7', digest: true, value: true },
+        { id: 'REC-1', digest: true, value: true },
+        { id: 'DTECedido_T33F7', digest: true, value: true },
+        { id: 'Cesion_T33F7_1', digest: true, value: true },
+        { id: 'AEC_T33F7_1', digest: true, value: true },
+      ])
+    })
+
+    test('the receipt of the document is carried as it was signed, with the namespaces it had in scope, and the others are left out', () => {
+      const [first] = Array.from(received.matchAll(/<Recibo [\s\S]*?<\/Recibo>/g), (match) => match[0])
+      const carried = first.replace(
+        '<Recibo ',
+        '<Recibo xmlns="http://www.sii.cl/SiiDte" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ',
+      )
+      expect(received).toContain('<TipoDoc>34</TipoDoc>')
+      expect(xml).toContain(`${invoice.xml}${carried}<TmstFirma>${STAMP}</TmstFirma></DocumentoDTECedido>`)
+      expect(zoneOf(xml)).not.toContain('<TipoDoc>34</TipoDoc>')
+      expect(tagText(zoneOf(xml), 'RutFirma')).toEqual([RECEIVER_RUT])
+    })
+
+    test('the assignment carries no sworn statement, here or in a later assignment of the file', () => {
+      expect(xml).not.toContain('<DeclaracionJurada>')
+      expect(unstable_createAssignment(firstAssignment())).toContain('<DeclaracionJurada>')
+      const later = unstable_createReassignment(laterAssignment(xml, financier, secondFinancier))
+      expect(later).not.toContain('<DeclaracionJurada>')
+      expect(unstable_verifyAssignment(later).valid).toBe(true)
+      expect(unstable_verifyAssignment(later).receipts).toHaveLength(1)
+    })
+
+    test('a lone Recibo is taken too, the same receipt given twice is carried once, and several receipts go in order', () => {
+      const lone = resignedReceipt(/<Recibo [\s\S]*?<\/Recibo>/.exec(received)![0], 1)
+      const once = unstable_createAssignment(firstAssignment({ receipts: [lone, lone] }))
+      expect(tagText(zoneOf(once), 'RutFirma')).toHaveLength(1)
+      expect(unstable_verifyAssignment(once).valid).toBe(true)
+      const two = unstable_createAssignment(firstAssignment({ receipts: [resignedReceipt(lone, 2), received] }))
+      expect(unstable_verifyAssignment(two).receipts.map((receipt) => receipt.referenceId)).toEqual(['REC-2', 'REC-1'])
+      expect(unstable_verifyAssignment(two).valid).toBe(true)
+    })
+
+    test('a file of receipts that names other documents alone is refused', () => {
+      const others = receiptsFile(FIXED_NOW, (document) => (document.type === 34 ? {} : null))
+      expect(others).toContain('<TipoDoc>34</TipoDoc>')
+      expect(others).not.toContain('<TipoDoc>33</TipoDoc>')
+      expect(caught(() => unstable_createAssignment(firstAssignment({ receipts: [others] }))).details).toEqual({
+        field: 'receipts',
+        reason: 'no receipt names the assigned document',
+      })
+    })
+  })
+
+  test('receipts that cannot be carried are refused', () => {
+    const refusal = (receipts: unknown) =>
+      caught(() => unstable_createAssignment(firstAssignment({ receipts: receipts as readonly string[] })))
+    expect(refusal(received)).toMatchObject({ code: 'INVALID_OPTION', details: { field: 'receipts' } })
+    expect(refusal([])).toMatchObject({
+      code: 'INVALID_OPTION',
+      details: { field: 'receipts', reason: 'no receipt names the assigned document' },
+    })
+    // A receipt changed after it was signed.
+    expect(refusal([received.replace('Oficina central', 'Otra parte')])).toMatchObject({
+      code: 'SIGNATURE_INVALID',
+      details: { field: 'Recibo' },
+    })
+    expect(refusal(['<Otro xmlns="http://www.sii.cl/SiiDte"/>'])).toMatchObject({
+      code: 'XML_PARSE_FAILED',
+      details: { field: 'Recibo' },
+    })
+    expect(refusal([`<!DOCTYPE x>${received}`]).code).toBe('XML_PARSE_FAILED')
+    expect(
+      refusal([received.replace('<EnvioRecibos xmlns="http://www.sii.cl/SiiDte"', '<EnvioRecibos xmlns="urn:other"')])
+        .code,
+    ).toBe('XML_PARSE_FAILED')
+  })
+
+  // A `Recibo` holds one `DocumentoRecibo` and the signature over it: the fields read are the ones the signature covers.
+  test('a Recibo of any other shape is refused', () => {
+    const recibo = resignedReceipt(/<Recibo [\s\S]*?<\/Recibo>/.exec(received)![0], 1)
+    const body = /<DocumentoRecibo [\s\S]*?<\/DocumentoRecibo>/.exec(recibo)![0]
+    const signature = /<Signature [\s\S]*?<\/Signature>/.exec(recibo)![0]
+    const open = '<Recibo xmlns="http://www.sii.cl/SiiDte" version="1.0">'
+    const refusal = (text: string) => caught(() => unstable_createAssignment(firstAssignment({ receipts: [text] })))
+    const shapes = [
+      `${open}</Recibo>`,
+      `${open}${body}</Recibo>`,
+      `${open}${signature}${body}</Recibo>`,
+      `${open}${body}${signature}<Otro/></Recibo>`,
+      `${open}${body.replace('<DocumentoRecibo ', '<DocumentoRecibo xmlns="urn:other" ')}${signature}</Recibo>`,
+      `${open}${body}<Signature/></Recibo>`,
+      `${open}${body.replace(/DocumentoRecibo/g, 'Documento')}${signature}</Recibo>`,
+    ]
+    for (const shape of shapes)
+      expect(refusal(shape)).toMatchObject({
+        code: 'XML_PARSE_FAILED',
+        details: { field: 'Recibo', reason: 'expected a Recibo with one DocumentoRecibo and its Signature' },
+      })
+    // A body that names the document, unsigned, put before the signed body of another document: the signature covers
+    // the second, and the fields would be read from the first.
+    const other = /<Recibo [\s\S]*?<\/Recibo>/g
+    const [, exemptReceipt] = Array.from(received.matchAll(other), (match) => match[0])
+    const wrapped = exemptReceipt
+      .replace(
+        '<Recibo ',
+        '<Recibo xmlns="http://www.sii.cl/SiiDte" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ',
+      )
+      .replace('<DocumentoRecibo ', () => `${body.replace('ID="REC-1"', 'ID="X"')}<DocumentoRecibo `)
+    expect(refusal(wrapped).code).toBe('XML_PARSE_FAILED')
+  })
+
+  // What is checked and what is carried are read from one text: a file written so that its elements and the texts cut
+  // from it pair off differently gains nothing by it.
+  test('a file whose elements and texts pair off differently carries no receipt it did not check', () => {
+    const [mine, exemptReceipt] = Array.from(received.matchAll(/<Recibo [\s\S]*?<\/Recibo>/g), (match) => match[0])
+    // The receipt of the exempt invoice hidden in a comment, where only a cut of the text finds it, and an element that
+    // names the assigned document closed as `</Recibo >`, which the cut does not find.
+    const crafted = received
+      .replace(exemptReceipt, '')
+      .replace(mine, () => `<!-- ${exemptReceipt} -->${mine.replace(/<\/Recibo>$/, '</Recibo >')}`)
+    expect(caught(() => unstable_createAssignment(firstAssignment({ receipts: [crafted] }))).details).toEqual({
+      field: 'receipts',
+      reason: 'no receipt names the assigned document',
+    })
+  })
+
+  // `xs:ID`: an ID names one element of the whole file.
+  test('a receipt whose ID another element of the file carries is refused', () => {
+    const first = /<Recibo [\s\S]*?<\/Recibo>/.exec(received)![0]
+    const refusal = (receipts: readonly string[]) =>
+      caught(() => unstable_createAssignment(firstAssignment({ receipts })))
+    const repeated = {
+      code: 'INVALID_OPTION',
+      details: { field: 'ID', reason: 'two elements of the file carry the same ID' },
+    }
+    // Two receptions that numbered their receipts alike.
+    expect(refusal([received, receiptsFile(new Date(FIXED_NOW.getTime() + 60_000))])).toMatchObject(repeated)
+    // The ID of the document, and the one the assignment will take: each is verified on its own, so only the whole
+    // file shows the repeat.
+    expect(refusal([resignedReceipt(first, 'DTE_T33F7')])).toMatchObject(repeated)
+    expect(refusal([resignedReceipt(first, 'Cesion_T33F7_1')])).toMatchObject(repeated)
+    // The ID of a zone verified where the receipt sits fails that zone's signature first.
+    expect(refusal([resignedReceipt(first, 'DTECedido_T33F7')])).toMatchObject({
+      code: 'SIGNATURE_INVALID',
+      details: { field: 'DocumentoDTECedido' },
+    })
+    expect(refusal([resignedReceipt(first, 'AEC_T33F7_1')])).toMatchObject({ code: 'SIGNATURE_INVALID' })
+    // A signature's `Id` is an ID too.
+    const withId = resignedReceipt(first, 2).replace('<Signature xmlns', '<Signature Id="REC-1" xmlns')
+    expect(refusal([received, withId])).toMatchObject(repeated)
+  })
+
+  test('more than 40 receipts of the document are refused', () => {
+    const first = /<Recibo [\s\S]*?<\/Recibo>/.exec(received)![0]
+    const many = Array.from({ length: 41 }, (_, index) => resignedReceipt(first, index + 1))
+    expect(
+      unstable_verifyAssignment(unstable_createAssignment(firstAssignment({ receipts: many.slice(0, 40) }))).receipts,
+    ).toHaveLength(40)
+    expect(caught(() => unstable_createAssignment(firstAssignment({ receipts: many }))).details).toEqual({
+      field: 'receipts',
+      reason: 'a file carries up to 40 receipts',
+    })
+  })
+
+  describe('with the images', () => {
+    const xml = unstable_createAssignment(
+      firstAssignment({ documentImage: pdf(200), receiptImage: pdf(300), receipts: [received] }),
+    )
+
+    test('each PDF goes in base64 on short lines, in the schema`s order, and the file is still valid', async () => {
+      expect(await validateAgainstXsd(xml, 'AEC')).toEqual([])
+      expect(unstable_verifyAssignment(xml).valid).toBe(true)
+      expect(zoneOf(xml)).toMatch(
+        /<\/DTE><ImagenDTE>JVBERi0xLjQg[\s\S]*<\/ImagenDTE><Recibo [\s\S]*<\/Recibo><ImagenAR>JVBERi0xLjQg[\s\S]*<\/ImagenAR><TmstFirma>/,
+      )
+      const [image] = tagText(xml, 'ImagenDTE')
+      expect(image.split('\n').every((line) => line.length <= 76)).toBe(true)
+      expect(image.split('\n').length).toBeGreaterThan(1)
+      expect(Buffer.from(image, 'base64')).toEqual(Buffer.from(pdf(200)))
+      expect(Buffer.from(tagText(xml, 'ImagenAR')[0], 'base64')).toHaveLength(300)
+    })
+
+    test('an image of the receipts does not replace the sworn statement, and each image goes alone', () => {
+      const paper = unstable_createAssignment(firstAssignment({ receiptImage: pdf(64) }))
+      expect(paper).toContain('<DeclaracionJurada>')
+      expect(paper).not.toContain('<ImagenDTE>')
+      expect(unstable_verifyAssignment(paper).valid).toBe(true)
+      const pictured = unstable_createAssignment(firstAssignment({ documentImage: pdf(64) }))
+      expect(pictured).not.toContain('<ImagenAR>')
+      expect(pictured).toContain('<DeclaracionJurada>')
+    })
+
+    test('what is not the bytes of a PDF is refused, and so is an image of the receipts over 4,000,000 bytes', () => {
+      const refusal = (overrides: Partial<AssignmentInput>) =>
+        caught(() => unstable_createAssignment(firstAssignment(overrides)))
+      expect(refusal({ documentImage: new Uint8Array([1, 2, 3, 4, 5]) }).details).toEqual({
+        field: 'documentImage',
+        reason: 'expected the bytes of a PDF',
+      })
+      expect(refusal({ documentImage: 'JVBERi0=' as unknown as Uint8Array }).details.field).toBe('documentImage')
+      expect(refusal({ receiptImage: new Uint8Array(0) }).details.field).toBe('receiptImage')
+      expect(refusal({ receiptImage: pdf(4_000_001) }).details).toEqual({
+        field: 'receiptImage',
+        reason: 'larger than 4000000 bytes',
+      })
+      expect(() => unstable_createAssignment(firstAssignment({ documentImage: pdf(4_000_001) }))).not.toThrow()
     })
   })
 })

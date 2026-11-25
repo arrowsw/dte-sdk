@@ -3,7 +3,7 @@
     "name": "dte-sdk (min + brotli)",
     "path": "dist/index.min.js",
     "ignore": ["node-forge", "@xmldom/xmldom", "fast-xml-parser", "rut.ts", "pdf-lib", "bwip-js", "xmllint-wasm", "node:*"],
-    "limit": "48 kB"
+    "limit": "50 kB"
   },
   {
     "name": "dte-sdk/node (min + brotli)",
@@ -21,13 +21,13 @@
     "name": "dte-sdk/pdf (min + brotli)",
     "path": "dist/pdf.min.js",
     "ignore": ["node-forge", "@xmldom/xmldom", "fast-xml-parser", "rut.ts", "pdf-lib", "bwip-js", "xmllint-wasm", "node:*"],
-    "limit": "22 kB"
+    "limit": "30 kB"
   },
   {
     "name": "dte-sdk/catalogs (min + brotli)",
     "path": "dist/catalogs.min.js",
     "ignore": ["node-forge", "@xmldom/xmldom", "fast-xml-parser", "rut.ts", "pdf-lib", "bwip-js", "xmllint-wasm", "node:*"],
-    "limit": "12 kB"
+    "limit": "20 kB"
   },
   {
     "name": "dte-sdk/schemas (min + brotli)",
