@@ -14,6 +14,7 @@ import {
   PAGE,
   ROLL,
   STAMP,
+  verificationLine,
   TABLE,
   TRANSFER_REASON_NAMES,
   TYPE_BOX,
@@ -74,6 +75,8 @@ export type PrintedSampleOptions = {
   readonly siiOffice?: string
   /** EN: Resolution line under the stamp: a string printed as given, or the company's resolution as data, `{ number, date }` (`NroResol` and `FchResol` as `YYYY-MM-DD`), printed as `resolutionLine` writes it; default `Res. Ex. SII N° 0 del {year}`. ES: Línea de resolución bajo el timbre: un texto que se imprime tal cual, o la resolución de la empresa como dato, `{ number, date }` (`NroResol` y `FchResol` como `AAAA-MM-DD`), que se imprime como la escribe `resolutionLine`; por defecto `Res. Ex. SII N° 0 del {año}`. */
   readonly resolution?: string | { readonly number: number; readonly date: string }
+  /** EN: The site the legend under the stamp sends the receiver to, `Verifique documento: {site}`; `www.sii.cl` by default. A company names here the site it declared to the SII for its receipts (39, 41), the query link of that declaration. Up to 80 printable ASCII characters with no space. ES: El sitio al que la leyenda bajo el timbre manda al receptor, `Verifique documento: {sitio}`; por defecto `www.sii.cl`. Una empresa nombra aquí el sitio que declaró al SII para sus boletas (39, 41), el link de consulta de esa declaración. Hasta 80 caracteres ASCII imprimibles sin espacios. */
+  readonly verificationSite?: string
   /** EN: Logo at the top left; one the library cannot embed is ignored. ES: Logo arriba a la izquierda; uno que la librería no pueda incrustar se ignora. */
   readonly logo?: PrintedLogo
   /** EN: Clock for the year of the default resolution (not used when `resolution` is given). ES: Reloj para el año de la resolución por defecto (no se usa si se da `resolution`). */
@@ -166,14 +169,34 @@ const measureTypeBox = (doc: PrintableDocument, fonts: Fonts): number => {
   return Math.min(TYPE_BOX.maxHeight, Math.max(TYPE_BOX.minHeight, content))
 }
 
+const TYPE_BOX_X = PAGE.width - MARGIN - TYPE_BOX.width
+
+// The issuer's lines of the header, each wrapped to the width left of the type box: a name of a hundred characters, or
+// an address with its commune and its city, does not fit on one line and would run under the box. A text that fits is
+// one line, as it always was.
+const ISSUER_WIDTH = TYPE_BOX_X - MARGIN - GAP.section
+
+const issuerLines = (
+  { issuer }: PrintableDocument,
+  fonts: Fonts,
+): { readonly name: readonly string[]; readonly details: readonly string[] } => {
+  const detail = (text: string): readonly string[] => wrapText(text, fonts.normal, FONT.small, ISSUER_WIDTH)
+  return {
+    name: wrapText(issuer.name, fonts.bold, FONT.name, ISSUER_WIDTH),
+    details: [
+      ...detail(issuer.activity),
+      ...detail(issuerAddress(issuer)),
+      ...(issuer.branch ? detail(`Sucursal: ${issuer.branch}`) : []),
+    ],
+  }
+}
+
 const measureHeader = (doc: PrintableDocument, fonts: Fonts, logo: PDFImage | null): number => {
-  const left =
-    (logo ? 25 + GAP.small : 0) + LINE.normal + LINE.small + LINE.small + (doc.issuer.branch ? LINE.small : 0)
+  const { name, details } = issuerLines(doc, fonts)
+  const left = (logo ? 25 + GAP.small : 0) + name.length * LINE.normal + details.length * LINE.small
   const right = measureTypeBox(doc, fonts) + GAP.small + LINE.small
   return Math.max(left, right)
 }
-
-const TYPE_BOX_X = PAGE.width - MARGIN - TYPE_BOX.width
 
 const logoSize = (logo: PDFImage): { readonly width: number; readonly height: number } => {
   const maxWidth = Math.min((TYPE_BOX_X - MARGIN - GAP.section) * 0.4, 120)
@@ -262,13 +285,15 @@ const drawHeader = (
     canvas.page.drawImage(logo, { x: MARGIN, y: canvas.height - ly - height, width, height })
     ly += height + GAP.small
   }
-  drawText(canvas, issuer.name, MARGIN, ly, fonts.bold, FONT.name, black)
-  ly += LINE.normal
-  drawText(canvas, issuer.activity, MARGIN, ly, fonts.normal, FONT.small, black)
-  ly += LINE.small
-  drawText(canvas, issuerAddress(issuer), MARGIN, ly, fonts.normal, FONT.small, black)
-  ly += LINE.small
-  if (issuer.branch) drawText(canvas, `Sucursal: ${issuer.branch}`, MARGIN, ly, fonts.normal, FONT.small, black)
+  const { name, details } = issuerLines(doc, fonts)
+  for (const line of name) {
+    drawText(canvas, line, MARGIN, ly, fonts.bold, FONT.name, black)
+    ly += LINE.normal
+  }
+  for (const line of details) {
+    drawText(canvas, line, MARGIN, ly, fonts.normal, FONT.small, black)
+    ly += LINE.small
+  }
 
   drawRect(canvas, boxX, y, TYPE_BOX.width, boxHeight, { stroke: red, strokeWidth: TYPE_BOX.border })
   const innerWidth = TYPE_BOX.width - TYPE_BOX.padX * 2
@@ -613,7 +638,7 @@ const drawAcknowledgement = (canvas: Canvas, legendLines: readonly string[], y: 
   return y + boxHeight
 }
 
-const drawStamp = (canvas: Canvas, image: PDFImage, y: number, resolution: string): number => {
+const drawStamp = (canvas: Canvas, image: PDFImage, y: number, resolution: string, verification: string): number => {
   const black = canvas.paint(COLOURS.black)
   const natural = image.scale(1)
   const targetWidth = Math.max(STAMP.minWidth, Math.min(STAMP.maxWidth, natural.width))
@@ -628,7 +653,7 @@ const drawStamp = (canvas: Canvas, image: PDFImage, y: number, resolution: strin
   yy += LINE.legal
   drawText(canvas, resolution, x, yy, canvas.fonts.normal, FONT.legend, black)
   yy += LINE.legal
-  drawText(canvas, 'Verifique documento: www.sii.cl', x, yy, canvas.fonts.normal, FONT.legend, black)
+  drawText(canvas, verification, x, yy, canvas.fonts.normal, FONT.legend, black)
   return yy + LINE.legal
 }
 
@@ -691,6 +716,7 @@ type SheetInput = {
   readonly stamp: PDFImage | null
   readonly unstamped: boolean
   readonly resolution: string
+  readonly verification: string
   readonly transferable: boolean
 }
 
@@ -722,7 +748,15 @@ const tableBlocks = <T>(
 // The sheet top to bottom, under the header: date, receiver, transfer type, transport, references, detail, and the
 // closing (totals, acknowledgement box and stamp), which keeps with the last detail row so the last page is never only
 // totals.
-const sheetBlocks = ({ doc, fonts, stamp, unstamped, resolution, transferable }: SheetInput): readonly Block[] => {
+const sheetBlocks = ({
+  doc,
+  fonts,
+  stamp,
+  unstamped,
+  resolution,
+  verification,
+  transferable,
+}: SheetInput): readonly Block[] => {
   const legendLines = transferable ? wrapText(ACKNOWLEDGEMENT_TEXT, fonts.normal, FONT.legal, BOX_INNER_WIDTH) : []
   const transferReason = doc.type === 52 ? doc.transferReason : null
   const payment = flowLines(paymentGroups(doc), fonts, TABLE_WIDTH, PAYMENT_GAP)
@@ -866,7 +900,7 @@ const sheetBlocks = ({ doc, fonts, stamp, unstamped, resolution, transferable }:
           {
             height: GAP.section + STAMP.maxHeight + STAMP.legendGap + LINE.legal * 3,
             gap: 0,
-            draw: (canvas: Canvas, y: number) => drawStamp(canvas, stamp, y, resolution),
+            draw: (canvas: Canvas, y: number) => drawStamp(canvas, stamp, y, resolution, verification),
           },
         ]
       : []),
@@ -943,6 +977,7 @@ const draw = async (
   doc: PrintableDocument,
   options: RenderPrintedSampleOptions,
   resolution: string,
+  verification: string,
 ): Promise<Uint8Array> => {
   const { pdf } = modules
   const document = await pdf.PDFDocument.create()
@@ -960,13 +995,13 @@ const draw = async (
   const transferable = options.transferable === true && needsTransferableCopy(doc)
   const office = options.siiOffice ?? siiOfficeForCommune(doc.issuer.commune) ?? DEFAULT_SII_OFFICE
   if (options.paper === 'roll') {
-    const rows = buildRoll({ doc, fonts, office, resolution, logo, stamp, unstamped, transferable })
+    const rows = buildRoll({ doc, fonts, office, resolution, verification, logo, stamp, unstamped, transferable })
     const height = rollHeight(rows, fonts)
     const roll = document.addPage([ROLL.width, height])
     drawRoll({ page: roll, fonts, height, paint: ([r, g, b]) => pdf.rgb(r, g, b) }, rows)
     return document.save()
   }
-  const blocks = sheetBlocks({ doc, fonts, stamp, unstamped, resolution, transferable })
+  const blocks = sheetBlocks({ doc, fonts, stamp, unstamped, resolution, verification, transferable })
   const single = paginate(headerBottom(doc, fonts, logo, MARGIN, false), blocks)
   // A document of several pages numbers them under the SII office, so its header may be taller.
   const pages = single.length === 1 ? single : paginate(headerBottom(doc, fonts, logo, MARGIN, true), blocks)
@@ -1093,7 +1128,7 @@ const checkPaperAndStamp = (doc: PrintableDocument, { paper, stamp }: RenderPrin
  * @param options EN: office, resolution, logo, clock, `transferable`, `paper` and `stamp`. ES: oficina, resolución, logo, reloj, `transferable`, `paper` y `stamp`.
  * @param load EN: loader of the two libraries, for tests. ES: cargador de las dos librerías, para tests.
  * @returns EN: the PDF bytes. ES: los bytes del PDF.
- * @throws {DteError} EN: `MISSING_FIELD` (field `TipoDTE`) when the type is 0, `INVALID_DOCUMENT_TYPE` (field `TipoDTE`) for an export document (110, 111, 112), whose sample is not drawn yet, `INVALID_OPTION` (`paper` when it is neither `'sheet'` nor `'roll'`; `stamp` when it is not a boolean, or is `false` on a document that is not a receipt; `resolution.number` when a resolution given as data has a number that is not a whole number from 0), `INVALID_DATE` (field `resolution.date`) when its date is not a real `YYYY-MM-DD`, `ENCODING_UNSUPPORTED_CHAR` for a TED with a code point above U+00FF, `DEPENDENCY_UNAVAILABLE` when a library cannot be loaded, `PDF_RENDER_FAILED` (with `type` and `folio`) when a library throws while drawing, for example on a character outside WinAnsi. ES: `MISSING_FIELD` (campo `TipoDTE`) cuando el tipo es 0, `INVALID_DOCUMENT_TYPE` (campo `TipoDTE`) ante un documento de exportación (110, 111, 112), cuya muestra aún no se dibuja, `INVALID_OPTION` (`paper` si no es `'sheet'` ni `'roll'`; `stamp` si no es booleano, o es `false` en un documento que no es boleta; `resolution.number` si una resolución dada como dato trae un número que no es un entero desde 0), `INVALID_DATE` (campo `resolution.date`) si su fecha no es una `AAAA-MM-DD` real, `ENCODING_UNSUPPORTED_CHAR` ante un TED con un code point mayor a U+00FF, `DEPENDENCY_UNAVAILABLE` si una librería no se puede cargar, `PDF_RENDER_FAILED` (con `type` y `folio`) si una librería lanza al dibujar, por ejemplo ante un carácter fuera de WinAnsi.
+ * @throws {DteError} EN: `MISSING_FIELD` (field `TipoDTE`) when the type is 0, `INVALID_DOCUMENT_TYPE` (field `TipoDTE`) for an export document (110, 111, 112), whose sample is not drawn yet, `INVALID_OPTION` (`paper` when it is neither `'sheet'` nor `'roll'`; `stamp` when it is not a boolean, or is `false` on a document that is not a receipt; `resolution.number` when a resolution given as data has a number that is not a whole number from 0; `verificationSite` when it is not up to 80 printable ASCII characters with no space), `INVALID_DATE` (field `resolution.date`) when its date is not a real `YYYY-MM-DD`, `ENCODING_UNSUPPORTED_CHAR` for a TED with a code point above U+00FF, `DEPENDENCY_UNAVAILABLE` when a library cannot be loaded, `PDF_RENDER_FAILED` (with `type` and `folio`) when a library throws while drawing, for example on a character outside WinAnsi. ES: `MISSING_FIELD` (campo `TipoDTE`) cuando el tipo es 0, `INVALID_DOCUMENT_TYPE` (campo `TipoDTE`) ante un documento de exportación (110, 111, 112), cuya muestra aún no se dibuja, `INVALID_OPTION` (`paper` si no es `'sheet'` ni `'roll'`; `stamp` si no es booleano, o es `false` en un documento que no es boleta; `resolution.number` si una resolución dada como dato trae un número que no es un entero desde 0; `verificationSite` si no son hasta 80 caracteres ASCII imprimibles sin espacios), `INVALID_DATE` (campo `resolution.date`) si su fecha no es una `AAAA-MM-DD` real, `ENCODING_UNSUPPORTED_CHAR` ante un TED con un code point mayor a U+00FF, `DEPENDENCY_UNAVAILABLE` si una librería no se puede cargar, `PDF_RENDER_FAILED` (con `type` y `folio`) si una librería lanza al dibujar, por ejemplo ante un carácter fuera de WinAnsi.
  */
 export const renderPrintedSample = async (
   doc: PrintableDocument,
@@ -1107,9 +1142,10 @@ export const renderPrintedSample = async (
     throw new DteError('INVALID_DOCUMENT_TYPE', { field: 'TipoDTE', type: doc.type })
   checkPaperAndStamp(doc, options)
   const resolution = resolutionOf(options)
+  const verification = verificationLine(options.verificationSite)
   const modules = await load()
   try {
-    return await draw(modules, doc, options, resolution)
+    return await draw(modules, doc, options, resolution, verification)
   } catch (error) {
     if (isDteError(error)) throw error
     throw new DteError('PDF_RENDER_FAILED', { reason: errorMessage(error), type: doc.type, folio: doc.folio })

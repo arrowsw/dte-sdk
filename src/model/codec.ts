@@ -261,6 +261,8 @@ const toSiiTotales = (totals: Totals, receipt: boolean): SiiTotales =>
         IVAProp: totals.ownVatAmount,
         IVATerc: totals.thirdPartyVatAmount,
         ImptoReten: totals.withholdings?.map((w) => ({ TipoImp: w.taxCode, TasaImp: w.rate, MontoImp: w.amount })),
+        // "No se registra si es igual a 0" (Formato DTE 2.5, field 118): no `IVANoRet` is written at zero.
+        IVANoRet: totals.vatNotWithheld || undefined,
         // A guarantee of zero is none, as `calculateTotals` leaves it out: no `GrntDep` is written at zero.
         GrntDep: totals.depositGuarantee || undefined,
         Comisiones:
@@ -351,6 +353,7 @@ const toSiiDscRcgGlobal = (adjustment: GlobalAdjustment): SiiDscRcgGlobal =>
     GlosaDR: adjustment.description,
     TpoValor: adjustment.valueType === 'percent' ? '%' : '$',
     ValorDR: adjustment.value,
+    ValorDROtrMnda: adjustment.otherCurrencyValue,
     IndExeDR: adjustment.exemptIndicator,
   })
 
@@ -594,6 +597,7 @@ const fromSiiTotales = (totales: SiiTotales): Totals =>
     ownVatAmount: totales.IVAProp,
     thirdPartyVatAmount: totales.IVATerc,
     withholdings: totales.ImptoReten?.map((r) => ({ taxCode: r.TipoImp, rate: r.TasaImp, amount: r.MontoImp })),
+    vatNotWithheld: totales.IVANoRet,
     depositGuarantee: totales.GrntDep,
     commissions:
       totales.Comisiones === undefined
@@ -660,6 +664,7 @@ const fromSiiDscRcgGlobal = (adjustment: SiiDscRcgGlobal): GlobalAdjustment =>
     value: adjustment.ValorDR,
     description: adjustment.GlosaDR,
     exemptIndicator: adjustment.IndExeDR as 1 | 2 | undefined,
+    otherCurrencyValue: adjustment.ValorDROtrMnda,
   })
 
 const fromSiiReferencia = (reference: SiiReferencia): Reference =>

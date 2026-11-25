@@ -3,11 +3,15 @@ import { dropForbiddenControls } from '../xml/escape'
 
 /**
  * EN: Normalizes free text for a DTE field: drops apostrophes and double quotes (they break the SII signature
- * checks), maps typographic dashes and ellipsis to ASCII, removes anything outside ISO-8859-1 (emoji, curly quotes)
- * and the control characters XML 1.0 forbids (U+0000 to U+001F but the tab, the line feed and the carriage return),
- * and trims. `null`/`undefined` become `''`.
+ * checks), maps every typographic dash and the minus sign (U+2010 to U+2015, U+2212) to a hyphen, the ellipsis to
+ * three dots and the typographic spaces (U+2000 to U+200A, U+202F, U+205F, U+3000) to a plain space, so a pasted
+ * `−5` does not become `5` and two words do not run together; removes anything else outside ISO-8859-1 (emoji, curly
+ * quotes) and the control characters XML 1.0 forbids (U+0000 to U+001F but the tab, the line feed and the carriage
+ * return), and trims. `null`/`undefined` become `''`.
  * ES: Normaliza texto libre para un campo del DTE: quita apóstrofes y comillas dobles (rompen la validación de firma
- * del SII), pasa guiones y puntos suspensivos tipográficos a ASCII, elimina todo lo que no es ISO-8859-1 (emoji,
+ * del SII), pasa todo guion tipográfico y el signo menos (U+2010 a U+2015, U+2212) a un guion, los puntos suspensivos
+ * a tres puntos y los espacios tipográficos (U+2000 a U+200A, U+202F, U+205F, U+3000) a un espacio simple, para que un
+ * `−5` pegado no quede en `5` ni dos palabras queden juntas; elimina todo lo demás que no es ISO-8859-1 (emoji,
  * comillas curvas) y los caracteres de control que XML 1.0 prohíbe (U+0000 a U+001F salvo el tabulador, el salto de
  * línea y el retorno de carro), y recorta espacios. `null`/`undefined` quedan en `''`.
  */
@@ -17,8 +21,9 @@ export const sanitizeText = (text: string | null | undefined): string => {
     String(text)
       .replace(/['´`]/g, '')
       .replace(/"/g, '')
-      .replace(/[—–]/g, '-')
+      .replace(/[\u2010-\u2015\u2212]/g, '-')
       .replace(/…/g, '...')
+      .replace(/[\u2000-\u200A\u202F\u205F\u3000]/g, ' ')
       .replace(/[\u0100-\uFFFF]/g, ''),
   ).trim()
 }

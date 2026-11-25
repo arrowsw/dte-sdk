@@ -560,19 +560,33 @@ describe('calculateExportLineAmount', () => {
       { quantity: 1.00005, unitPrice: 1.5 },
       { base: 1.5001, discountAmount: 0, surchargeAmount: 0, amount: 1.5001 },
     ],
-    // Its 3 % is 37.035: a whole 37, the only amount `RecargoMonto` admits.
+    // The share of a percent has the four decimals of the amount it goes into: 3 % of 1234.5 is 37.035.
     [
       { quantity: 10, unitPrice: 123.45, surchargePercent: 3 },
-      { base: 1234.5, discountAmount: 0, surchargeAmount: 37, amount: 1271.5 },
+      { base: 1234.5, discountAmount: 0, surchargeAmount: 37.035, amount: 1271.535 },
     ],
-    // Its 10 % is 123.45, a whole 123; half a unit rounds away from zero.
     [
       { quantity: 1, unitPrice: 1234.5, discountPercent: 10 },
-      { base: 1234.5, discountAmount: 123, surchargeAmount: 0, amount: 1111.5 },
+      { base: 1234.5, discountAmount: 123.45, surchargeAmount: 0, amount: 1111.05 },
     ],
     [
       { quantity: 1, unitPrice: 25, discountPercent: 10 },
-      { base: 25, discountAmount: 3, surchargeAmount: 0, amount: 22 },
+      { base: 25, discountAmount: 2.5, surchargeAmount: 0, amount: 22.5 },
+    ],
+    // A service of 94 with a surcharge of 10 % on the line is 103.4, not 103.
+    [
+      { quantity: 1, unitPrice: 94, surchargePercent: 10 },
+      { base: 94, discountAmount: 0, surchargeAmount: 9.4, amount: 103.4 },
+    ],
+    // 33.33 % of 0.3333 is 0.11108889: 0.1111 to four decimals, half away from zero.
+    [
+      { quantity: 1, unitPrice: 0.3333, discountPercent: 33.33 },
+      { base: 0.3333, discountAmount: 0.1111, surchargeAmount: 0, amount: 0.2222 },
+    ],
+    // A share that is a whole number stays one.
+    [
+      { quantity: 2, unitPrice: 50, discountPercent: 10, surchargePercent: 5 },
+      { base: 100, discountAmount: 10, surchargeAmount: 5, amount: 95 },
     ],
     [{}, { base: 0, discountAmount: 0, surchargeAmount: 0, amount: 0 }],
     [{ unitPrice: 0.1 + 0.2 }, { base: 0.3, discountAmount: 0, surchargeAmount: 0, amount: 0.3 }],

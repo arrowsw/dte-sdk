@@ -297,6 +297,16 @@ describe('createReceptionAnswer', () => {
     expect(thrown(() => createReceptionAnswer('<nope/>', base)).code).toBe('XML_PARSE_FAILED')
   })
 
+  test('quotes the digest of the envelope signature after its id, when the envelope read carries one', async () => {
+    const read = readReceivedEnvelope(ENVELOPE)
+    const digest = 'hlmQtu/AyjUjTDhM3852wvRCr8w='
+    const xml = createReceptionAnswer({ ...read, digest }, base)
+    expect(xml).toContain(`<EnvioDTEID>${read.setId}</EnvioDTEID><Digest>${digest}</Digest><RutEmisor>`)
+    expect(createReceptionAnswer({ ...read, digest: null }, base)).not.toContain('<Digest>')
+    expect(createReceptionAnswer({ ...read, digest: undefined }, base)).not.toContain('<Digest>')
+    await expect(validateAgainstXsd(xml, 'RespuestaEnvioDTE')).resolves.toEqual([])
+  })
+
   // One validation per test: each runs the schema validator, which is slow under coverage.
   test('validates the default answer against the official schema', async () => {
     await expect(validateAgainstXsd(createReceptionAnswer(ENVELOPE, base), 'RespuestaEnvioDTE')).resolves.toEqual([])

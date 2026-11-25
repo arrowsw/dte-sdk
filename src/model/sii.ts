@@ -297,6 +297,8 @@ export type SiiTotales = {
   readonly IVATerc?: number
   /** EN: Additional taxes and withholdings. ES: `ImptoReten` — Impuestos adicionales y retenciones. */
   readonly ImptoReten?: readonly SiiImptoReten[]
+  /** EN: VAT not withheld (purchase invoices and their notes). ES: `IVANoRet` — IVA no retenido (facturas de compra y sus notas). */
+  readonly IVANoRet?: number
   /** EN: Deposit guarantee for containers or packaging. ES: `GrntDep` — Garantía por depósito de envases o embalajes. */
   readonly GrntDep?: number
   /** EN: Commission totals (settlement invoices). ES: `Comisiones` — Totales de comisiones (liquidación factura). */
@@ -441,6 +443,8 @@ export type SiiDscRcgGlobal = {
   readonly TpoValor: '%' | '$'
   /** EN: Value. ES: `ValorDR` — Valor del descuento o recargo. */
   readonly ValorDR: number
+  /** EN: Value in the other currency (export documents). ES: `ValorDROtrMnda` — Valor en otra moneda (documentos de exportación). */
+  readonly ValorDROtrMnda?: number
   /** EN: Exemption indicator: 1 exempt base, 2 non-billable base. ES: `IndExeDR` — Indicador de exención del descuento o recargo. */
   readonly IndExeDR?: number
 }

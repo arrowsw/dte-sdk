@@ -20,6 +20,38 @@ describe('the SII office of a commune', () => {
     expect(siiOfficeForCommune('Tiltil')).toBe('S.I.I. - SANTIAGO NORTE')
   })
 
+  test('only letters and digits count: spaces, hyphens and apostrophes are ignored too', () => {
+    expect(siiOfficeForCommune('Til Til')).toBe('S.I.I. - SANTIAGO NORTE')
+    expect(siiOfficeForCommune('TIL  TIL')).toBe('S.I.I. - SANTIAGO NORTE')
+    expect(siiOfficeForCommune('Tal-Tal')).toBe(siiOfficeForCommune('Taltal'))
+    expect(siiOfficeForCommune('OHiggins')).toBe(siiOfficeForCommune("O'Higgins"))
+    expect(siiOfficeForCommune('O\u2019Higgins')).toBe(siiOfficeForCommune("O'Higgins"))
+    expect(siiOfficeForCommune('Alto Bio Bio')).toBe('S.I.I. - LOS ÁNGELES')
+    expect(siiOfficeForCommune('Llay Llay')).toBe('S.I.I. - SAN FELIPE')
+    expect(siiOfficeForCommune("-' ")).toBeNull()
+  })
+
+  test('another spelling in use of a commune gives the office of that commune', () => {
+    expect(siiOfficeForCommune('Aisén')).toBe(siiOfficeForCommune('Aysén'))
+    expect(siiOfficeForCommune('Coihaique')).toBe(siiOfficeForCommune('Coyhaique'))
+    expect(siiOfficeForCommune('Llaillay')).toBe('S.I.I. - SAN FELIPE')
+    expect(siiOfficeForCommune('Marchigüe')).toBe(siiOfficeForCommune('Marchihue'))
+    expect(siiOfficeForCommune('Paiguano')).toBe(siiOfficeForCommune('Paihuano'))
+  })
+
+  test('no two names of different offices read the same once reduced to letters and digits', () => {
+    const reduced = (name: string) =>
+      name
+        .normalize('NFD')
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '')
+    const offices = new Map<string, Set<string>>()
+    for (const [office, communes] of Object.entries(SII_OFFICES))
+      for (const commune of communes)
+        offices.set(reduced(commune), (offices.get(reduced(commune)) ?? new Set()).add(office))
+    expect([...offices].filter(([, of]) => of.size > 1)).toEqual([])
+  })
+
   test('an unknown, empty or missing commune gives null', () => {
     expect(siiOfficeForCommune('Atlantis')).toBeNull()
     expect(siiOfficeForCommune('')).toBeNull()
@@ -33,11 +65,11 @@ describe('the SII office of a commune', () => {
     expect(siiOfficeForCommune('toString')).toBeNull()
   })
 
-  test('the table: 40 offices, 355 communes, each in one office and written in its normal form', () => {
+  test('the table: 40 offices, 360 communes, each in one office and written in its normal form', () => {
     const offices = Object.keys(SII_OFFICES)
     const communes = Object.values(SII_OFFICES).flat()
     expect(offices).toHaveLength(40)
-    expect(communes).toHaveLength(355)
+    expect(communes).toHaveLength(360)
     expect(new Set(communes).size).toBe(communes.length)
     for (const office of offices) expect(office).toMatch(/^S\.I\.I\. - [A-ZÁÉÍÓÚÑ ]+$/)
     for (const commune of communes) {

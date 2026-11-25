@@ -38,6 +38,18 @@ export type ReceivedEnvelope = {
   readonly receiverRut: string | null
   /** EN: The documents, in envelope order. ES: Los documentos, en el orden del sobre. */
   readonly documents: readonly ReceivedEnvelopeDocument[]
+  /** EN: The digest of the envelope's own signature, as it wrote it, in base64 and without its line breaks; null or absent when the envelope carries none that is base64. The reception answer quotes it. ES: `DigestValue` — El digest de la firma del propio sobre, como lo escribió, en base64 y sin sus saltos de línea; null o ausente si el sobre no trae uno en base64. La respuesta de recepción lo cita. */
+  readonly digest?: string | null
+}
+
+// The digest the envelope's own signature states of its set: the `DigestValue` of the `Signature` under the root. It is
+// quoted, not checked (`verifyReceivedDocuments` checks it), and only a text that is base64 is quoted, since the answer
+// writes it in an element of that type.
+const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/
+
+const digestOf = (root: Element): string | null => {
+  const digest = (textAt(root, 'Signature', 'SignedInfo', 'Reference', 'DigestValue') ?? '').replace(/\s+/g, '')
+  return BASE64.test(digest) ? digest : null
 }
 
 // The RUTs of an envelope are the sender's: they are not validated (so rut.ts has nothing to say here); only the dots
@@ -79,7 +91,8 @@ const documentOf = (header: ReceivedHeader, index: number): ReceivedEnvelopeDocu
  * that lacks one of them, or whose type, folio or total is not a whole number written in digits (the type and the folio
  * from 1, and the total of an export document without decimals, since the answers have no place for them), refuses the
  * envelope; a number is never converted (`1e3`, `0x10` and `12abc` are refused). The set id is the `ID` attribute of
- * the `SetDTE`, `SetDTE` when absent; the cover gives its issuer, sender and receiver. The RUTs are not validated:
+ * the `SetDTE`, `SetDTE` when absent; the cover gives its issuer, sender and receiver, and the envelope's signature its
+ * digest, quoted as written. The RUTs are not validated:
  * only their dots are removed and their letter is upper-cased. It does not check the signatures or the stamps:
  * `verifyReceivedDocuments` does, over the same text. To answer an envelope that cannot be read (`EstadoRecepEnv` 1 or
  * 91), build the `ReceivedEnvelope` by hand, with no documents.
@@ -91,7 +104,8 @@ const documentOf = (header: ReceivedHeader, index: number): ReceivedEnvelopeDocu
  * verificación. Un documento al que le falta alguno, o cuyo tipo, folio o total no es un entero escrito en dígitos (el
  * tipo y el folio desde 1, y el total de un documento de exportación sin decimales, porque las respuestas no tienen
  * lugar para ellos), hace que el sobre se rechace; un número nunca se convierte (`1e3`, `0x10` y `12abc` se rechazan). El id del set es el
- * atributo `ID` del `SetDTE`, `SetDTE` si falta; la carátula entrega su emisor, enviador y receptor. Los RUT no se
+ * atributo `ID` del `SetDTE`, `SetDTE` si falta; la carátula entrega su emisor, enviador y receptor, y la firma del
+ * sobre su digest, citado como viene. Los RUT no se
  * validan: solo se les quitan los puntos y se sube su letra a mayúscula. No chequea las firmas ni los timbres:
  * `verifyReceivedDocuments` lo hace, sobre el mismo texto. Para responder un sobre que no se puede leer
  * (`EstadoRecepEnv` 1 o 91), arma el `ReceivedEnvelope` a mano, sin documentos.
@@ -100,7 +114,7 @@ const documentOf = (header: ReceivedHeader, index: number): ReceivedEnvelopeDocu
  * @throws {DteError} EN: `XML_PARSE_FAILED` for empty or malformed XML, a DOCTYPE, a root that is not `EnvioDTE` or `EnvioBOLETA` (`details.field` `root`), an envelope without exactly one `SetDTE`, a `DTE` out of place or prefixed, a `DTE` without one unprefixed `Documento`, `Liquidacion` or `Exportaciones`, or a document that lacks a field or gives a number that is not one (`details.field` names the element and `details.index` the document, from 0); `ENVELOPE_EMPTY` for an envelope without documents. ES: `XML_PARSE_FAILED` para XML vacío o malformado, un DOCTYPE, una raíz que no es `EnvioDTE` ni `EnvioBOLETA` (`details.field` `root`), un sobre sin exactamente un `SetDTE`, un `DTE` fuera de lugar o con prefijo, un `DTE` sin un `Documento`, `Liquidacion` o `Exportaciones` sin prefijo, o un documento al que le falta un campo o trae un número que no lo es (`details.field` nombra el elemento y `details.index` el documento, desde 0); `ENVELOPE_EMPTY` para un sobre sin documentos.
  */
 export const readReceivedEnvelope = (envelopeXml: string): ReceivedEnvelope => {
-  const { rootTag, set, documents } = readReceivedStructure(envelopeXml)
+  const { rootTag, root, set, documents } = readReceivedStructure(envelopeXml)
   if (set === undefined)
     throw new DteError('XML_PARSE_FAILED', {
       field: 'root',
@@ -114,5 +128,6 @@ export const readReceivedEnvelope = (envelopeXml: string): ReceivedEnvelope => {
     senderRut: optionalEnvelopeRut(textAt(cover, 'RutEnvia')),
     receiverRut: optionalEnvelopeRut(textAt(cover, 'RutReceptor')),
     documents: documents.map(({ header }, index) => documentOf(header, index)),
+    digest: digestOf(root),
   }
 }

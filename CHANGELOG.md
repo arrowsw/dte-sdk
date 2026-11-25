@@ -7,7 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The VAT not withheld of a purchase invoice and its notes** (`totals.vatNotWithheld`, `IVANoRet`). Formato DTE 2.5
+  gives `IVANoRet` (field 118) to a purchase invoice (46) that withholds part of the VAT and to the notes that
+  reference one (56, 61): the VAT less the VAT withheld by product. The totals had no place for it. It is written
+  after the withholdings, a whole number above zero; a zero is none, and any other type refuses it
+  (`INVALID_OPTION`, `totals.vatNotWithheld`).
+- **A global adjustment of an export document in pesos** (`GlobalAdjustment.otherCurrencyValue`, `ValorDROtrMnda`).
+  Formato DTE 2.5 marks `ValorDROtrMnda` required on the three export documents, for the amounts of global discounts
+  and surcharges (field 6). An adjustment given as an amount now carries it, `convertToPesos` of its value, when the
+  document brings its `exchangeRate`. An adjustment in percent has none.
+- **The site the legend under the stamp names** (`verificationSite`, `dte-sdk/pdf`). The printed sample always said
+  `Verifique documento: www.sii.cl`. A company that declared to the SII the site where its receipts are consulted
+  names it here, on the sheet and on the roll; `www.sii.cl` stays the default.
+- **The digest of a received envelope** (`ReceivedEnvelope.digest`). `readReceivedEnvelope` reads the digest of the
+  envelope's own signature, and `createReceptionAnswer` quotes it (`Digest`, which `RespuestaEnvioDTE_v10.xsd`
+  declares after the id of the envelope).
+
 ### Changed
+
+- **On an export line the share of a percent keeps its decimals.** A line of an export document rounded the share of
+  a discount or a surcharge in percent to a whole number, the only amount `DescuentoMonto` and `RecargoMonto` admit,
+  so a price of 94 with 10 % on the line was 103. Formato DTE 2.5 leaves those two amounts optional on the three
+  export documents (fields 30 and 34 of the detail). The share now has the four decimals of `MontoItem`, 103.4, and it
+  is written as an amount only when it is a whole number; otherwise the percent goes alone, and `warnings` lists it
+  (`{ formatField: 30 | 34, field }`), since the same fields say a percent goes with its amount. Only a share those
+  four decimals bring to zero is refused. None of it has been run against the SII: a discount with decimals, and a
+  line with one share written and the other not, are the cases to look at in the first export documents.
+  - **What to change:** nothing in the call. `calculateExportLineAmount` returns shares with decimals, so code that
+    writes them as `DescuentoMonto` or `RecargoMonto` itself must write only a whole one; the amount of a line with a
+    percent may differ from the one 0.15.0 wrote; and `DocumentWarning` is now one of two shapes, so code that reads
+    `validation` of every warning must tell them apart.
+- **`sanitizeText` keeps the dashes and the spaces a text editor writes.** It dropped every dash but two and the minus
+  sign, so a pasted `−5` read `5`, and the typographic spaces, so two words ran together. Each dash from U+2010 to
+  U+2015 and U+2212 is now a hyphen, and each typographic space a plain space.
+- **A commune is matched to its SII office by its letters and digits alone.** `siiOfficeForCommune` ignored case and
+  accents only, so `Til Til`, `Tal-Tal` and `OHiggins` found no office and the printed sample fell back to Santiago
+  Centro. Spaces, hyphens and apostrophes no longer count, and `SII_OFFICES` gains five spellings in use of names it
+  already listed (Aisén, Coihaique, Llaillay, Marchigüe, Paiguano): 360 names in 40 offices.
+- **A document admits 30 payment installments.** `MntPagos` repeats up to 30 times (Formato DTE 2.5), and
+  `createDocument` wrote any number. More than 30 are refused with `INVALID_OPTION` and `options.payments`.
 
 - **A dispatch guide without its transfer type is refused.** Formato DTE 2.5 marks `IndTraslado` (field 7) mandatory
   on a guide, and `createDocument` issued a 52 without `options.transferType` and read it as a sale. It now refuses
@@ -38,6 +78,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A header too long for one line is broken inside.** The SII rejects an upload over a line of about 4,090
+  characters (`CHR-00002`), with the folio already spent. The header of a document is one line, and thirty payment
+  installments with their glosses took it to 4,992 characters. A line over 4,000 characters is now broken again
+  after the sections of the header and the elements that repeat inside them, before the document is signed, and a
+  line that still does not fit is refused with `FIELD_TOO_LONG` (`field: 'line'`). A document that fits is written as
+  before.
+- **The samples of the settlement set are filed with the test set.** `sampleSetOf` named the basic, guide, exempt and
+  purchase sets, and the envelope of the settlement set (`envio-set-liquidacion.xml`) fell with the simulation.
+- **The issuer's name, activity and address wrap in the header of the printed sample.** Each was drawn on one line
+  whatever its length, so a name of a hundred characters ran under the type box. They wrap to the width left of the
+  box; a text that fits is one line, as before.
 - **The non-billable amount takes off the lines with `IndExe` 6.** Formato DTE 2.5 defines `MontoNF` (field 125) as
   the lines with `IndExe` 2 less the lines with `IndExe` 6, and lets it be negative. `calculateTotals` added the
   lines with `IndExe` 6, and those with 3, 4 and 5, to the lines with 2: on a 33, a line of 1 000 with `IndExe` 2 and

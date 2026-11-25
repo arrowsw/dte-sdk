@@ -153,9 +153,9 @@ export type LineItemInput = {
   readonly exemptIndicator?: ExemptIndicator
   /** EN: Marks the line as a transaction of a withholding agent (`IndAgente` R), with the bases it declares; refused on a receipt and on a settlement invoice (43), whose lines have no such element. ES: `Retenedor` — Marca la línea como transacción de un agente retenedor (`IndAgente` R), con las bases que declara; se rechaza en una boleta y en una liquidación factura (43), cuyas líneas no tienen ese elemento. */
   readonly withholdingAgent?: WithholdingAgentLine
-  /** EN: Line discount percent, rounded to two decimals; refused on a settlement invoice (43). A percent of zero is left out; a negative one, or one above zero whose share of the line rounds to zero, is refused, since the percent is written with its amount, and so is one above 100 on a receipt (39, 41), whose schema stops there, and any on a line written at zero (`IndExe` 4 or 5, or a credit note that corrects a text). ES: `DescuentoPct` — Porcentaje de descuento de la línea, redondeado a dos decimales; se rechaza en una liquidación factura (43). Un porcentaje de cero se omite; uno negativo, o uno mayor que cero cuya parte de la línea redondea a cero, se rechaza, porque el porcentaje se escribe con su monto, y también uno mayor que 100 en una boleta (39, 41), cuyo esquema llega hasta ahí, y cualquiera en una línea que se escribe en cero (`IndExe` 4 o 5, o una nota de crédito que corrige un texto). */
+  /** EN: Line discount percent, rounded to two decimals; refused on a settlement invoice (43). A percent of zero is left out; a negative one, or one above zero whose share of the line rounds to zero, is refused, since the percent is written with its amount, and so is one above 100 on a receipt (39, 41), whose schema stops there, and any on a line written at zero (`IndExe` 4 or 5, or a credit note that corrects a text). On an export document its share has four decimals, and is written as `DescuentoMonto` only when it is a whole number. ES: `DescuentoPct` — Porcentaje de descuento de la línea, redondeado a dos decimales; se rechaza en una liquidación factura (43). Un porcentaje de cero se omite; uno negativo, o uno mayor que cero cuya parte de la línea redondea a cero, se rechaza, porque el porcentaje se escribe con su monto, y también uno mayor que 100 en una boleta (39, 41), cuyo esquema llega hasta ahí, y cualquiera en una línea que se escribe en cero (`IndExe` 4 o 5, o una nota de crédito que corrige un texto). En un documento de exportación su parte tiene cuatro decimales, y se escribe como `DescuentoMonto` solo cuando es un entero. */
   readonly discountPercent?: number
-  /** EN: Line surcharge percent, rounded to two decimals; refused on a settlement invoice (43). A percent of zero is left out; a negative one, or one above zero whose share of the line rounds to zero, is refused, since the percent is written with its amount, and so is one above 100 on a receipt (39, 41), whose schema stops there, and any on a line written at zero (`IndExe` 4 or 5, or a credit note that corrects a text). ES: `RecargoPct` — Porcentaje de recargo de la línea, redondeado a dos decimales; se rechaza en una liquidación factura (43). Un porcentaje de cero se omite; uno negativo, o uno mayor que cero cuya parte de la línea redondea a cero, se rechaza, porque el porcentaje se escribe con su monto, y también uno mayor que 100 en una boleta (39, 41), cuyo esquema llega hasta ahí, y cualquiera en una línea que se escribe en cero (`IndExe` 4 o 5, o una nota de crédito que corrige un texto). */
+  /** EN: Line surcharge percent, rounded to two decimals; refused on a settlement invoice (43). A percent of zero is left out; a negative one, or one above zero whose share of the line rounds to zero, is refused, since the percent is written with its amount, and so is one above 100 on a receipt (39, 41), whose schema stops there, and any on a line written at zero (`IndExe` 4 or 5, or a credit note that corrects a text). On an export document its share has four decimals, and is written as `RecargoMonto` only when it is a whole number. ES: `RecargoPct` — Porcentaje de recargo de la línea, redondeado a dos decimales; se rechaza en una liquidación factura (43). Un porcentaje de cero se omite; uno negativo, o uno mayor que cero cuya parte de la línea redondea a cero, se rechaza, porque el porcentaje se escribe con su monto, y también uno mayor que 100 en una boleta (39, 41), cuyo esquema llega hasta ahí, y cualquiera en una línea que se escribe en cero (`IndExe` 4 o 5, o una nota de crédito que corrige un texto). En un documento de exportación su parte tiene cuatro decimales, y se escribe como `RecargoMonto` solo cuando es un entero. */
   readonly surchargePercent?: number
   /** EN: Item codes. ES: `CdgItem` — Códigos del ítem (hasta 5). */
   readonly codes?: readonly ItemCode[]
@@ -271,6 +271,8 @@ export type Totals = {
   readonly thirdPartyVatAmount?: number
   /** EN: Withholdings; refused on a receipt. ES: `ImptoReten` — Retenciones; se rechazan en una boleta. */
   readonly withholdings?: readonly Withholding[]
+  /** EN: VAT not withheld: the VAT less the VAT withheld by product (Formato DTE 2.5, field 118), on a purchase invoice (46) that withholds part of the VAT and on the notes that reference one (56, 61); a whole number above zero, written as given, where a given zero is none and no `IVANoRet` is written; refused on any other type. ES: `IVANoRet` — IVA no retenido: el IVA menos el IVA retenido por producto (Formato DTE 2.5, campo 118), en una factura de compra (46) que retiene parte del IVA y en las notas que referencian una (56, 61); un entero mayor que cero, escrito tal como viene, donde uno entregado en cero no cuenta y no se escribe `IVANoRet`; se rechaza en cualquier otro tipo. */
+  readonly vatNotWithheld?: number
   /** EN: Deposit guarantee for containers or packaging: the sum of the lines with `IndExe` 3 (Formato DTE 2.5, field 120), added to the total; only on a 33, 34, 56 or 61, the types the format gives it to, and refused on any other unless it is zero, a value that is not a number included; a given zero is none, and no `GrntDep` is written. ES: `GrntDep` — Garantía por depósito de envases o embalajes: la suma de las líneas con `IndExe` 3 (Formato DTE 2.5, campo 120), que se suma al total; solo en un 33, 34, 56 o 61, los tipos a los que la da el formato, y se rechaza en cualquier otro salvo que sea cero, también un valor que no es número; una entregada en cero no cuenta, y no se escribe `GrntDep`. */
   readonly depositGuarantee?: number
   /** EN: Totals of the commission and other charge lines; refused on a receipt. ES: `Comisiones` — Totales de las líneas de comisiones y otros cargos; se rechazan en una boleta. */
@@ -393,6 +395,8 @@ export type GlobalAdjustmentInput = {
 export type GlobalAdjustment = GlobalAdjustmentInput & {
   /** EN: 1-based line number. ES: `NroLinDR` — Número de línea, desde 1. */
   readonly lineNumber: number
+  /** EN: The value in Chilean pesos of an adjustment given as an amount, on an export document that brings its exchange rate: `convertToPesos` of the value (Formato DTE 2.5, field 6 of the global discounts and surcharges, required on the three export documents). Absent on an adjustment in percent and on any other type. ES: `ValorDROtrMnda` — El valor en pesos chilenos de un ajuste dado como monto, en un documento de exportación que trae su tipo de cambio: el `convertToPesos` del valor (Formato DTE 2.5, campo 6 de los descuentos y recargos globales, obligatorio en los tres documentos de exportación). Ausente en un ajuste en porcentaje y en cualquier otro tipo. */
+  readonly otherCurrencyValue?: number
 }
 
 /**
@@ -632,7 +636,7 @@ export type HeaderOptions = {
   readonly settledAmount?: number
   /** EN: Outstanding balance. ES: `SaldoInsol` — Saldo insoluto. */
   readonly outstandingBalance?: number
-  /** EN: Payment installments. ES: `MntPagos` — Cuotas de pago. */
+  /** EN: Payment installments, at most 30. ES: `MntPagos` — Cuotas de pago, 30 como máximo. */
   readonly payments?: readonly Payment[]
   /** EN: Billing period. ES: `PeriodoDesde`/`PeriodoHasta` — Período de facturación. */
   readonly billingPeriod?: { readonly from: string; readonly to: string }
@@ -723,21 +727,38 @@ export type Header = {
 }
 
 /**
- * EN: What the SII accepts with an objection (reparo), by the number of its validation in "Nuevas validaciones a la
- * IECV, DTE y DJ 3327 y 3328": 10, a total of zero on an invoice, an exempt invoice, a settlement invoice or a purchase
- * invoice (33, 34, 43, 46), and 12, a net amount of zero on an invoice, a settlement invoice or a purchase invoice (33,
- * 43, 46), both in the purchase book of the one who books it; 56, an invoice (33) whose net amount is not above zero.
- * ES: Lo que el SII acepta con reparo, por el número de su validación en "Nuevas validaciones a la IECV, DTE y DJ 3327 y
- * 3328": 10, un monto total en cero en una factura, una factura exenta, una liquidación factura o una factura de compra
- * (33, 34, 43, 46), y 12, un monto neto en cero en una factura, una liquidación factura o una factura de compra (33,
- * 43, 46), ambas en el libro de compras de quien lo registra; 56, una factura (33) cuyo monto neto no es mayor que cero.
+ * EN: What `createDocument` builds and the SII may object to. Of the totals, what the SII accepts with an objection
+ * (reparo), by the number of its validation in "Nuevas validaciones a la IECV, DTE y DJ 3327 y 3328": 10, a total of
+ * zero on an invoice, an exempt invoice, a settlement invoice or a purchase invoice (33, 34, 43, 46), and 12, a net
+ * amount of zero on an invoice, a settlement invoice or a purchase invoice (33, 43, 46), both in the purchase book of
+ * the one who books it; 56, an invoice (33) whose net amount is not above zero. Of a line of an export document, a
+ * percent written without its amount, by the field of the detail of Formato DTE 2.5 that asks a percent for its amount
+ * ("Si va el descuento en %, debe ir el monto correspondiente"): the schema's element holds whole numbers only, so a
+ * share with decimals has no amount to be written as, and the format leaves that amount optional on an export
+ * document.
+ * ES: Lo que `createDocument` arma y el SII puede reparar. De los totales, lo que el SII acepta con reparo, por el
+ * número de su validación en "Nuevas validaciones a la IECV, DTE y DJ 3327 y 3328": 10, un monto total en cero en una
+ * factura, una factura exenta, una liquidación factura o una factura de compra (33, 34, 43, 46), y 12, un monto neto en
+ * cero en una factura, una liquidación factura o una factura de compra (33, 43, 46), ambas en el libro de compras de
+ * quien lo registra; 56, una factura (33) cuyo monto neto no es mayor que cero. De una línea de un documento de
+ * exportación, un porcentaje escrito sin su monto, por el campo del detalle del Formato DTE 2.5 que le pide a un
+ * porcentaje su monto ("Si va el descuento en %, debe ir el monto correspondiente"): el elemento del esquema admite
+ * solo enteros, así que una parte con decimales no tiene monto con que escribirse, y el formato deja ese monto
+ * opcional en un documento de exportación.
  */
-export type DocumentWarning = {
-  /** EN: Number of the SII validation that objects to it. ES: Número de la validación del SII que lo repara. */
-  readonly validation: 10 | 12 | 56
-  /** EN: The total it is about. ES: `MntNeto` o `MntTotal` — El total del que se trata. */
-  readonly field: 'totals.netAmount' | 'totals.totalAmount'
-}
+export type DocumentWarning =
+  | {
+      /** EN: Number of the SII validation that objects to it. ES: Número de la validación del SII que lo repara. */
+      readonly validation: 10 | 12 | 56
+      /** EN: The total it is about. ES: `MntNeto` o `MntTotal` — El total del que se trata. */
+      readonly field: 'totals.netAmount' | 'totals.totalAmount'
+    }
+  | {
+      /** EN: The field of the detail of Formato DTE 2.5 that asks the percent for its amount: 30 for a discount, 34 for a surcharge. ES: `DescuentoMonto` (30) o `RecargoMonto` (34) — El campo del detalle del Formato DTE 2.5 que le pide al porcentaje su monto: 30 para un descuento, 34 para un recargo. */
+      readonly formatField: 30 | 34
+      /** EN: The percent written without its amount: `items[i].discountPercent` or `items[i].surchargePercent`, with the line's position from 0. ES: `DescuentoPct` o `RecargoPct` — El porcentaje escrito sin su monto: `items[i].discountPercent` o `items[i].surchargePercent`, con la posición de la línea desde 0. */
+      readonly field: string
+    }
 
 /**
  * EN: A normalized document, ready to be rendered, stamped and signed. Produced by `createDocument`.
@@ -755,7 +776,7 @@ export type Document = {
   readonly receiptReferences: readonly ReceiptReference[]
   /** EN: Commission lines (settlement invoices only). ES: `Comisiones` — Líneas de comisión (solo 43). */
   readonly commissions: readonly CommissionLine[]
-  /** EN: What the SII will accept with an objection, as `createDocument` found it; absent when there is nothing, and never written to the XML. ES: Lo que el SII aceptará con reparo, tal como lo encontró `createDocument`; ausente si no hay nada, y nunca se escribe en el XML. */
+  /** EN: What the SII may object to, as `createDocument` found it: totals it accepts with an objection, and on an export document each percent of a line written without its amount; absent when there is nothing, and never written to the XML. ES: Lo que el SII puede reparar, tal como lo encontró `createDocument`: totales que acepta con reparo, y en un documento de exportación cada porcentaje de una línea escrito sin su monto; ausente si no hay nada, y nunca se escribe en el XML. */
   readonly warnings?: readonly DocumentWarning[]
 }
 

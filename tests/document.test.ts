@@ -1,6 +1,6 @@
 import { parseCaf } from '../src/caf/parse'
 import { loadCertificateFromPem } from '../src/certificate/pem'
-import { buildDocumentXml, documentElementName } from '../src/document/build-xml'
+import { breakLongLines, buildDocumentXml, documentElementName } from '../src/document/build-xml'
 import { createDocument } from '../src/document/create'
 import { issueDocument } from '../src/document/issue'
 import { signDocument, verifyDocumentSignature } from '../src/document/sign'
@@ -83,6 +83,56 @@ describe('buildDocumentXml', () => {
     expect(xml.replace(/\n/g, '').length).toBeGreaterThan(4090 * 2)
     expect(longest).toBeLessThan(4090)
     expect(xml.split('\n').filter((line) => line.startsWith('<Detalle>')).length).toBe(60)
+  })
+
+  // The header is one line: thirty installments with their glosses are the case that takes it past the SII's limit.
+  const installments = (count: number) =>
+    Array.from({ length: count }, (_, i) => ({
+      date: `2027-01-${String((i % 28) + 1).padStart(2, '0')}`,
+      amount: 100000 + i,
+      note: 'Cuota mensual pactada segun contrato 12',
+    }))
+
+  test('a header too long for one line is broken inside, and the document still signs and verifies', () => {
+    const signed = issueDocument({
+      document: { ...invoiceInput, options: { paymentTerms: 2, payments: installments(30) } },
+      caf: caf33,
+      certificate,
+      now: FIXED_NOW,
+    })
+    const lines = signed.xml.split('\n')
+    expect(signed.xml.match(/<Encabezado>[^]*<\/Encabezado>/)?.[0].length).toBeGreaterThan(4090)
+    expect(Math.max(...lines.map((line) => line.length))).toBeLessThan(4000)
+    // Thirty installments, a break between each two.
+    expect(signed.xml.split('</MntPagos>\n<MntPagos>')).toHaveLength(30)
+    expect(signed.xml).toContain('</IdDoc>\n<Emisor>')
+    expect(signed.xml).toContain('</Receptor>\n<Totales>')
+    expect(verifyDocumentSignature(signed.xml).valid).toBe(true)
+  })
+
+  test('a header that fits stays on one line, as it always was', () => {
+    const signed = issueDocument({
+      document: { ...invoiceInput, options: { paymentTerms: 2, payments: installments(10) } },
+      caf: caf33,
+      certificate,
+      now: FIXED_NOW,
+    })
+    expect(signed.xml).toMatch(/<Encabezado><IdDoc>.*<\/MntPagos><MntPagos>.*<\/Totales><\/Encabezado>\n/)
+  })
+
+  test('breakLongLines leaves short lines alone and refuses a line it cannot break', () => {
+    const short = '<A>1</A>\n<B>2</B>'
+    expect(breakLongLines(short)).toBe(short)
+    const sections = `<IdDoc>${'x'.repeat(2500)}</IdDoc><Emisor>${'y'.repeat(2500)}</Emisor>`
+    expect(breakLongLines(sections).split('\n')).toHaveLength(2)
+    const error = (() => {
+      try {
+        return breakLongLines(`<Emisor>${'y'.repeat(4001)}</Emisor>`)
+      } catch (caught) {
+        return caught as { code: string; details: unknown }
+      }
+    })()
+    expect(error).toMatchObject({ code: 'FIELD_TOO_LONG', details: { field: 'line', maxLength: 4000, length: 4018 } })
   })
 
   test('settlement invoice uses the Liquidacion element', () => {

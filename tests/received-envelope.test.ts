@@ -49,7 +49,24 @@ describe('readReceivedEnvelope', () => {
         { type: 33, folio: 1, issueDate: '2026-11-01', issuerRut: SUPPLIER, receiverRut: COMPANY, total: 119000 },
         { type: 61, folio: 2, issueDate: '2026-11-02', issuerRut: SUPPLIER, receiverRut: OTHER, total: 5000 },
       ],
+      digest: null,
     })
+  })
+
+  test('the digest of the envelope signature is quoted as written, without its line breaks, when it is base64', () => {
+    const signed = (digest: string): string =>
+      ONE.replace(
+        '</EnvioDTE>',
+        `<Signature xmlns="http://www.w3.org/2000/09/xmldsig#"><SignedInfo><Reference URI="#SetDoc"><DigestValue>${digest}</DigestValue></Reference></SignedInfo><SignatureValue>AAAA</SignatureValue></Signature></EnvioDTE>`,
+      )
+    expect(readReceivedEnvelope(signed('hlmQtu/AyjUjTDhM3852wvRCr8w=')).digest).toBe('hlmQtu/AyjUjTDhM3852wvRCr8w=')
+    expect(readReceivedEnvelope(signed('\n  hlmQtu/AyjUjTDhM\n3852wvRCr8w=\n')).digest).toBe(
+      'hlmQtu/AyjUjTDhM3852wvRCr8w=',
+    )
+    expect(readReceivedEnvelope(signed('not base64!')).digest).toBeNull()
+    expect(readReceivedEnvelope(signed('')).digest).toBeNull()
+    // The digest of a document's own signature is not the envelope's.
+    expect(readReceivedEnvelope(ONE).digest).toBeNull()
   })
 
   test('reads of each document what verifyReceivedDocuments reads of it', () => {

@@ -83,6 +83,18 @@ describe('a receipt on continuous paper', () => {
     expect(await decodeStampInPdf(pdf)).toBe(receiptDoc.tedXml)
   })
 
+  test('the legend under the stamp names the site the company declared for its receipts', async () => {
+    const named = await pdfText(
+      await renderPrintedSample(receiptDoc, {
+        paper: 'roll',
+        now: () => FIXED_NOW,
+        verificationSite: 'boletas.ejemplo.cl',
+      }),
+    )
+    expect(named).toContain('Verifique documento: boletas.ejemplo.cl')
+    expect(named).not.toContain('www.sii.cl')
+  })
+
   test('draws the stamp between 5 and 9 cm wide and at least 2 cm high', async () => {
     const [stamp] = await pdfImages(pdf)
     expect(stamp.width).toBeGreaterThan(0)

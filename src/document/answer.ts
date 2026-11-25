@@ -416,6 +416,7 @@ export const receptionAnswerOf = (envelope: ReceivedEnvelope, input: ReceptionAn
         FchRecep: receivedAt,
         CodEnvio: checkCode(input.envelopeCode ?? 1, 'envelopeCode', 9_999_999_999),
         EnvioDTEID: envelope.setId,
+        ...(envelope.digest ? { Digest: envelope.digest } : {}),
         RutEmisor: envelope.issuerRut,
         RutReceptor: common.company,
         EstadoRecepEnv: stateOf.state,
@@ -438,14 +439,16 @@ export const receptionAnswerOf = (envelope: ReceivedEnvelope, input: ReceptionAn
 /**
  * EN: Builds and signs the reception answer to a received envelope: a `RespuestaDTE` with one `RecepcionEnvio` that
  * states the reception of the envelope (`EstadoRecepEnv`) and, for each document, the reception of the document
- * (`EstadoRecepDTE`), the answer the SII asks every receiver to give. The caller decides the state and the gloss of the
+ * (`EstadoRecepDTE`), the answer the SII asks every receiver to give. When the envelope read carries the digest of its
+ * signature, the answer quotes it (`Digest`), so the sender can tell which file it answers. The caller decides the state and the gloss of the
  * envelope and of each document; by default a document addressed to another RUT than the company's is "DTE No
  * Recibido - Error en RUT Receptor" (3), any other is received (0), and the envelope is received (0) unless its cover
  * names another receiver (3). A document decided `null` is left out. One line, UTF-8, no declaration; the ids carry
  * the clock in milliseconds and every timestamp is Chile's local time.
  * ES: Arma y firma la respuesta de recepción a un sobre recibido: una `RespuestaDTE` con una `RecepcionEnvio` que dice
  * la recepción del envío (`EstadoRecepEnv`) y, por documento, la recepción del documento (`EstadoRecepDTE`), la
- * respuesta que el SII pide a todo receptor. Quien llama decide el estado y la glosa del envío y de cada documento; por
+ * respuesta que el SII pide a todo receptor. Cuando el sobre leído trae el digest de su firma, la respuesta lo cita
+ * (`Digest`), así el emisor sabe a qué archivo responde. Quien llama decide el estado y la glosa del envío y de cada documento; por
  * defecto un documento dirigido a otro RUT que el de la empresa es "DTE No Recibido - Error en RUT Receptor" (3), los
  * demás se reciben (0), y el sobre se recibe (0) salvo que su carátula nombre otro receptor (3). Un documento
  * decidido `null` queda fuera. Una línea, UTF-8, sin declaración; los ids llevan el reloj en milisegundos y cada marca
