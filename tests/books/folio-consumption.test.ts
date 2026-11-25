@@ -73,6 +73,13 @@ describe('createFolioConsumption', () => {
     expect(createFolioConsumption({ ...report, id: 'RCOF_2026-10.a' }).id).toBe('RCOF_2026-10.a')
   })
 
+  test('an id of null is one left out, as before: an id is generated', () => {
+    const id = null as unknown as undefined
+    expect(createFolioConsumption({ ...{ cover: reportCover, entries: [receipt], now: FIXED_NOW }, id }).id).toBe(
+      'RCOF_15_11_2026_15_30_00_000',
+    )
+  })
+
   test('the dates come from the lines, the sequence defaults to 1 and the id and timestamp are generated', () => {
     const report = createFolioConsumption({
       cover: reportCover,

@@ -50,6 +50,13 @@ describe('createGuideBook', () => {
     expect(createGuideBook({ ...book, id: 'LGD_2026-10.a' }).id).toBe('LGD_2026-10.a')
   })
 
+  test('an id of null is one left out, as before: an id is generated', () => {
+    const id = null as unknown as undefined
+    expect(
+      createGuideBook({ ...{ cover: guideCover, entries: [entry({ totalAmount: 1 })], now: FIXED_NOW }, id }).id,
+    ).toBe('LGD_15_11_2026_15_30_00_000')
+  })
+
   test('defaults to a total and generates the id and timestamp', () => {
     const book = createGuideBook({ cover: guideCover, entries: [entry({ totalAmount: 1 })], now: FIXED_NOW })
     expect(book.cover).toMatchObject({ submission: 'total', notificationFolio: 3 })

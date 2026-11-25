@@ -27,7 +27,7 @@ import {
   normalizeBookCover,
   toBookDate,
 } from './common'
-import { xmlId } from '../xml/id'
+import { givenOrGeneratedId } from '../xml/id'
 
 const ROOT_TAG = 'LibroGuia'
 const SIGNED_TAG = 'EnvioLibro'
@@ -165,7 +165,7 @@ export const createGuideBook = (input: GuideBookInput): GuideBook => {
   const period = accumulateGuideTotals(input.previousTotals ?? EMPTY_TOTALS, lineTotals)
   const hasTotals = entries.length > 0 || input.previousTotals !== undefined
   return {
-    id: input.id === undefined ? generateSetId('LGD', input.now) : xmlId(input.id, 'id'),
+    id: givenOrGeneratedId(input.id, 'id', () => generateSetId('LGD', input.now)),
     cover,
     entries,
     segmentTotals: (submission === 'partial' || submission === 'adjustment') && entries.length > 0 ? lineTotals : null,

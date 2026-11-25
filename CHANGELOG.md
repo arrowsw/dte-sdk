@@ -30,7 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `createPurchaseSalesBook`, `createGuideBook` and `createFolioConsumption` (`id`) wrote whatever they were given:
   `39-1` or `a b` made a file the schema refuses, and a `<` or a quote broke the attribute the id is written in. An id
   that is not a letter or an underscore followed by letters, digits, full stops, hyphens and underscores is now
-  refused with `INVALID_OPTION` (`cover.setId`, `id`). The ids the library generates do not change.
+  refused with `INVALID_OPTION` (`cover.setId`, `id`), and so is a `cover.setId` that is the id of a document of the
+  envelope, since an `xs:ID` names one element of its file. The ids the library generates do not change, and one is
+  generated for an id left out, a `null` included, as before.
   - **What to change:** rename an id that starts with a digit or holds a space or a colon, or leave it out to have
     one generated.
 
@@ -39,15 +41,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A folio file saved as the SII serves it is found when the company's name has an Ñ or an accent.** The folio file
   the SII serves opens with `<?xml version="1.0"?>`, naming no encoding, and its bytes are ISO-8859-1. `findCafFiles`
   (`dte-sdk/node`) read a file that names no encoding as strict UTF-8 and skipped it when its bytes were not, so the
-  file of a company with an Ñ in its name was never found, with no error to say why. A file that names no encoding is
-  now read as UTF-8 when its bytes are, and as ISO-8859-1 otherwise. A file that names its encoding is read as
-  before, and skipped when its bytes are not that encoding. `findLatestCafFile` and `resolveCafFile` follow.
-- **The refusal of an upload keeps its reason wherever the reply writes it.** `uploadEnvelope`, `uploadBook` and
-  `uploadFolioConsumption` read the reason of a refused file from the `DETAIL/ERROR` lines of the reply alone. A reply
-  with no such line came back as `SII_UPLOAD_REJECTED` with empty `errors`, and one that named the TrackID of an
-  earlier upload outside those lines was a refusal where it is a duplicate. With no `ERROR` line, what the reply says
-  after `STATUS` is now read line by line, less its markup and its `TRACKID` element. A reply with `ERROR` lines is
-  read as before.
+  file of a company with an Ñ in its name was never found, with no error to say why; the entry of 0.7.0 that told a
+  caller to declare the encoding "as the SII's file does" had the SII's file wrong. A file that names no encoding is
+  now read as UTF-8 when its bytes are; when they are not, it is read as ISO-8859-1 and kept only if the SII's
+  signature of the CAF read that way (`FRMA`) does not fail, so a file in any other encoding is still skipped rather
+  than misread: its bytes are not the ones the SII signed. A CAF of a key the library does not know cannot be checked
+  and is kept. A file that names its encoding is read as before, and one that opens with a UTF-8 byte order mark is
+  UTF-8 or skipped. `findLatestCafFile` and `resolveCafFile` follow.
+- **The refusal of an upload carries the reply.** `uploadEnvelope`, `uploadBook` and `uploadFolioConsumption` hand
+  back the reason of a refused file as the `DETAIL/ERROR` lines of the reply (`errors`). A reply with no such line
+  came back as `SII_UPLOAD_REJECTED` with empty `errors` and nothing else to correct the file with, unless an archive
+  or a capture was set up. `details.body` now carries the first 2 000 characters of the reply with its secrets
+  redacted, as the details of a reply that cannot be read already do. How a reply is read does not change: its
+  `ERROR` lines and its `TRACKID` element alone say whether it is a refusal or a duplicate.
 - **A logo handed as a `Buffer` is printed.** `Buffer.from` of a short base64 text and `fs.readFile` of a small file
   hand out a view of a larger pool, at an offset, and `renderPrintedSample` passed it on as it came: the JPEG reader
   looked for the image at the start of the pool and found none, so the sample was printed without its logo and with

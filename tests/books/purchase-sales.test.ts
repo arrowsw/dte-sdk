@@ -58,6 +58,13 @@ describe('createPurchaseSalesBook', () => {
     )
   })
 
+  test('an id of null is one left out, as before: an id is generated', () => {
+    const id = null as unknown as undefined
+    expect(createPurchaseSalesBook({ ...{ cover: saleCover, entries: [invoice], now: FIXED_NOW }, id }).id).toBe(
+      'LCV_15_11_2026_15_30_00_000',
+    )
+  })
+
   test('defaults to a monthly total and generates the id and timestamp in Chile time', () => {
     const book = createPurchaseSalesBook({ cover: saleCover, entries: [invoice], now: FIXED_NOW })
     expect(book.cover).toMatchObject({ kind: 'monthly', submission: 'total', operation: 'sale' })

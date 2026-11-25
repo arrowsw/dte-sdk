@@ -16,7 +16,20 @@ const XML_ID = new RegExp(`^[${LETTERS}][${LETTERS}0-9.·-]*$`)
  * @param field EN: name of the field, for the error. ES: nombre del campo, para el error.
  * @throws {DteError} EN: `INVALID_OPTION` with the field in `details.field`. ES: `INVALID_OPTION` con el campo en `details.field`.
  */
-export const xmlId = (value: string, field: string): string => {
+const xmlId = (value: string, field: string): string => {
   if (typeof value !== 'string' || !XML_ID.test(value)) throw new DteError('INVALID_OPTION', { field })
   return value
 }
+
+/**
+ * EN: The id a caller gave, checked as `xmlId` checks it, or a generated one when none was given: `undefined`, or the
+ * `null` a caller's JSON may carry in its place. Internal.
+ * ES: El id entregado por quien llama, revisado como lo revisa `xmlId`, o uno generado si no se entregó ninguno:
+ * `undefined`, o el `null` que el JSON de quien llama puede traer en su lugar. Interno.
+ * @param value EN: the id, if any. ES: el id, si hay.
+ * @param field EN: name of the field, for the error. ES: nombre del campo, para el error.
+ * @param generate EN: makes the id when none was given. ES: genera el id cuando no se entregó ninguno.
+ * @throws {DteError} EN: `INVALID_OPTION` with the field in `details.field`. ES: `INVALID_OPTION` con el campo en `details.field`.
+ */
+export const givenOrGeneratedId = (value: string | null | undefined, field: string, generate: () => string): string =>
+  value === undefined || value === null ? generate() : xmlId(value, field)
