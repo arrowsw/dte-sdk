@@ -39,6 +39,8 @@ export type ExportLineAmountInput = {
   readonly discountPercent?: number
   /** EN: Surcharge percent. ES: `RecargoPct` — Porcentaje de recargo. */
   readonly surchargePercent?: number
+  /** EN: Round the share of each percent half away from zero to a whole number, the only one `DescuentoMonto` and `RecargoMonto` admit, so that it can be written beside its percent; the amount of the line is worked out with it. Without it a share keeps its four decimals. ES: `DescuentoMonto`, `RecargoMonto` — Redondear la parte de cada porcentaje, la mitad lejos de cero, a un número entero, el único que admiten `DescuentoMonto` y `RecargoMonto`, para que se pueda escribir junto a su porcentaje; el monto de la línea se calcula con ella. Sin esto la parte conserva sus cuatro decimales. */
+  readonly wholeShares?: boolean
 }
 
 /**
@@ -73,12 +75,16 @@ export const calculateExportLineAmount = ({
   unitPrice = 0,
   discountPercent = 0,
   surchargePercent = 0,
+  wholeShares = false,
 }: ExportLineAmountInput): ExportLineAmount => {
   // Quantity and price with six decimals each: their product has twelve, rounded to the four of the amount.
   const base = divide(unitsOf(quantity, 6) * unitsOf(unitPrice, 6), pow10(12 - AMOUNT_DECIMALS))
   // A base with four decimals by a percent with two, over 100: with four decimals again, that over 10^4.
-  const share = (percent: number): bigint =>
+  // A whole share is that share rounded once more, to no decimals, and held in the same units.
+  const whole = (units: bigint): bigint => divide(units, pow10(AMOUNT_DECIMALS)) * pow10(AMOUNT_DECIMALS)
+  const exact = (percent: number): bigint =>
     percent > 0 ? divide(base * unitsOf(percent, 2), pow10(2) * HUNDRED) : ZERO
+  const share = (percent: number): bigint => (wholeShares ? whole(exact(percent)) : exact(percent))
   const discount = share(discountPercent)
   const surcharge = share(surchargePercent)
   return {

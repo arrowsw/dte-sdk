@@ -180,7 +180,7 @@ describe('a run whose text holds the export sets', () => {
     expect(Object.keys(result.state.sets)).toEqual(['export1', 'export2'])
     expect(result.state.sets.export2!.cases.map((c) => [c.type, c.folio, c.totals.totalAmount])).toEqual([
       [110, 2, 103.4],
-      [110, 3, 233792.18],
+      [110, 3, 233792.38],
       [110, 4, 281],
     ])
     expect(result.state.cafs.map((xml) => /<TD>(\d+)<\/TD>/.exec(xml)![1]).sort()).toEqual(['110', '111', '112'])

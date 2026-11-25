@@ -272,8 +272,10 @@ describe('issuing the export sets', () => {
       { exemptAmount: 36411, totalAmount: 36411 },
       { exemptAmount: 36411, totalAmount: 36411 },
     ])
-    // The conformant goods invoice came to 233792.38: it wrote the 5 % of 200984, 10049.2, as a whole 10049.
-    expect(two.cases.map((issued) => issued.document.header.totals.totalAmount)).toEqual([103.4, 233792.18, 281])
+    // The goods invoice of a conformant set wrote the 5 % of 200984, 10049.2, as a whole 10049 beside its percent, and
+    // the surcharge of the service, 9.4, in the line's amount alone.
+    expect(two.cases.map((issued) => issued.document.header.totals.totalAmount)).toEqual([103.4, 233792.38, 281])
+    expect(two.cases[1].document.items[0]).toMatchObject({ discountPercent: 5, discountAmount: 10049, amount: 190935 })
     expect(two.cases.map((issued) => issued.document.header.currency)).toEqual(['YEN', 'YEN', 'DOLAR USA'])
   })
 
@@ -285,7 +287,7 @@ describe('issuing the export sets', () => {
       totalAmount: 120956313,
     })
     expect(doc(one, 3).header.otherCurrency).toMatchObject({ exchangeRate: 1075, totalAmount: 39141825 })
-    expect(two.cases.map((issued) => issued.document.header.otherCurrency?.totalAmount)).toEqual([724, 1636545, 266950])
+    expect(two.cases.map((issued) => issued.document.header.otherCurrency?.totalAmount)).toEqual([724, 1636547, 266950])
     expect(doc(one, 1).globalAdjustments).toEqual([
       {
         lineNumber: 1,
@@ -426,7 +428,7 @@ describe('issuing the export sets', () => {
       [807, 'DUS'],
       [809, 'AWB'],
     ])
-    expect(goods.items[0]).toMatchObject({ discountPercent: 5, amount: 190934.8 })
+    expect(goods.items[0]).toMatchObject({ discountPercent: 5, discountAmount: 10049, amount: 190935 })
   })
 
   test('lodging: the country and nothing else of the customs area', () => {

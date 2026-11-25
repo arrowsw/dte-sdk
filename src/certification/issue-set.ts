@@ -840,6 +840,9 @@ const exportLine = (item: PlannedExportItem): LineItemInput =>
     unitPrice: item.unitPrice,
     discountPercent: item.discountPercent,
     surchargePercent: item.surchargePercent,
+    // A discount in percent goes with its amount, a whole number, as the goods invoice of a conformant set wrote it;
+    // the surcharge of its service invoice went in the line's amount alone, with its decimals.
+    wholeShares: item.discountPercent === undefined ? undefined : true,
   })
 
 // The lines of a note: those of the document it refers to when it names none, else its own, each priced, with its unit,

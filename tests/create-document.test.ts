@@ -2262,6 +2262,36 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
     expect(doc.warnings).toEqual([{ formatField: 34, field: 'items[0].surchargePercent' }])
   })
 
+  // `DescuentoMonto` and `RecargoMonto` hold whole numbers only. A line may ask for the share of its percent as one,
+  // written beside the percent as the same fields say ("Si va el descuento en %, debe ir el monto correspondiente"),
+  // with the line's amount worked out with it: 5 % of 1036 by 194 is 10049.2, written 10049.
+  test('with wholeShares the share of a percent is a whole number, written as its amount, and the line follows it', () => {
+    const goods = { name: 'Ciruelas', quantity: 1036, unit: 'KN', unitPrice: 194, discountPercent: 5 }
+    const whole = exportOf({ items: [{ ...goods, wholeShares: true }] })
+    expect(whole.items[0]).toMatchObject({ discountPercent: 5, discountAmount: 10049, amount: 190935 })
+    expect(whole).not.toHaveProperty('warnings')
+    expect(buildDocumentXml(whole)).toContain(
+      '<DescuentoPct>5</DescuentoPct><DescuentoMonto>10049</DescuentoMonto><MontoItem>190935</MontoItem>',
+    )
+    const exact = exportOf({ items: [goods] })
+    expect(exact.items[0]).toMatchObject({ discountPercent: 5, amount: 190934.8 })
+    expect(exact.items[0].discountAmount).toBeUndefined()
+    // A surcharge too: 10 % of 94 is 9.4, written 9.
+    const service = exportOf({
+      items: [{ name: 'Asesoría', quantity: 1, unit: 'U', unitPrice: 94, surchargePercent: 10, wholeShares: true }],
+    })
+    expect(service.items[0]).toMatchObject({ surchargeAmount: 9, amount: 103 })
+    // A share that rounds to none is still refused: the percent would be written with no amount.
+    expectError(
+      () =>
+        exportOf({
+          items: [{ name: 'Clip', quantity: 1, unit: 'U', unitPrice: 4, discountPercent: 10, wholeShares: true }],
+        }),
+      'INVALID_AMOUNT',
+      { field: 'items[0].discountPercent' },
+    )
+  })
+
   test('each percent written without its amount is listed in the warnings, and one written with it is not', () => {
     const doc = exportOf({
       items: [
