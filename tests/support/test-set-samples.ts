@@ -191,14 +191,14 @@ export const EXPORT_ATTENTION_2 = '2410022'
 
 /**
  * The two export sets (110, 111, 112), written by hand. Nobody here has the literal text of an export set: this is the
- * best reconstruction of the six cases of a pair of sets the SII reviewed as conformant, their contents kept and their
+ * best reconstruction of the six cases of the two sets as field behaviour issues them, their contents kept and their
  * wording guessed. What is guessed is the wording of the labels (the units of tare and weights, the country line, the
  * customs document a case names, the line surcharge, the column headers) and the layout; the names of currencies,
  * ports, countries, clauses, routes, modes, payment terms, units and package types are those of the SII's and the
- * customs service's tables. The amounts are the cases' own, so the six totals of the conformant documents are known:
- * 112517.50, 36411 and 36411 in `FRANCO SZ`, and 103.4 and 233792.38 in `YEN` and 281 in `DOLAR USA`; the second
- * of the second set wrote the 5 % discount of its first line as a whole 10049, where its share is 10049.2. `(**)` marks
- * the freight and insurance that also go as global surcharges.
+ * customs service's tables. The amounts are the cases' own, so the six totals field behaviour arrives at are known:
+ * 112517.50, 36411 and 36411 in `FRANCO SZ`, and 103.4 and 233792.38 in `YEN` and 281 in `DOLAR USA`; the second of the
+ * second set writes the 5 % discount of its first line as a whole 10049, where its share is 10049.2. `(**)` marks the
+ * freight and the insurance in the text; the run writes both as global surcharges whether the mark is there or not.
  */
 export const EXPORT_SET_TEXT = [
   `SET DOCUMENTOS DE EXPORTACION (1) - NUMERO DE ATENCION: ${EXPORT_ATTENTION_1}`,

@@ -1,5 +1,12 @@
 import { TEST_SET_REFERENCE_TYPE } from '../catalogs/certification'
-import { FOREIGN_RECEIVER_RUT, SII_RUT, type Currency, type DispatchType, type TransferType } from '../catalogs/codes'
+import {
+  FOREIGN_RECEIVER_RUT,
+  isCurrency,
+  SII_RUT,
+  type Currency,
+  type DispatchType,
+  type TransferType,
+} from '../catalogs/codes'
 import type { DocumentType } from '../catalogs/document-types'
 import type { Certificate } from '../certificate/certificate'
 import { createDocument, createDocumentWith } from '../document/create'
@@ -673,8 +680,8 @@ const issueSettlements = async (context: IssueContext, plan: SettlementSetPlan):
     )
 }
 
-// The folio of a reference to a customs document: the set names the document and gives no number of it, and the SII's
-// review of a conformant set did not look at it.
+// The folio of a reference to a customs document: the set names the document and gives no number of it, so a stand-in
+// goes, as in field behaviour, which writes a made-up number there.
 const CUSTOMS_REFERENCE_FOLIO = '1'
 const DEFAULT_TARE_PERCENT = 2
 const MAX_TARE = 9999999
@@ -752,9 +759,9 @@ const tarePercentOf = (options: ExportIssueOptions): number => {
 
 const toCents = (value: number): bigint => unitsOf(value, 2)
 
-// The global surcharges of an export invoice, in the order of a conformant set: the commission abroad, a percent of
-// the total of the sale clause rounded half away from zero to the cents `ValorDR` holds, then the freight and the
-// insurance, which the set marks to go as surcharges too. Each is exempt (`IndExeDR` 1).
+// The global surcharges of an export invoice, in the order field behaviour writes them: the commission abroad, a
+// percent of the total of the sale clause rounded half away from zero to the cents `ValorDR` holds, then the freight
+// and the insurance, which go as surcharges too. Each is exempt (`IndExeDR` 1).
 const exportSurcharges = (planned: PlannedExport): readonly GlobalAdjustmentInput[] => {
   const { customs, foreignCommissionPercent: percent } = planned
   const surcharge = (value: number, description: string): GlobalAdjustmentInput => ({
@@ -840,8 +847,8 @@ const exportLine = (item: PlannedExportItem): LineItemInput =>
     unitPrice: item.unitPrice,
     discountPercent: item.discountPercent,
     surchargePercent: item.surchargePercent,
-    // A discount in percent goes with its amount, a whole number, as the goods invoice of a conformant set wrote it;
-    // the surcharge of its service invoice went in the line's amount alone, with its decimals.
+    // A discount in percent goes with its amount, a whole number, as field behaviour writes the goods invoice of the
+    // second set; the surcharge of its service invoice goes in the line's amount alone, with its decimals.
     wholeShares: item.discountPercent === undefined ? undefined : true,
   })
 
@@ -856,6 +863,13 @@ const noteLines = (planned: PlannedExport, referenced: ExportDraft): readonly Li
           ? exportLine(item)
           : compact({ ...original, quantity: item.quantity, unit: item.unit ?? original.unit })
       })
+
+// The set names its currency in words: one the SII's table does not list is refused here, with the case that names
+// it, rather than later by `createDocument`, which knows nothing of cases.
+const currencyOf = (name: string, caseId: string): Currency => {
+  if (!isCurrency(name)) throw new DteError('INVALID_OPTION', { field: 'currency', value: name, caseId })
+  return name
+}
 
 const exchangeRateOf = (options: ExportIssueOptions, currency: string, caseId: string): number => {
   const rate = options.exportSets?.exchangeRates?.[currency]
@@ -896,25 +910,26 @@ const draftOf = (context: DraftContext, planned: PlannedExport): ExportDraft => 
   if (planned.type !== 110) {
     const referenced = planned.reference === undefined ? undefined : context.drafts.get(planned.reference.caseId)
     if (referenced === undefined) throw new DteError('MISSING_FIELD', { field: 'referencedCase', caseId })
-    const currency = planned.currency ?? referenced.currency
+    const currency = currencyOf(planned.currency ?? referenced.currency, caseId)
     return {
       planned,
       lines: noteLines(planned, referenced),
-      currency: currency as Currency,
+      currency,
       exchangeRate: exchangeRateOf(context.options, currency, caseId),
       receiver: referenced.receiver,
       customsReferences,
     }
   }
   if (planned.currency === undefined) throw new DteError('MISSING_FIELD', { field: 'currency', caseId })
+  const currency = currencyOf(planned.currency, caseId)
   const lines = planned.items.map(exportLine)
-  const exchangeRate = exchangeRateOf(context.options, planned.currency, caseId)
+  const exchangeRate = exchangeRateOf(context.options, currency, caseId)
   const terms = customsCodeOf(planned.paymentTerms, context.codes.paymentTerms, 'options.exportPaymentTerms', caseId)
   const surcharges = exportSurcharges(planned)
   return {
     planned,
     lines,
-    currency: planned.currency as Currency,
+    currency,
     exchangeRate,
     receiver: foreignReceiver(context, planned),
     transport: { customs: exportCustoms(context, planned, lines) },
@@ -981,7 +996,7 @@ const exportDocumentInput = (
  * del set pasa a ser su código, cada moneda su tipo de cambio, cada nota sus líneas y su cliente, y cada documento se
  * arma una vez con un folio provisional, así lo que lo rechazaría detiene el set antes de tomar el primer folio.
  * Interno: el ejecutor revisa un set con ella antes de pedir folios.
- * @throws {DteError} EN: `MISSING_FIELD` (`documents` on an empty plan, `exportSets.exchangeRates` with the currency, `currency`, `referencedCase`, `transport.customs.saleClauseTotal`), `INVALID_OPTION` (a name the customs tables do not know, with its field and value; `exportSets.tarePercent`), and the phase 1 codes, each with the case id. ES: los mismos códigos.
+ * @throws {DteError} EN: `MISSING_FIELD` (`documents` on an empty plan, `exportSets.exchangeRates` with the currency, `currency`, `referencedCase`, `transport.customs.saleClauseTotal`), `INVALID_OPTION` (a name the customs tables do not know or a `currency` the SII does not list, with its field and value; `exportSets.tarePercent`), and the phase 1 codes, each with the case id. ES: los mismos códigos.
  */
 export const prepareExportSet = async (
   plan: ExportSetPlan,

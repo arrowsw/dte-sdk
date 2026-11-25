@@ -80,11 +80,11 @@ export const calculateExportLineAmount = ({
   // Quantity and price with six decimals each: their product has twelve, rounded to the four of the amount.
   const base = divide(unitsOf(quantity, 6) * unitsOf(unitPrice, 6), pow10(12 - AMOUNT_DECIMALS))
   // A base with four decimals by a percent with two, over 100: with four decimals again, that over 10^4.
-  // A whole share is that share rounded once more, to no decimals, and held in the same units.
-  const whole = (units: bigint): bigint => divide(units, pow10(AMOUNT_DECIMALS)) * pow10(AMOUNT_DECIMALS)
-  const exact = (percent: number): bigint =>
-    percent > 0 ? divide(base * unitsOf(percent, 2), pow10(2) * HUNDRED) : ZERO
-  const share = (percent: number): bigint => (wholeShares ? whole(exact(percent)) : exact(percent))
+  // A whole share is the same division rounded once to no decimals, not the share of four rounded again, and it is
+  // held in the units of the others.
+  const kept = wholeShares ? pow10(AMOUNT_DECIMALS) : pow10(0)
+  const share = (percent: number): bigint =>
+    percent > 0 ? divide(base * unitsOf(percent, 2), pow10(2) * HUNDRED * kept) * kept : ZERO
   const discount = share(discountPercent)
   const surcharge = share(surchargePercent)
   return {

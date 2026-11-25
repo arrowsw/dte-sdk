@@ -402,12 +402,16 @@ export const declareTestSets = async (
  * EN: Waits for the sent sets to be approved: 5 attempts 10 s apart, sleeping first, reading the progress page. A read
  * that fails only uses up its attempt. Of the states the page shows for the sets sent (or of every state, when no set
  * was sent), all approved is approval, and so is a page that shows none of them; a rejected or inconsistent one stops
- * with its wording, and the readable text of the page is kept as the artefact `sets-prueba/avance-rechazo.txt`.
+ * with its wording, and the readable text of the page is kept as the artefact `sets-prueba/avance-rechazo.txt`. An
+ * export set is the exception: the page has not been seen with one, so an export set that was sent and that the page
+ * does not show is not approved, and a wait that ends without it times out with a `detail` that names it.
  * ES: Espera la aprobación de los sets enviados: 5 intentos cada 10 s, durmiendo primero, leyendo la página de avance.
  * Una lectura que falla solo gasta su intento. De los estados que la página muestra para los sets enviados (o de todos
  * los estados, si no se envió ninguno), todos aprobados es aprobación, y también lo es una página que no muestra
  * ninguno; uno rechazado o inconsistente detiene con su texto, y el texto legible de la página queda como el artefacto
- * `sets-prueba/avance-rechazo.txt`.
+ * `sets-prueba/avance-rechazo.txt`. Un set de exportación es la excepción: la página no se ha visto con uno, así que
+ * un set de exportación enviado que la página no muestra no está aprobado, y una espera que termina sin él agota su
+ * tiempo con un `detail` que lo nombra.
  */
 export const waitForTestSetsApproval = async (
   deps: CertificationDependencies,
@@ -415,6 +419,8 @@ export const waitForTestSetsApproval = async (
 ): Promise<StepResult<'approved' | 'rejected' | 'timedOut'>> => {
   const rt = runtime(deps)
   const wanted: readonly string[] = SENT_SET_KEYS.filter((key) => state.sets[key] !== undefined)
+  // The export sets the last page read did not show.
+  let unseen: readonly string[] = []
   for (let attempt = 1; attempt <= SETS_APPROVAL_ATTEMPTS; attempt += 1) {
     await rt.sleep(SETS_APPROVAL_INTERVAL_MS)
     rt.emit({ step: 'POLLING', attempt, max: SETS_APPROVAL_ATTEMPTS, label: 'sets' })
@@ -424,7 +430,10 @@ export const waitForTestSetsApproval = async (
     })
     if (report === null) continue
     const relevant = Object.entries(report.states).filter(([key]) => wanted.length === 0 || wanted.includes(key))
-    if (relevant.every(([, item]) => item.state === 'approved')) {
+    // The page has not been seen with an export set: one that was sent and that the page does not show is not
+    // approved, where a page that shows none of the other sets is, as field behaviour takes it.
+    unseen = EXPORT_SET_KEYS.filter((key) => wanted.includes(key) && report.states[key] === undefined)
+    if (unseen.length === 0 && relevant.every(([, item]) => item.state === 'approved')) {
       rt.emit({ step: 'SETS_APPROVED' })
       return { state: await saveState(rt, state, { setsApproved: true, stage: 'books' }), outcome: 'approved' }
     }
@@ -436,7 +445,9 @@ export const waitForTestSetsApproval = async (
       return { state, outcome: 'rejected', detail: rejected.map(([key, item]) => `${key}: ${item.text}`).join('; ') }
     }
   }
-  return { state, outcome: 'timedOut' }
+  return unseen.length === 0
+    ? { state, outcome: 'timedOut' }
+    : { state, outcome: 'timedOut', detail: `not shown by the progress page: ${unseen.join(', ')}` }
 }
 
 /**
@@ -519,6 +530,13 @@ export const sendSimulation = async (
   const rt = runtime(deps)
   if (state.plan === undefined) throw new DteError('MISSING_FIELD', { field: 'plan' })
   rt.emit({ step: 'SIM_START' })
+  // The simulation issues the export sets again, sent or not: they are worked out before a folio is asked for, so a
+  // rate that is missing stops it here, where nothing has been asked of the SII.
+  for (const kind of EXPORT_SET_KEYS) {
+    const plan = state.plan[kind]
+    if (plan !== undefined)
+      await prepareExportSet(plan, { issuer: rt.issuer, exportSets: rt.exportSets }, chileDate(rt.now()))
+  }
   const prepared = await prepareFolios(deps, state, { needs: simulationFolioNeeds(state.plan), fresh: true })
   const held = heldCafs(prepared.cafs, rt.now())
   const issued = await issueSimulation(state.plan, {

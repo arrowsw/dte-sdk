@@ -31,26 +31,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`TipoConsumoType`): the receipt (39), the exempt receipt (41) and the credit note (61), "Nota de Credito
   Electronica". `createFolioConsumption` refused a 61 (`INVALID_DOCUMENT_TYPE`). It now reports it, after the
   receipts, with its net, its VAT and its exempt amount, and counts its folios, used and voided.
-- **The export test sets in the certification run** (`dte-sdk/portal`). The run read some lines of the export sets
-  and issued none of their documents. It now plans, issues and sends them: the two sets the SII gives, each with its
+- **The export test sets in the certification run** (`dte-sdk/portal`). The run read some lines of the export sets and
+  issued none of their documents. It now plans, issues and sends them: the two sets the SII gives, each with its
   attention number and in its own envelope (`envio-set-exportacion-1.xml`, `-2.xml`), with their export invoices
   (110), credit note (112) and debit note (111). Each document is exempt and in the currency of its case; the freight
-  and the insurance go in the customs area and as two global surcharges, a commission stated as a percent of the sale
-  clause as a third, and a surcharge the case asks for on the line stays on the line; the names the set gives in words
-  (ports, countries, clauses, units, packages) become the codes of the customs tables; a document names the customs
-  document its case does beside the reference of the set; a note repeats the price of its invoice. What the set does
-  not give is the run's to say, in `exportSets`: the exchange rate of each currency (`exchangeRates`, with no default:
-  a currency without one stops the set before a folio is taken), the foreign customer (`receiver`) and the tare as a
-  percent of the net weight (`tarePercent`, 2 by default), since the set gives the units of the weights and asks for
-  their values. `checkExportSets` works every document out before the run asks for folios. The documents of a pair of
-  sets the SII reviewed as conformant are what the tests hold the result to, total by total. The literal text of an
-  export set has not been seen: its labels are read tolerantly and the fixture is a reconstruction; neither have the
-  rows the portal's pages give these sets, so the wait for approval does not look at them.
+  and the insurance go in the customs area and, always, as two global surcharges, a commission stated as a percent of
+  the sale clause as a third, and a surcharge the case asks for on the line stays on the line, on every item of the
+  case; the names the set gives in words (ports, countries, clauses, units, packages) become the codes of the customs
+  tables; a document names the customs document its case does beside the reference of the set; a note repeats the
+  price of its invoice. What the set does not give is the run's to say, in `exportSets`: the exchange rate of each
+  currency (`exchangeRates`, with no default: a currency without one stops the set before a folio is taken), the
+  foreign customer (`receiver`) and the tare as a percent of the net weight (`tarePercent`, 2 by default), since the
+  set gives the units of the weights and asks for their values. `checkExportSets` works every document out before the
+  run asks for folios, and so does the simulation before it asks for its own; a currency the SII does not list is
+  refused there with its case (`INVALID_OPTION`, `currency`). The tests hold the documents to field behaviour, total
+  by total. Two things have not been seen and are guessed. One is the literal text of an export set: its labels are
+  read tolerantly, a row that fills every column of its header is read as an item whatever its name starts with, two
+  sets named alike are both planned, and the fixture is a reconstruction. The other is the rows the progress page
+  gives these sets: they are looked for by the labels of the declaration form (`SET DOCUMENTOS DE EXPORTACION`, and
+  the same with `(2)`), and an export set that was sent and that the page does not show is not taken as approved,
+  where the other sets are: the wait ends `timedOut` with a `detail` that names it.
 - **The share of a percent as a whole amount on an export line** (`wholeShares`). `DescuentoMonto` and `RecargoMonto`
   hold whole numbers only, so an export line keeps the four decimals of the share of a percent and writes the percent
-  alone when the share is not whole. A line with `wholeShares` writes the share rounded to a whole number beside its
-  percent, as the format asks of a percent ("debe ir el monto correspondiente"), and works out its amount with it: 5 %
-  of 200 984 is written 10 049, and the line 190 935. The export sets ask for it on a line with a discount.
+  alone when the share is not whole. A line with `wholeShares` writes the share, rounded once to a whole number,
+  beside its percent, as the format asks of a percent ("debe ir el monto correspondiente"), and works out its amount
+  with it: 5 % of 200 984 is written 10 049, and the line 190 935. It applies to both percents of the line, the
+  discount and the surcharge. The export sets ask for it on a line with a discount.
 - **The settlement set and the export sets in the simulation of the certification run.** The simulation issued again
   the cases of the basic, exempt, guide and purchase sets, and left out the settlement set a run had sent.
   `issueSimulation` now issues its settlement invoices too, after the others, and then the documents of the export

@@ -119,13 +119,16 @@ const DECLARATION_LABELS: readonly { readonly key: DeclarationKey; readonly patt
 ]
 
 // The state of each set and book on the progress page: the first bold text after its label, searched over the whole
-// page as it came. The labels are loose because the portal abbreviates there.
+// page as it came. The labels are loose because the portal abbreviates there. The export sets are looked for by the
+// labels the declaration form gives them: the page has not been seen with them.
 const PROGRESS_STATES: readonly { readonly key: DeclarationKey; readonly pattern: RegExp }[] = [
   { key: 'basic', pattern: /SET BASICO[\s\S]*?<b>([^<]+)<\/b>/i },
   { key: 'guide', pattern: /SET GUIA[\s\S]*?DESP[\s\S]*?<b>([^<]+)<\/b>/i },
   { key: 'exempt', pattern: /SET FACTURA EXENTA[\s\S]*?<b>([^<]+)<\/b>/i },
   { key: 'purchase', pattern: /SET CASO GENERAL FACTURA COMPRA[\s\S]*?<b>([^<]+)<\/b>/i },
   { key: 'settlement', pattern: /SET LIQUIDACION[\s\S]*?<b>([^<]+)<\/b>/i },
+  { key: 'export1', pattern: /SET DOCUMENTOS DE EXPORTACION(?!\s*\(2\))[\s\S]*?<b>([^<]+)<\/b>/i },
+  { key: 'export2', pattern: /SET DOCUMENTOS DE EXPORTACION\s*\(2\)[\s\S]*?<b>([^<]+)<\/b>/i },
   { key: 'simulation', pattern: /SET(?:\s+DE)?\s+SIMULACION[\s\S]*?<b>([^<]+)<\/b>/i },
   { key: 'salesBook', pattern: /LIBRO[\s\S]*?VENTA[\s\S]*?<b>([^<]+)<\/b>/i },
   { key: 'purchaseBook', pattern: /LIBRO DE COMPRAS(?!\s+PARA EXENTOS)[\s\S]*?<b>([^<]+)<\/b>/i },

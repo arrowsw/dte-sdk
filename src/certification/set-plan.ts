@@ -599,7 +599,9 @@ const exportSlot = (
   plan: { readonly export1?: ExportSetPlan; readonly export2?: ExportSetPlan },
 ): 'export1' | 'export2' | null => {
   const named = EXPORT_SLOT.exec(set.name)?.[1]
-  if (named !== undefined) return named === '1' ? 'export1' : 'export2'
+  const wanted = named === undefined ? undefined : named === '1' ? 'export1' : 'export2'
+  // The slot its name gives while it is free; else the one that is, so two sets named alike are both planned.
+  if (wanted !== undefined && plan[wanted] === undefined) return wanted
   if (plan.export1 === undefined) return 'export1'
   return plan.export2 === undefined ? 'export2' : null
 }

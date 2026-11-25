@@ -195,6 +195,11 @@ describe('the export plans', () => {
       ),
     )
     expect([unnamed.export1?.attentionNumber, unnamed.export2?.attentionNumber]).toEqual(['1', '2'])
+    // Two sets named alike are both planned: the second takes the slot left free.
+    const twice = planCertificationSets(
+      parseTestSetText(header('DOCUMENTOS DE EXPORTACION (2)', 7) + header('DOCUMENTOS DE EXPORTACION (2)', 8)),
+    )
+    expect([twice.export1?.attentionNumber, twice.export2?.attentionNumber]).toEqual(['8', '7'])
   })
 
   test('a set built by hand without customs references plans none', () => {
@@ -274,8 +279,8 @@ describe('issuing the export sets', () => {
       { exemptAmount: 36411, totalAmount: 36411 },
       { exemptAmount: 36411, totalAmount: 36411 },
     ])
-    // The goods invoice of a conformant set wrote the 5 % of 200984, 10049.2, as a whole 10049 beside its percent, and
-    // the surcharge of the service, 9.4, in the line's amount alone.
+    // Field behaviour writes the 5 % of 200984 of the goods invoice, 10049.2, as a whole 10049 beside its percent,
+    // and the surcharge of the service, 9.4, in the line's amount alone.
     expect(two.cases.map((issued) => issued.document.header.totals.totalAmount)).toEqual([103.4, 233792.38, 281])
     expect(two.cases[1].document.items[0]).toMatchObject({ discountPercent: 5, discountAmount: 10049, amount: 190935 })
     expect(two.cases.map((issued) => issued.document.header.currency)).toEqual(['YEN', 'YEN', 'DOLAR USA'])
@@ -518,6 +523,17 @@ describe('what the run gives an export set', () => {
     expect(await failure(issueTestSet(planOf([...INVOICE, line]), options()))).toEqual(
       expect.objectContaining({ code: 'INVALID_OPTION', details: { field, value, caseId: '7-1' } }),
     )
+  })
+
+  test('a currency the SII does not list is refused with the case that names it, before any folio', async () => {
+    const odd = planOf(INVOICE.map((line) => line.replace('DOLAR USA', 'DOBLON')))
+    const folios = counting()
+    const error = await failure(issueTestSet(odd, { ...options({ exchangeRates: { DOBLON: 5 } }), folios }))
+    expect(error).toMatchObject({
+      code: 'INVALID_OPTION',
+      details: { field: 'currency', value: 'DOBLON', caseId: '7-1' },
+    })
+    expect(folios.taken()).toBe(0)
   })
 
   test('a receiver country the tables do not know, a container and a set without a currency', async () => {

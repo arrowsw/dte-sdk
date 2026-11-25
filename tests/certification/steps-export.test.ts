@@ -3,7 +3,14 @@ import { runCertification } from '../../src/certification/runner'
 import { planCertificationSets } from '../../src/certification/set-plan'
 import { parseTestSetText } from '../../src/certification/set-text'
 import type { SentSet } from '../../src/certification/state'
-import { checkExportSets, declareTestSets, sendTestSet } from '../../src/certification/steps'
+import {
+  checkExportSets,
+  declareTestSets,
+  sendSimulation,
+  sendTestSet,
+  waitForTestSetsApproval,
+} from '../../src/certification/steps'
+import { parseProgressPage } from '../../src/portal/pages/certification-progress'
 import { renderPrintedSamples } from '../../src/pdf/samples'
 import {
   cafXml,
@@ -12,6 +19,7 @@ import {
   MAULLIN,
   post,
   reception,
+  repeat,
   sequence,
   stampingRoutes,
   stateWith,
@@ -170,7 +178,13 @@ describe('a run whose text holds the export sets', () => {
       },
       post('pe_avance3', DECLARATION_ANSWERS.success),
       get('pe_avance5', page('p5')),
-      post('pe_avance6', progressPage('SET', {})),
+      post(
+        'pe_avance6',
+        progressPage('SET', {
+          'SET DOCUMENTOS DE EXPORTACION': 'REVISADO CONFORME',
+          'SET DOCUMENTOS DE EXPORTACION(2)': 'REVISADO CONFORME',
+        }),
+      ),
     ])
     const deps = { ...harness.deps, exportSets: { exchangeRates: RATES } }
     const result = await runCertification(deps, { until: 'testSets', optionalSets: ['SET11'] })
@@ -197,5 +211,101 @@ describe('a run whose text holds the export sets', () => {
     expect(error).toMatchObject({ code: 'MISSING_FIELD', details: { field: 'exportSets.exchangeRates' } })
     expect(harness.urls().some((url) => url.includes('of_solicita_folios'))).toBe(false)
     expect(harness.steps()).toContain('CERT_ERROR')
+  })
+})
+
+// The progress page has not been seen with export sets. Their rows are looked for by the labels the declaration form
+// gives them, and a set that was sent and that the page does not show is not approved: the wait goes on and times out,
+// naming it, rather than give for approved what nobody was seen to approve.
+describe('the wait for the approval of the export sets', () => {
+  const FIRST = 'SET DOCUMENTOS DE EXPORTACION'
+  const SECOND = 'SET DOCUMENTOS DE EXPORTACION(2)'
+  const routes = (...pages: readonly string[]) => [
+    get('pe_avance1', ...repeat(page('entry'), pages.length)),
+    post('pe_avance2', ...repeat(page('<p>x</p>'), pages.length)),
+    get('pe_avance5', ...repeat(page('p5'), pages.length)),
+    post('pe_avance6', ...pages),
+  ]
+  const wait = async (sets: Record<string, SentSet>, ...pages: readonly string[]) => {
+    const harness = await certificationHarness(routes(...pages))
+    return waitForTestSetsApproval(harness.deps, stateWith({ sets }))
+  }
+  const both = { export1: sent('31'), export2: sent('32') }
+
+  test('the progress page names each export set by the label of the declaration form', () => {
+    const states = parseProgressPage(
+      progressPage('SET', { [FIRST]: 'REVISADO CONFORME', [SECOND]: 'RECHAZADO' }),
+    ).states
+    expect(states).toEqual({
+      export1: { text: 'REVISADO CONFORME', state: 'approved' },
+      export2: { text: 'RECHAZADO', state: 'rejected' },
+    })
+    // The second set alone is not taken for the first.
+    expect(Object.keys(parseProgressPage(progressPage('SET', { [SECOND]: 'EN REVISION' })).states)).toEqual(['export2'])
+  })
+
+  test('both approved is approval, and a rejected one stops the wait with its wording', async () => {
+    const approved = progressPage('SET', { [FIRST]: 'REVISADO CONFORME', [SECOND]: 'REVISADO CONFORME' })
+    expect(await wait(both, approved)).toMatchObject({ outcome: 'approved', state: { setsApproved: true } })
+    const rejected = progressPage('SET', {
+      'SET BASICO': 'REVISADO CONFORME',
+      [FIRST]: 'REVISADO CONFORME',
+      [SECOND]: 'RECHAZADO',
+    })
+    expect(await wait({ basic: sent('1'), ...both }, rejected)).toMatchObject({
+      outcome: 'rejected',
+      detail: 'export2: RECHAZADO',
+    })
+  })
+
+  test('an export set the page does not show is not approved: the wait times out and names it', async () => {
+    const others = progressPage('SET', { 'SET BASICO': 'REVISADO CONFORME' })
+    const result = await wait({ basic: sent('1'), ...both }, ...repeat(others, 5))
+    expect(result).toMatchObject({ outcome: 'timedOut', detail: 'not shown by the progress page: export1, export2' })
+    expect(result.state.setsApproved).toBe(false)
+    // One of the two shown and approved: still not approval.
+    const one = progressPage('SET', { [FIRST]: 'REVISADO CONFORME' })
+    expect(await wait(both, ...repeat(one, 5))).toMatchObject({
+      outcome: 'timedOut',
+      detail: 'not shown by the progress page: export2',
+    })
+    // The export sets alone, on a page that shows no set at all.
+    expect((await wait(both, ...repeat(progressPage('SET', {}), 5))).outcome).toBe('timedOut')
+  })
+
+  test('the sets the page already showed are waited for as before, with or without export sets', async () => {
+    const approved = progressPage('SET', { 'SET BASICO': 'REVISADO CONFORME' })
+    expect((await wait({ basic: sent('1') }, approved)).outcome).toBe('approved')
+    // A page that shows none of the sets sent counted as approval, and still does without an export set.
+    expect((await wait({ basic: sent('1') }, progressPage('SET', {}))).outcome).toBe('approved')
+    const waiting = progressPage('SET', { 'SET BASICO': 'EN REVISION' })
+    expect(await wait({ basic: sent('1') }, ...repeat(waiting, 5))).toEqual(
+      expect.objectContaining({ outcome: 'timedOut' }),
+    )
+    expect(await wait({ basic: sent('1') }, ...repeat(waiting, 5))).not.toHaveProperty('detail')
+  })
+})
+
+// The simulation issues the export sets again, so it needs what they need. It works them out before it asks the SII
+// for a folio: a rate that is missing in a run resumed later stops it there, with nothing asked.
+describe('the simulation of a run that sent the export sets', () => {
+  test('without the rate of a currency it stops before asking for any folio', async () => {
+    const harness = await certificationHarness([...stampingRoutes(), uploadRoute(reception('901'))])
+    const error = await failure(sendSimulation(harness.deps, stateWith({ plan: exportPlan, cafs: [] })))
+    expect(error).toMatchObject({ code: 'MISSING_FIELD', details: { field: 'exportSets.exchangeRates' } })
+    expect(harness.urls().some((url) => url.includes('of_solicita_folios'))).toBe(false)
+    expect(harness.steps()).not.toContain('CAF_REQUESTING')
+  })
+
+  test('with the rates it issues their six documents in the envelope of the simulation', async () => {
+    const harness = await certificationHarness([...stampingRoutes(), uploadRoute(reception('902'))])
+    const deps = { ...harness.deps, exportSets: { exchangeRates: RATES } }
+    const result = await sendSimulation(deps, stateWith({ plan: exportPlan, cafs: [] }))
+    expect(result.outcome).toBe('sent')
+    const names = await harness.store.listArtefacts()
+    expect(names.filter((name) => /simulacion\/dtes\/dte-11[012]-/.test(name))).toHaveLength(6)
+    const envelope = (await harness.store.readArtefact('simulacion/envio-simulacion.xml'))!
+    expect(envelope).not.toContain('<TpoDocRef>SET</TpoDocRef>')
+    expect((envelope.match(/<TipoDTE>110<\/TipoDTE>/g) ?? []).length).toBeGreaterThanOrEqual(4)
   })
 })

@@ -786,14 +786,22 @@ const parseExportField = (current: MutableCase, line: string): boolean => {
 }
 
 // An export case: its labelled lines, then its item rows, read by the columns of the last `ITEM` header. Returns the
-// columns the next row is read by. Any other line is nothing.
+// columns the next row is read by. Any other line is nothing. Under a header of several columns, a row with no colon
+// that fills every one of them is an item whatever its name starts with: a label of the case holds one value, or a
+// colon, and read as a label such a row would lose its item and put its numbers in the freight or the insurance.
 const parseExportLine = (
   current: MutableCase,
   line: string,
   columns: readonly ExportColumn[],
 ): readonly ExportColumn[] => {
-  if (parseExportField(current, line)) return columns
   const parts = cells(line)
+  const fills = columns.length > 1 && parts.length === columns.length + 1 && !line.includes(':')
+  const row = fills ? exportItem(parts, columns) : null
+  if (row !== null) {
+    current.items.push(row)
+    return columns
+  }
+  if (parseExportField(current, line)) return columns
   if (/^ITEM\b/i.test(line) && parts.length > 1) return parts.slice(1).map(exportColumn)
   if (parts.length < 2) return columns
   const item = exportItem(parts, columns)

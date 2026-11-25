@@ -277,6 +277,54 @@ describe('the export sets', () => {
     ])
   })
 
+  // Under a header of several columns, a row that fills every one of them is an item, whatever its name starts with:
+  // a label of the case holds one value, or a colon. Read as a label, such a row lost its item and changed the totals.
+  test('a row that fills the columns of its header is an item, even when its name reads as a label', () => {
+    const testCase = exportCase([
+      'DOCUMENTO  FACTURA DE EXPORTACION ELECTRONICA',
+      'ITEM  CANTIDAD  UNIDAD  PRECIO',
+      'FLETE INTERNO  1  UN  100',
+      'SEGURO DE CARGA  2  UN  50',
+      'CAJAS CON REFERENCIA DUS  3  UN  10',
+      'SERVICIO CON RECARGO EN LA LINEA  1  UN  9',
+      'UNIDAD DE PESO NETO MEDIDOR  4  UN  1',
+      'VINO  5  BOT  7',
+    ])
+    expect(testCase.items.map((item) => [item.name, item.quantity, item.unitPrice])).toEqual([
+      ['FLETE INTERNO', 1, 100],
+      ['SEGURO DE CARGA', 2, 50],
+      ['CAJAS CON REFERENCIA DUS', 3, 10],
+      ['SERVICIO CON RECARGO EN LA LINEA', 1, 9],
+      ['UNIDAD DE PESO NETO MEDIDOR', 4, 1],
+      ['VINO', 5, 7],
+    ])
+    expect(testCase.exportFields).toEqual({})
+    expect(testCase.customsReferences).toEqual([])
+  })
+
+  test('after the header a label is still a label: with its colon, or with fewer cells than the header has columns', () => {
+    const testCase = exportCase([
+      'DOCUMENTO  FACTURA DE EXPORTACION ELECTRONICA',
+      'ITEM  CANTIDAD  UNIDAD  PRECIO',
+      'VINO  5  BOT  7',
+      'FLETE (**): 100',
+      'SEGURO  50',
+      'TOTAL BULTOS  69',
+      'UNIDAD DE PESO NETO: KN  1  2',
+      'REFERENCIA: DUS',
+      '%10 RECARGO EN LA LINEA DE ITEM POR COMISIONES EN EL EXTERIOR',
+    ])
+    expect(testCase.items.map((item) => item.name)).toEqual(['VINO'])
+    expect(testCase.exportFields).toEqual({
+      FLETE: '100',
+      SEGURO: '50',
+      'TOTAL BULTOS': '69',
+      'UNIDAD DE PESO NETO': 'KN  1  2',
+      'RECARGO EN LA LINEA': '10',
+    })
+    expect(testCase.customsReferences).toEqual(['DUS'])
+  })
+
   test('the cases of every other set carry no customs references', () => {
     for (const set of parseTestSetText(FULL_SET_TEXT))
       for (const testCase of set.cases) expect(testCase).not.toHaveProperty('customsReferences')
