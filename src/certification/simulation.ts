@@ -11,6 +11,7 @@ import {
   issuerAsReceiver,
   plannedAmount,
   sameName,
+  settlementDocument,
   signCertificationEnvelope,
   totaledItems,
   type IssueContext,
@@ -162,15 +163,17 @@ const purchaseTotals = (items: readonly PlannedItem[]): Totals | undefined =>
 
 /**
  * EN: Issues every case of the four set plans again with fresh folios, in the order basic, exempt, guide and purchase,
- * and signs one envelope with all of them. As the field does for the simulation: no SET reference; a note carries one
+ * then the settlement invoices of the settlement set when the plan holds it, each as the set issues it less its SET
+ * reference, and signs one envelope with all of them. As the field does for the simulation: no SET reference; a note carries one
  * reference to its referenced document when that case is in the simulation; the global discount has no description;
  * the receiver is the issuer on purchase documents and internal transfers; a note with no items gets one line named
  * after its reason; a purchase note item without a price takes the original's price, or 1; a guide carries the
  * transfer reason and no dispatch type; a document whose lines add up to nothing totals 0 with no VAT rate (a guide
  * keeps it). Unlike the test sets it runs on the clock of the process: the issue date is the local day, `TSTED` and
  * `TmstFirma` the UTC instant to the second, the envelope id the local time, and only `TmstFirmaEnv` is Chile time.
- * ES: Reemite cada caso de los cuatro planes con folios nuevos, en el orden básico, exento, guías y compra, y firma un
- * solo sobre con todos. Como el campo en la simulación: sin referencia SET; una nota lleva una referencia a su documento
+ * ES: Reemite cada caso de los cuatro planes con folios nuevos, en el orden básico, exento, guías y compra, luego las
+ * liquidaciones factura del set de liquidación cuando el plan lo trae, cada una como la emite el set menos su
+ * referencia SET, y firma un solo sobre con todos. Como el campo en la simulación: sin referencia SET; una nota lleva una referencia a su documento
  * referido cuando ese caso está en la simulación; el descuento global no lleva glosa; el receptor es el emisor en los
  * documentos de compra y los traslados internos; una nota sin ítems lleva una línea con su razón; un ítem de nota de
  * compra sin precio toma el del original, o 1; una guía lleva el `IndTraslado` y no el `TipoDespacho`; un documento
@@ -278,6 +281,9 @@ export const issueSimulation = async (plan: CertificationPlan, options: IssueSet
       })
     }
   }
+  // The settlement set, when the run sent it: each settlement invoice as the set issued it, less the SET reference.
+  for (const settlement of plan.settlement?.settlements ?? [])
+    await issueCertificationDocument(context, settlementDocument(settlement, []))
   if (context.issued.length === 0) throw new DteError('MISSING_FIELD', { field: 'cases' })
   const sealedAt = clock()
   const envelope = signCertificationEnvelope(

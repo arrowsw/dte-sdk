@@ -133,6 +133,7 @@ export const simulationFolioNeeds = (plan: CertificationPlan): Readonly<Record<n
     addNeed(needs, 61, plan.purchase.creditNote === null ? 0 : 1)
     addNeed(needs, 56, plan.purchase.debitNote === null ? 0 : 1)
   }
+  addNeed(needs, 43, plan.settlement?.settlements.length ?? 0)
   return needs
 }
 

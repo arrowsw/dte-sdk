@@ -28,6 +28,7 @@ import type {
   PlannedGuide,
   PlannedItem,
   PlannedNote,
+  PlannedSettlement,
   PlannedSettlementLine,
   PurchaseSetPlan,
   SettlementSetPlan,
@@ -577,24 +578,37 @@ const commissionLine = (planned: PlannedCommission): CommissionLineInput =>
     exemptValue: planned.exemptValue,
   })
 
-// A settlement invoice is issued to the run's customer, the principal it settles with: its lines carry their amount as
-// the set gives it, with no price, its commissions are taken off its total, and its VAT is split in the own VAT, that
-// of the commissions, and the third parties'. No note references it.
+/**
+ * EN: The settlement invoice of one case, with the references it is to carry: its lines carry their amount as the set
+ * gives it, with no price, its commissions are taken off its total, and its VAT is split in the own VAT, that of the
+ * commissions, and the third parties'. No note references it. Internal.
+ * ES: La liquidación factura de un caso, con las referencias que debe llevar: sus líneas llevan el monto que da el
+ * set, sin precio, sus comisiones se restan del total, y su IVA se separa en el propio, el de las comisiones, y el de
+ * terceros. Ninguna nota la refiere. Interno.
+ */
+export const settlementDocument = (
+  settlement: PlannedSettlement,
+  references: readonly ReferenceInput[],
+): IssueDocumentSpec => ({
+  caseId: settlement.caseId,
+  type: 43,
+  items: [],
+  lines: settlement.lines.map(settlementLine),
+  commissions: settlement.commissions.map(commissionLine),
+  splitVat: true,
+  style: 'plain',
+  references,
+  record: false,
+})
+
+// A settlement invoice is issued to the run's customer, the principal it settles with.
 const issueSettlements = async (context: IssueContext, plan: SettlementSetPlan): Promise<void> => {
   if (plan.settlements.length === 0) throw new DteError('MISSING_FIELD', { field: 'settlements', kind: plan.kind })
-  for (const settlement of plan.settlements) {
-    await issueCertificationDocument(context, {
-      caseId: settlement.caseId,
-      type: 43,
-      items: [],
-      lines: settlement.lines.map(settlementLine),
-      commissions: settlement.commissions.map(commissionLine),
-      splitVat: true,
-      style: 'plain',
-      references: [setReference(settlement.caseId, context.date)],
-      record: false,
-    })
-  }
+  for (const settlement of plan.settlements)
+    await issueCertificationDocument(
+      context,
+      settlementDocument(settlement, [setReference(settlement.caseId, context.date)]),
+    )
 }
 
 /**
