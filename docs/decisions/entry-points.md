@@ -13,7 +13,7 @@ on 2026-11-14 to ship inside the package with their validator as an optional pee
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 7.42 kB | Yes, on first use |
 | `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 86.99 kB | Yes, on first use |
 | `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 19.93 kB | Yes, on first use |
-| `dte-sdk/catalogs` | The SII's large code tables: the business activities | 10.65 kB | No |
+| `dte-sdk/catalogs` | The large code tables: the SII's business activities and the customs tables of an export document | 17.96 kB | No |
 | `dte-sdk/schemas` | The SII's schemas as text and the validation of a document against them; `xmllint-wasm` is an optional peer | 24.72 kB | No |
 
 Size is min + brotli of the entry and the chunks it reaches, with dependencies left out, as `.size-limit.json` measures
@@ -166,6 +166,9 @@ under its limit; `dte-sdk/portal` measured 86.98 kB and `dte-sdk/pdf` 19.93 kB.
 Reporting who signed a received document, with the check of its certificate against the ones the caller trusts, on
 2026-11-25, took `dte-sdk` to 49.54 kB, under its limit; `dte-sdk/portal` measured 86.99 kB and `dte-sdk/pdf`
 19.93 kB.
+The customs tables of an export document, eight tables of Anexo 51 of the Compendio de Normas Aduaneras with some
+750 rows, on 2026-11-25, took `dte-sdk/catalogs` from 10.65 kB to 17.96 kB, over its 12 kB limit, which went to
+20 kB; no other entry reads them, so none moved.
 
 ## Why
 

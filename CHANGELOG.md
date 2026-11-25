@@ -62,6 +62,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extension other than key usage, basic constraints or name constraints. The RUT is the person's who holds the
   certificate, seldom the company's: whether that person may sign for the issuer is not checked, and no revocation is
   looked up. It has not been tried on the certificates of every Chilean authority.
+- **The customs tables of an export document** (`dte-sdk/catalogs`). Formato DTE 2.5 sends the codes of an export
+  document to the tables of the Servicio Nacional de Aduanas, and the library carried none. `dte-sdk/catalogs` now
+  holds eight of Anexo 51 of the Compendio de Normas Aduaneras, each row as the annex writes it: countries
+  (`CUSTOMS_COUNTRIES`, `CodPaisRecep` and `CodPaisDestin`), ports (`CUSTOMS_PORTS`, with the heading each is listed
+  under), transport routes, sale clauses, payment terms of an export (`FmaPagExp`), package types, units of measure
+  and sale modes. `customsCode` finds the code of a name or an abbreviation, matched whole by its letters and digits
+  alone, and answers `null` when rows of different codes match, as `SAN FRANCISCO` does without the heading of its
+  port; `customsName` names a code. They are catalogs: `createDocument` takes any code, as before.
 
 ### Changed
 
