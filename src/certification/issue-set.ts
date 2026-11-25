@@ -702,9 +702,16 @@ export type ExportDraft = {
   readonly customsReferences: readonly ReferenceInput[]
 }
 
+/**
+ * EN: What working out an export set takes of the options of a run: the issuer and the export options. Internal.
+ * ES: Lo que toma de las opciones de una corrida resolver un set de exportación: el emisor y las opciones de
+ * exportación. Interno.
+ */
+export type ExportIssueOptions = Pick<IssueSetOptions, 'issuer' | 'exportSets'>
+
 type DraftContext = {
   readonly codes: CustomsCodes
-  readonly options: IssueSetOptions
+  readonly options: ExportIssueOptions
   readonly date: string
   readonly drafts: Map<string, ExportDraft>
 }
@@ -722,7 +729,7 @@ const customsCodeOf = (
   return code
 }
 
-const tarePercentOf = (options: IssueSetOptions): number => {
+const tarePercentOf = (options: ExportIssueOptions): number => {
   const percent = options.exportSets?.tarePercent ?? DEFAULT_TARE_PERCENT
   if (!(typeof percent === 'number' && percent > 0 && percent <= 100))
     throw new DteError('INVALID_OPTION', { field: 'exportSets.tarePercent' })
@@ -767,7 +774,7 @@ const exportCustoms = (
   const code = (name: string | undefined, lookup: (name: string) => number | null, field: string) =>
     customsCodeOf(name, lookup, `transport.customs.${field}`, caseId)
   const netWeight = roundHalfAwayFromZero(
-    lines.reduce((sum, line) => sum + (line.quantity ?? 0), 0),
+    planned.items.reduce((sum, item) => sum + item.quantity, 0),
     2,
   )
   const tare = Math.min(MAX_TARE, Math.max(1, Math.ceil((netWeight * tarePercentOf(context.options)) / 100)))
@@ -833,7 +840,7 @@ const noteLines = (planned: PlannedExport, referenced: ExportDraft): readonly Li
           : compact({ ...original, quantity: item.quantity, unit: item.unit ?? original.unit })
       })
 
-const exchangeRateOf = (options: IssueSetOptions, currency: string, caseId: string): number => {
+const exchangeRateOf = (options: ExportIssueOptions, currency: string, caseId: string): number => {
   const rate = options.exportSets?.exchangeRates?.[currency]
   if (rate === undefined) throw new DteError('MISSING_FIELD', { field: 'exportSets.exchangeRates', currency, caseId })
   return rate
@@ -846,12 +853,16 @@ const foreignReceiver = (context: DraftContext, planned: PlannedExport): Receive
     'transport.customs.receiverCountry',
     planned.caseId,
   )
-  const countryName = country === undefined ? null : context.codes.countryName(country)
+  // The rates are asked for first, so the export options are there.
+  const given = compact(context.options.exportSets!.receiver ?? {})
+  if (country === undefined) return { ...DEFAULT_CERTIFICATION_FOREIGN_RECEIVER, ...given }
+  // A code the table gave has its name.
+  const city = context.codes.countryName(country)!.slice(0, CITY_LENGTH)
   return {
     ...DEFAULT_CERTIFICATION_FOREIGN_RECEIVER,
-    ...(countryName === null ? {} : { city: countryName.slice(0, CITY_LENGTH) }),
-    ...compact(context.options.exportSets?.receiver ?? {}),
-    ...(country === undefined ? {} : { foreign: { nationality: String(country) } }),
+    city,
+    ...given,
+    foreign: { nationality: String(country) },
   }
 }
 
@@ -923,7 +934,7 @@ const exportReferences = (
 }
 
 const exportDocumentInput = (
-  options: IssueSetOptions,
+  options: ExportIssueOptions,
   draft: ExportDraft,
   date: string,
   folio: number,
@@ -957,7 +968,7 @@ const exportDocumentInput = (
  */
 export const prepareExportSet = async (
   plan: ExportSetPlan,
-  options: IssueSetOptions,
+  options: ExportIssueOptions,
   date: string,
 ): Promise<readonly ExportDraft[]> => {
   if (plan.documents.length === 0) throw new DteError('MISSING_FIELD', { field: 'documents', kind: plan.kind })
@@ -1037,7 +1048,13 @@ export const signCertificationEnvelope = (
  * per case, in the set's order and in one envelope: it names the customer of the options, the principal it settles
  * with, and carries the SET reference, its lines with their quantity, amount, settled document type and exempt mark,
  * and its commissions, whose totals are worked out by phase 1 and taken off the total, with the VAT split in own and
- * third-party (`splitVat`). With `receivers`, the invoices and the guides that do not name the issuer name those
+ * third-party (`splitVat`). An export set issues one document per case in the set's order (`prepareExportSet` works
+ * them all out first, so nothing is taken from the folio source when one of them cannot be issued): exempt, in the
+ * currency of the case with its totals in pesos at the rate `exportSets` gives, naming the foreign customer; an invoice
+ * with its customs area coded from the customs tables, its weights worked out from its lines, its commission abroad,
+ * freight and insurance as global surcharges, its settlement date when paid in advance and the customs documents it
+ * names as references; a note with the reference to its document and that document's prices, currency and customer.
+ * With `receivers`, the invoices and the guides that do not name the issuer name those
  * customers in turn, and a note names the customer of the document it refers to. The issue date is the Chile day the
  * run starts on, as the SII's instructions ask ("Agregue fecha del día"); `TSTED`, `TmstFirma` and `TmstFirmaEnv` are
  * UTC instants with milliseconds.
@@ -1049,13 +1066,19 @@ export const signCertificationEnvelope = (
  * factura (43) por caso, en el orden del set y en un solo sobre: nombra al cliente de las opciones, el mandante con
  * quien se liquida, y lleva su referencia SET, sus líneas con su cantidad, monto, tipo de documento liquidado y marca de
  * exenta, y sus comisiones, cuyos totales calcula la fase 1 y se restan del total, con el IVA separado en propio y de
- * terceros (`splitVat`). Con `receivers`, las facturas y las guías que no nombran al emisor nombran a esos clientes
+ * terceros (`splitVat`). Un set de exportación emite un documento por caso en el orden del set (`prepareExportSet` los
+ * resuelve todos primero, así nada se toma de la fuente de folios cuando uno no se puede emitir): exento, en la moneda
+ * del caso con sus totales en pesos al tipo de cambio que da `exportSets`, nombrando al cliente extranjero; una factura
+ * con su área aduanera codificada desde las tablas de Aduanas, sus pesos calculados desde sus líneas, su comisión en el
+ * extranjero, flete y seguro como recargos globales, su fecha de cancelación cuando se paga por anticipado y los
+ * documentos aduaneros que nombra como referencias; una nota con la referencia a su documento y los precios, la moneda
+ * y el cliente de ese documento. Con `receivers`, las facturas y las guías que no nombran al emisor nombran a esos clientes
  * por turno, y una nota nombra al cliente del documento que refiere. La fecha de emisión es el día de Chile en que
  * parte la corrida, como piden las instrucciones del SII ("Agregue fecha del día"); `TSTED`, `TmstFirma` y
  * `TmstFirmaEnv` son instantes UTC con milisegundos.
  * @param plan EN: a set plan of `planCertificationSets`. ES: un plan de set de `planCertificationSets`.
  * @param options EN: issuer, receiver, certificate, folios, resolution, clock. ES: emisor, receptor, certificado, folios, resolución, reloj.
- * @throws {DteError} EN: `MISSING_FIELD` (`invoices`, `guides` or `settlements` on an empty plan, `referencedCase` on a note whose case was not issued before it), `FOLIO_OUT_OF_RANGE` from the folio source, and the phase 1 codes. ES: `MISSING_FIELD` (`invoices`, `guides` o `settlements` en un plan vacío, `referencedCase` en una nota cuyo caso no se emitió antes), `FOLIO_OUT_OF_RANGE` de la fuente de folios, y los códigos de la fase 1.
+ * @throws {DteError} EN: `MISSING_FIELD` (`invoices`, `guides`, `settlements` or `documents` on an empty plan, `referencedCase` on a note whose case was not issued before it), the codes of `prepareExportSet` on an export set, `FOLIO_OUT_OF_RANGE` from the folio source, and the phase 1 codes. ES: `MISSING_FIELD` (`invoices`, `guides`, `settlements` o `documents` en un plan vacío, `referencedCase` en una nota cuyo caso no se emitió antes), los códigos de `prepareExportSet` en un set de exportación, `FOLIO_OUT_OF_RANGE` de la fuente de folios, y los códigos de la fase 1.
  */
 export const issueTestSet = async (plan: IssuableSetPlan, options: IssueSetOptions): Promise<IssuedSet> => {
   const clock = options.now ?? (() => new Date())

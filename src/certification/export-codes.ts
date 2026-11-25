@@ -63,8 +63,9 @@ const find = (table: readonly CustomsEntry[], name: string): number | null => {
   return unique(table.filter((entry) => texts(entry).some((text) => text.startsWith(wanted))))
 }
 
+// Every port of Anexo 51-11 is listed under a heading.
 const inGroup = (table: readonly CustomsEntry[], group: string): readonly CustomsEntry[] =>
-  table.filter((entry) => key(entry.group ?? '') === key(group))
+  table.filter((entry) => key(String(entry.group)) === key(group))
 
 /**
  * EN: Loads the customs tables and answers the code of each name an export set writes. Internal.

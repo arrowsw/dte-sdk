@@ -9,6 +9,7 @@ import { runtime, saveState, type CertificationDependencies } from './runtime'
 import { createCertificationState, SENT_SET_KEYS, type CertificationState } from './state'
 import {
   advanceToNextStage,
+  checkExportSets,
   declareComplianceFinal,
   declareSimulation,
   declareTestSets,
@@ -85,7 +86,9 @@ const past = (stage: CertificationStage, other: CertificationStage): boolean =>
 
 /**
  * EN: The HTML side of the certification, in the field's order, resumed from the saved state: the test set (downloaded
- * once), the folios, each set not yet sent, their declaration and approval; the books; the advance; the simulation
+ * once), the check of the export sets the text holds (`checkExportSets`), the folios, each set not yet sent (the
+ * settlement and the two export sets last, each export set in an envelope of its own), their declaration and approval;
+ * the books; the advance; the simulation
  * sent, declared and confirmed; the exchange set answered, uploaded and confirmed; the printed samples uploaded and
  * submitted when the `samples` option gives them (else it stops there); and then it declares compliance, only with
  * `declareCompliance: true`, because that declaration cannot be undone. Nothing is repeated: a set with a track id is
@@ -93,7 +96,9 @@ const past = (stage: CertificationStage, other: CertificationStage): boolean =>
  * time-out comes back as data with the state saved; a `DteError` of the portal, of the SII or of the folios propagates
  * after the state is saved, with a `CERT_ERROR` event.
  * ES: El lado HTML de la certificación, en el orden del campo, retomado desde el estado guardado: el set de pruebas
- * (descargado una vez), los folios, cada set aún no enviado, su declaración y aprobación; los libros; el avance; la
+ * (descargado una vez), la revisión de los sets de exportación que trae el texto (`checkExportSets`), los folios, cada
+ * set aún no enviado (el de liquidación y los dos de exportación al final, cada set de exportación en su propio sobre),
+ * su declaración y aprobación; los libros; el avance; la
  * simulación enviada, declarada y confirmada; el set de intercambio respondido, subido y confirmado; las muestras
  * impresas subidas y enviadas cuando la opción `samples` las da (si no, se detiene ahí); y luego declara cumplimiento,
  * solo con `declareCompliance: true`, porque esa declaración no se puede deshacer. Nada se repite: un set con track id
@@ -131,6 +136,8 @@ export const runCertification = async (
             options.optionalSets === undefined ? {} : { optionalSets: options.optionalSets },
           )
         ).state
+      // An export set that cannot be issued stops the run before its folios are asked for.
+      await checkExportSets(deps, state)
       state = (await prepareFolios(deps, state)).state
       for (const kind of SENT_SET_KEYS) {
         if (state.plan![kind] === undefined || state.sets[kind] !== undefined) continue

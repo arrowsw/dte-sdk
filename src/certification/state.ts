@@ -6,19 +6,26 @@ import type { SampleDetail } from '../portal/pages/samples'
 import type { CertificationPlan } from './set-plan'
 
 /**
- * EN: The sets the runner sends: the four of `SetKey` and the settlement set, which only a text that holds it plans.
- * ES: Los sets que envía el ejecutor: los cuatro de `SetKey` y el set de liquidación, que solo planifica un texto que lo
- * trae.
+ * EN: The sets the runner sends: the four of `SetKey`, the settlement set and the two export sets, which only a text
+ * that holds them plans.
+ * ES: Los sets que envía el ejecutor: los cuatro de `SetKey`, el set de liquidación y los dos sets de exportación, que
+ * solo planifica un texto que los trae.
  */
-export type SentSetKey = SetKey | 'settlement'
+export type SentSetKey = SetKey | 'settlement' | 'export1' | 'export2'
 
 /**
- * EN: The sets in the order they are sent, declared and waited for: the four of `SET_KEYS`, then the settlement set.
- * Internal.
+ * EN: The sets in the order they are sent, declared and waited for: the four of `SET_KEYS`, then the settlement set,
+ * then the two export sets. Internal.
  * ES: Los sets en el orden en que se envían, se declaran y se esperan: los cuatro de `SET_KEYS`, luego el set de
- * liquidación. Interno.
+ * liquidación, luego los dos sets de exportación. Interno.
  */
-export const SENT_SET_KEYS: readonly SentSetKey[] = [...SET_KEYS, 'settlement']
+export const SENT_SET_KEYS: readonly SentSetKey[] = [...SET_KEYS, 'settlement', 'export1', 'export2']
+
+/**
+ * EN: The export sets among the sets the runner sends. Internal.
+ * ES: Los sets de exportación entre los sets que envía el ejecutor. Interno.
+ */
+export const EXPORT_SET_KEYS = ['export1', 'export2'] as const
 
 /**
  * EN: An envelope sent to the SII: its track id, the Chile date it was sent (what the declaration takes), the instant.

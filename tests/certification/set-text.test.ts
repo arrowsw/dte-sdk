@@ -261,6 +261,7 @@ describe('the export sets', () => {
       'REFERENCIA: CASO 7-0',
       'REFERENCIA: B/L Y CARTA DE PORTE',
       'REFERENCIA: RESOLUCION DEL SERVICIO NACIONAL DE ADUANAS',
+      'DOC. REFERENCIA  DUS',
     ])
     expect(testCase.exportFields).toEqual({
       'RECARGO EN LA LINEA': '10',
@@ -269,7 +270,11 @@ describe('the export sets', () => {
       'UNIDAD DE MEDIDA DE TARA': 'KN',
     })
     expect(testCase.referencedCase).toBe('7-0')
-    expect(testCase.customsReferences).toEqual(['B/L Y CARTA DE PORTE', 'RESOLUCION DEL SERVICIO NACIONAL DE ADUANAS'])
+    expect(testCase.customsReferences).toEqual([
+      'B/L Y CARTA DE PORTE',
+      'RESOLUCION DEL SERVICIO NACIONAL DE ADUANAS',
+      'DUS',
+    ])
   })
 
   test('the cases of every other set carry no customs references', () => {

@@ -195,6 +195,16 @@ describe('the export plans', () => {
     expect([unnamed.export1?.attentionNumber, unnamed.export2?.attentionNumber]).toEqual(['1', '2'])
   })
 
+  test('a set built by hand without customs references plans none', () => {
+    const [set] = parseTestSetText(EXPORT_SET_TEXT)
+    const byHand = { ...set, cases: set.cases.map(({ customsReferences: _dropped, ...rest }) => rest) }
+    expect(planCertificationSets([byHand]).export1!.documents.map((document) => document.customsReferences)).toEqual([
+      [],
+      [],
+      [],
+    ])
+  })
+
   test('next to the other sets they add plans of their own and leave theirs exactly as they were', () => {
     const both = planCertificationSets(parseTestSetText(`${FULL_SET_TEXT}\n${EXPORT_SET_TEXT}`))
     const { export1, export2, ...rest } = both
@@ -513,6 +523,10 @@ describe('what the run gives an export set', () => {
       value: 'ATLANTIDA',
       caseId: '7-1',
     })
+    // An invoice that names no country, in a set that named none before, has no city for its customer either, and
+    // `createDocument` refuses it on that first.
+    const nowhere = planOf(INVOICE.filter((line) => !line.startsWith('PAIS')))
+    expect((await failure(issueTestSet(nowhere, options()))).details).toEqual({ field: 'receiver.city' })
     const container = await issueTestSet(planOf([...INVOICE, 'TIPO DE BULTO: CONT40', 'TOTAL BULTOS: 1']), options())
     expect(container.cases[0].document.header.transport?.customs?.packages).toEqual([{ code: 74, count: 1 }])
     const noCurrency = planOf(INVOICE.filter((line) => !line.startsWith('MONEDA')))
