@@ -1,6 +1,7 @@
 import forge from 'node-forge'
 import { format } from 'rut.ts'
 import { DteError, errorMessage } from '../errors'
+import { decodeLatin1 } from '../text/latin1'
 import type { SiiRut } from '../model/rut'
 import type { RsaPublicKeyParts } from './rsa'
 
@@ -117,5 +118,75 @@ export const parseCertificatePem = (certificatePem: string): ParsedCertificate =
     rut: rutFromCertificate(certificate),
     base64: certificateBase64(forge.pki.certificateToPem(certificate)),
     publicKey: { modulus: bigIntToBase64(publicKey.n), exponent: bigIntToBase64(publicKey.e) },
+  }
+}
+
+/**
+ * EN: What a certificate says of its holder: the RUT and the name it names, and the dates it is in force between.
+ * ES: Lo que un certificado dice de su titular: el RUT y el nombre que nombra, y las fechas entre las que rige.
+ */
+export type CertificateHolder = {
+  /** EN: Holder RUT, SII shape, or null when the certificate carries none. ES: RUT del titular en forma SII, o null si el certificado no lo trae. */
+  readonly rut: SiiRut | null
+  /** EN: Common name of the holder, or null. ES: Nombre común (`CN`) del titular, o null. */
+  readonly name: string | null
+  /** EN: Validity start. ES: Inicio de vigencia. */
+  readonly notBefore: Date
+  /** EN: Validity end. ES: Fin de vigencia. */
+  readonly notAfter: Date
+}
+
+const PEM_BLOCK = /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g
+
+const certificateFromDer = (der: string): forge.pki.Certificate =>
+  forge.pki.certificateFromAsn1(forge.asn1.fromDer(der))
+
+/**
+ * EN: The certificates a caller trusts, read into a store: each a PEM text, which may hold several certificates, or
+ * the DER bytes of one.
+ * ES: Los certificados en que confía quien llama, leídos a un almacén: cada uno un texto PEM, que puede traer varios
+ * certificados, o los bytes DER de uno.
+ * @throws {DteError} EN: `INVALID_OPTION { field: 'trustedCertificates', index }` for an entry that is not a certificate. ES: `INVALID_OPTION { field: 'trustedCertificates', index }` para una entrada que no es un certificado.
+ * @internal
+ */
+export const trustStore = (certificates: readonly (string | Uint8Array)[]): forge.pki.CAStore =>
+  forge.pki.createCaStore(
+    certificates.flatMap((entry, index) => {
+      try {
+        if (entry instanceof Uint8Array) return [certificateFromDer(decodeLatin1(entry))]
+        const blocks = String(entry).match(PEM_BLOCK) ?? []
+        if (blocks.length === 0) throw new Error('no certificate')
+        return blocks.map((block) => forge.pki.certificateFromPem(block))
+      } catch {
+        throw new DteError('INVALID_OPTION', { field: 'trustedCertificates', index })
+      }
+    }),
+  )
+
+/**
+ * EN: What a certificate says of its holder, when a certificate of `store` vouches for it: it was issued and signed by
+ * one of them, or it is one of them. Null otherwise: for what is not an RSA certificate, for one no trusted
+ * certificate issued, for one whose signature does not verify, and for one with a critical extension other than key
+ * usage, basic constraints or name constraints. The dates are reported, not held against a clock, and no revocation
+ * is looked up.
+ * ES: Lo que un certificado dice de su titular, cuando un certificado de `store` responde por él: fue emitido y firmado
+ * por uno de ellos, o es uno de ellos. Null si no: para lo que no es un certificado RSA, para uno que ningún
+ * certificado de confianza emitió, para uno cuya firma no verifica, y para uno con una extensión crítica distinta de
+ * uso de llave, restricciones básicas o restricciones de nombre. Las fechas se informan, no se comparan con un reloj,
+ * y no se consulta revocación alguna.
+ * @internal
+ */
+export const trustedHolder = (certificateBase64: string, store: forge.pki.CAStore): CertificateHolder | null => {
+  try {
+    const certificate = certificateFromDer(forge.util.decode64(certificateBase64))
+    forge.pki.verifyCertificateChain(store, [certificate], { validityCheckDate: null })
+    return {
+      rut: rutFromCertificate(certificate),
+      name: subjectFields(certificate).CN ?? null,
+      notBefore: certificate.validity.notBefore,
+      notAfter: certificate.validity.notAfter,
+    }
+  } catch {
+    return null
   }
 }

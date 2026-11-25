@@ -9,7 +9,10 @@ import { createEnvelope } from '../src/envelope/create'
 import { signEnvelope } from '../src/envelope/sign'
 import { verifyDocumentSignature } from '../src/document/sign'
 import { issueDocument } from '../src/document/issue'
-import { FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from './support/fixtures'
+import type { Certificate } from '../src/certificate/certificate'
+import { signEnveloped } from '../src/signature/xmldsig'
+import { fixtureText, FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from './support/fixtures'
+import { authority, signerOf } from './support/trust-fixtures'
 import {
   certificate,
   envelopeAround,
@@ -36,7 +39,8 @@ const only = (xml: string): ReceivedDocument => {
   return documents[0]
 }
 
-const VALID_SIGNATURE = { found: true, digestValid: true, signatureValid: true, valid: true }
+// Without `trustedCertificates` no signer is reported.
+const VALID_SIGNATURE = { found: true, digestValid: true, signatureValid: true, valid: true, signer: null }
 const VALID_TED = { found: true, signatureValid: true, mismatches: [], valid: true }
 const VALID_CAF = {
   found: true,
@@ -158,6 +162,7 @@ describe('verifyReceivedDocuments: each check on its own', () => {
       digestValid: false,
       signatureValid: false,
       valid: false,
+      signer: null,
     })
     expect(document.status).toBe('invalid')
   })
@@ -298,6 +303,7 @@ describe('verifyReceivedDocuments: each check on its own', () => {
       digestValid: false,
       signatureValid: false,
       valid: false,
+      signer: null,
     })
     expect(result.status).toBe('invalid')
   })
@@ -344,6 +350,7 @@ describe('verifyReceivedDocuments: the size of a key the document names', () => 
       digestValid: true,
       signatureValid: valid,
       valid,
+      signer: null,
     })
   })
 })
@@ -891,5 +898,161 @@ describe('verifyReceivedDocuments: malformed input throws', () => {
       field: 'Documento',
       index: 1,
     })
+  })
+})
+
+// A signature that verifies says that whoever holds the key of the certificate it carries signed the element, and
+// anyone can make a certificate. Who signed is said only when a certificate the caller trusts vouches for that one.
+describe('verifyReceivedDocuments: who signed', () => {
+  const authorityA = authority('ENTIDAD CERTIFICADORA UNO')
+  const authorityB = authority('ENTIDAD CERTIFICADORA DOS')
+  const person = signerOf({ issuer: authorityA, rut: '14625621-K', name: 'PEDRO PRUEBA SOTO' })
+  const signedBy = (signer: { readonly certificate: Certificate }, timestamp?: string): string =>
+    issueDocument({
+      document: invoiceInput(21),
+      caf: signedCaf(),
+      certificate: signer.certificate,
+      now: FIXED_NOW,
+      timestamp,
+    }).xml
+  const signerWith = (xml: string, trustedCertificates: readonly (string | Uint8Array)[]) =>
+    verifyReceivedDocuments(xml, { ...options, trustedCertificates }).documents[0].signature
+  const PERSON = {
+    rut: '14625621-K',
+    name: 'PEDRO PRUEBA SOTO',
+    notBefore: '2026-01-01T00:00:00.000Z',
+    notAfter: '2028-01-01T00:00:00.000Z',
+    inForceWhenSigned: true,
+  }
+
+  test('without trusted certificates no signer is reported, on the documents or on the envelope', () => {
+    const result = verify(envelopeOf([issued(1)]))
+    expect(result.envelope).toMatchObject({ valid: true, signer: null })
+    expect(result.documents[0].signature).toMatchObject({ valid: true, signer: null })
+    expect(
+      verifyReceivedDocuments(signedBy(person), { ...options, trustedCertificates: [] }).documents[0].signature,
+    ).toMatchObject({
+      valid: true,
+      signer: null,
+    })
+  })
+
+  test('a certificate the trusted authority issued reports who it names', () => {
+    expect(signerWith(signedBy(person), [authorityA.pem])).toEqual({
+      ...VALID_SIGNATURE,
+      referenceId: 'DTE_T33F21',
+      signer: PERSON,
+    })
+  })
+
+  test('the authority is taken as PEM, as a PEM with several certificates, and as DER bytes', () => {
+    const xml = signedBy(person)
+    expect(signerWith(xml, [`${authorityB.pem}\n${authorityA.pem}`]).signer).toEqual(PERSON)
+    expect(signerWith(xml, [authorityB.der, authorityA.der]).signer).toEqual(PERSON)
+    expect(signerWith(xml, [authorityB.pem, authorityB.der]).signer).toBeNull()
+  })
+
+  test('the signer`s own certificate may be the trusted one, and the envelope reports its signer too', () => {
+    const result = verifyReceivedDocuments(envelopeOf([issued(1)]), {
+      ...options,
+      trustedCertificates: [fixtureText('cert.pem')],
+    })
+    const holder = { rut: ISSUER_RUT, name: 'CAROLINA VALDES ROJAS', inForceWhenSigned: true }
+    expect(result.envelope?.signer).toMatchObject(holder)
+    expect(result.documents[0].signature.signer).toMatchObject(holder)
+    expect(result.documents[0].signature.signer?.notAfter).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
+  })
+
+  test('a certificate that names no RUT, or no name, reports none', () => {
+    const anonymous = signerOf({ issuer: authorityA, name: 'SIN RUT' })
+    expect(signerWith(signedBy(anonymous), [authorityA.pem]).signer).toMatchObject({ rut: null, name: 'SIN RUT' })
+    const nameless = signerOf({ issuer: authorityA, rut: '14625621-K', name: null })
+    expect(signerWith(signedBy(nameless), [authorityA.pem]).signer).toMatchObject({ rut: '14625621-K', name: null })
+  })
+
+  // What anyone can make: a certificate that names whoever it likes.
+  test('a certificate nobody trusted issued reports no signer, whatever it names', () => {
+    const selfMade = signerOf({ issuer: null, rut: '14625621-K', name: 'PEDRO PRUEBA SOTO' })
+    const forged = signerWith(signedBy(selfMade), [authorityA.pem])
+    expect(forged).toMatchObject({ ...VALID_SIGNATURE, signer: null })
+    // An authority of the same name with another key: its certificates are not the trusted authority's.
+    const impostor = authority('ENTIDAD CERTIFICADORA UNO', 'impostor')
+    const underImpostor = signerOf({ issuer: impostor, rut: '14625621-K', name: 'PEDRO PRUEBA SOTO' })
+    expect(signerWith(signedBy(underImpostor), [authorityA.pem])).toMatchObject({ ...VALID_SIGNATURE, signer: null })
+    expect(signerWith(signedBy(underImpostor), [impostor.pem]).signer).toEqual(PERSON)
+    // Issued by another authority than the trusted one.
+    expect(signerWith(signedBy(person), [authorityB.pem]).signer).toBeNull()
+  })
+
+  test('a certificate with a critical extension the check does not know reports no signer', () => {
+    const odd = signerOf({
+      issuer: authorityA,
+      rut: '14625621-K',
+      extensions: [{ name: 'extKeyUsage', critical: true, emailProtection: true }],
+    })
+    expect(signerWith(signedBy(odd), [authorityA.pem])).toMatchObject({ ...VALID_SIGNATURE, signer: null })
+  })
+
+  test('a signature that does not verify reports no signer, though its certificate is a trusted one', () => {
+    const tampered = signedBy(person).replace('<MntTotal>', '<MntTotal>1')
+    expect(signerWith(tampered, [authorityA.pem])).toMatchObject({ found: true, valid: false, signer: null })
+  })
+
+  test('whether the certificate was in force is held against the instant the document says it was signed', () => {
+    const later = signerOf({
+      issuer: authorityA,
+      rut: '14625621-K',
+      notBefore: '2027-01-01T00:00:00Z',
+      notAfter: '2028-01-01T00:00:00Z',
+    })
+    // Signed in November 2026, before the certificate was in force.
+    expect(signerWith(signedBy(later), [authorityA.pem]).signer).toMatchObject({
+      rut: '14625621-K',
+      inForceWhenSigned: false,
+    })
+    // The same certificate over a document that says it was signed inside its validity, and after it.
+    expect(signerWith(signedBy(later, '2027-06-01T12:00:00'), [authorityA.pem]).signer?.inForceWhenSigned).toBe(true)
+    expect(signerWith(signedBy(later, '2028-01-02T12:00:00'), [authorityA.pem]).signer?.inForceWhenSigned).toBe(false)
+    // The first and the last instant count, read as Chile time: midnight UTC of January is 21:00 of the day before.
+    expect(signerWith(signedBy(later, '2026-12-31T21:00:00'), [authorityA.pem]).signer?.inForceWhenSigned).toBe(true)
+    expect(signerWith(signedBy(later, '2026-12-31T20:59:59'), [authorityA.pem]).signer?.inForceWhenSigned).toBe(false)
+    expect(signerWith(signedBy(later, '2027-12-31T21:00:00'), [authorityA.pem]).signer?.inForceWhenSigned).toBe(true)
+    expect(signerWith(signedBy(later, '2027-12-31T21:00:01'), [authorityA.pem]).signer?.inForceWhenSigned).toBe(false)
+  })
+
+  test('a document that states no instant that reads leaves it unknown', () => {
+    expect(signerWith(signedBy(person, '2026-13-45T00:00:00'), [authorityA.pem]).signer).toEqual({
+      ...PERSON,
+      inForceWhenSigned: null,
+    })
+    expect(signerWith(signedBy(person, 'sin fecha'), [authorityA.pem]).signer?.inForceWhenSigned).toBeNull()
+    // No `TmstFirma` at all, signed again without it.
+    const bare = signEnveloped({
+      xml: signedBy(person)
+        .replace(/<Signature xmlns=[\s\S]*<\/Signature>/, '')
+        .replace(/<TmstFirma>[^<]*<\/TmstFirma>/, ''),
+      elementTag: 'Documento',
+      rootTag: 'DTE',
+      certificate: person.certificate,
+    }).xml
+    expect(bare).not.toContain('<TmstFirma>')
+    expect(signerWith(bare, [authorityA.pem])).toMatchObject({
+      valid: true,
+      signer: { ...PERSON, inForceWhenSigned: null },
+    })
+  })
+
+  test('an entry that is not a certificate is refused, with its position', () => {
+    const refused = (trustedCertificates: readonly (string | Uint8Array)[], index: number): void =>
+      expectFailure(
+        () => verifyReceivedDocuments(signedBy(person), { ...options, trustedCertificates }),
+        'INVALID_OPTION',
+        { field: 'trustedCertificates', index },
+      )
+    refused(['no es un certificado'], 0)
+    refused([authorityA.pem, ''], 1)
+    refused([authorityA.pem, new Uint8Array([1, 2, 3])], 1)
+    refused(['-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----'], 0)
+    refused([authorityA.der, authorityA.pem, null as unknown as string], 2)
   })
 })
