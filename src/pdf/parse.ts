@@ -246,6 +246,89 @@ export type PrintableTransport = {
   readonly departureTime: string
   /** EN: Arrival date as written (YYYY-MM-DD). ES: `FchLlegada` — Fecha de llegada tal como viene (AAAA-MM-DD). */
   readonly arrivalDate: string
+  /** EN: The customs area of an export document or of a guide for export; undefined when absent. ES: `Aduana` — El área de Aduana de un documento de exportación o de una guía para exportación; undefined si falta. */
+  readonly customs?: PrintableCustoms
+}
+
+/**
+ * EN: One kind of package of the customs area, as written.
+ * ES: `TipoBultos` — Un tipo de bulto del área de Aduana, tal como viene.
+ */
+export type PrintablePackage = {
+  /** EN: Kind of package, by the code of the customs table. ES: `CodTpoBultos` — Tipo de bulto, con el código de la tabla de Aduanas. */
+  readonly code?: number
+  /** EN: How many. ES: `CantBultos` — Cantidad de bultos. */
+  readonly count?: number
+  /** EN: Marks. ES: `Marcas` — Marcas. */
+  readonly marks: string
+  /** EN: Container. ES: `IdContainer` — Identificación del contenedor. */
+  readonly containerId: string
+  /** EN: Seal. ES: `Sello` — Sello. */
+  readonly seal: string
+  /** EN: Who issued the seal. ES: `EmisorSello` — Emisor del sello. */
+  readonly sealIssuer: string
+}
+
+/**
+ * EN: The customs area of a document, as written in the XML: the codes are those of the customs tables.
+ * ES: `Aduana` — El área de Aduana de un documento, tal como viene en el XML: los códigos son los de las tablas de
+ * Aduanas.
+ */
+export type PrintableCustoms = {
+  /** EN: Sale mode. ES: `CodModVenta` — Modalidad de venta. */
+  readonly saleModality?: number
+  /** EN: Sale clause. ES: `CodClauVenta` — Cláusula de venta. */
+  readonly saleClause?: number
+  /** EN: Total of the sale clause. ES: `TotClauVenta` — Total de la cláusula de venta. */
+  readonly saleClauseTotal?: number
+  /** EN: Transport route. ES: `CodViaTransp` — Vía de transporte. */
+  readonly transportRoute?: number
+  /** EN: Name of the ship, the aircraft or the vehicle. ES: `NombreTransp` — Nombre o identificación del medio de transporte. */
+  readonly transportName: string
+  /** EN: RUT of the carrier company, as written. ES: `RUTCiaTransp` — RUT de la compañía de transporte, tal como viene. */
+  readonly carrierRut: string
+  /** EN: Name of the carrier company. ES: `NomCiaTransp` — Nombre de la compañía de transporte. */
+  readonly carrierName: string
+  /** EN: Additional identifier of the carrier company. ES: `IdAdicTransp` — Identificador adicional de la compañía de transporte. */
+  readonly carrierAdditionalId: string
+  /** EN: Booking number. ES: `Booking` — Número de reserva del operador. */
+  readonly booking: string
+  /** EN: Code of the operator. ES: `Operador` — Código del operador. */
+  readonly operator: string
+  /** EN: Port of loading. ES: `CodPtoEmbarque` — Puerto de embarque. */
+  readonly loadingPort?: number
+  /** EN: Additional identifier of the port of loading. ES: `IdAdicPtoEmb` — Identificador adicional del puerto de embarque. */
+  readonly loadingPortAdditionalId: string
+  /** EN: Port of unloading. ES: `CodPtoDesemb` — Puerto de desembarque. */
+  readonly unloadingPort?: number
+  /** EN: Additional identifier of the port of unloading. ES: `IdAdicPtoDesemb` — Identificador adicional del puerto de desembarque. */
+  readonly unloadingPortAdditionalId: string
+  /** EN: Tare. ES: `Tara` — Tara. */
+  readonly tare?: number
+  /** EN: Unit of the tare. ES: `CodUnidMedTara` — Unidad de medida de la tara. */
+  readonly tareUnit?: number
+  /** EN: Gross weight. ES: `PesoBruto` — Total peso bruto. */
+  readonly grossWeight?: number
+  /** EN: Unit of the gross weight. ES: `CodUnidPesoBruto` — Unidad del peso bruto. */
+  readonly grossWeightUnit?: number
+  /** EN: Net weight. ES: `PesoNeto` — Total peso neto. */
+  readonly netWeight?: number
+  /** EN: Unit of the net weight. ES: `CodUnidPesoNeto` — Unidad del peso neto. */
+  readonly netWeightUnit?: number
+  /** EN: Total of items. ES: `TotItems` — Total de ítems. */
+  readonly totalItems?: number
+  /** EN: Total of packages. ES: `TotBultos` — Total de bultos. */
+  readonly totalPackages?: number
+  /** EN: Each kind of package. ES: `TipoBultos` — Cada tipo de bulto. */
+  readonly packages: readonly PrintablePackage[]
+  /** EN: Freight. ES: `MntFlete` — Monto del flete. */
+  readonly freight?: number
+  /** EN: Insurance. ES: `MntSeguro` — Monto del seguro. */
+  readonly insurance?: number
+  /** EN: Country of the receiver. ES: `CodPaisRecep` — País del receptor. */
+  readonly receiverCountry?: number
+  /** EN: Country of destination. ES: `CodPaisDestin` — País de destino. */
+  readonly destinationCountry?: number
 }
 
 /**
@@ -267,6 +350,10 @@ export type PrintableDocument = {
   readonly dispatchType?: number
   /** EN: Payment terms: 1 cash, 2 credit, 3 free of charge; undefined when absent. ES: `FmaPago` — Forma de pago: 1 contado, 2 crédito, 3 sin costo; undefined si falta. */
   readonly paymentTerms?: number
+  /** EN: Payment terms of an export, by the code of the customs table; undefined when absent. ES: `FmaPagExp` — Forma de pago de una exportación, con el código de la tabla de Aduanas; undefined si falta. */
+  readonly exportPaymentTerms?: number
+  /** EN: The currency of the amounts of an export document, as written; undefined when absent, as on every other document, whose amounts are pesos. ES: `Totales/TpoMoneda` — La moneda de los montos de un documento de exportación, tal como viene; undefined si falta, como en cualquier otro documento, cuyos montos son pesos. */
+  readonly currency?: string
   /** EN: Due date as written (YYYY-MM-DD); undefined when absent. ES: `FchVenc` — Fecha de vencimiento tal como viene (AAAA-MM-DD); undefined si falta. */
   readonly dueDate?: string
   /** EN: Amount paid when the document was issued. ES: `MntCancel` — Monto cancelado al emitirse el documento. */
@@ -373,6 +460,48 @@ const RECEIVER_TAGS = {
   city: 'CiudadRecep',
 } as const
 
+const customs = (value: unknown): PrintableCustoms => {
+  const node = record(value)
+  return {
+    saleModality: number(node.CodModVenta),
+    saleClause: number(node.CodClauVenta),
+    saleClauseTotal: number(node.TotClauVenta),
+    transportRoute: number(node.CodViaTransp),
+    transportName: text(node.NombreTransp),
+    carrierRut: text(node.RUTCiaTransp),
+    carrierName: text(node.NomCiaTransp),
+    carrierAdditionalId: text(node.IdAdicTransp),
+    booking: text(node.Booking),
+    operator: text(node.Operador),
+    loadingPort: number(node.CodPtoEmbarque),
+    loadingPortAdditionalId: text(node.IdAdicPtoEmb),
+    unloadingPort: number(node.CodPtoDesemb),
+    unloadingPortAdditionalId: text(node.IdAdicPtoDesemb),
+    tare: number(node.Tara),
+    tareUnit: number(node.CodUnidMedTara),
+    grossWeight: number(node.PesoBruto),
+    grossWeightUnit: number(node.CodUnidPesoBruto),
+    netWeight: number(node.PesoNeto),
+    netWeightUnit: number(node.CodUnidPesoNeto),
+    totalItems: number(node.TotItems),
+    totalPackages: number(node.TotBultos),
+    packages: toArray(node.TipoBultos)
+      .map(record)
+      .map((pack) => ({
+        code: number(pack.CodTpoBultos),
+        count: number(pack.CantBultos),
+        marks: text(pack.Marcas),
+        containerId: text(pack.IdContainer),
+        seal: text(pack.Sello),
+        sealIssuer: text(pack.EmisorSello),
+      })),
+    freight: number(node.MntFlete),
+    insurance: number(node.MntSeguro),
+    receiverCountry: number(node.CodPaisRecep),
+    destinationCountry: number(node.CodPaisDestin),
+  }
+}
+
 const transport = (value: unknown): PrintableTransport | undefined => {
   if (value === undefined) return undefined
   const node = record(value)
@@ -389,6 +518,8 @@ const transport = (value: unknown): PrintableTransport | undefined => {
     departureDate: text(node.FchSalida),
     departureTime: text(node.HraSalida),
     arrivalDate: text(node.FchLlegada),
+    // A transport without a customs area has no such field at all.
+    ...(node.Aduana === undefined ? {} : { customs: customs(node.Aduana) }),
   }
 }
 
@@ -506,6 +637,8 @@ const printable = (dte: ParsedXml, teds: readonly string[], index: number): Prin
     transferReason: number(idDoc.IndTraslado) ?? null,
     dispatchType: number(idDoc.TipoDespacho),
     paymentTerms: number(idDoc.FmaPago),
+    exportPaymentTerms: number(idDoc.FmaPagExp),
+    currency: optionalText(totals.TpoMoneda),
     dueDate: optionalText(idDoc.FchVenc),
     settledAmount: number(idDoc.MntCancel),
     outstandingBalance: number(idDoc.SaldoInsol),

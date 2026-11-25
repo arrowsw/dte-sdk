@@ -1,6 +1,18 @@
 import type { PDFFont, PDFPage, RGB } from 'pdf-lib'
 import { format } from 'rut.ts'
-import { documentTypeName, isDocumentType, isReceipt } from '../catalogs/document-types'
+import {
+  CUSTOMS_COUNTRIES,
+  CUSTOMS_PACKAGE_TYPES,
+  CUSTOMS_PAYMENT_TERMS,
+  CUSTOMS_PORTS,
+  CUSTOMS_SALE_CLAUSES,
+  CUSTOMS_SALE_MODES,
+  CUSTOMS_TRANSPORT_ROUTES,
+  CUSTOMS_UNITS,
+  customsName,
+  type CustomsEntry,
+} from '../catalogs/customs'
+import { documentTypeName, isDocumentType, isExport, isReceipt } from '../catalogs/document-types'
 import { REFERENCE_DOCUMENT_TYPES, isReferenceDocumentType } from '../catalogs/reference-types'
 import {
   DISPATCH_TYPE_NAMES,
@@ -19,6 +31,7 @@ import {
 } from './layout'
 import type {
   PrintableAdjustment,
+  PrintableCustoms,
   PrintableDocument,
   PrintableIssuer,
   PrintableItem,
@@ -50,7 +63,14 @@ const minus =
   (written: (value: number) => string) =>
   (value: number): string =>
     value < 0 ? written(-value) : `-${written(value)}`
-const subtracted = minus(money)
+/** How an amount is written. */
+export type AmountWriter = (value: number) => string
+/**
+ * How a document writes its amounts: pesos with their sign, or, on an export document, the figure alone with the
+ * decimals it has, since its amounts are in the currency the document names.
+ */
+export const amountWriter = ({ type }: PrintableDocument): AmountWriter =>
+  isDocumentType(type) && isExport(type) ? formatQuantity : money
 export const dottedRut = (rut: string): string => format(rut, { dots: true, throwOnError: false }) ?? rut
 export const printedTypeName = (type: number): string =>
   isDocumentType(type) ? documentTypeName(type, 'printed') : `DTE ${type}`
@@ -72,8 +92,8 @@ export const referenceReason = ({ code, reason }: PrintableReference): string =>
   [code === undefined ? undefined : nameOf(REFERENCE_CODE_NAMES, code), reason].filter(Boolean).join('. ')
 // A quantity as it prints, and a unit price: both admit six decimals.
 export const printedQuantity = (value: number | undefined): string => (value === undefined ? '' : formatQuantity(value))
-export const printedUnitPrice = (value: number | undefined): string =>
-  value === undefined ? '' : `$${formatQuantity(value)}`
+export const printedUnitPrice = (value: number | undefined, written: AmountWriter = money): string =>
+  value === undefined ? '' : written === money ? `$${formatQuantity(value)}` : written(value)
 // The city prints when it says more than the commune: the SDK writes the commune as the city when none is given.
 export const cityOf = ({ city, commune }: PrintableParty): string => {
   const trimmed = (city ?? '').trim()
@@ -87,38 +107,49 @@ const codeText = (code: number | undefined, names: Readonly<Record<number, strin
 // A value the format asks to print in words, by its name, or as written when it has none; empty when absent.
 const named = (value: string | number | undefined, names: Readonly<Record<string, string>>): string =>
   value === undefined ? '' : (nameOf(names, value) ?? String(value))
-const amountText = (value: number | undefined): string => (value === undefined ? '' : money(value))
+// The name a customs table gives a code, which the format asks to print in words; the code as written when the table
+// does not list it, and empty when absent.
+const customsWords = (table: readonly CustomsEntry[], code: number | undefined): string =>
+  code === undefined ? '' : (customsName(table, code) ?? String(code))
+// The abbreviation customs asks for in a declaration (`FOB`, `KN`), likewise.
+const customsAbbreviation = (table: readonly CustomsEntry[], code: number | undefined): string =>
+  code === undefined ? '' : (table.find((entry) => entry.code === code)?.abbreviation ?? String(code))
 const dateText = (date: string | undefined): string => (date ? longDate(date) : '')
 // The payment in the order of Formato DTE 2.5, one group per line, every field of it the format marks to print: the
 // payment terms in words and the due date; the payment medium and the kind of account in words, the account and the
 // bank; the description of the terms; the amount paid and the balance owed; and each scheduled payment. A receipt
 // names its own payment media. A group may hold empty fields; the layouts leave those out.
-export const paymentGroups = (doc: PrintableDocument): readonly (readonly Field[])[] => [
-  [
-    ['Forma de Pago: ', named(doc.paymentTerms, PAYMENT_TERMS_NAMES)],
-    ['Fecha Vencimiento: ', dateText(doc.dueDate)],
-  ],
-  [
+export const paymentGroups = (doc: PrintableDocument): readonly (readonly Field[])[] => {
+  const written = amountWriter(doc)
+  const amountText = (value: number | undefined): string => (value === undefined ? '' : written(value))
+  return [
     [
-      'Medio de Pago: ',
-      named(
-        doc.paymentMedium,
-        isDocumentType(doc.type) && isReceipt(doc.type) ? RECEIPT_PAYMENT_MEDIUM_NAMES : PAYMENT_MEDIUM_NAMES,
-      ),
+      ['Forma de Pago: ', named(doc.paymentTerms, PAYMENT_TERMS_NAMES)],
+      ['Forma de Pago Exportación: ', customsWords(CUSTOMS_PAYMENT_TERMS, doc.exportPaymentTerms)],
+      ['Fecha Vencimiento: ', dateText(doc.dueDate)],
     ],
-    ['Tipo de Cuenta: ', named(doc.paymentAccountType, PAYMENT_ACCOUNT_NAMES)],
-    ['N° de Cuenta: ', doc.paymentAccountNumber ?? ''],
-    ['Banco: ', doc.paymentBank ?? ''],
-  ],
-  [['Términos de Pago: ', doc.paymentTermsNote ?? '']],
-  [
-    ['Monto Cancelado: ', amountText(doc.settledAmount)],
-    ['Saldo Insoluto: ', amountText(doc.outstandingBalance)],
-  ],
-  ...(doc.payments ?? []).map((payment): readonly Field[] => [
-    ['Pago: ', [dateText(payment.date), amountText(payment.amount), payment.note].filter(Boolean).join(' - ')],
-  ]),
-]
+    [
+      [
+        'Medio de Pago: ',
+        named(
+          doc.paymentMedium,
+          isDocumentType(doc.type) && isReceipt(doc.type) ? RECEIPT_PAYMENT_MEDIUM_NAMES : PAYMENT_MEDIUM_NAMES,
+        ),
+      ],
+      ['Tipo de Cuenta: ', named(doc.paymentAccountType, PAYMENT_ACCOUNT_NAMES)],
+      ['N° de Cuenta: ', doc.paymentAccountNumber ?? ''],
+      ['Banco: ', doc.paymentBank ?? ''],
+    ],
+    [['Términos de Pago: ', doc.paymentTermsNote ?? '']],
+    [
+      ['Monto Cancelado: ', amountText(doc.settledAmount)],
+      ['Saldo Insoluto: ', amountText(doc.outstandingBalance)],
+    ],
+    ...(doc.payments ?? []).map((payment): readonly Field[] => [
+      ['Pago: ', [dateText(payment.date), amountText(payment.amount), payment.note].filter(Boolean).join(' - ')],
+    ]),
+  ]
+}
 // Who dispatches the goods, the code and its name; empty when the document does not say.
 export const dispatchText = ({ dispatchType }: PrintableDocument): string => codeText(dispatchType, DISPATCH_TYPE_NAMES)
 // The lines under the receiver after the transfer reason and the dispatch, each that the document has: the kind of
@@ -147,9 +178,11 @@ export const descriptionLines = (item: PrintableItem): readonly string[] =>
     .split(/[\r\n]+/)
     .map((line) => line.replace(/\s+/g, ' ').trim())
     .filter(Boolean)
-// The total written out, empty when the document has none or the words cannot say it exactly.
-export const totalInWords = ({ totals }: PrintableDocument): string => {
-  const words = totals.total === undefined ? '' : amountInWords(totals.total)
+// The total written out, empty when the document has none or the words cannot say it exactly. The words are of
+// pesos, so an export document, whose total is in another currency, has none.
+export const totalInWords = (doc: PrintableDocument): string => {
+  const { total } = doc.totals
+  const words = total === undefined || amountWriter(doc) !== money ? '' : amountInWords(total)
   return words === '' ? '' : `Son: ${words}`
 }
 
@@ -235,11 +268,11 @@ export const drawRule = (canvas: Canvas, x1: number, x2: number, yFromTop: numbe
 
 // What prints under an item's description, each on its line: its discount and its surcharge, the bases and the price to
 // the final consumer of a withholding agent, and its value in another currency.
-export const itemNotes = (item: PrintableItem): readonly string[] => {
+export const itemNotes = (item: PrintableItem, written: AmountWriter = money): readonly string[] => {
   const adjustment = (label: string, amount?: number, percent?: number): string =>
-    amount ? `${label}: ${money(amount)}` : percent ? `${label}: ${percent}%` : ''
+    amount ? `${label}: ${written(amount)}` : percent ? `${label}: ${percent}%` : ''
   const labelled = (label: string, value: number | undefined): string =>
-    value === undefined ? '' : `${label}: ${money(value)}`
+    value === undefined ? '' : `${label}: ${written(value)}`
   return [
     adjustment('Dcto', item.discountAmount, item.discountPercent),
     adjustment('Recargo', item.surchargeAmount, item.surchargePercent),
@@ -253,11 +286,17 @@ export const itemNotes = (item: PrintableItem): readonly string[] => {
 }
 
 // One row of the detail: the description and the code wrapped to their columns, and the height of the taller of the two.
-export const itemRow = (item: PrintableItem, fonts: Fonts, descriptionWidth: number, codeWidth: number) => {
+export const itemRow = (
+  item: PrintableItem,
+  fonts: Fonts,
+  descriptionWidth: number,
+  codeWidth: number,
+  written: AmountWriter,
+) => {
   const lines = [item.name, ...descriptionLines(item)].flatMap((line) =>
     wrapText(line, fonts.normal, FONT.tiny, descriptionWidth),
   )
-  const notes = itemNotes(item)
+  const notes = itemNotes(item, written)
   const codes = wrapText(item.code, fonts.normal, FONT.tiny, codeWidth)
   const height = Math.max(
     TABLE.rowHeight,
@@ -308,7 +347,10 @@ const otherCurrencyRows = ({ otherCurrency, globalAdjustments }: PrintableDocume
 
 export const totalRows = (doc: PrintableDocument): readonly TotalRow[] => {
   const { totals } = doc
-  const rows: TotalRow[] = []
+  const money = amountWriter(doc)
+  const subtracted = minus(money)
+  // An export document names the currency of its amounts above them.
+  const rows: TotalRow[] = doc.currency ? [['Moneda', doc.currency, false]] : []
   const add = (label: string, value: number | undefined, written = money, bold = false): void => {
     if (value) rows.push([label, written(value), bold])
   }
@@ -345,6 +387,59 @@ export const totalRows = (doc: PrintableDocument): readonly TotalRow[] => {
 
 // The transport area in the order of Formato DTE 2.5, one group per line: the plates, the carrier and the driver, the
 // destination, and the departure and arrival. A group may hold empty fields; the layouts leave those out.
+// A weight with the abbreviation of its unit, as `1.250,5 KN`; empty when the document gives no weight.
+const weightText = (value: number | undefined, unit: number | undefined): string =>
+  value === undefined ? '' : [formatQuantity(value), customsAbbreviation(CUSTOMS_UNITS, unit)].filter(Boolean).join(' ')
+const countText = (value: number | undefined): string => (value === undefined ? '' : formatQuantity(value))
+
+// The customs area in the order of Formato DTE 2.5, one group per line, each code the format asks to print in words by
+// the name its customs table gives it: the sale, the transport, the ports, the weights and the counts, each kind of
+// package, the freight and the insurance, and the countries.
+const customsGroups = (customs: PrintableCustoms): readonly (readonly Field[])[] => [
+  [
+    ['Modalidad de Venta: ', customsWords(CUSTOMS_SALE_MODES, customs.saleModality)],
+    ['Cláusula de Venta: ', customsAbbreviation(CUSTOMS_SALE_CLAUSES, customs.saleClause)],
+    ['Total Cláusula de Venta: ', countText(customs.saleClauseTotal)],
+  ],
+  [
+    ['Vía de Transporte: ', customsWords(CUSTOMS_TRANSPORT_ROUTES, customs.transportRoute)],
+    ['Nombre Transporte: ', customs.transportName],
+    ['RUT Cía. Transporte: ', customs.carrierRut],
+    ['Cía. Transporte: ', customs.carrierName],
+    ['Id. Adicional Transporte: ', customs.carrierAdditionalId],
+    ['Booking: ', customs.booking],
+    ['Operador: ', customs.operator],
+  ],
+  [
+    ['Puerto de Embarque: ', customsWords(CUSTOMS_PORTS, customs.loadingPort)],
+    ['Id. Adicional Embarque: ', customs.loadingPortAdditionalId],
+    ['Puerto de Desembarque: ', customsWords(CUSTOMS_PORTS, customs.unloadingPort)],
+    ['Id. Adicional Desembarque: ', customs.unloadingPortAdditionalId],
+  ],
+  [
+    ['Tara: ', weightText(customs.tare, customs.tareUnit)],
+    ['Peso Bruto: ', weightText(customs.grossWeight, customs.grossWeightUnit)],
+    ['Peso Neto: ', weightText(customs.netWeight, customs.netWeightUnit)],
+    ['Total Ítems: ', countText(customs.totalItems)],
+    ['Total Bultos: ', countText(customs.totalPackages)],
+  ],
+  ...customs.packages.map((pack): readonly Field[] => [
+    ['Bultos: ', [countText(pack.count), customsWords(CUSTOMS_PACKAGE_TYPES, pack.code)].filter(Boolean).join(' ')],
+    ['Marcas: ', pack.marks],
+    ['Contenedor: ', pack.containerId],
+    ['Sello: ', pack.seal],
+    ['Emisor Sello: ', pack.sealIssuer],
+  ]),
+  [
+    ['Flete: ', countText(customs.freight)],
+    ['Seguro: ', countText(customs.insurance)],
+  ],
+  [
+    ['País Receptor: ', customsWords(CUSTOMS_COUNTRIES, customs.receiverCountry)],
+    ['País Destino: ', customsWords(CUSTOMS_COUNTRIES, customs.destinationCountry)],
+  ],
+]
+
 export const transportGroups = (transport: PrintableTransport): readonly (readonly Field[])[] => [
   [
     ['Patente: ', transport.licensePlate],
@@ -365,4 +460,5 @@ export const transportGroups = (transport: PrintableTransport): readonly (readon
     ['Hora de Salida: ', transport.departureTime],
     ['Fecha de Llegada: ', transport.arrivalDate],
   ],
+  ...(transport.customs === undefined ? [] : customsGroups(transport.customs)),
 ]
