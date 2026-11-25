@@ -1,4 +1,5 @@
 import type { Certificate } from '../certificate/certificate'
+import { base64Lines } from '../crypto/digest'
 import { readReceivedStructure } from '../document/received-structure'
 import { verifyDocumentSignature } from '../document/sign'
 import { DteError } from '../errors'
@@ -8,7 +9,7 @@ import { assertMaxLength, sanitizeText } from '../text/sanitize'
 import { chileTimestamp, toIsoDate } from '../time/chile'
 import { child, textAt } from '../xml/elements'
 import { escapeXmlText } from '../xml/escape'
-import { readAssignmentFile, SII_NS, unstable_verifyAssignment } from './read'
+import { readAssignmentFile, readGoodsReceipts, SII_NS, unstable_verifyAssignment, verifyGoodsReceipt } from './read'
 
 /**
  * EN: The document types that can be assigned (Formato Archivo Electrónico de Cesión 1.1, C.1 field 2): invoice (33),
@@ -127,6 +128,12 @@ export type AssignmentTerms = {
 export type AssignmentInput = AssignmentTerms & {
   /** EN: The signed `DTE`, exactly as it was sent; an XML declaration before it is dropped. ES: `DTE` — El `DTE` firmado, tal como se envió; se descarta una declaración XML antes de él. */
   readonly document: string
+  /** EN: The electronic receipts of the goods or services of the document (Ley 19.983), as the debtor sent them: each text an `EnvioRecibos` file as it was received, or a lone `Recibo`. Every `Recibo` that names the document is carried in the zone of the assigned document as it was signed, up to 40, and its signature must verify; the ones of other documents are left out. With them the file carries no sworn statement. ES: `Recibo` — Los recibos electrónicos de las mercaderías o servicios del documento (Ley 19.983), tal como los envió el deudor: cada texto un archivo `EnvioRecibos` tal como se recibió, o un `Recibo` solo. Cada `Recibo` que nombra al documento se lleva en el área del documento cedido tal como se firmó, hasta 40, y su firma debe verificar; los de otros documentos quedan fuera. Con ellos el archivo no lleva declaración jurada. */
+  readonly receipts?: readonly string[]
+  /** EN: The assigned document as a PDF. ES: `ImagenDTE` — El documento cedido como PDF. */
+  readonly documentImage?: Uint8Array
+  /** EN: The acknowledgements of receipt as a PDF, for the ones that are not electronic; up to 4,000,000 bytes. It does not replace the sworn statement. ES: `ImagenAR` — Los acuses de recibo como PDF, para los que no son electrónicos; hasta 4.000.000 de bytes. No reemplaza la declaración jurada. */
+  readonly receiptImage?: Uint8Array
 }
 
 /**
@@ -150,6 +157,10 @@ const LONG_MAX = 512
 const FIRST_DATE = '2003-04-01'
 const LAST_DATE = '2050-12-31'
 const MAX_SIGNERS = 3
+// `DTECedido_v10.xsd`: up to 40 `Recibo`, and an `ImagenAR` of up to 4,000,000 octets.
+const MAX_RECEIPTS = 40
+const MAX_RECEIPT_IMAGE = 4_000_000
+const PDF_START = [0x25, 0x50, 0x44, 0x46, 0x2d]
 const FOLIO_MAX = 9_999_999_999
 const PROLOG = /^\uFEFF?\s*<\?xml[^>]*\?>/
 
@@ -275,8 +286,48 @@ const signersOf = (terms: AssignmentTerms): readonly Signer[] => {
   })
 }
 
+// The electronic receipts that name the document among the texts given, each as it was signed. One that does not
+// verify is refused; one of another document is left out, since an `EnvioRecibos` answers a whole envelope.
+const receiptsOf = (texts: readonly string[] | undefined, document: AssignedDocument): readonly string[] => {
+  if (texts === undefined) return []
+  if (!Array.isArray(texts)) refuse('receipts', 'expected a list of texts')
+  // Each `Recibo` with its `DocumentoRecibo`; one without it names no document.
+  const found = texts
+    .flatMap((text) => readGoodsReceipts(String(text)))
+    .flatMap((receipt) => {
+      const body = child(receipt.element, 'DocumentoRecibo')
+      return body === undefined ? [] : [{ receipt, body }]
+    })
+  const naming = found.filter(
+    ({ body }) =>
+      textAt(body, 'TipoDoc') === String(document.type) &&
+      textAt(body, 'Folio') === String(document.folio) &&
+      siiRutOrNull(textAt(body, 'RUTEmisor')) === document.issuerRut &&
+      siiRutOrNull(textAt(body, 'RUTRecep')) === document.receiverRut,
+  )
+  if (naming.length === 0) refuse('receipts', 'no receipt names the assigned document')
+  if (naming.some(({ receipt }) => !verifyGoodsReceipt(receipt).valid))
+    throw new DteError('SIGNATURE_INVALID', { field: 'Recibo' })
+  // The same receipt given twice is carried once; two different ones under one ID would leave the file with an ID
+  // that names two elements.
+  const receipts = Array.from(new Map(naming.map((one) => [one.receipt.text, one])).values())
+  if (new Set(receipts.map(({ body }) => body.getAttribute('ID'))).size !== receipts.length)
+    refuse('receipts', 'two receipts carry the same ID')
+  if (receipts.length > MAX_RECEIPTS) refuse('receipts', `a file carries up to ${MAX_RECEIPTS} receipts`)
+  return receipts.map(({ receipt }) => receipt.text)
+}
+
+// A PDF carried in the zone of the assigned document, in base64 on short lines.
+const imageOf = (tag: string, field: string, bytes: Uint8Array | undefined, maxBytes?: number): string => {
+  if (bytes === undefined) return ''
+  if (!(bytes instanceof Uint8Array) || PDF_START.some((byte, index) => bytes[index] !== byte))
+    refuse(field, 'expected the bytes of a PDF')
+  if (maxBytes !== undefined && bytes.length > maxBytes) refuse(field, `larger than ${maxBytes} bytes`)
+  return `<${tag}>${base64Lines(bytes)}</${tag}>`
+}
+
 // C.1 field 14, in the format's own words with the names and RUTs filled in. The format asks for it when the receipt of
-// the goods or services is not an electronic one carried in the file, and dte-sdk carries none.
+// the goods or services is not an electronic one carried in the file.
 const swornStatement = (assignor: Party, assignee: Party, document: AssignedDocument): string => {
   const statement =
     `Se declara bajo juramento que ${assignor.businessName}, RUT ${assignor.rut} ha puesto a disposición del ` +
@@ -301,6 +352,7 @@ const signedAssignment = (
   document: AssignedDocument,
   sequence: number,
   stamp: string,
+  sworn: boolean,
 ): { readonly xml: string; readonly assignor: Party; readonly assignee: Party } => {
   const assignor = partyOf(terms.assignor, 'assignor', 'Cedente')
   const assignee = partyOf(terms.assignee, 'assignee', 'Cesionario')
@@ -317,7 +369,7 @@ const signedAssignment = (
   const body =
     `<DocumentoCesion ID="${ids(document, sequence).assignment}">${el('SeqCesion', sequence)}${idDte}` +
     `<Cedente>${partyXml(assignor)}${authorized.join('')}` +
-    `${el('DeclaracionJurada', swornStatement(assignor, assignee, document))}</Cedente>` +
+    `${sworn ? el('DeclaracionJurada', swornStatement(assignor, assignee, document)) : ''}</Cedente>` +
     `<Cesionario>${partyXml(assignee)}</Cesionario>${el('MontoCesion', amount)}${el('UltimoVencimiento', lastDueDate)}` +
     `${optional('OtrasCondiciones', terms.otherTerms, LONG_MAX)}${optional('eMailDeudor', terms.debtorEmail, EMAIL.max)}` +
     `${el('TmstCesion', stamp)}</DocumentoCesion>`
@@ -358,6 +410,7 @@ const failedZone = (verification: ReturnType<typeof unstable_verifyAssignment>):
   const checks: readonly (readonly [string, SignatureVerification])[] = [
     ['DTE', verification.document],
     ['DocumentoDTECedido', verification.assignedDocument],
+    ...verification.receipts.map((receipt) => ['Recibo', receipt] as const),
     ...verification.assignments.flatMap((signatures) =>
       signatures.map((signature) => ['DocumentoCesion', signature] as const),
     ),
@@ -384,9 +437,12 @@ const verified = (file: string): string => {
  * with its zone signed (`DocumentoDTECedido`); the assignment (`DocumentoCesion`, `SeqCesion` 1) signed once by each
  * authorized signer, with their own certificate; and the whole file signed (`DocumentoAEC`). Only 33, 34, 46 and 43 can
  * be assigned, and a first assignment only by the document's creditor: the issuer of an invoice (33, 34), the receiver
- * of a purchase or settlement invoice (46, 43). The file carries no electronic receipt of the goods, so it carries the
- * sworn statement the format words for that case (`DeclaracionJurada`), naming the assignor, the assignee and the
- * debtor. The texts are sanitized as a document's are and held to the stricter of the format's and the schema's lengths.
+ * of a purchase or settlement invoice (46, 43). With `receipts`, the zone of the assigned document carries the
+ * electronic receipts of the goods or services the debtor signed for the document (`Recibo`), each as it was signed
+ * and with its signature verified; without them the assignment carries the sworn statement the format words for that
+ * case (`DeclaracionJurada`), naming the assignor, the assignee and the debtor. The zone may also carry the document
+ * and the receipts that are not electronic as PDFs (`ImagenDTE`, `ImagenAR`). Who signed a receipt is not checked. The
+ * texts are sanitized as a document's are and held to the stricter of the format's and the schema's lengths.
  * Pure: no network; the clock is `now`. ISO-8859-1 XML text with its declaration, ready for
  * `unstable_uploadAssignment`. The file is verified before it is handed back, every signature where it stands, and one
  * that does not verify is an error and no file. Three limits: the `DTE` must declare the SII's namespace itself, so one
@@ -400,9 +456,12 @@ const verified = (file: string): string => {
  * (`DocumentoDTECedido`); la cesión (`DocumentoCesion`, `SeqCesion` 1) firmada una vez por cada persona autorizada,
  * con su propio certificado; y todo el archivo firmado (`DocumentoAEC`). Solo se pueden ceder 33, 34, 46 y 43, y una
  * primera cesión solo la hace el acreedor del documento: el emisor de una factura (33, 34), el receptor de una factura
- * de compra o una liquidación factura (46, 43). El archivo no lleva recibo electrónico de las mercaderías, así que lleva
- * la declaración jurada que el formato redacta para ese caso (`DeclaracionJurada`), con el cedente, el cesionario y el
- * deudor. Los textos se sanitizan como los de un documento y se atienen al más estricto de los largos del formato y del
+ * de compra o una liquidación factura (46, 43). Con `receipts`, el área del documento cedido lleva los recibos
+ * electrónicos de las mercaderías o servicios que el deudor firmó para el documento (`Recibo`), cada uno tal como se
+ * firmó y con su firma verificada; sin ellos la cesión lleva la declaración jurada que el formato redacta para ese
+ * caso (`DeclaracionJurada`), con el cedente, el cesionario y el deudor. El área puede llevar además el documento y
+ * los recibos que no son electrónicos como PDF (`ImagenDTE`, `ImagenAR`). No se revisa quién firmó un recibo. Los
+ * textos se sanitizan como los de un documento y se atienen al más estricto de los largos del formato y del
  * esquema. Pura: sin red; el reloj es `now`. Texto XML ISO-8859-1 con su declaración, listo para
  * `unstable_uploadAssignment`. El archivo se verifica antes de entregarlo, cada firma donde está, y uno que no verifica
  * es un error y no un archivo. Tres límites: el `DTE` debe declarar él mismo el namespace del SII, así que uno cortado
@@ -410,22 +469,28 @@ const verified = (file: string): string => {
  * de sus 512 caracteres; y el certificado de un firmante que no nombra ningún RUT no se compara con el del firmante.
  * @param input EN: the signed document, the parties, the amount, the last due date and the certificates. ES: el documento firmado, las partes, el monto, el último vencimiento y los certificados.
  * @returns EN: the signed `AEC`. ES: el `AEC` firmado.
- * @throws {DteError} EN: `XML_PARSE_FAILED` for a document that is not one signed `DTE` declaring the SII namespace; `SIGNATURE_INVALID` when its signature does not verify; `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `INVALID_AMOUNT` (`MntTotal`, `amount`), `MISSING_FIELD` and `FIELD_TOO_LONG` with the field in `details.field`; `INVALID_OPTION` for an assignor that is not the creditor (`assignor.rut`), no signers or more than three, a signer's certificate of another RUT (`assignor.signers`) and a text shorter than the schema allows; and for the file built, `SIGNATURE_INVALID` with the zone in `details.field` when one of its signatures does not verify, or `XML_PARSE_FAILED` when it cannot be read back. ES: los mismos códigos.
+ * @throws {DteError} EN: `XML_PARSE_FAILED` for a document that is not one signed `DTE` declaring the SII namespace; `SIGNATURE_INVALID` when its signature does not verify; `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `INVALID_AMOUNT` (`MntTotal`, `amount`), `MISSING_FIELD` and `FIELD_TOO_LONG` with the field in `details.field`; `INVALID_OPTION` for an assignor that is not the creditor (`assignor.rut`), no signers or more than three, a signer's certificate of another RUT (`assignor.signers`) and a text shorter than the schema allows; and for the file built, `SIGNATURE_INVALID` with the zone in `details.field` when one of its signatures does not verify, or `XML_PARSE_FAILED` when it cannot be read back. Also `XML_PARSE_FAILED` for a text of `receipts` that is neither an `EnvioRecibos` nor a `Recibo`; `SIGNATURE_INVALID` with `field: 'Recibo'` for a receipt that names the document and does not verify; `INVALID_OPTION` with `receipts` (not a list, no receipt names the document, two receipts with one ID, more than 40), `documentImage` or `receiptImage` (not the bytes of a PDF, or a `receiptImage` over 4,000,000 bytes). ES: los mismos códigos. También `XML_PARSE_FAILED` para un texto de `receipts` que no es un `EnvioRecibos` ni un `Recibo`; `SIGNATURE_INVALID` con `field: 'Recibo'` para un recibo que nombra al documento y no verifica; `INVALID_OPTION` con `receipts` (no es una lista, ningún recibo nombra al documento, dos recibos con un mismo ID, más de 40), `documentImage` o `receiptImage` (no son los bytes de un PDF, o un `receiptImage` de más de 4.000.000 de bytes).
  */
 export const unstable_createAssignment = (input: AssignmentInput): string => {
   const dte = String(input.document).replace(PROLOG, '').trim()
   const document = readDocument(dte)
   if (toSiiRut(input.assignor.rut, 'assignor.rut') !== document.creditorRut)
     refuse('assignor.rut', 'a first assignment is made by the creditor of the document')
+  const receipts = receiptsOf(input.receipts, document)
+  // `DTECedido_v10.xsd`: the document, its image, the electronic receipts, the image of the other receipts, the stamp.
+  const carried =
+    imageOf('ImagenDTE', 'documentImage', input.documentImage) +
+    receipts.join('') +
+    imageOf('ImagenAR', 'receiptImage', input.receiptImage, MAX_RECEIPT_IMAGE)
   const stamp = chileTimestamp(input.now)
   const id = ids(document, 1)
   const assignedDocument = signEnveloped({
-    xml: `<DTECedido xmlns="${SII_NS}" version="1.0"><DocumentoDTECedido ID="${id.assignedDocument}">${dte}${el('TmstFirma', stamp)}</DocumentoDTECedido></DTECedido>`,
+    xml: `<DTECedido xmlns="${SII_NS}" version="1.0"><DocumentoDTECedido ID="${id.assignedDocument}">${dte}${carried}${el('TmstFirma', stamp)}</DocumentoDTECedido></DTECedido>`,
     elementTag: 'DocumentoDTECedido',
     rootTag: 'DTECedido',
     certificate: input.certificate,
   }).xml
-  const assignment = signedAssignment(input, document, 1, stamp)
+  const assignment = signedAssignment(input, document, 1, stamp, receipts.length === 0)
   return verified(signedFile(input, assignment, `${assignedDocument}${assignment.xml}`, id.file, stamp))
 }
 
@@ -435,8 +500,9 @@ export const unstable_createAssignment = (input: AssignmentInput): string => {
  * Builds and signs the file of a later assignment: the previous file's assigned document and assignments carried
  * over as they were signed, and one more assignment, with the next `SeqCesion`, by the previous assignment's assignee.
  * Every signature of the previous file must verify first. The new assignment and the whole file are signed as in
- * `unstable_createAssignment`, and the same rules hold, with the sworn statement naming the new parties; the zone of the
- * assigned document is the previous file's and is not signed again. A file holds up to 40 assignments. That the
+ * `unstable_createAssignment`, and the same rules hold, with the sworn statement naming the new parties unless the
+ * previous file carries electronic receipts; the zone of the assigned document is the previous file's and is not
+ * signed again. A file holds up to 40 assignments. That the
  * previous file verifies says nobody changed it after it was signed, not who signed it: beyond their numbering and the
  * last assignee, the earlier assignments are not compared with the document nor with each other.
  * ES: **Inestable**: ningún archivo que haya armado se ha registrado aún en el SII, así que su forma puede cambiar en
@@ -444,8 +510,9 @@ export const unstable_createAssignment = (input: AssignmentInput): string => {
  * Arma y firma el archivo de una cesión posterior: el documento cedido y las cesiones del archivo anterior tal como
  * se firmaron, y una cesión más, con el `SeqCesion` siguiente, hecha por el cesionario de la cesión anterior. Antes
  * debe verificar cada firma del archivo anterior. La nueva cesión y todo el archivo se firman como en
- * `unstable_createAssignment`, y rigen las mismas reglas, con la declaración jurada nombrando a las nuevas partes; el área del
- * documento cedido es la del archivo anterior y no se vuelve a firmar. Un archivo lleva hasta 40 cesiones. Que el
+ * `unstable_createAssignment`, y rigen las mismas reglas, con la declaración jurada nombrando a las nuevas partes salvo
+ * que el archivo anterior lleve recibos electrónicos; el área del documento cedido es la del archivo anterior y no se
+ * vuelve a firmar. Un archivo lleva hasta 40 cesiones. Que el
  * archivo anterior verifique dice que nadie lo cambió después de firmado, no quién lo firmó: fuera de su numeración y
  * del último cesionario, las cesiones anteriores no se comparan con el documento ni entre sí.
  * @param input EN: the previous file, the parties, the amount, the last due date and the certificates. ES: el archivo anterior, las partes, el monto, el último vencimiento y los certificados.
@@ -467,7 +534,8 @@ export const unstable_createReassignment = (input: ReassignmentInput): string =>
   if (siiRutOrNull(textAt(last, 'Cesionario', 'RUT')) !== toSiiRut(input.assignor.rut, 'assignor.rut'))
     refuse('assignor.rut', 'a later assignment is made by the assignee of the previous one')
   const stamp = chileTimestamp(input.now)
-  const assignment = signedAssignment(input, document, sequence, stamp)
+  // The zone of the assigned document is the previous file's: with electronic receipts in it, no sworn statement.
+  const assignment = signedAssignment(input, document, sequence, stamp, file.receipts.length === 0)
   const carried = [file.assignedDocument, ...file.assignments].map((zone) => zone.text).join('')
   return verified(signedFile(input, assignment, `${carried}${assignment.xml}`, ids(document, sequence).file, stamp))
 }

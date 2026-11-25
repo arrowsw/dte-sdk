@@ -105,3 +105,18 @@ export const resignedFile = (xml: string, edit: (cesion: string, index: number) 
     certificate,
   }).xml
 }
+
+/**
+ * A `Recibo` numbered `n` and signed again with the fixture certificate, declaring the SII's namespace itself: one
+ * more receipt of the same document, under another ID.
+ */
+export const resignedReceipt = (recibo: string, n: number): string =>
+  signEnveloped({
+    xml: recibo
+      .replace(SIGNATURE, '')
+      .replace(/ID="[^"]*"/, `ID="REC-${n}"`)
+      .replace(/^<Recibo (?!xmlns=)/, '<Recibo xmlns="http://www.sii.cl/SiiDte" '),
+    elementTag: 'DocumentoRecibo',
+    rootTag: 'Recibo',
+    certificate,
+  }).xml
