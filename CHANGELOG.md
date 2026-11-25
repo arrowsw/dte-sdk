@@ -21,35 +21,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The site the legend under the stamp names** (`verificationSite`, `dte-sdk/pdf`). The printed sample always said
   `Verifique documento: www.sii.cl`. A company that declared to the SII the site where its receipts are consulted
   names it here, on the sheet and on the roll; `www.sii.cl` stays the default.
-- **The certificate of a received signature** (`ReceivedSignatureCheck.certificate`). `verifyReceivedDocuments`
-  reports, for the envelope and for each document, the RUT the signing certificate names as its holder and the
-  validity it states. The chain of the certificate is not checked, so they can refuse a document (another holder than
-  the expected one, a validity that does not cover `TmstFirma`) and never vouch for one.
 - **The digest of a received envelope** (`ReceivedEnvelope.digest`). `readReceivedEnvelope` reads the digest of the
   envelope's own signature, and `createReceptionAnswer` quotes it (`Digest`, which `RespuestaEnvioDTE_v10.xsd`
   declares after the id of the envelope).
 
 ### Changed
 
-- **The stamp follows the SII's instructions for the PDF417: rows three modules high, over 300 DPI, bytes alone.**
-  Section A.2.5 of the issuance instructions asks for rows three times the module, a module of 6.7 mils or more, 300
-  DPI or more and byte compaction. The stamp had rows one module high that the page stretched to 2 cm (about 1.3 to 1
-  with a CAF of 512 bits), a raster of 270 DPI across 9 cm, and bytes alone only for a text with a byte above ASCII.
-  `renderTedBarcode` now gives a symbol of eighteen data columns, 387 modules across, with rows three modules high and
-  four pixels a module, written in bytes alone whenever the TED fits (up to 1,034 bytes). The sheet and the roll draw
-  it by one factor for both sides: a module of 9.2 mils across the 9 cm of the sheet and of 7.1 across the roll, about
-  3 cm high.
-  - **What to change:** nothing when the sample is drawn by `renderPrintedSample`. Code that places the PNG of
-    `renderTedBarcode` itself gets an image of 1,548 pixels across and of another proportion: scale both sides by one
-    factor, and give it 6.6 cm or more.
 - **On an export line the share of a percent keeps its decimals.** A line of an export document rounded the share of
   a discount or a surcharge in percent to a whole number, the only amount `DescuentoMonto` and `RecargoMonto` admit,
   so a price of 94 with 10 % on the line was 103. Formato DTE 2.5 leaves those two amounts optional on the three
   export documents (fields 30 and 34 of the detail). The share now has the four decimals of `MontoItem`, 103.4, and it
-  is written as an amount only when it is a whole number; otherwise the percent goes alone. Only a share those four
-  decimals bring to zero is refused.
-  - **What to change:** nothing in the call. `calculateExportLineAmount` returns shares with decimals, and the amount
-    of a line with a percent may differ from the one 0.15.0 wrote.
+  is written as an amount only when it is a whole number; otherwise the percent goes alone, and `warnings` lists it
+  (`{ formatField: 30 | 34, field }`), since the same fields say a percent goes with its amount. Only a share those
+  four decimals bring to zero is refused. None of it has been run against the SII: a discount with decimals, and a
+  line with one share written and the other not, are the cases to look at in the first export documents.
+  - **What to change:** nothing in the call. `calculateExportLineAmount` returns shares with decimals, so code that
+    writes them as `DescuentoMonto` or `RecargoMonto` itself must write only a whole one; the amount of a line with a
+    percent may differ from the one 0.15.0 wrote; and `DocumentWarning` is now one of two shapes, so code that reads
+    `validation` of every warning must tell them apart.
 - **`sanitizeText` keeps the dashes and the spaces a text editor writes.** It dropped every dash but two and the minus
   sign, so a pasted `−5` read `5`, and the typographic spaces, so two words ran together. Each dash from U+2010 to
   U+2015 and U+2212 is now a hyphen, and each typographic space a plain space.

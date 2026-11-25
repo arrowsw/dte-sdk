@@ -393,8 +393,10 @@ settlement.warnings // [{ validation: 10, field: 'totals.totalAmount' }]: a tota
 ```
 
 Validation 10 is a total of zero on a 33, 34, 43 or 46, 12 a net amount of zero on a 33, 43 or 46, and 56 an invoice
-(33) whose net amount is not above zero. `warnings` is absent when there is nothing, is never written to the XML, and
-travels to the signed document. `createEnvelope` holds an `EnvioDTE` to 2,000 documents and an `EnvioBOLETA` to 500
+(33) whose net amount is not above zero. On an export document, a line's percent written without its amount is listed
+too, as `{ formatField: 30, field: 'items[0].discountPercent' }` (34 for a surcharge): the format asks a percent for
+its amount, and the element that would hold it takes whole numbers only. `warnings` is absent when there is nothing,
+is never written to the XML, and travels to the signed document. `createEnvelope` holds an `EnvioDTE` to 2,000 documents and an `EnvioBOLETA` to 500
 (`INVALID_OPTION`, `documents`).
 
 Not checked yet: a total whose totals carry a tax code other than 15, since which of those codes add to the total and
@@ -552,7 +554,7 @@ exportInvoice.header.otherCurrency
   and plus its surcharge, each its percent of that base rounded to the same four decimals: a price of 94 with a
   surcharge of 10 % is 103.4 (`calculateExportLineAmount`). `DescuentoMonto` and `RecargoMonto` admit whole numbers
   only, and Formato DTE 2.5 leaves them optional on an export document (fields 30 and 34 of the detail), so a share
-  with decimals is written as its percent alone, and a whole one with its amount. The totals are the exempt amount, the sum of the lines with no
+  with decimals is written as its percent alone, which `warnings` lists, and a whole one with its amount. The totals are the exempt amount, the sum of the lines with no
   exemption indicator or with 1 and the global adjustments, and the total, the same amount, or zero on an export
   without payment (`exportPaymentTerms: '21'`, Formato DTE 2.5, field 124) (`calculateExportTotals`, which
   `calculateTotals` calls for these types). Each is worked out exactly, over the decimal digits as written, and rounded
@@ -827,9 +829,7 @@ has no known key, and `valid` otherwise:
 
 - **`signature`**: its XMLDSig signature over `Documento` (or `Liquidacion`, or `Exportaciones`), with `found`, `digestValid` and
   `signatureValid`. It proves the document is intact with respect to the certificate it carries, not whose that
-  certificate is. `certificate` reports that certificate as the document states it, the RUT it names as its holder
-  and its validity, with its chain unchecked: they can refuse a document (another holder than the one the company
-  expects, a validity that does not cover `TmstFirma`) and never vouch for one.
+  certificate is.
 - **`ted`**: the stamp. Its `FRMT` must verify with the key of the CAF the TED carries, over the `DD` as ISO-8859-1
   bytes, and its `DD` must agree with the header: `mismatches` names what differs among the issuer, the type, the folio,
   the date, the receiver and the total, which on an export document is compared by value with its decimals. `RSR` and
@@ -1765,12 +1765,10 @@ the certification samples are always the sheet. `stamp: false` leaves the electr
 receipt (39 or 41), whose printed stamp is optional from 1 January 2026 (Res. Ex. SII N° 207 of 2025; the XML keeps its
 `TED`), on the sheet or on the roll; on any other type it throws `INVALID_OPTION`. Delivering the receipt virtually
 instead of printing it (Res. Ex. SII N° 53 of 2025) stays with the application. The stamp encodes the signed bytes exactly (`renderTedBarcode` gives the PNG
-alone), as section A.2.5 of the SII's issuance instructions asks of the PDF417: error correction level 5, always;
-byte compaction alone, whenever the TED fits in it (up to 1,034 bytes), so no reader has to follow a shift in the
-middle of text to get the byte that was signed; rows three modules high; and four pixels a module, over 300 DPI at
-any size it is printed at. The symbol is 387 modules across with its quiet zone, and the sheet and the roll draw it
-by one factor for both sides: a module of 9.2 mils across the 9 cm of the sheet and of 7.1 across the roll, over the
-6.7 mils of the instructions. It needs Node and the optional peers `pdf-lib` and `bwip-js`, which are loaded on first use: without them
+alone), always at error correction level 5, the one the SII's instructions ask for. A stamp with a byte above ASCII,
+as the document of another issuer may carry in a name, is written in byte compaction alone when it fits, so no reader
+has to follow a shift in the middle of text to get the byte that was signed; a stamp of plain ASCII, as every one
+dte-sdk issues, keeps the compaction the barcode library picks. It needs Node and the optional peers `pdf-lib` and `bwip-js`, which are loaded on first use: without them
 the render functions throw `DEPENDENCY_UNAVAILABLE`. Failures of a batch come back as data (`failures[].code`), never as thrown errors; a folio that is not a run
 of digits is an `INVALID_FOLIO` failure, since it would name the file. A stamp raster above 300 DPI is not printed
 yet: see the
