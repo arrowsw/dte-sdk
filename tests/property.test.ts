@@ -148,6 +148,25 @@ describe('text invariants', () => {
     )
   })
 
+  test('sanitizeText of any Unicode text yields ISO-8859-1 or refuses it, and never leaves a quote', () => {
+    fc.assert(
+      fc.property(fc.string({ unit: 'binary', maxLength: 60 }), (text) => {
+        const once = (() => {
+          try {
+            return sanitizeText(text)
+          } catch (error) {
+            expect((error as { code?: string }).code).toBe('ENCODING_UNSUPPORTED_CHAR')
+            return null
+          }
+        })()
+        if (once === null) return
+        expect([...once].every((c) => c.charCodeAt(0) <= 0xff)).toBe(true)
+        expect(once).not.toMatch(/['"´`]/)
+        expect(sanitizeText(once)).toBe(once)
+      }),
+    )
+  })
+
   test('foldToAscii yields printable ASCII', () => {
     fc.assert(fc.property(fc.string({ maxLength: 200 }), (text) => expect(foldToAscii(text)).toMatch(/^[\x20-\x7E]*$/)))
   })

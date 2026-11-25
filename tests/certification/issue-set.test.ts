@@ -3,6 +3,7 @@ import { createFolioAllocator } from '../../src/certification/folios'
 import { issueTestSet, issuerAsReceiver, type IssuedSet } from '../../src/certification/issue-set'
 import type { BasicSetPlan, PlannedItem } from '../../src/certification/set-plan'
 import { calculateLineAmount, calculateTotals } from '../../src/totals/calculate'
+import { chileDate } from '../../src/time/chile'
 import { verifyDocumentSignature } from '../../src/document/sign'
 import { verifyEnvelopeSignature } from '../../src/envelope/sign'
 import { verifyTed } from '../../src/ted/build'
@@ -461,23 +462,26 @@ describe('errors and defaults', () => {
     expect((await failure(issueTestSet(basic, few))).code).toBe('FOLIO_OUT_OF_RANGE')
   })
 
-  test('without a clock the issue date is the UTC day of now, and a certificate without RUT sends as the issuer', async () => {
+  test('without a clock the issue date is the Chile day of now, and a certificate without RUT sends as the issuer', async () => {
     const options = { ...issueOptions(), now: undefined, certificate: { ...issueOptions().certificate, rut: null } }
-    const before = new Date().toISOString().slice(0, 10)
+    const before = chileDate(new Date())
     const set = await issueTestSet(basic, options)
-    const after = new Date().toISOString().slice(0, 10)
+    const after = chileDate(new Date())
     expect([before, after]).toContain(set.cases[0].document.header.issueDate)
     expect(set.envelope.cover.senderRut).toBe(ISSUER_RUT)
   })
 
-  test('the set is dated and stamped on the UTC clock, read once per document and once for the envelope', async () => {
-    // 22:30 of the 15th in Chile is already the 16th in UTC.
+  test('the set is dated on the Chile day and stamped on the UTC clock, read once per document and once for the envelope', async () => {
+    // 22:30 of the 15th in Chile is already the 16th in UTC: the documents are of the 15th, "fecha del día".
     const start = Date.parse('2026-11-16T01:30:00.250Z')
     const box = { reads: 0 }
     const clock = () => new Date(start + 1000 * box.reads++)
     const set = await issueTestSet(basic, { ...issueOptions(), now: clock })
-    expect(set.cases.every((issued) => issued.document.header.issueDate === '2026-11-16')).toBe(true)
-    expect(set.cases[0].document.references[0].date).toBe('2026-11-16')
+    expect(set.cases.every((issued) => issued.document.header.issueDate === '2026-11-15')).toBe(true)
+    expect(set.cases[0].document.references[0].date).toBe('2026-11-15')
+    expect(set.cases[0].document.xml).toContain('<FchEmis>2026-11-15</FchEmis>')
+    // A note dates its reference to the invoice on the same day.
+    expect(byCase(set, 4).document.references[1].date).toBe('2026-11-15')
     // The first reading dates the set; each document then takes the next one, and the envelope the last.
     expect(set.cases.map((issued) => issued.document.signedAt)).toEqual(
       set.cases.map((_, index) => new Date(start + 1000 * (index + 1)).toISOString().replace('Z', '')),
@@ -827,4 +831,50 @@ test('a return of one unit of a discounted line takes the discount only when it 
   const returned = issued.cases[1].document.items[0]
   expect(returned).toMatchObject({ name: 'Clip', quantity: 1, unitPrice: 9, amount: 9 })
   expect(returned).not.toHaveProperty('discountPercent')
+})
+
+describe('customers in turn', () => {
+  const customer = (rut: string, businessName: string) => ({ ...receiver, rut, businessName })
+  const first = customer('11111111-1', 'CLIENTE UNO')
+  const second = customer('14625621-K', 'CLIENTE DOS')
+  const namedBy = (set: IssuedSet) =>
+    Object.fromEntries(set.cases.map((issued) => [issued.caseId.split('-')[1], issued.document.header.receiver?.rut]))
+
+  test('the invoices of a set name the customers in turn, and a note names the customer of the document it refers to', async () => {
+    const set = await issueTestSet(plan.basic!, { ...issueOptions(), receivers: [first, second] })
+    // Invoices 1 to 3 take turns; notes 4 to 6 follow their invoices; 7 follows note 6, which followed invoice 3.
+    expect(namedBy(set)).toEqual({
+      1: '11111111-1',
+      2: '14625621-K',
+      3: '11111111-1',
+      4: '11111111-1',
+      5: '14625621-K',
+      6: '11111111-1',
+      7: '11111111-1',
+      8: '11111111-1',
+    })
+    expect(byCase(set, 2).document.header.receiver?.businessName).toBe('CLIENTE DOS')
+    expect(byCase(set, 5).document.xml).toContain('<RUTRecep>14625621-K</RUTRecep>')
+    expect(set.cases.every((issued) => verifyDocumentSignature(issued.document.xml).valid)).toBe(true)
+    expect(await validateAgainstXsd(set.envelope.xml, 'EnvioDTE')).toEqual([])
+  })
+
+  test('without customers, or with an empty list, every document names the receiver of the options', async () => {
+    const plain = await issueTestSet(plan.basic!, issueOptions())
+    const empty = await issueTestSet(plan.basic!, { ...issueOptions(), receivers: [] })
+    expect(new Set(Object.values(namedBy(plain)))).toEqual(new Set([RECEIVER_RUT]))
+    expect(namedBy(empty)).toEqual(namedBy(plain))
+  })
+
+  test('a guide that is not an internal transfer takes its turn, and an internal transfer names the issuer and takes none', async () => {
+    const set = await issueTestSet(plan.guide!, { ...issueOptions(), receivers: [first, second] })
+    expect(namedBy(set)).toEqual({ 13: '11111111-1', 14: ISSUER_RUT, 15: '14625621-K' })
+  })
+
+  test('a single customer is named by every invoice, and the purchase set keeps naming the issuer', async () => {
+    const exempt = await issueTestSet(plan.exempt!, { ...issueOptions(), receivers: [second] })
+    expect(new Set(Object.values(namedBy(exempt)))).toEqual(new Set(['14625621-K']))
+    const purchase = await issueTestSet(plan.purchase!, { ...issueOptions(), receivers: [first, second] })
+    expect(new Set(Object.values(namedBy(purchase)))).toEqual(new Set([ISSUER_RUT]))
+  })
 })

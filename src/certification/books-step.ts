@@ -206,6 +206,7 @@ const sendBook = async (
   }
   await rt.store.writeArtefact(BOOK_ARTEFACT_NAMES[key], built.xml)
   try {
+    await rt.beforeUpload?.({ kind: 'book', name: key, xml: built.xml })
     const trackId = await uploadForTrackId(
       (overrides) => uploadBook(rt.sii, { xml: built.xml, fileName: BOOK_FILE_NAMES[key] }, overrides),
       'uploadBook',

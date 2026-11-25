@@ -244,8 +244,12 @@ describe('issuing the settlement set', () => {
       exemptAmount: 60230,
       vatRate: 19,
       vatAmount: 56717,
+      // Without commissions the whole VAT is the third parties'.
+      ownVatAmount: 0,
+      thirdPartyVatAmount: 56717,
       totalAmount: 415457,
     })
+    expect(doc(1).xml).toContain('<IVA>56717</IVA><IVAProp>0</IVAProp><IVATerc>56717</IVATerc>')
     expect(doc(1).commissions).toEqual([])
     expect(doc(1).xml).not.toContain('<Comisiones>')
   })
