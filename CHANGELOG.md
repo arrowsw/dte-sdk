@@ -24,6 +24,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The digest of a received envelope** (`ReceivedEnvelope.digest`). `readReceivedEnvelope` reads the digest of the
   envelope's own signature, and `createReceptionAnswer` quotes it (`Digest`, which `RespuestaEnvioDTE_v10.xsd`
   declares after the id of the envelope).
+- **A check before every upload of the certification run** (`beforeUpload`, `dte-sdk/portal`). The run hands it each
+  file it is about to upload (a test set, the simulation, a book) after keeping it as an artefact and before sending
+  it. A check that throws stops the step there, with nothing sent: the step ends as it does when an upload fails. It is
+  where to hold a file against the SII's schema with `validateAgainstSchema` of `dte-sdk/schemas`, the check the SII
+  runs first on an upload.
+- **Several customers for the test sets** (`receivers`, `dte-sdk/portal`). The SII's instructions for the test set ask
+  for a different RUT on each invoice ("Utilice RUT distintos para las distintas facturas"), and every document of a
+  set named the one `receiver`. With `receivers`, the invoices and the guides of a set name those customers in turn,
+  and a note names the customer of the document it refers to. Without it the run names `receiver`, as before.
+- **The VAT of a settlement invoice split in own and third-party** (`splitVat`, `IVAProp` and `IVATerc`). Formato DTE
+  2.5 lets a company that sells on behalf of a principal split the VAT (fields 113 and 114), each part within the VAT.
+  With `splitVat`, a settlement invoice (43) writes the VAT of its commissions as the own VAT and the rest as the third
+  parties'; one without VAT, or whose commissions carry a VAT below zero or above the VAT, has no split. The
+  settlement set of the certification run turns it on.
 
 ### Changed
 
@@ -48,6 +62,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already listed (Aisén, Coihaique, Llaillay, Marchigüe, Paiguano): 360 names in 40 offices.
 - **A document admits 30 payment installments.** `MntPagos` repeats up to 30 times (Formato DTE 2.5), and
   `createDocument` wrote any number. More than 30 are refused with `INVALID_OPTION` and `options.payments`.
+- **The documents of a test set are dated on the Chile day.** The SII's instructions for the test set ask for the date
+  of the day ("Agregue fecha del día"), and the run dated its documents on the UTC day, which late in the Chilean
+  evening is already the next one, and on the last evening of a month the next tax period. The issue date is now the
+  Chile day the set is issued on; `TSTED`, `TmstFirma` and `TmstFirmaEnv` are UTC instants, as before.
 
 - **A dispatch guide without its transfer type is refused.** Formato DTE 2.5 marks `IndTraslado` (field 7) mandatory
   on a guide, and `createDocument` issued a 52 without `options.transferType` and read it as a sale. It now refuses
