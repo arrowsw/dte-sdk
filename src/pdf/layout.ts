@@ -31,25 +31,6 @@ export const STAMP = {
   legendGap: 5,
 } as const
 
-/**
- * EN: The size the stamp is drawn at: as wide as `maxWidth`, as high as the symbol's own proportion makes it, and both
- * sides brought down together when that height would pass the stamp box. One factor for the two sides: a PDF417 whose
- * rows are stretched or squashed is no longer the symbol that was rendered, with rows three modules high.
- * ES: El tamaño con que se dibuja el timbre: del ancho de `maxWidth`, del alto que le da la proporción del propio
- * símbolo, y ambos lados reducidos juntos cuando ese alto pasaría la caja del timbre. Un solo factor para los dos lados:
- * un PDF417 con las filas estiradas o aplastadas ya no es el símbolo que se generó, de filas de tres módulos de alto.
- * @param natural EN: the size of the stamp image, in pixels. ES: el tamaño de la imagen del timbre, en píxeles.
- * @param maxWidth EN: the width it may take, in points; the stamp box's by default. ES: el ancho que puede ocupar, en puntos; por defecto el de la caja del timbre.
- * @returns EN: the width and the height to draw it at, in points. ES: el ancho y el alto con que se dibuja, en puntos.
- */
-export const stampSize = (
-  natural: { readonly width: number; readonly height: number },
-  maxWidth: number = STAMP.maxWidth,
-): { readonly width: number; readonly height: number } => {
-  const factor = Math.min(maxWidth / natural.width, STAMP.maxHeight / natural.height)
-  return { width: natural.width * factor, height: natural.height * factor }
-}
-
 /** EN: Font sizes. ES: Tamaños de fuente. */
 export const FONT = { name: 11, normal: 10, small: 9, tiny: 8, legal: 7, legend: 7 } as const
 

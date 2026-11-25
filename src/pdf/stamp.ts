@@ -11,7 +11,7 @@ export type BarcodeModule = {
     readonly bcid: string
     readonly text: string
     readonly scale: number
-    readonly columns: number
+    readonly height: number
     readonly padding: number
     readonly includetext: boolean
     readonly binarytext: boolean
@@ -34,17 +34,14 @@ export const loadBarcodeModule = async (): Promise<BarcodeModule> => {
   }
 }
 
-// PDF417 as the SII's instructions ask for the stamp (section A.2.5): error correction level 5, fixed, since the
-// library would otherwise pick it by the size of the data; rows three modules high, the library's own proportion; and
-// a raster of four pixels a module, over 300 DPI at any size the stamp is printed at. The text is handed over as bytes
-// (`binarytext`), so an `ñ` reaches the symbol as the single ISO-8859-1 byte that was signed, never as two UTF-8 bytes.
-// Eighteen data columns make a symbol 387 modules wide with its quiet zone of six on each side: the widest whose
-// module stays over the 6.7 mils of the instructions on the 80 mm roll (7.1 mils across its 7 cm), and 9.2 mils across
-// the 9 cm of the sheet, where a stamp of a CAF of 512 bits is about 3 cm high.
+// PDF417 as the SII reads it: the text is handed over as bytes (`binarytext`), so an `ñ` reaches the symbol as the
+// single ISO-8859-1 byte that was signed, never as two UTF-8 bytes. Scale, height and padding are those of the field.
+// The error correction level is the one the SII's instructions ask for (section A.2.5), and it is fixed: the library
+// would otherwise pick it by the size of the data, and lower or raise it to fill the symbol.
 const STAMP_OPTIONS = {
   bcid: 'pdf417',
-  scale: 4,
-  columns: 18,
+  scale: 3,
+  height: 10,
   padding: 6,
   includetext: false,
   binarytext: true,
@@ -84,11 +81,12 @@ export const byteCompactionCodewords = (bytes: Uint8Array): readonly number[] =>
   return [bytes.length === whole ? BYTE_LATCH_BY_SIX : BYTE_LATCH, ...groups, ...bytes.subarray(whole)]
 }
 
-// The stamp is written in bytes alone, the compaction the SII's instructions name. Mixed with text compaction, a byte
-// above ASCII (an `ñ` in a name) travels behind a shift that readers are known to lose, and the stamp then reads as
-// another text than the one that was signed. Only a text too long to fit in bytes keeps the compaction the library
-// picks: 1,034 bytes fit, and the stamp of a CAF of 512 bits is under 900.
+// A stamp with a byte above ASCII, an `ñ` in a name another issuer signed, is written in bytes alone. Mixed with text
+// compaction, such a byte travels behind a shift that readers are known to lose, and the stamp then reads as another
+// text than the one that was signed. A stamp of plain ASCII, as every one dte-sdk issues, keeps the compaction the
+// library picks, and so does one too long to fit in bytes.
 const rawCodewords = (bytes: Uint8Array): string | null => {
+  if (bytes.every((byte) => byte < 0x80)) return null
   const codewords = byteCompactionCodewords(bytes)
   return codewords.length > MAX_DATA_CODEWORDS
     ? null
@@ -110,18 +108,13 @@ export const renderTedBarcodeWith = async (barcode: BarcodeModule, tedXml: strin
 }
 
 /**
- * EN: The PDF417 stamp of a TED as a PNG, by the SII's instructions for it (section A.2.5): error correction level 5,
- * always; byte compaction alone, whenever the TED fits in it (up to 1,034 bytes); rows three modules high; and four
- * pixels a module, with a quiet zone of six modules on each side, 387 modules across in all. The TED bytes are exactly
- * the ones that were signed. The renderer embeds it under the totals; callers with a layout of their own use it
- * directly, and must scale its two sides by one factor: 9 cm across gives a module of 9.2 mils, and nothing under
- * 6.6 cm keeps the 6.7 mils the instructions ask for.
- * ES: El timbre PDF417 de un TED como PNG, según las instrucciones del SII para él (sección A.2.5): nivel de corrección
- * 5, siempre; solo compactación de bytes, siempre que el TED quepa en ella (hasta 1.034 bytes); filas de tres módulos
- * de alto; y cuatro píxeles por módulo, con una zona de silencio de seis módulos a cada lado, 387 módulos de ancho en
- * total. Los bytes del TED son exactamente los que se firmaron. El renderizador lo incrusta bajo los totales; quien arma
- * su propia diagramación lo usa directo, y debe escalar sus dos lados por un mismo factor: 9 cm de ancho dan un módulo
- * de 9,2 mils, y nada bajo 6,6 cm conserva los 6,7 mils que piden las instrucciones.
+ * EN: The PDF417 stamp of a TED as a PNG: error correction level 5, always, and the TED bytes exactly as they were
+ * signed. A TED with a byte above ASCII, as another issuer's may carry in a name, is written in byte compaction alone
+ * when it fits. The renderer embeds it under the totals; callers with a layout of their own use it directly.
+ * ES: El timbre PDF417 de un TED como PNG: nivel de corrección 5, siempre, y los bytes del TED exactamente como se
+ * firmaron. Un TED con un byte sobre ASCII, como el de otro emisor puede traer en un nombre, se escribe solo en
+ * compactación de bytes cuando cabe. El renderizador lo incrusta bajo los totales; quien arma su propia diagramación
+ * lo usa directo.
  * @param tedXml EN: the `<TED>…</TED>` XML, verbatim from the signed document. ES: el XML `<TED>…</TED>`, textual del documento firmado.
  * @param load EN: loader of the barcode library, for tests. ES: cargador de la librería de códigos de barras, para tests.
  * @throws {DteError} EN: `MISSING_FIELD` (field `TED`) without a `<TED`, `ENCODING_UNSUPPORTED_CHAR` for a code point above U+00FF, `DEPENDENCY_UNAVAILABLE` when the library cannot be loaded. ES: `MISSING_FIELD` (campo `TED`) sin `<TED`, `ENCODING_UNSUPPORTED_CHAR` ante un code point mayor a U+00FF, `DEPENDENCY_UNAVAILABLE` si la librería no se puede cargar.

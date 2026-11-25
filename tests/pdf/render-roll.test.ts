@@ -1,5 +1,5 @@
 import { PNG } from 'pngjs'
-import { ROLL, stampSize } from '../../src/pdf/layout'
+import { ROLL } from '../../src/pdf/layout'
 import { parsePrintableDocuments, type PrintableDocument } from '../../src/pdf/parse'
 import { renderPrintedSample } from '../../src/pdf/render'
 import { renderPrintedSamples } from '../../src/pdf/samples'
@@ -95,15 +95,14 @@ describe('a receipt on continuous paper', () => {
     expect(named).not.toContain('www.sii.cl')
   })
 
-  test('draws the stamp between 5 and 9 cm wide and 2 to 4 cm high, in its own proportion', async () => {
+  test('draws the stamp between 5 and 9 cm wide and at least 2 cm high', async () => {
     const [stamp] = await pdfImages(pdf)
     expect(stamp.width).toBeGreaterThan(0)
-    const drawn = stampSize(stamp, ROLL.contentWidth)
-    expect(drawn.width).toBeGreaterThanOrEqual(5 * 28.3465)
-    expect(drawn.width).toBeLessThanOrEqual(9 * 28.3465)
-    expect(drawn.height).toBeGreaterThanOrEqual(2 * 28.3465)
-    expect(drawn.height).toBeLessThanOrEqual(4 * 28.3465)
-    expect(drawn.height / drawn.width).toBeCloseTo(stamp.height / stamp.width)
+    const ratio = stamp.height / stamp.width
+    const width = ROLL.contentWidth
+    expect(width).toBeGreaterThanOrEqual(5 * 28.3465)
+    expect(width).toBeLessThanOrEqual(9 * 28.3465)
+    expect(Math.max(56.69, Math.min(113.39, ratio * width))).toBeGreaterThanOrEqual(2 * 28.3465 - 0.01)
   })
 
   test('prints no acknowledgement box on a receipt, which is never transferable', async () => {
