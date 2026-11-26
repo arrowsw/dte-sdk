@@ -1,11 +1,13 @@
 import type { CertificationStage } from '../catalogs/certification'
-import { errorMessage } from '../errors'
+import { errorMessage, isDteError } from '../errors'
 import type { PrintedSampleFile } from '../pdf/samples'
+import { fetchCompanyResolution } from '../portal/company'
+import { toIsoDate } from '../time/chile'
 import { runBooks } from './books-step'
 import { runExchange } from './exchange-step'
 import { prepareFolios } from './folios-step'
 import { uploadPrintedSamples } from './samples-step'
-import { runtime, saveState, type CertificationDependencies } from './runtime'
+import { runtime, saveState, type CertificationDependencies, type Runtime } from './runtime'
 import { createCertificationState, SENT_SET_KEYS, type CertificationState } from './state'
 import {
   advanceToNextStage,
@@ -83,6 +85,34 @@ const ORDER: readonly CertificationStage[] = [
 const past = (stage: CertificationStage, other: CertificationStage): boolean =>
   ORDER.indexOf(stage) > ORDER.indexOf(other)
 
+// The stages that still send an envelope, and so write a cover.
+const WRITES_COVER: readonly CertificationStage[] = ['testSets', 'books', 'simulation']
+const NOT_READ = 'certification resolution not read from the SII'
+
+// The cover of an envelope names the resolution of the company in the environment it goes to, and the SII refuses an
+// envelope that names another ("Error en Carátula"). The portal shows the date of the one of the certification
+// environment, so a run that is given no date reads it there; its number is the caller's, or 0, which is the number
+// of that environment whatever the page shows. When the portal shows no date, shows one that is not a date, or its
+// page cannot be read, the run goes on as it did, with the UTC day it starts on, and says so in the client's logger:
+// the reading never stops a run. An error that is not the portal's is no unreadable page, and is not swallowed.
+const resolutionOf = async (
+  rt: Runtime,
+  resolution: CertificationDependencies['resolution'],
+  companyRut: string,
+): Promise<Runtime['resolution']> => {
+  if (resolution?.date) return rt.resolution
+  try {
+    const shown = await fetchCompanyResolution(rt.portal, { companyRut, environment: 'certification' })
+    if (shown.resolutionDate !== null)
+      return { number: rt.resolution.number, date: toIsoDate(shown.resolutionDate, 'resolution.date') }
+    rt.portal.logger.warn(NOT_READ, { reason: 'the page shows no date' })
+  } catch (error) {
+    if (!isDteError(error)) throw error
+    rt.portal.logger.warn(NOT_READ, { error: errorMessage(error) })
+  }
+  return rt.resolution
+}
+
 /**
  * EN: The HTML side of the certification, in the field's order, resumed from the saved state: the test set (downloaded
  * once), the folios, each set not yet sent, their declaration and approval; the books; the advance; the simulation
@@ -110,11 +140,14 @@ export const runCertification = async (
   options: RunCertificationOptions = {},
 ): Promise<RunCertificationResult> => {
   const rt = runtime(dependencies)
-  // A resolution left out is dated once, when the run starts: every envelope of the run carries that date, whatever
-  // day its step begins on.
-  const deps: CertificationDependencies = { ...dependencies, resolution: rt.resolution }
   const companyRut = rt.portal.companyRut ?? rt.issuer.rut
   let state = (await rt.store.load()) ?? createCertificationState(companyRut, rt.now())
+  // A resolution left out is settled once, when the run starts: every envelope of the run carries it, whatever day its
+  // step begins on. A run resumed where no envelope is left to send asks the portal for nothing.
+  const resolution = WRITES_COVER.includes(state.stage)
+    ? await resolutionOf(rt, dependencies.resolution, companyRut)
+    : rt.resolution
+  const deps: CertificationDependencies = { ...dependencies, resolution }
   const stop = (stopped: RunStop, detail?: string): RunCertificationResult => ({
     state,
     stopped,

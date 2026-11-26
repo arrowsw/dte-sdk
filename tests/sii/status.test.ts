@@ -76,6 +76,7 @@ describe('queryUploadStatus (SOAP)', () => {
       countsByType: [{ documentType: '33', reported: 2, accepted: 1, rejected: 1, objections: 0 }],
       documentType: '33',
       documents: [],
+      unreported: null,
       raw: expect.stringContaining('<ESTADO>EPR</ESTADO>'),
     })
   })
@@ -357,7 +358,7 @@ describe('queryUploadStatus (REST)', () => {
     expect(status).toEqual({
       code: 'RCH',
       status: 'rejected',
-      message: 'Rechazado',
+      message: 'Rechazado por errores en información',
       trackId: '1234567890',
       channel: 'rest',
       counts: { reported: 4, accepted: 2, rejected: 1, objections: 0 },
@@ -385,6 +386,7 @@ describe('queryUploadStatus (REST)', () => {
         },
         { type: '41', folio: null, code: 'RLV', description: 'Aceptado con reparos leves', errors: [] },
       ],
+      unreported: null,
       raw: siiFixture('rest-envelope-status.json'),
     })
   })
@@ -560,6 +562,38 @@ describe('TrackID and channel validation', () => {
   })
 })
 
+// The counts of an upload are the SII's, type by type, and they may cover fewer documents than the envelope carried:
+// the verdict settled with them says nothing of a document they leave out.
+describe('the documents the counts of an upload leave out', () => {
+  test('with the number of documents of the envelope, the status says how many the counts do not cover', async () => {
+    // The fixture reports two documents of type 33.
+    const { sii } = cachedSii(route(EST_UP, fx('soap-estup-epr.xml')))
+    expect((await queryUploadStatus(sii, { trackId: '9876543210', documents: 5 })).unreported).toBe(3)
+    expect((await queryUploadStatus(sii, { trackId: '9876543210', documents: 2 })).unreported).toBe(0)
+    expect((await queryUploadStatus(sii, { trackId: '9876543210', documents: 1 })).unreported).toBe(0)
+    expect((await queryUploadStatus(sii, { trackId: '9876543210' })).unreported).toBeNull()
+  })
+
+  test('it is null while the SII reports no counts, and it comes on the REST channel and through the wait too', async () => {
+    const pending = cachedSii(route(EST_UP, fx('soap-estup-rec.xml')))
+    expect((await queryUploadStatus(pending.sii, { trackId: '9876543210', documents: 5 })).unreported).toBeNull()
+    const rest = cachedSii(route(REST_STATUS, json('rest-envelope-status.json')))
+    const status = await queryUploadStatus(rest.sii, { trackId: '1234567890', channel: 'rest', documents: 10 })
+    expect(status.unreported).toBe(10 - status.counts!.reported)
+    const waited = cachedSii(route(EST_UP, fx('soap-estup-epr.xml')))
+    expect((await waitForUploadStatus(waited.sii, { trackId: '9876543210', documents: 4 })).unreported).toBe(2)
+  })
+
+  test.each([0, -1, 1.5, Number.NaN])('a number of documents of %p is refused', async (documents) => {
+    const { sii, fake } = cachedSii(route(EST_UP, fx('soap-estup-epr.xml')))
+    await expect(queryUploadStatus(sii, { trackId: '9876543210', documents })).rejects.toMatchObject({
+      code: 'INVALID_OPTION',
+      details: { field: 'documents' },
+    })
+    expect(fake.requests).toHaveLength(0)
+  })
+})
+
 describe('waitForUploadStatus', () => {
   // A sleep that only moves the injected clock: the whole suite takes no real time.
   const manualTime = () => {
@@ -627,6 +661,84 @@ describe('waitForUploadStatus', () => {
     const { options } = manualTime()
     const { sii } = cachedSii(route(EST_UP, estadoReply('soap-estup-rec.xml', 'REC', estado)), options)
     expect(await waitForUploadStatus(sii, { trackId: '9876543210' })).toMatchObject({ code: estado, status: expected })
+  })
+
+  // What the receipt of an upload carries as `retryAfterMs`: the SII asks to wait that long before the first question.
+  test('an initial delay is waited before the first poll, and is not part of the time to give up', async () => {
+    const waited = manualTime()
+    const done = cachedSii(route(EST_UP, fx('soap-estup-epr.xml')), waited.options)
+    expect((await waitForUploadStatus(done.sii, { trackId: '9876543210', initialDelayMs: 120000 })).code).toBe('EPR')
+    expect(waited.sleeps).toEqual([120000])
+    expect(requestsTo(done.fake.requests, EST_UP)).toBe(1)
+
+    const none = manualTime()
+    const direct = cachedSii(route(EST_UP, fx('soap-estup-epr.xml')), none.options)
+    await waitForUploadStatus(direct.sii, { trackId: '9876543210', initialDelayMs: null })
+    await waitForUploadStatus(direct.sii, { trackId: '9876543210', initialDelayMs: 0 })
+    expect(none.sleeps).toEqual([])
+
+    // A delay longer than the time to give up still ends in a question: the SII may ask to wait an hour.
+    const long = manualTime()
+    const asked = cachedSii(route(EST_UP, fx('soap-estup-epr.xml')), long.options)
+    const late = { trackId: '9876543210', initialDelayMs: 5000, timeoutMs: 2000 }
+    expect((await waitForUploadStatus(asked.sii, late)).code).toBe('EPR')
+    expect(long.sleeps).toEqual([5000])
+    expect(requestsTo(asked.fake.requests, EST_UP)).toBe(1)
+
+    // The time to give up counts from the first question.
+    const pending = manualTime()
+    const never = cachedSii(route(EST_UP, fx('soap-estup-rec.xml')), pending.options)
+    await expectCode(
+      waitForUploadStatus(never.sii, {
+        trackId: '9876543210',
+        initialDelayMs: 5000,
+        intervalMs: 1000,
+        timeoutMs: 2500,
+      }),
+      'WAIT_TIMEOUT',
+      { attempts: 3, lastCode: 'REC' },
+    )
+    expect(pending.sleeps).toEqual([5000, 1000, 1000, 500])
+  })
+
+  // The header is the SII's to write: a delay of days would hold the caller for days, and one past what a timer can
+  // count (2^31 - 1 ms) would not wait at all.
+  test.each([3_600_001, 86_400_000, 3e9])('an initial delay of %p ms is waited for an hour', async (initialDelayMs) => {
+    // The clock stands still, so the cached token outlives the hour.
+    const sleeps: number[] = []
+    const sleep: SleepFn = async (ms) => {
+      sleeps.push(ms)
+    }
+    const { sii, fake } = cachedSii(route(EST_UP, fx('soap-estup-epr.xml')), { sleep })
+    expect((await waitForUploadStatus(sii, { trackId: '9876543210', initialDelayMs })).code).toBe('EPR')
+    expect(sleeps).toEqual([3_600_000])
+    expect(requestsTo(fake.requests, EST_UP)).toBe(1)
+  })
+
+  test('the initial delay hears the caller signal: aborted while it waits, no question is asked', async () => {
+    const clock = testClock()
+    const controller = new AbortController()
+    const signals: (AbortSignal | undefined)[] = []
+    const sleep: SleepFn = async (ms, signal) => {
+      signals.push(signal)
+      clock.advance(ms)
+      controller.abort()
+    }
+    const { sii, fake } = cachedSii(route(EST_UP, fx('soap-estup-epr.xml')), { now: clock.now, sleep })
+    await expectCode(
+      waitForUploadStatus(sii, { trackId: '9876543210', initialDelayMs: 5000 }, { signal: controller.signal }),
+      'REQUEST_ABORTED',
+    )
+    expect(signals).toEqual([controller.signal])
+    expect(requestsTo(fake.requests, EST_UP)).toBe(0)
+  })
+
+  test.each([-1, Number.NaN, Number.POSITIVE_INFINITY])('an initial delay of %p is refused', async (initialDelayMs) => {
+    const { sii } = cachedSii(route(EST_UP, fx('soap-estup-epr.xml')))
+    await expect(waitForUploadStatus(sii, { trackId: '9876543210', initialDelayMs })).rejects.toMatchObject({
+      code: 'INVALID_OPTION',
+      details: { field: 'initialDelayMs' },
+    })
   })
 
   test('waits on the REST channel too', async () => {

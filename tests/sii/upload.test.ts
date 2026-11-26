@@ -110,6 +110,7 @@ describe('uploadEnvelope through DTEUpload', () => {
         channel: 'soap',
         fileName: 'EnvioDTE.xml',
         duplicate: false,
+        retryAfterMs: null,
         raw: expect.stringContaining('<RECEPCIONDTE>'),
       })
       expect(memory.records()).toHaveLength(1)
@@ -1005,6 +1006,7 @@ describe('uploadEnvelope for receipts', () => {
         channel: 'rest',
         fileName: 'EnvioBOLETA.xml',
         duplicate: false,
+        retryAfterMs: null,
         raw: siiFixture('rest-upload-ok.json'),
       })
       expect(memory.records()).toHaveLength(1)
@@ -1019,6 +1021,18 @@ describe('uploadEnvelope for receipts', () => {
     },
     SLOW,
   )
+
+  // The SII's OpenAPI of its receipts API gives the answer to an upload the header `X-Retry-After`: "Cantidad de
+  // segundos que debe esperar para utilizar url que viene en Location. Es "muy importante" respetar estos segundos".
+  test('the receipt carries the wait the SII asks for before the status of the upload is asked', async () => {
+    const asked = (seconds: string): FakeReply => ({ ...restOk, headers: { 'X-Retry-After': seconds } })
+    const receiptOf = async (reply: FakeReply) =>
+      uploadEnvelope(cachedSii(restRoutes(REST_UPLOAD_CERT, reply), { receiptsChannel: 'rest' }).sii, receipt)
+    expect((await receiptOf(asked('120'))).retryAfterMs).toBe(120000)
+    expect((await receiptOf(asked('5'))).retryAfterMs).toBe(5000)
+    expect((await receiptOf(asked('pronto'))).retryAfterMs).toBeNull()
+    expect((await receiptOf(restOk)).retryAfterMs).toBeNull()
+  })
 
   test('channel override: REST on a certification client; SOAP on a production one; REST refused for EnvioDTE', async () => {
     const rest = cachedSii(restRoutes(REST_UPLOAD_CERT, restOk))
