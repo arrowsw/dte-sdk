@@ -142,7 +142,7 @@ const SIGNED_INTEGER = /^-?\d+$/
 const EXPORT_LINES: readonly { readonly label: string; readonly pattern: RegExp }[] = [
   { label: 'FORMA DE PAGO EXPORTACION', pattern: /^FORMA\s+DE\s+PAGO\s+EXPORTACION[:\s]+(.+)$/i },
   { label: 'MODALIDAD DE VENTA', pattern: /^MODALIDAD\s+DE\s+VENTA[:\s]+(.+)$/i },
-  { label: 'CLAUSULA DE VENTA', pattern: /^CLAUSULA\s+DE\s+VENTA.+?[:\s]+(.+)$/i },
+  { label: 'CLAUSULA DE VENTA', pattern: /^CLAUSULA\s+DE\s+VENTA(?:[^:]*:|\s)\s*(.+)$/i },
   { label: 'TOTAL CLAUSULA DE VENTA', pattern: /^TOTAL\s+CLAUSULA\s+DE\s+VENTA[:\s]+(.+)$/i },
   { label: 'VIA DE TRANSPORTE', pattern: /^VIA\s+DE\s+TRANSPORTE[:\s]+(.+)$/i },
   { label: 'PUERTO DE EMBARQUE', pattern: /^PUERTO\s+DE\s+EMBARQUE[:\s]+(.+)$/i },
@@ -421,8 +421,9 @@ const observe = (document: MutableBookDocument, observation: string): void => {
  * item with its quantity and its line total (`lineTotal`), and the commissions and other charges in `commissions`.
  * The cases of an export set are read by their labelled lines (`exportFields`, with the units of tare and weights, a
  * country of destination and a surcharge on the line), the customs documents their reference lines name
- * (`customsReferences`), and item rows read by the columns of the `ITEM` header above them, decimals included; the
- * literal wording of an export set was never seen, so its labels are read loosely.
+ * (`customsReferences`), and item rows read by the columns of the `ITEM` header above them, decimals included; its
+ * labels are read as the set writes them (`CLAUSULA DE VENTA DE EXPORTACION`, `DESCUENTO LINEA # 1`, `NACIONALIDAD`)
+ * and loosely around that wording.
  * Lines the grammar does not know are ignored and a set of unknown kind is `other`, so the function never throws. The
  * text is the portal page with its tags turned into line breaks and its entities decoded, or a file holding the same.
  * ES: Parsea el texto del set de pruebas del SII: sets, sus casos con ítems y referencias, los documentos de proveedor
@@ -431,7 +432,8 @@ const observe = (document: MutableBookDocument, observation: string): void => {
  * `commissions`. Los casos de un set de exportación se leen por sus líneas con rótulo (`exportFields`, con las unidades
  * de tara y pesos, un país de destino y un recargo en la línea), los documentos aduaneros que nombran sus líneas de
  * referencia (`customsReferences`), y filas de ítems leídas por las columnas del encabezado `ITEM` sobre ellas, con
- * decimales; el texto literal de un set de exportación nunca se vio, así que sus rótulos se leen con holgura. Las
+ * decimales; sus rótulos se leen como los escribe el set (`CLAUSULA DE VENTA DE EXPORTACION`, `DESCUENTO LINEA # 1`,
+ * `NACIONALIDAD`) y con holgura alrededor de esa redacción. Las
  * líneas que la gramática no conoce se ignoran y un set de tipo desconocido es `other`, así que la función nunca lanza. El texto es la página del portal con las etiquetas vueltas saltos de línea y las entidades
  * decodificadas, o un archivo con lo mismo.
  * @param text EN: the set text. ES: el texto del set.
@@ -660,10 +662,10 @@ const parseSettlementLine = (current: MutableCase, line: string, table: Settleme
   return table
 }
 
-// The lines only an export case is read for. Nobody here has seen the literal text of an export set, so each label is
-// read loosely: the units of the tare and of the weights the set asks to work out ("CALCULE LOS VALORES"), a country of
-// destination of its own, and a surcharge the set asks for on the line of the item, whose percent may come before or
-// after its `%` ("%10 RECARGO EN LA LINEA DE ITEM ...").
+// The lines only an export case is read for, each label read loosely: the units of the tare and of the weights, whose
+// values the set asks to work out, a country of destination of its own, the nationality a lodging case gives in place
+// of a country, a surcharge the set asks for on the line of the item, whose percent may come before or after its `%`
+// ("%10 RECARGO EN LA LINEA DE ITEM ..."), and a discount it states for a numbered line ("DESCUENTO LINEA # 1: 5%").
 const EXPORT_ONLY_LINES: readonly { readonly label: string; readonly pattern: RegExp }[] = [
   {
     label: 'UNIDAD DE MEDIDA DE TARA',
@@ -678,22 +680,25 @@ const EXPORT_ONLY_LINES: readonly { readonly label: string; readonly pattern: Re
     pattern: /^UNIDAD\s+(?:DE\s+)?(?:MEDIDA\s+)?(?:DEL?\s+)?PESO\s+NETO[\s:]+(.+)$/i,
   },
   { label: 'PAIS DESTINO', pattern: /^PAIS\s+(?:DE\s+)?DESTINO[^:]*[:\s]+(.+)$/i },
+  { label: 'NACIONALIDAD', pattern: /^NACIONALIDAD[:\s]+(.+)$/i },
 ]
 const LINE_SURCHARGE = /RECARGO\s+EN\s+LA\s+LINEA/i
 const LINE_SURCHARGE_PERCENT = /%\s*(\d+(?:[.,]\d+)?)|(\d+(?:[.,]\d+)?)\s*%/
 const LINE_SURCHARGE_LABEL = 'RECARGO EN LA LINEA'
+const LINE_DISCOUNT = /^DESCUENTO\s+(?:(?:EN|DE)\s+)?(?:LA\s+)?LINEA\s*#?\s*(\d+)\s*:?\s*(\d+(?:[.,]\d+)?)\s*%/i
+const LINE_DISCOUNT_LABEL = 'DESCUENTO LINEA'
 const REFERENCE_WORD = /REFERENCIA/i
 const REFERENCE_LABEL = /^.*?REFERENCIA\S*/i
 const EXPORT_NUMBER = /^\d+(?:[.,]\d+)?$/
 
 /**
- * EN: A customs document a reference line of an export case names: its reference type (`TpoDocRef`, 807 to 812) and
+ * EN: A customs document a reference line of an export case names: its reference type (`TpoDocRef`, 807 to 813) and
  * the short name written as the reason.
  * ES: Un documento aduanero que nombra una línea de referencia de un caso de exportación: su tipo de referencia
- * (`TpoDocRef`, 807 a 812) y el nombre corto que se escribe como razón.
+ * (`TpoDocRef`, 807 a 813) y el nombre corto que se escribe como razón.
  */
 export type CustomsDocument = {
-  /** EN: Reference type, by Formato DTE 2.5 (807 DUS to 812 resolution of the customs service). ES: `TpoDocRef` — Tipo de referencia, según el Formato DTE 2.5 (807 DUS a 812 resolución del SNA). */
+  /** EN: Reference type, by Formato DTE 2.5 (807 DUS to 813 passport). ES: `TpoDocRef` — Tipo de referencia, según el Formato DTE 2.5 (807 DUS a 813 pasaporte). */
   readonly type: number
   /** EN: Short name of the document. ES: `RazonRef` — Nombre corto del documento. */
   readonly name: string
@@ -708,6 +713,7 @@ const CUSTOMS_DOCUMENTS: readonly (CustomsDocument & { readonly pattern: RegExp 
   { type: 810, name: 'MIC/DTA', pattern: /\bMIC\b|\bDTA\b/ },
   { type: 811, name: 'CARTA DE PORTE', pattern: /CARTA\s+DE\s+PORTE/ },
   { type: 812, name: 'RESOLUCION SNA', pattern: /\bRESOLUCION\b.*\b(?:SNA|ADUANAS?)\b/ },
+  { type: 813, name: 'PASAPORTE', pattern: /\bPASAPORTE\b/ },
 ]
 
 /**
@@ -773,6 +779,12 @@ const parseExportField = (current: MutableCase, line: string): boolean => {
   if (LINE_SURCHARGE.test(line)) {
     const percent = LINE_SURCHARGE_PERCENT.exec(line)
     if (percent !== null) current.exportFields[LINE_SURCHARGE_LABEL] = (percent[1] ?? percent[2]).replace(',', '.')
+    return true
+  }
+  // The discount of a line by its number, kept under the label and that number: `DESCUENTO LINEA 1`.
+  const discount = LINE_DISCOUNT.exec(line)
+  if (discount !== null) {
+    current.exportFields[`${LINE_DISCOUNT_LABEL} ${Number(discount[1])}`] = discount[2].replace(',', '.')
     return true
   }
   for (const { label, pattern } of EXPORT_ONLY_LINES) {

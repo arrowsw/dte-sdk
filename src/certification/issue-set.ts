@@ -90,8 +90,12 @@ export type ExportSetOptions = {
   readonly exchangeRates?: Readonly<Record<string, number>>
   /** EN: The foreign customer every export document names; what it leaves out takes `DEFAULT_CERTIFICATION_FOREIGN_RECEIVER`, and its city, the name of the country of the case. ES: `Receptor` — El cliente extranjero que nombra cada documento de exportación; lo que omite se toma de `DEFAULT_CERTIFICATION_FOREIGN_RECEIVER`, y su ciudad, del nombre del país del caso. */
   readonly receiver?: ExportReceiverInput
-  /** EN: The tare as a percent of the net weight, above 0 and at most 100; 2 by default. The set gives the units of the tare and of the weights and asks for their values to be worked out ("CALCULE LOS VALORES"): the net weight is the sum of the quantities of the lines, the tare this percent of it rounded up to a whole number of at least 1, and the gross weight the net weight plus the tare. ES: `Tara` — La tara como porcentaje del peso neto, mayor que 0 y hasta 100; 2 por defecto. El set da las unidades de la tara y de los pesos y pide calcular sus valores ("CALCULE LOS VALORES"): el peso neto es la suma de las cantidades de las líneas, la tara este porcentaje de él redondeado hacia arriba a un entero de al menos 1, y el peso bruto el neto más la tara. */
+  /** EN: The tare as a percent of the net weight, above 0 and at most 100; 2 by default. The set gives the units of the tare and of the weights and asks for their values to be worked out ("CALCULE LOS VALORES CORRESPONDIENTES DEL ENCABEZADO"): the net weight is the sum of the quantities of the lines, the tare this percent of it rounded up to a whole number of at least 1, and the gross weight the net weight plus the tare. ES: `Tara` — La tara como porcentaje del peso neto, mayor que 0 y hasta 100; 2 por defecto. El set da las unidades de la tara y de los pesos y pide calcular sus valores ("CALCULE LOS VALORES CORRESPONDIENTES DEL ENCABEZADO"): el peso neto es la suma de las cantidades de las líneas, la tara este porcentaje de él redondeado hacia arriba a un entero de al menos 1, y el peso bruto el neto más la tara. */
   readonly tarePercent?: number
+  /** EN: The identification of the container of a case whose package is one, which the set does not give: text of up to 25 characters; the stand-in `XXXU000000-2` by default. Formato DTE 2.5 lets this field and the seal be filled only for a container and makes neither mandatory; field behaviour is that the SII's review objects to a container without them. ES: `IdContainer` — La identificación del contenedor de un caso cuyo bulto es uno, que el set no da: texto de hasta 25 caracteres; por defecto el valor de relleno `XXXU000000-2`. El Formato DTE 2.5 permite llenar este campo y el sello solo para un contenedor y no hace obligatorio ninguno; el comportamiento de campo es que la revisión del SII objeta un contenedor sin ellos. */
+  readonly containerId?: string
+  /** EN: The seal of that container: text of up to 20 characters; the stand-in `0000000` by default. ES: `Sello` — El sello de ese contenedor: texto de hasta 20 caracteres; por defecto el valor de relleno `0000000`. */
+  readonly seal?: string
 }
 
 /**
@@ -691,9 +695,25 @@ const ADVANCE_PAYMENT = 32
 const FOREIGN_COMMISSION = 'COMISIONES EN EL EXTRANJERO'
 const FREIGHT = 'FLETE'
 const INSURANCE = 'SEGURO'
-// A container (codes 73 to 76, and 78 of Anexo 51-23) carries no marks; any other package `S/M`, without marks.
+// Every package of a case carries `S/M`, without marks. A container (codes 73 to 76, and 78 of Anexo 51-23) carries
+// its identification and its seal too. Formato DTE 2.5 asks for the marks of a package that is no container, lets the
+// other two be filled only for one, and makes neither of them mandatory; field behaviour is that the SII's review
+// objects to a package without its marks and to a container without the other two. The set gives none of the three,
+// so the identification and the seal are stand-ins the run may replace, each within the length the schema gives it.
 const CONTAINERS: readonly number[] = [73, 74, 75, 76, 78]
 const NO_MARKS = 'S/M'
+const CONTAINER_TEXTS = {
+  containerId: { standIn: 'XXXU000000-2', length: 25 },
+  seal: { standIn: '0000000', length: 20 },
+} as const
+
+const containerText = (options: ExportIssueOptions, field: keyof typeof CONTAINER_TEXTS): string => {
+  const value: unknown = options.exportSets?.[field] ?? CONTAINER_TEXTS[field].standIn
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (text === '' || text.length > CONTAINER_TEXTS[field].length)
+    throw new DteError('INVALID_OPTION', { field: `exportSets.${field}` })
+  return text
+}
 const CITY_LENGTH = 20
 
 /**
@@ -803,6 +823,7 @@ const exportCustoms = (
   const grossWeightUnit = code(customs.grossWeightUnit, codes.unit, 'grossWeightUnit')
   const netWeightUnit = code(customs.netWeightUnit, codes.unit, 'netWeightUnit')
   const packageType = code(customs.packageType, codes.packageType, 'packages[0].code')
+  const container = packageType !== undefined && CONTAINERS.includes(packageType)
   return compact({
     saleModality: code(customs.saleModality, codes.saleModality, 'saleModality'),
     saleClause: code(customs.saleClause, codes.saleClause, 'saleClause'),
@@ -829,7 +850,9 @@ const exportCustoms = (
             compact({
               code: packageType,
               count: customs.totalPackages,
-              marks: CONTAINERS.includes(packageType) ? undefined : NO_MARKS,
+              marks: NO_MARKS,
+              containerId: container ? containerText(context.options, 'containerId') : undefined,
+              seal: container ? containerText(context.options, 'seal') : undefined,
             }),
           ],
     freight: customs.freight,
@@ -996,7 +1019,7 @@ const exportDocumentInput = (
  * del set pasa a ser su código, cada moneda su tipo de cambio, cada nota sus líneas y su cliente, y cada documento se
  * arma una vez con un folio provisional, así lo que lo rechazaría detiene el set antes de tomar el primer folio.
  * Interno: el ejecutor revisa un set con ella antes de pedir folios.
- * @throws {DteError} EN: `MISSING_FIELD` (`documents` on an empty plan, `exportSets.exchangeRates` with the currency, `currency`, `referencedCase`, `transport.customs.saleClauseTotal`), `INVALID_OPTION` (a name the customs tables do not know or a `currency` the SII does not list, with its field and value; `exportSets.tarePercent`), and the phase 1 codes, each with the case id. ES: los mismos códigos.
+ * @throws {DteError} EN: `MISSING_FIELD` (`documents` on an empty plan, `exportSets.exchangeRates` with the currency, `currency`, `referencedCase`, `transport.customs.saleClauseTotal`), `INVALID_OPTION` (a name the customs tables do not know or a `currency` the SII does not list, with its field and value; `exportSets.tarePercent`, `exportSets.containerId`, `exportSets.seal`), and the phase 1 codes, each with the case id. ES: los mismos códigos.
  */
 export const prepareExportSet = async (
   plan: ExportSetPlan,
