@@ -542,6 +542,21 @@ describe('roundHalfAwayFromZero', () => {
 })
 
 describe('calculateExportLineAmount', () => {
+  // A whole share is the exact share rounded once: 5 % of 200989.9999 is 10049.499995, which is 10049, where rounding
+  // it to four decimals first, 10049.5, and then to none would give 10050.
+  test('a whole share is rounded once, from the exact share', () => {
+    const line = { quantity: 1, unitPrice: 200989.9999, discountPercent: 5, wholeShares: true }
+    expect(calculateExportLineAmount(line)).toMatchObject({ discountAmount: 10049, amount: 190940.9999 })
+    expect(calculateExportLineAmount({ ...line, surchargePercent: 5 })).toMatchObject({
+      discountAmount: 10049,
+      surchargeAmount: 10049,
+    })
+    // Half a unit goes away from zero, as every amount does: 5 % of 10 is 0.5.
+    expect(
+      calculateExportLineAmount({ quantity: 1, unitPrice: 10, discountPercent: 5, wholeShares: true }),
+    ).toMatchObject({ discountAmount: 1, amount: 9 })
+  })
+
   test.each([
     [
       { quantity: 3, unitPrice: 1234.565 },

@@ -22,7 +22,8 @@ import { givenOrGeneratedId } from '../xml/id'
 
 const ROOT_TAG = 'ConsumoFolios'
 const SIGNED_TAG = 'DocumentoConsumoFolios'
-const REPORT_TYPES: readonly FolioConsumptionType[] = [39, 41]
+// The types `ConsumoFolio_v10.xsd` admits in a summary (`TipoConsumoType`), in the order they are reported.
+const REPORT_TYPES: readonly FolioConsumptionType[] = [39, 41, 61]
 const MAX_SEQUENCE = 999
 
 const isReportType = (type: number): type is FolioConsumptionType => (REPORT_TYPES as readonly number[]).includes(type)
@@ -93,7 +94,8 @@ const summarize = (
   entries: readonly FolioConsumptionEntry[],
   voided: readonly VoidedFolio[],
 ): FolioConsumptionSummary => {
-  const taxed = type === 39
+  // An exempt receipt has neither net nor VAT; a receipt and a credit note may have both.
+  const taxed = type !== 41
   const add = (read: (entry: FolioConsumptionEntry) => number | undefined): number =>
     entries.reduce((total, entry) => total + (read(entry) ?? 0), 0)
   return {
@@ -112,12 +114,14 @@ const summarize = (
 }
 
 /**
- * EN: Builds a folio consumption report (RCOF, now Resumen de Ventas Diarias): one summary per receipt type present, 39
- * first, or one of type 39 in zeros for a day without sales. The ranges list issued folios and voided folios separately,
+ * EN: Builds a folio consumption report (RCOF, now Resumen de Ventas Diarias): one summary per document type present,
+ * in the order receipt (39), exempt receipt (41) and credit note (61), or one of type 39 in zeros for a day without
+ * sales. The ranges list issued folios and voided folios separately,
  * as the worked example of the format does. Used today in the receipts certification; the SII probably no longer requires
  * it in production.
- * ES: Arma un reporte de consumo de folios (RCOF, hoy Resumen de Ventas Diarias): un resumen por cada tipo de boleta
- * presente, primero el 39, o uno de tipo 39 en ceros para un día sin ventas. Los rangos listan por separado los folios
+ * ES: Arma un reporte de consumo de folios (RCOF, hoy Resumen de Ventas Diarias): un resumen por cada tipo de documento
+ * presente, en el orden boleta (39), boleta exenta (41) y nota de crédito (61), o uno de tipo 39 en ceros para un día
+ * sin ventas. Los rangos listan por separado los folios
  * emitidos y los anulados, como el ejemplo del formato. Hoy se usa en la certificación de boletas; probablemente el SII ya
  * no lo exige en producción.
  * @throws {DteError} EN: `MISSING_FIELD`, `INVALID_OPTION`, `INVALID_RUT`, `INVALID_DATE`, `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_AMOUNT`. ES: los mismos códigos.

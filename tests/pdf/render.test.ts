@@ -1,6 +1,6 @@
 import fc from 'fast-check'
 import { PNG } from 'pngjs'
-import { BOX, GAP, LINE, resolutionLine } from '../../src/pdf/layout'
+import { BOX, GAP, LINE, resolutionLine, STAMP } from '../../src/pdf/layout'
 import { parsePrintableDocuments, type PrintableDocument, type PrintableTransport } from '../../src/pdf/parse'
 import { needsTransferableCopy, renderPrintedSample } from '../../src/pdf/render'
 import { FIXED_NOW } from '../support/fixtures'
@@ -476,26 +476,42 @@ describe('needsTransferableCopy', () => {
   })
 })
 
-// An option until a stamp drawn this way is printed and read back with a scanner.
-describe('the stamp of the instructions, on the sheet', () => {
-  const instructions = { unstable_stampGeometry: 'instructions' } as const
-
-  test('it is the symbol of 387 modules, drawn with its own proportion, and reads back as the TED', async () => {
-    const pdf = await render(invoiceDoc, instructions)
+// The sheet draws the symbol section A.2.5 of the SII's instructions describes: bytes alone, rows three modules high,
+// one factor for its two sides. The stamp of every release up to 0.16.0 stays as `'compact'`, and it is the stamp of
+// the continuous paper, where the module of the other is under two dots of a 203 DPI printer.
+describe('the stamp of the sheet', () => {
+  test('it is the symbol of the instructions: 387 modules across, its own proportion, and it reads back as the TED', async () => {
+    const pdf = await render(invoiceDoc)
     const [image] = await pdfImages(pdf)
     expect(image.width).toBe(387 * 4)
+    // Rows three modules high: the symbol is far taller than the one of a module a row.
+    expect(image.height).toBeGreaterThan(image.width / 3)
     expect(await decodeStampInPdf(pdf)).toBe(invoice.ted.xml)
     expect(await pdfText(pdf)).toContain('Timbre Electrónico SII')
-    // The stamp of every release so far is another image, and the page is as tall with either: the room of the stamp
-    // box is the same.
-    const usual = await render(invoiceDoc)
-    expect((await pdfImages(usual))[0].width).not.toBe(image.width)
-    expect((await pdfPage(pdf)).height).toBe((await pdfPage(usual)).height)
+    const named = await render(invoiceDoc, { unstable_stampGeometry: 'instructions' })
+    expect((await pdfImages(named))[0]).toEqual(image)
   })
 
-  test('it is refused on continuous paper, and so is a geometry that is not one, before a library loads', async () => {
+  test("`'compact'` draws the stamp of every release until now, in the same room", async () => {
+    const usual = await render(invoiceDoc)
+    const compact = await render(invoiceDoc, { unstable_stampGeometry: 'compact' })
+    const [image] = await pdfImages(compact)
+    expect(image.width).not.toBe(387 * 4)
+    expect(image.width % 3).toBe(0)
+    expect(image.height).toBeLessThan(image.width / 3)
+    expect(await decodeStampInPdf(compact)).toBe(invoice.ted.xml)
+    expect((await pdfPage(compact)).pages).toBe((await pdfPage(usual)).pages)
+  })
+
+  test('the continuous paper keeps the compact stamp and refuses the one of the instructions', async () => {
+    const roll = await render(invoiceDoc, { paper: 'roll' })
+    const named = await render(invoiceDoc, { paper: 'roll', unstable_stampGeometry: 'compact' })
+    expect((await pdfImages(roll))[0].width).not.toBe(387 * 4)
+    expect((await pdfImages(named))[0]).toEqual((await pdfImages(roll))[0])
     const load = jest.fn()
-    const onRoll = await failure(renderPrintedSample(invoiceDoc, { ...instructions, paper: 'roll' }, load))
+    const onRoll = await failure(
+      renderPrintedSample(invoiceDoc, { unstable_stampGeometry: 'instructions', paper: 'roll' }, load),
+    )
     expect(onRoll.code).toBe('INVALID_OPTION')
     expect(onRoll.details).toEqual({ field: 'unstable_stampGeometry' })
     const other = await failure(
@@ -503,6 +519,14 @@ describe('the stamp of the instructions, on the sheet', () => {
     )
     expect(other.details).toEqual({ field: 'unstable_stampGeometry' })
     expect(load).not.toHaveBeenCalled()
+  })
+
+  // Section A.2.5 asks for a quarter of an inch, 18 points, clear around the symbol. The image carries six modules of
+  // its own on each side, and the sheet leaves the rest above and below it.
+  test('a quarter of an inch is clear above and below the symbol of the instructions', () => {
+    const module = STAMP.maxWidth / 387
+    expect(STAMP.clearance + 6 * module).toBeGreaterThanOrEqual(18)
+    expect(STAMP.marginLeft).toBeGreaterThanOrEqual(18)
   })
 })
 

@@ -563,7 +563,13 @@ const withholdingAgentOf = (input: LineItemInput['withholdingAgent'], path: stri
   })
 }
 
-type LineParts = { quantity?: number; unitPrice?: number; discountPercent?: number; surchargePercent?: number }
+type LineParts = {
+  quantity?: number
+  unitPrice?: number
+  discountPercent?: number
+  surchargePercent?: number
+  wholeShares?: boolean
+}
 type LineShares = { readonly discountAmount: number; readonly surchargeAmount: number }
 
 // What the document says of the amounts of its lines (Formato DTE 2.5, field 38 of the detail): `zero` when every line
@@ -779,7 +785,7 @@ const normalizeItem = (input: LineItemInput, index: number, type: DocumentType, 
   )
     throw new DteError('INVALID_OPTION', { field: `${path}.unitPriceDecimals` })
   const surchargePercent = linePercent(input.surchargePercent, `${path}.surchargePercent`, receipt)
-  const parts = { quantity, unitPrice, discountPercent, surchargePercent }
+  const parts = { quantity, unitPrice, discountPercent, surchargePercent, wholeShares: input.wholeShares === true }
   const zero = context.zero || ZERO_LINE_INDICATORS.includes(input.exemptIndicator)
   const computed = lineAmounts(input, path, type, parts, zero, context.zeroAdmitted)
   const settledDocumentType = text(input.settledDocumentType, 'TpoDocLiq')

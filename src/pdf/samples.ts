@@ -102,13 +102,13 @@ export type PrintedSamplesResult = {
   readonly simulation: number
 }
 
-const TEST_SET_PATTERN = /envio-set-(basico|guia|exenta|compra|liquidacion)\.xml/
+const TEST_SET_PATTERN = /envio-set-(basico|guia|exenta|compra|liquidacion|exportacion-[12])\.xml/
 
 /**
- * EN: The set an envelope belongs to by its name: the basic, guide, exempt, purchase and settlement set envelopes go
- * to the test set, everything else to the simulation set.
- * ES: El conjunto al que pertenece un envío por su nombre: los envíos de los sets básico, guía, exento, compra y
- * liquidación van al conjunto de pruebas, todo lo demás al de simulación.
+ * EN: The set an envelope belongs to by its name: the basic, guide, exempt, purchase, settlement and export set
+ * envelopes go to the test set, everything else to the simulation set.
+ * ES: El conjunto al que pertenece un envío por su nombre: los envíos de los sets básico, guía, exento, compra,
+ * liquidación y exportación van al conjunto de pruebas, todo lo demás al de simulación.
  */
 export const sampleSetOf = (name: string): PrintedSampleSet =>
   TEST_SET_PATTERN.test(name.toLowerCase()) ? 'tests' : 'simulation'

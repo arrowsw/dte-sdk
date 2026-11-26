@@ -1,5 +1,11 @@
-import { dispatchTypeOf, referenceCodeOf, settledDocumentTypeOf, transferReasonOf } from './set-text'
-import type { TestBookDocument, TestCase, TestCaseCommission, TestCaseItem, TestSet } from './set-text'
+import {
+  customsDocumentsOf,
+  dispatchTypeOf,
+  referenceCodeOf,
+  settledDocumentTypeOf,
+  transferReasonOf,
+} from './set-text'
+import type { CustomsDocument, TestBookDocument, TestCase, TestCaseCommission, TestCaseItem, TestSet } from './set-text'
 
 /**
  * EN: An item of a case, ready to become a phase 1 line.
@@ -112,6 +118,104 @@ export type PlannedSettlement = {
   readonly commissions: readonly PlannedCommission[]
 }
 
+/**
+ * EN: An item of an export case, in the currency of the case, with its decimals.
+ * ES: Un ítem de un caso de exportación, en la moneda del caso, con sus decimales.
+ */
+export type PlannedExportItem = {
+  /** EN: `NmbItem` item name, as the set writes it. ES: `NmbItem` — Nombre del ítem, tal como lo escribe el set. */
+  readonly name: string
+  /** EN: `QtyItem` quantity; 1 on a row that gives a line value and no quantity. ES: `QtyItem` — Cantidad; 1 en una fila que da un valor de línea y no una cantidad. */
+  readonly quantity: number
+  /** EN: `UnmdItem` unit of measure, as the set writes it. ES: `UnmdItem` — Unidad de medida, tal como la escribe el set. */
+  readonly unit?: string
+  /** EN: `PrcItem` unit price, or the line value; absent on a note row that names only a quantity, whose price is the one of the document it refers to. ES: `PrcItem` — Precio unitario, o el valor de la línea; ausente en una fila de nota que solo nombra una cantidad, cuyo precio es el del documento que refiere. */
+  readonly unitPrice?: number
+  /** EN: `DescuentoPct` line discount, percent. ES: `DescuentoPct` — Descuento de la línea, en porcentaje. */
+  readonly discountPercent?: number
+  /** EN: `RecargoPct` line surcharge, percent: the surcharge the case asks for on the line of the item. ES: `RecargoPct` — Recargo de la línea, en porcentaje: el recargo que el caso pide en la línea del ítem. */
+  readonly surchargePercent?: number
+}
+
+/**
+ * EN: The customs area of an export case, each name as the set writes it in words; issuing turns the names into the
+ * codes of the customs tables (Anexo 51).
+ * ES: El área aduanera de un caso de exportación, cada nombre tal como el set lo escribe en palabras; al emitir los
+ * nombres pasan a ser los códigos de las tablas de Aduanas (Anexo 51).
+ */
+export type PlannedExportCustoms = {
+  /** EN: `MODALIDAD DE VENTA`, for `CodModVenta`. ES: `CodModVenta` — `MODALIDAD DE VENTA`. */
+  readonly saleModality?: string
+  /** EN: `CLAUSULA DE VENTA`, for `CodClauVenta`. ES: `CodClauVenta` — `CLAUSULA DE VENTA`. */
+  readonly saleClause?: string
+  /** EN: `TOTAL CLAUSULA DE VENTA`, in the currency of the case. ES: `TotClauVenta` — `TOTAL CLAUSULA DE VENTA`, en la moneda del caso. */
+  readonly saleClauseTotal?: number
+  /** EN: `VIA DE TRANSPORTE`, for `CodViaTransp`. ES: `CodViaTransp` — `VIA DE TRANSPORTE`. */
+  readonly transportRoute?: string
+  /** EN: `PUERTO DE EMBARQUE`, for `CodPtoEmbarque`. ES: `CodPtoEmbarque` — `PUERTO DE EMBARQUE`. */
+  readonly loadingPort?: string
+  /** EN: `PUERTO DE DESEMBARQUE`, for `CodPtoDesemb`. ES: `CodPtoDesemb` — `PUERTO DE DESEMBARQUE`. */
+  readonly unloadingPort?: string
+  /** EN: The unit of the tare, for `CodUnidMedTara`; the set gives the unit and asks for the value to be worked out. ES: `CodUnidMedTara` — La unidad de la tara; el set da la unidad y pide calcular el valor. */
+  readonly tareUnit?: string
+  /** EN: The unit of the gross weight, for `CodUnidPesoBruto`. ES: `CodUnidPesoBruto` — La unidad del peso bruto. */
+  readonly grossWeightUnit?: string
+  /** EN: The unit of the net weight, for `CodUnidPesoNeto`. ES: `CodUnidPesoNeto` — La unidad del peso neto. */
+  readonly netWeightUnit?: string
+  /** EN: `TIPO DE BULTO`, for `CodTpoBultos`. ES: `CodTpoBultos` — `TIPO DE BULTO`. */
+  readonly packageType?: string
+  /** EN: `TOTAL BULTOS`. ES: `TotBultos` — `TOTAL BULTOS`. */
+  readonly totalPackages?: number
+  /** EN: `FLETE`, in the currency of the case. ES: `MntFlete` — `FLETE`, en la moneda del caso. */
+  readonly freight?: number
+  /** EN: `SEGURO`, in the currency of the case. ES: `MntSeguro` — `SEGURO`, en la moneda del caso. */
+  readonly insurance?: number
+  /** EN: `PAIS RECEPTOR`, for `CodPaisRecep`; the one of an earlier case of the set when the case names none. ES: `CodPaisRecep` — `PAIS RECEPTOR`; el de un caso anterior del set cuando el caso no nombra ninguno. */
+  readonly receiverCountry?: string
+  /** EN: The country of destination, for `CodPaisDestin`; the receiver's country when the case names none of its own. ES: `CodPaisDestin` — El país de destino; el del receptor cuando el caso no nombra uno propio. */
+  readonly destinationCountry?: string
+}
+
+/**
+ * EN: A note of an export case: the case it refers to, the code and the reason.
+ * ES: Una nota de un caso de exportación: el caso que refiere, el código y la razón.
+ */
+export type PlannedExportReference = {
+  /** EN: The case the note refers to. ES: El caso que refiere la nota. */
+  readonly caseId: string
+  /** EN: `CodRef` derived from the reason text. ES: `CodRef` — Derivado del texto de la razón. */
+  readonly code: 1 | 2 | 3
+  /** EN: `RAZON REFERENCIA` verbatim. ES: `RazonRef` — `RAZON REFERENCIA` textual. */
+  readonly reason: string
+}
+
+/**
+ * EN: An export case (110, 111 or 112).
+ * ES: Un caso de exportación (110, 111 o 112).
+ */
+export type PlannedExport = {
+  /** EN: Id of the case, for example `4256-1`. ES: Id del caso, por ejemplo `4256-1`. */
+  readonly caseId: string
+  /** EN: Document type: export invoice 110, debit note 111, credit note 112. ES: `TipoDTE` — Factura de exportación 110, nota de débito 111, nota de crédito 112. */
+  readonly type: 110 | 111 | 112
+  /** EN: `MONEDA DE LA OPERACION`; absent on a note that names none, which takes the currency of the document it refers to. ES: `TpoMoneda` — `MONEDA DE LA OPERACION`; ausente en una nota que no la nombra, que toma la moneda del documento que refiere. */
+  readonly currency?: string
+  /** EN: The items of the case. ES: `Detalle` — Los ítems del caso. */
+  readonly items: readonly PlannedExportItem[]
+  /** EN: `FORMA DE PAGO EXPORTACION`, for `FmaPagExp`. ES: `FmaPagExp` — `FORMA DE PAGO EXPORTACION`. */
+  readonly paymentTerms?: string
+  /** EN: Service indicator of an export of services: 4 for lodging, 3 for any other invoice whose case names no sale modality, the one thing Formato DTE 2.5 excuses only a service from. ES: `IndServicio` — Indicador de servicio de una exportación de servicios: 4 para alojamiento, 3 para cualquier otra factura cuyo caso no nombra modalidad de venta, lo único de lo que el Formato DTE 2.5 excusa solo a un servicio. */
+  readonly serviceIndicator?: 3 | 4
+  /** EN: The customs area of the case, in words. ES: `Aduana` — El área aduanera del caso, en palabras. */
+  readonly customs: PlannedExportCustoms
+  /** EN: `COMISIONES EN EL EXTRANJERO`, a percent of the total of the sale clause, issued as a global surcharge. ES: `COMISIONES EN EL EXTRANJERO`, un porcentaje del total de la cláusula de venta, que se emite como recargo global. */
+  readonly foreignCommissionPercent?: number
+  /** EN: The customs documents the case names, each a reference line of the document. ES: `Referencia` — Los documentos aduaneros que nombra el caso, cada uno una línea de referencia del documento. */
+  readonly customsReferences: readonly CustomsDocument[]
+  /** EN: The document a note refers to; absent on an invoice. ES: `Referencia` — El documento que refiere una nota; ausente en una factura. */
+  readonly reference?: PlannedExportReference
+}
+
 /** EN: Folios each document type needs. ES: Folios que necesita cada tipo de documento. */
 export type SetFolios = Readonly<Record<number, number>>
 
@@ -190,6 +294,23 @@ export type SettlementSetPlan = {
 }
 
 /**
+ * EN: An export set: its cases in the order of the set, each issued as an export invoice (110), debit note (111) or
+ * credit note (112), all in one envelope.
+ * ES: Un set de exportación: sus casos en el orden del set, cada uno emitido como factura de exportación (110), nota de
+ * débito (111) o nota de crédito (112), todos en un sobre.
+ */
+export type ExportSetPlan = {
+  /** EN: Set kind: `export`. ES: Tipo de set: `export`. */
+  readonly kind: 'export'
+  /** EN: `NUMERO DE ATENCION` of the set. ES: `NUMERO DE ATENCION` del set. */
+  readonly attentionNumber: string
+  /** EN: The export cases, in the order of the set. ES: Los casos de exportación, en el orden del set. */
+  readonly documents: readonly PlannedExport[]
+  /** EN: Folios needed per document type. ES: Folios que se necesitan por tipo de documento. */
+  readonly folios: SetFolios
+}
+
+/**
  * EN: A purchase-book set: the supplier documents and the proportionality factor (0.6 when the set gives none).
  * ES: Un set de libro de compras: los documentos de proveedor y el factor de proporcionalidad (0,6 si el set no lo trae).
  */
@@ -221,6 +342,10 @@ export type CertificationPlan = {
   readonly purchase?: PurchaseSetPlan
   /** EN: Plan of the `settlement` set, when the text has it: it is there only when the set was asked for on download. ES: Plan del set `settlement`, cuando el texto lo trae: solo está si el set se pidió al descargar. */
   readonly settlement?: SettlementSetPlan
+  /** EN: Plan of the first export set, when the text has it: one whose name says `(1)`, or else the first export set of the text. ES: Plan del primer set de exportación, cuando el texto lo trae: uno cuyo nombre dice `(1)`, o si no el primer set de exportación del texto. */
+  readonly export1?: ExportSetPlan
+  /** EN: Plan of the second export set, when the text has it: one whose name says `(2)`, or else the next export set of the text. ES: Plan del segundo set de exportación, cuando el texto lo trae: uno cuyo nombre dice `(2)`, o si no el siguiente set de exportación del texto. */
+  readonly export2?: ExportSetPlan
   /** EN: Plan of the `purchaseBook` set, when the text has it. ES: Plan del set `purchaseBook`, cuando el texto lo trae. */
   readonly purchaseBook?: PurchaseBookPlan
   /** EN: Plan of the `exemptPurchaseBook` set, when the text has it. ES: Plan del set `exemptPurchaseBook`, cuando el texto lo trae. */
@@ -380,6 +505,107 @@ const settlementPlan = (set: TestSet): SettlementSetPlan => {
   return { kind: 'settlement', attentionNumber: set.attentionNumber, settlements, folios: { 43: settlements.length } }
 }
 
+// A number as an export set writes it: the first one of the text, its decimals after a point or a comma.
+const EXPORT_AMOUNT = /\d+(?:[.,]\d+)?/
+const LODGING = /ALOJAMIENTO|HOSPEDAJE|HOTEL/
+
+const exportAmount = (text: string | undefined): number | undefined => {
+  const found = text === undefined ? null : EXPORT_AMOUNT.exec(text)
+  return found === null ? undefined : Number(found[0].replace(',', '.'))
+}
+
+const exportItem = (item: TestCaseItem, surchargePercent: number | undefined): PlannedExportItem =>
+  compact({
+    name: item.name,
+    quantity: item.quantity,
+    unit: item.unit,
+    unitPrice: item.unitPrice,
+    discountPercent: exportAmount(item.discount),
+    surchargePercent,
+  })
+
+// 4 for lodging; 3 for an invoice that names no sale modality: Formato DTE 2.5 excuses only a service from it.
+const serviceIndicatorOf = (testCase: TestCase): 3 | 4 | undefined => {
+  if (testCase.documentType !== 110) return undefined
+  const words = plainUpper([testCase.documentText, ...testCase.items.map((item) => item.name)].join(' '))
+  if (LODGING.test(words)) return 4
+  return testCase.exportFields['MODALIDAD DE VENTA'] === undefined ? 3 : undefined
+}
+
+const plainUpper = (text: string): string => text.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase()
+
+const EXPORT_TYPES: readonly number[] = [110, 111, 112]
+
+const exportPlan = (set: TestSet): ExportSetPlan => {
+  // A case that names no country takes the one an earlier case of the set named: the set has one foreign customer.
+  let country: string | undefined
+  const documents = set.cases
+    .filter((testCase) => EXPORT_TYPES.includes(testCase.documentType ?? 0))
+    .map((testCase): PlannedExport => {
+      const fields = testCase.exportFields
+      country = fields['PAIS RECEPTOR'] ?? country
+      const surcharge = exportAmount(fields['RECARGO EN LA LINEA'])
+      const type = testCase.documentType as PlannedExport['type']
+      const note = type !== 110 && testCase.referencedCase !== null
+      return compact({
+        caseId: testCase.id,
+        type,
+        currency: testCase.currency || undefined,
+        items: testCase.items.map((item) => exportItem(item, surcharge)),
+        paymentTerms: fields['FORMA DE PAGO EXPORTACION'],
+        serviceIndicator: serviceIndicatorOf(testCase),
+        customs: compact({
+          saleModality: fields['MODALIDAD DE VENTA'],
+          saleClause: fields['CLAUSULA DE VENTA'],
+          saleClauseTotal: exportAmount(fields['TOTAL CLAUSULA DE VENTA']),
+          transportRoute: fields['VIA DE TRANSPORTE'],
+          loadingPort: fields['PUERTO DE EMBARQUE'],
+          unloadingPort: fields['PUERTO DE DESEMBARQUE'],
+          tareUnit: fields['UNIDAD DE MEDIDA DE TARA'],
+          grossWeightUnit: fields['UNIDAD DE PESO BRUTO'],
+          netWeightUnit: fields['UNIDAD DE PESO NETO'],
+          packageType: fields['TIPO DE BULTO'],
+          totalPackages: exportAmount(fields['TOTAL BULTOS']),
+          freight: exportAmount(fields.FLETE),
+          insurance: exportAmount(fields.SEGURO),
+          receiverCountry: country,
+          destinationCountry: fields['PAIS DESTINO'] ?? country,
+        }),
+        foreignCommissionPercent: exportAmount(fields['COMISIONES EN EL EXTRANJERO']),
+        customsReferences: [
+          ...new Map(
+            (testCase.customsReferences ?? []).flatMap(customsDocumentsOf).map((found) => [found.type, found]),
+          ).values(),
+        ],
+        reference: note
+          ? {
+              caseId: testCase.referencedCase!,
+              code: referenceCodeOf(testCase.reasonText),
+              reason: testCase.reasonText,
+            }
+          : undefined,
+      })
+    })
+  const folios: Record<number, number> = {}
+  for (const document of documents) folios[document.type] = (folios[document.type] ?? 0) + 1
+  return { kind: 'export', attentionNumber: set.attentionNumber, documents, folios }
+}
+
+// The slot of an export set: the number its name gives in parentheses, else the first one still free. Neither name
+// was seen; the declaration form names the second set `SET DOCUMENTOS DE EXPORTACION(2)`. A set with a number always
+// takes the slot of that number, since its slot is the row it is declared on: of two sets with the same number the
+// last one wins, as for every other kind.
+const EXPORT_SLOT = /\(\s*([12])\s*\)/
+const exportSlot = (
+  set: TestSet,
+  plan: { readonly export1?: ExportSetPlan; readonly export2?: ExportSetPlan },
+): 'export1' | 'export2' | null => {
+  const named = EXPORT_SLOT.exec(set.name)?.[1]
+  if (named !== undefined) return named === '1' ? 'export1' : 'export2'
+  if (plan.export1 === undefined) return 'export1'
+  return plan.export2 === undefined ? 'export2' : null
+}
+
 const bookPlan = (set: TestSet, kind: PurchaseBookPlan['kind']): PurchaseBookPlan => ({
   kind,
   attentionNumber: set.attentionNumber,
@@ -394,16 +620,29 @@ const bookPlan = (set: TestSet, kind: PurchaseBookPlan['kind']): PurchaseBookPla
  * (`settledDocumentTypeOf`) and the exempt mark when the name starts with `EXENTO`; its commissions and other charges
  * keep their name as the description, take the line total as their exempt value when the name starts with `EXENTO`
  * and as their net value otherwise, and are commissions when the name says `COMISION` and other charges when it does
- * not. Export sets, the sales-book and guide-book instructions and unknown sets are left out: the first are never
- * issued, the books come from the issued sets.
+ * not. Each export set gets a plan of its own, `export1` or `export2` by the number its name gives in parentheses, else
+ * the first slot still free (a third export set is left out): one document per case of type 110, 111 or 112, in the
+ * set's order, with its currency, its items (decimals, the discount of the row and the surcharge the case asks for on
+ * the line), its payment form, its customs area in words, its commission abroad as a percent of the sale clause, the
+ * customs documents it names (`customsDocumentsOf`), on a note the case it refers to with the code of its reason, and
+ * the service indicator of an export of services (4 for lodging, 3 for an invoice that names no sale modality); a case
+ * that names no country takes the one of an earlier case of the set. The sales-book and guide-book instructions and
+ * unknown sets are left out: the books come from the issued sets.
  * ES: Los casos que emite cada set, con los folios que necesita cada tipo de documento, a partir de los sets parseados.
  * Por cada tipo gana el último set del texto. Cada caso del set de liquidación es una liquidación factura (43): sus
  * ítems pasan a ser líneas con su cantidad, su total de línea como monto (con su signo), el tipo del documento
  * liquidado según el nombre del ítem (`settledDocumentTypeOf`) y la marca de exenta cuando el nombre empieza con
  * `EXENTO`; sus comisiones y otros cargos conservan su nombre como glosa, toman el total de línea como valor exento
  * cuando el nombre empieza con `EXENTO` y como valor neto si no, y son comisiones cuando el nombre dice `COMISION` y
- * otros cargos cuando no. Los sets de exportación, las instrucciones de libro de ventas y de guías y los sets
- * desconocidos quedan fuera: los primeros nunca se emiten, los libros salen de los sets emitidos.
+ * otros cargos cuando no. Cada set de exportación tiene su propio plan, `export1` o `export2` según el número que da su
+ * nombre entre paréntesis, si no el primer lugar libre (un tercer set de exportación queda fuera): un documento por
+ * caso de tipo 110, 111 o 112, en el orden del set, con su moneda, sus ítems (decimales, el descuento de la fila y el
+ * recargo que el caso pide en la línea), su forma de pago, su área aduanera en palabras, su comisión en el extranjero
+ * como porcentaje de la cláusula de venta, los documentos aduaneros que nombra (`customsDocumentsOf`), en una nota el
+ * caso que refiere con el código de su razón, y el indicador de servicio de una exportación de servicios (4 para
+ * alojamiento, 3 para una factura que no nombra modalidad de venta); un caso que no nombra país toma el de un caso
+ * anterior del set. Las instrucciones de libro de ventas y de guías y los sets desconocidos quedan fuera: los libros
+ * salen de los sets emitidos.
  * @param sets EN: the parsed sets. ES: los sets parseados.
  */
 export const planCertificationSets = (sets: readonly TestSet[]): CertificationPlan => {
@@ -416,7 +655,10 @@ export const planCertificationSets = (sets: readonly TestSet[]): CertificationPl
     else if (set.kind === 'guide') plan.guide = guidePlan(set)
     else if (set.kind === 'purchase') plan.purchase = purchasePlan(set) ?? plan.purchase
     else if (set.kind === 'settlement') plan.settlement = settlementPlan(set)
-    else if (set.kind === 'purchaseBook') plan.purchaseBook = bookPlan(set, 'purchaseBook')
+    else if (set.kind === 'export') {
+      const slot = exportSlot(set, plan)
+      if (slot !== null) plan[slot] = exportPlan(set)
+    } else if (set.kind === 'purchaseBook') plan.purchaseBook = bookPlan(set, 'purchaseBook')
     else if (set.kind === 'exemptPurchaseBook') plan.exemptPurchaseBook = bookPlan(set, 'exemptPurchaseBook')
   }
   return plan

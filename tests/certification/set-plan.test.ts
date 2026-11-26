@@ -198,7 +198,7 @@ test('the purchase-book sets carry their documents and factor, and a missing fac
   })
 })
 
-test('export, sales-book and unknown sets have no plan entry, and the last set of a kind wins', () => {
+test('sales-book and unknown sets have no plan entry, and the last set of a kind wins', () => {
   expect(Object.keys(plan).sort()).toEqual([
     'basic',
     'exempt',

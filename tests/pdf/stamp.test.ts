@@ -146,8 +146,8 @@ test('when the library cannot be loaded it is DEPENDENCY_UNAVAILABLE', async () 
   }
 })
 
-// The symbol of section A.2.5 of the SII's instructions, an option until one is printed and read back: rows three
-// modules high, a module of 6.7 mils or more, 300 DPI or more.
+// The symbol of section A.2.5 of the SII's instructions, the stamp of the sheet: rows three modules high, a module of
+// 6.7 mils or more, 300 DPI or more.
 describe('the geometry of the instructions', () => {
   const PIXELS = 4
   const QUIET = 6 * PIXELS
@@ -223,6 +223,12 @@ describe('the geometry of the instructions', () => {
     const size = stampSize({ width: 1548, height: 1200 })
     expect(size.height).toBeCloseTo(STAMP.maxHeight)
     expect(size.width).toBeCloseTo((STAMP.maxHeight * 1548) / 1200)
+  })
+
+  test("named `'compact'`, the stamp is the one drawn when no geometry is named", async () => {
+    const named = await renderTedBarcode(ted, loadBarcodeModule, { unstable_geometry: 'compact' })
+    expect(named).toEqual(await renderTedBarcode(ted))
+    expect(named).not.toEqual(await drawn(ted))
   })
 
   test('a geometry that is not one is refused before the library loads', async () => {

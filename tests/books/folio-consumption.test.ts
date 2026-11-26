@@ -150,6 +150,54 @@ describe('createFolioConsumption', () => {
     expect(summaries[0]).not.toHaveProperty('vatRate')
   })
 
+  // `ConsumoFolio_v10.xsd` admits three types in a summary (`TipoConsumoType`): 39, 41 and 61, which it annotates
+  // "Nota de Credito Electronica".
+  describe('a credit note', () => {
+    const note = {
+      type: 61,
+      folio: 4,
+      issueDate: '2026-10-15',
+      netAmount: 1000,
+      vatAmount: 190,
+      exemptAmount: 50,
+      totalAmount: 1240,
+    } as const
+    const report = createFolioConsumption({
+      cover: reportCover,
+      entries: [note, receipt, { type: 41, folio: 2, issueDate: '2026-10-15', exemptAmount: 300, totalAmount: 300 }],
+      voidedFolios: [{ type: 61, folio: 5 }],
+      now: FIXED_NOW,
+    })
+
+    test('is reported beside the receipts, after them, with its net, its VAT and its exempt amount', () => {
+      expect(report.summaries.map((summary) => summary.type)).toEqual([39, 41, 61])
+      expect(report.summaries[2]).toEqual({
+        type: 61,
+        netAmount: 1000,
+        vatAmount: 190,
+        vatRate: 19,
+        exemptAmount: 50,
+        totalAmount: 1240,
+        issuedCount: 1,
+        voidedCount: 1,
+        usedCount: 2,
+        usedRanges: [{ from: 4, to: 4 }],
+        voidedRanges: [{ from: 5, to: 5 }],
+      })
+    })
+
+    test('makes a report the schema admits', async () => {
+      const { xml } = signFolioConsumption(report, certificate)
+      expect(xml).toContain('<TipoDocumento>61</TipoDocumento>\n<MntNeto>1000</MntNeto>\n<MntIva>190</MntIva>')
+      expect(await validateAgainstXsd(xml, 'ConsumoFolio')).toEqual([])
+    })
+
+    test('alone, with no receipt, is a report of its type', () => {
+      const alone = createFolioConsumption({ cover: reportCover, entries: [note] })
+      expect(alone.summaries.map((summary) => [summary.type, summary.usedCount])).toEqual([[61, 1]])
+    })
+  })
+
   test('voided folios alone produce a summary of their type', () => {
     const { summaries } = createFolioConsumption({
       cover: { ...reportCover, from: '2026-10-15', to: '2026-10-15' },
@@ -194,7 +242,7 @@ describe('createFolioConsumption', () => {
   test.each([
     [{ cover: reportCover }, 'MISSING_FIELD', { field: 'cover.from' }],
     [{ cover: { ...reportCover, from: '2026-10-15' } }, 'MISSING_FIELD', { field: 'cover.to' }],
-    [{ cover: reportCover, entries: [{ ...receipt, type: 61 }] }, 'INVALID_DOCUMENT_TYPE', { field: 'type', type: 61 }],
+    [{ cover: reportCover, entries: [{ ...receipt, type: 33 }] }, 'INVALID_DOCUMENT_TYPE', { field: 'type', type: 33 }],
     [{ cover: reportCover, entries: [{ ...receipt, folio: 0 }] }, 'INVALID_FOLIO', { field: 'folio', folio: 0 }],
     [{ cover: reportCover, entries: [receipt, receipt] }, 'INVALID_FOLIO', { field: 'folio', folio: 1, type: 39 }],
     [

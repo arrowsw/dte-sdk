@@ -118,6 +118,14 @@ const DECLARATION_LABELS: readonly { readonly key: DeclarationKey; readonly patt
   { key: 'settlement', pattern: /SET LIQUIDACION FACTURA/i },
 ]
 
+// The row of an export set on the progress page, which has not been seen with one. Its label is read loosely, as the
+// others are: `SET` and `EXPORT` in one run of text, the second set being the one whose label carries a 2, as the
+// declaration form writes it (`SET DOCUMENTOS DE EXPORTACION(2)`). Its state is the first bold text before the row
+// ends, where the other rows take the first one after their label wherever it is: a row that shows no state yet must
+// not answer with the state of the row below it, since nothing else says an export set was approved.
+const EXPORT_LABEL = String.raw`SET[^<]*?EXPORT`
+const SAME_ROW = String.raw`(?:(?!<\/?(?:tr|table)\b)[\s\S])*?<b>([^<]+)<\/b>`
+
 // The state of each set and book on the progress page: the first bold text after its label, searched over the whole
 // page as it came. The labels are loose because the portal abbreviates there.
 const PROGRESS_STATES: readonly { readonly key: DeclarationKey; readonly pattern: RegExp }[] = [
@@ -126,6 +134,8 @@ const PROGRESS_STATES: readonly { readonly key: DeclarationKey; readonly pattern
   { key: 'exempt', pattern: /SET FACTURA EXENTA[\s\S]*?<b>([^<]+)<\/b>/i },
   { key: 'purchase', pattern: /SET CASO GENERAL FACTURA COMPRA[\s\S]*?<b>([^<]+)<\/b>/i },
   { key: 'settlement', pattern: /SET LIQUIDACION[\s\S]*?<b>([^<]+)<\/b>/i },
+  { key: 'export1', pattern: new RegExp(`${EXPORT_LABEL}(?![^<]*2)${SAME_ROW}`, 'i') },
+  { key: 'export2', pattern: new RegExp(`${EXPORT_LABEL}[^<]*2${SAME_ROW}`, 'i') },
   { key: 'simulation', pattern: /SET(?:\s+DE)?\s+SIMULACION[\s\S]*?<b>([^<]+)<\/b>/i },
   { key: 'salesBook', pattern: /LIBRO[\s\S]*?VENTA[\s\S]*?<b>([^<]+)<\/b>/i },
   { key: 'purchaseBook', pattern: /LIBRO DE COMPRAS(?!\s+PARA EXENTOS)[\s\S]*?<b>([^<]+)<\/b>/i },

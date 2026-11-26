@@ -21,7 +21,7 @@ export const GAP = { section: 10, small: 6, tiny: 4 } as const
 /** EN: The red type box at the top right (5.5 cm wide, 1.5 to 4 cm high). ES: Recuadro rojo del tipo de documento, arriba a la derecha (5,5 cm de ancho, 1,5 a 4 cm de alto). */
 export const TYPE_BOX = { width: 155.91, minHeight: 42.52, maxHeight: 113.39, border: 1.5, padX: 8, padY: 6 } as const
 
-/** EN: The stamp box: 5 to 9 cm wide, 2 to 4 cm high, 2 cm from the left margin. ES: Caja del timbre: 5 a 9 cm de ancho, 2 a 4 cm de alto, a 2 cm del margen izquierdo. */
+/** EN: The stamp box: 5 to 9 cm wide, 2 to 4 cm high, 2 cm from the left margin. `clearance` is the room left above and below the symbol of the instructions: with the six modules the image carries on each side, the quarter of an inch section A.2.5 of the SII's instructions asks to keep clear around it. ES: Caja del timbre: 5 a 9 cm de ancho, 2 a 4 cm de alto, a 2 cm del margen izquierdo. `clearance` es el espacio que queda sobre y bajo el símbolo del instructivo: con los seis módulos que la imagen trae a cada lado, el cuarto de pulgada que la sección A.2.5 del instructivo del SII pide dejar libre a su alrededor. */
 export const STAMP = {
   minWidth: 141.73,
   minHeight: 56.69,
@@ -29,6 +29,7 @@ export const STAMP = {
   maxHeight: 113.39,
   marginLeft: 56.69,
   legendGap: 5,
+  clearance: 15,
 } as const
 
 /**

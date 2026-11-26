@@ -28,8 +28,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `queryDocumentStatus`. The verdict itself does not change.
   - **What to change:** code that builds an `UploadStatus` of its own must give it `unreported`.
 
+- **Credit notes in the folio consumption report.** `ConsumoFolio_v10.xsd` admits three document types in a summary
+  (`TipoConsumoType`): the receipt (39), the exempt receipt (41) and the credit note (61), "Nota de Credito
+  Electronica". `createFolioConsumption` refused a 61 (`INVALID_DOCUMENT_TYPE`). It now reports it, after the
+  receipts, with its net, its VAT and its exempt amount, and counts its folios, used and voided.
+- **The export test sets in the certification run** (`dte-sdk/portal`). The run read some lines of the export sets and
+  issued none of their documents. It now plans, issues and sends them: the two sets the SII gives, each with its
+  attention number and in its own envelope (`envio-set-exportacion-1.xml`, `-2.xml`), with their export invoices
+  (110), credit note (112) and debit note (111). Each document is exempt and in the currency of its case; the freight
+  and the insurance go in the customs area and, always, as two global surcharges, a commission stated as a percent of
+  the sale clause as a third, and a surcharge the case asks for on the line stays on the line, on every item of the
+  case; the names the set gives in words (ports, countries, clauses, units, packages) become the codes of the customs
+  tables; a document names the customs document its case does beside the reference of the set; a note repeats the
+  price of its invoice. What the set does not give is the run's to say, in `exportSets`: the exchange rate of each
+  currency (`exchangeRates`, with no default: a currency without one stops the set before a folio is taken), the
+  foreign customer (`receiver`) and the tare as a percent of the net weight (`tarePercent`, 2 by default), since the
+  set gives the units of the weights and asks for their values. `checkExportSets` works every document out before the
+  run asks for folios, and so does the simulation before it asks for its own; a currency the SII does not list is
+  refused there with its case (`INVALID_OPTION`, `currency`). The tests hold the documents to field behaviour, total
+  by total. Two things have not been seen and are guessed. One is the literal text of an export set: its labels are
+  read tolerantly and the fixture is a reconstruction. A row that fills every column of its header is read as an item
+  whatever its name starts with; one that leaves a column empty and starts like a label is still read as that label. A
+  set whose name carries its number takes the slot of that number, and of two with the same number the last one wins,
+  as for every other kind. The other is the rows the progress page gives these sets: they are looked for as `SET` …
+  `EXPORT` in one label, the second set being the one whose label carries a 2 (the declaration form writes `SET
+  DOCUMENTOS DE EXPORTACION(2)`), and the state of each is the bold text of its own row. An export set that was sent
+  and whose row the page does not show, or shows with no state, is not taken as approved, where the other sets are:
+  the wait ends `timedOut` with a `detail` that names it. A caller who sees the sets approved on a page this reading
+  does not find goes on by saving the state with `setsApproved: true` and `stage: 'books'`.
+- **The share of a percent as a whole amount on an export line** (`wholeShares`). `DescuentoMonto` and `RecargoMonto`
+  hold whole numbers only, so an export line keeps the four decimals of the share of a percent and writes the percent
+  alone when the share is not whole. A line with `wholeShares` writes the share, rounded once to a whole number,
+  beside its percent, as the format asks of a percent ("debe ir el monto correspondiente"), and works out its amount
+  with it: 5 % of 200 984 is written 10 049, and the line 190 935. It applies to both percents of the line, the
+  discount and the surcharge. The export sets ask for it on a line with a discount.
+- **The settlement set and the export sets in the simulation of the certification run.** The simulation issued again
+  the cases of the basic, exempt, guide and purchase sets, and left out the settlement set a run had sent.
+  `issueSimulation` now issues its settlement invoices too, after the others, and then the documents of the export
+  sets, each as its set issued it less the reference of the test set, and `simulationFolioNeeds` counts their folios.
+  A run with none of them sends the simulation it sent before.
+
 ### Changed
 
+- **The sheet draws the stamp the SII's instructions describe.** Section A.2.5 of the SII's instructions asks of the
+  PDF417 stamp byte compaction, rows three modules high and a quarter of an inch clear around it. `renderPrintedSample`
+  drew on the sheet a symbol with rows one module high, stretched to the stamp box, and offered the symbol of the
+  instructions as `unstable_stampGeometry: 'instructions'`. That symbol is now the stamp of the sheet: 387 modules
+  across, 9 cm wide with a module of 9.2 mils, its two sides scaled by one factor, with a quarter of an inch clear above
+  and below it. The earlier stamp stays as `'compact'`: it is the stamp of the continuous paper, where the module of
+  the other is under two dots of a 203 DPI printer, and the one `renderTedBarcode` draws unless told otherwise. The
+  stamp box keeps its 5 to 9 cm by 2 to 4 cm. The room the stamp takes on the sheet grows by 15 points, the clear
+  space, so a document whose lines filled its last page to the end may break to one page more. No stamp drawn this way
+  has been printed and read back with a scanner yet, so the option keeps its `unstable_` name.
+  - **What to change:** nothing to take the new stamp. Pass `unstable_stampGeometry: 'compact'` to keep on the sheet
+    the stamp of 0.16.0. The printed samples of the certification run are drawn with the new one.
 - **The certification run reads the date of the company's resolution from the SII when it is given none.** The cover
   of an envelope names the resolution of the company in the environment it goes to, and the SII refuses an envelope
   that names another ("Error en Carátula"). `runCertification`, given no `resolution`, wrote number 0 and the UTC day

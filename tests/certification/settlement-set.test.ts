@@ -1,11 +1,13 @@
 import { createFolioAllocator } from '../../src/certification/folios'
+import { simulationFolioNeeds } from '../../src/certification/folios-step'
 import { issueTestSet, type IssuedSet } from '../../src/certification/issue-set'
 import { planCertificationSets, type SettlementSetPlan } from '../../src/certification/set-plan'
 import { parseTestSetText, settledDocumentTypeOf, type TestSet } from '../../src/certification/set-text'
+import { issueSimulation } from '../../src/certification/simulation'
 import { verifyDocumentSignature } from '../../src/document/sign'
 import { verifyEnvelopeSignature } from '../../src/envelope/sign'
 import { verifyTed } from '../../src/ted/build'
-import { cafFor, fullPlan, issueOptions } from '../support/certification-fixtures'
+import { cafFor, certificationCafs, fullPlan, issueOptions } from '../support/certification-fixtures'
 import { ISSUER_RUT, RECEIVER_RUT } from '../support/fixtures'
 import { failure } from '../support/portal'
 import { BASIC_SET_TEXT, FULL_SET_TEXT, SETTLEMENT_ATTENTION, SETTLEMENT_SET_TEXT } from '../support/test-set-samples'
@@ -293,5 +295,42 @@ describe('issuing the settlement set', () => {
     })
     const without = { ...options(), folios: createFolioAllocator([cafFor(33)]) }
     expect((await failure(issueTestSet(plan, without))).code).toBe('FOLIO_OUT_OF_RANGE')
+  })
+})
+
+// The simulation issues again the cases of the sets the run sent. A run that sent the settlement set issues its
+// settlement invoices again too: each as the set issued it, less the reference of the test set.
+describe('the settlement set in the simulation', () => {
+  test('each settlement invoice comes again with its lines, its commissions and its totals, and no SET reference', async () => {
+    const set = await issueTestSet(plan, issueOptions([cafFor(43)]))
+    const simulation = await issueSimulation({ settlement: plan }, issueOptions([cafFor(43)]))
+    expect(simulation.cases.map((issued) => [issued.caseId, issued.type])).toEqual(
+      set.cases.map((issued) => [issued.caseId, issued.type]),
+    )
+    expect(simulation.types).toEqual([43])
+    expect(simulation.fewerThanRecommended).toBe(true)
+    simulation.cases.forEach((issued, index) => {
+      const original = set.cases[index].document
+      expect(original.references.map((reference) => reference.documentType)).toEqual(['SET'])
+      expect(issued.document.references).toEqual([])
+      expect(issued.document.items).toEqual(original.items)
+      expect(issued.document.commissions).toEqual(original.commissions)
+      expect(issued.document.header.totals).toEqual(original.header.totals)
+      expect(issued.document.header.receiver.rut).toBe(RECEIVER_RUT)
+    })
+    expect(verifyEnvelopeSignature(simulation.envelope.xml).valid).toBe(true)
+  })
+
+  test('it comes after the other sets, and its folios are counted with theirs', async () => {
+    const full = planCertificationSets(parseTestSetText(`${FULL_SET_TEXT}\n${SETTLEMENT_SET_TEXT}`))
+    const simulation = await issueSimulation(full, issueOptions([...certificationCafs(), cafFor(43)]))
+    const types = simulation.cases.map((issued) => issued.type)
+    expect(types.slice(0, 18)).toEqual([33, 33, 33, 61, 61, 61, 56, 56, 34, 61, 61, 56, 52, 52, 52, 46, 61, 56])
+    expect(types.slice(18)).toEqual([43, 43, 43, 43])
+    expect(simulation.types).toEqual([33, 61, 56, 34, 52, 46, 43])
+    expect(simulationFolioNeeds(full)).toMatchObject({ 33: 3, 43: 4 })
+    expect(simulationFolioNeeds(fullPlan())).not.toHaveProperty('43')
+    // Without the settlement set the simulation is the one of the four sets, as before.
+    expect((await issueSimulation(fullPlan(), issueOptions())).cases).toHaveLength(18)
   })
 })

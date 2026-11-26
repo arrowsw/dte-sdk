@@ -65,6 +65,8 @@ export type TestCase = {
   readonly exportFields: Readonly<Record<string, string>>
   /** EN: The commissions and other charges of a settlement case, in order; absent on the cases of every other set. ES: Las comisiones y otros cargos de un caso de liquidación (`COMISIONES Y OTROS CARGOS`), en orden; ausente en los casos de los demás sets. */
   readonly commissions?: readonly TestCaseCommission[]
+  /** EN: The lines of an export case that name a customs document (a DUS, an AWB, a MIC/DTA…) as a reference, each as written after its label, in order; absent on the cases of every other set. ES: Las líneas de un caso de exportación que nombran un documento aduanero (un DUS, un AWB, un MIC/DTA…) como referencia, cada una tal como viene tras su rótulo, en orden; ausente en los casos de los demás sets. */
+  readonly customsReferences?: readonly string[]
   /** EN: Every line of the case after its header, trimmed. ES: Cada línea del caso tras su cabecera, recortada. */
   readonly raw: readonly string[]
 }
@@ -417,13 +419,20 @@ const observe = (document: MutableBookDocument, observation: string): void => {
  * EN: Parses the text of the SII test set: sets, their cases with items and references, the supplier documents of the
  * purchase-book sets and the proportionality factor. The cases of a settlement set are read by their two tables: each
  * item with its quantity and its line total (`lineTotal`), and the commissions and other charges in `commissions`.
+ * The cases of an export set are read by their labelled lines (`exportFields`, with the units of tare and weights, a
+ * country of destination and a surcharge on the line), the customs documents their reference lines name
+ * (`customsReferences`), and item rows read by the columns of the `ITEM` header above them, decimals included; the
+ * literal wording of an export set was never seen, so its labels are read loosely.
  * Lines the grammar does not know are ignored and a set of unknown kind is `other`, so the function never throws. The
  * text is the portal page with its tags turned into line breaks and its entities decoded, or a file holding the same.
  * ES: Parsea el texto del set de pruebas del SII: sets, sus casos con ítems y referencias, los documentos de proveedor
  * de los sets de libro de compras y el factor de proporcionalidad. Los casos de un set de liquidación se leen por sus
  * dos tablas: cada ítem con su cantidad y su total de línea (`lineTotal`), y las comisiones y otros cargos en
- * `commissions`. Las líneas que la gramática no conoce se ignoran y un set de tipo desconocido es `other`, así que la
- * función nunca lanza. El texto es la página del portal con las etiquetas vueltas saltos de línea y las entidades
+ * `commissions`. Los casos de un set de exportación se leen por sus líneas con rótulo (`exportFields`, con las unidades
+ * de tara y pesos, un país de destino y un recargo en la línea), los documentos aduaneros que nombran sus líneas de
+ * referencia (`customsReferences`), y filas de ítems leídas por las columnas del encabezado `ITEM` sobre ellas, con
+ * decimales; el texto literal de un set de exportación nunca se vio, así que sus rótulos se leen con holgura. Las
+ * líneas que la gramática no conoce se ignoran y un set de tipo desconocido es `other`, así que la función nunca lanza. El texto es la página del portal con las etiquetas vueltas saltos de línea y las entidades
  * decodificadas, o un archivo con lo mismo.
  * @param text EN: the set text. ES: el texto del set.
  */
@@ -438,6 +447,8 @@ export const parseTestSetText = (text: string): readonly TestSet[] => {
   let booksOpen = false
   // The table the rows of a settlement case go to: the items until the commissions header.
   let settlementTable: SettlementTable = 'items'
+  // The columns the rows of an export case are read by: those of its last `ITEM` header.
+  let exportColumns: readonly ExportColumn[] = NO_HEADER
 
   const closeCase = (): void => {
     if (set !== null && current !== null)
@@ -481,7 +492,9 @@ export const parseTestSetText = (text: string): readonly TestSet[] => {
       booksOpen = false
       current = newCase(caseHeader[1], int(caseHeader[2]))
       if (set.kind === TEST_SET_KINDS.settlement) current.commissions = []
+      if (set.kind === TEST_SET_KINDS.export) current.customsReferences = []
       settlementTable = 'items'
+      exportColumns = NO_HEADER
       continue
     }
     if (EQUALS_LINE.test(line)) continue
@@ -496,6 +509,7 @@ export const parseTestSetText = (text: string): readonly TestSet[] => {
     if (current !== null) {
       current.raw.push(line)
       if (set.kind === TEST_SET_KINDS.settlement) settlementTable = parseSettlementLine(current, line, settlementTable)
+      else if (set.kind === TEST_SET_KINDS.export) exportColumns = parseExportLine(current, line, exportColumns)
       else parseCaseLine(current, line)
       continue
     }
@@ -644,4 +658,155 @@ const parseSettlementLine = (current: MutableCase, line: string, table: Settleme
   if (table === 'commissions') current.commissions = [...current.commissions!, { name: parts[0], lineTotal }]
   else current.items.push({ name: parts[0], quantity: (parts.length > 2 && int(parts[1])) || 1, lineTotal })
   return table
+}
+
+// The lines only an export case is read for. Nobody here has seen the literal text of an export set, so each label is
+// read loosely: the units of the tare and of the weights the set asks to work out ("CALCULE LOS VALORES"), a country of
+// destination of its own, and a surcharge the set asks for on the line of the item, whose percent may come before or
+// after its `%` ("%10 RECARGO EN LA LINEA DE ITEM ...").
+const EXPORT_ONLY_LINES: readonly { readonly label: string; readonly pattern: RegExp }[] = [
+  {
+    label: 'UNIDAD DE MEDIDA DE TARA',
+    pattern: /^UNIDAD\s+(?:DE\s+)?(?:MEDIDA\s+)?(?:DE(?:\s+LA|L)?\s+)?TARA[\s:]+(.+)$/i,
+  },
+  {
+    label: 'UNIDAD DE PESO BRUTO',
+    pattern: /^UNIDAD\s+(?:DE\s+)?(?:MEDIDA\s+)?(?:DEL?\s+)?PESO\s+BRUTO[\s:]+(.+)$/i,
+  },
+  {
+    label: 'UNIDAD DE PESO NETO',
+    pattern: /^UNIDAD\s+(?:DE\s+)?(?:MEDIDA\s+)?(?:DEL?\s+)?PESO\s+NETO[\s:]+(.+)$/i,
+  },
+  { label: 'PAIS DESTINO', pattern: /^PAIS\s+(?:DE\s+)?DESTINO[^:]*[:\s]+(.+)$/i },
+]
+const LINE_SURCHARGE = /RECARGO\s+EN\s+LA\s+LINEA/i
+const LINE_SURCHARGE_PERCENT = /%\s*(\d+(?:[.,]\d+)?)|(\d+(?:[.,]\d+)?)\s*%/
+const LINE_SURCHARGE_LABEL = 'RECARGO EN LA LINEA'
+const REFERENCE_WORD = /REFERENCIA/i
+const REFERENCE_LABEL = /^.*?REFERENCIA\S*/i
+const EXPORT_NUMBER = /^\d+(?:[.,]\d+)?$/
+
+/**
+ * EN: A customs document a reference line of an export case names: its reference type (`TpoDocRef`, 807 to 812) and
+ * the short name written as the reason.
+ * ES: Un documento aduanero que nombra una línea de referencia de un caso de exportación: su tipo de referencia
+ * (`TpoDocRef`, 807 a 812) y el nombre corto que se escribe como razón.
+ */
+export type CustomsDocument = {
+  /** EN: Reference type, by Formato DTE 2.5 (807 DUS to 812 resolution of the customs service). ES: `TpoDocRef` — Tipo de referencia, según el Formato DTE 2.5 (807 DUS a 812 resolución del SNA). */
+  readonly type: number
+  /** EN: Short name of the document. ES: `RazonRef` — Nombre corto del documento. */
+  readonly name: string
+}
+
+// The customs documents of Formato DTE 2.5, field 2 of "Información de Referencia", by the words a set may name them
+// with: an abbreviation as a word of its own, or its name in full.
+const CUSTOMS_DOCUMENTS: readonly (CustomsDocument & { readonly pattern: RegExp })[] = [
+  { type: 807, name: 'DUS', pattern: /\bDUS\b|DOCUMENTO\s+UNICO\s+DE\s+SALIDA/ },
+  { type: 808, name: 'B/L', pattern: /\bB\/L\b|CONOCIMIENTO\s+DE\s+EMBARQUE|BILL\s+OF\s+LADING/ },
+  { type: 809, name: 'AWB', pattern: /\bAWB\b|AIR\s*WAYBILL|GUIA\s+AEREA/ },
+  { type: 810, name: 'MIC/DTA', pattern: /\bMIC\b|\bDTA\b/ },
+  { type: 811, name: 'CARTA DE PORTE', pattern: /CARTA\s+DE\s+PORTE/ },
+  { type: 812, name: 'RESOLUCION SNA', pattern: /\bRESOLUCION\b.*\b(?:SNA|ADUANAS?)\b/ },
+]
+
+/**
+ * EN: The customs documents a text names, in the order it names them, each once: read in any case and without
+ * accents.
+ * ES: Los documentos aduaneros que nombra un texto, en el orden en que los nombra, cada uno una vez: leído sin
+ * distinguir mayúsculas y sin tildes.
+ * @param text EN: the text after the label of a reference line. ES: el texto tras el rótulo de una línea de referencia.
+ */
+export const customsDocumentsOf = (text: string): readonly CustomsDocument[] => {
+  const upper = plain(text)
+  return CUSTOMS_DOCUMENTS.flatMap(({ type, name, pattern }) => {
+    const found = pattern.exec(upper)
+    return found === null ? [] : [{ type, name, at: found.index }]
+  })
+    .sort((a, b) => a.at - b.at)
+    .map(({ type, name }) => ({ type, name }))
+}
+
+type ExportColumn = 'quantity' | 'unit' | 'unitPrice' | 'discount' | 'other'
+
+const exportColumn = (header: string): ExportColumn => {
+  const upper = header.toUpperCase()
+  if (upper.includes('CANTIDAD')) return 'quantity'
+  if (upper.includes('UNIDAD')) return 'unit'
+  if (upper.includes('PRECIO') || upper.includes('VALOR')) return 'unitPrice'
+  if (upper.includes('DESCUENTO')) return 'discount'
+  return 'other'
+}
+
+// A row of an export case before any header is its name and its quantity, as a note names what it returns.
+const NO_HEADER: readonly ExportColumn[] = ['quantity']
+
+const exportNumber = (cell: string): number | null => (EXPORT_NUMBER.test(cell) ? Number(cell.replace(',', '.')) : null)
+
+// A row of an export case read by the columns of the header above it. A number column that holds no number keeps the
+// row out; a row whose header has a value and no quantity counts 1, the value being the line's.
+const exportItem = (parts: readonly string[], columns: readonly ExportColumn[]): TestCaseItem | null => {
+  const item: { name: string; quantity: number; unit?: string; unitPrice?: number; discount?: string } = {
+    name: parts[0],
+    quantity: 1,
+  }
+  for (const [index, cell] of parts.slice(1).entries()) {
+    const column = columns[index] ?? 'other'
+    if (column === 'unit') item.unit = cell
+    else if (column === 'discount') item.discount = cell
+    else if (column === 'quantity' || column === 'unitPrice') {
+      const value = exportNumber(cell)
+      if (value === null) return null
+      if (column === 'quantity') item.quantity = value
+      else item.unitPrice = value
+    }
+  }
+  return item
+}
+
+const parseExportField = (current: MutableCase, line: string): boolean => {
+  if (REFERENCE_WORD.test(line) && customsDocumentsOf(line).length > 0) {
+    const value = line.includes(':') ? line.slice(line.indexOf(':') + 1) : line.replace(REFERENCE_LABEL, '')
+    current.customsReferences = [...current.customsReferences!, value.trim()]
+    return true
+  }
+  if (LINE_SURCHARGE.test(line)) {
+    const percent = LINE_SURCHARGE_PERCENT.exec(line)
+    if (percent !== null) current.exportFields[LINE_SURCHARGE_LABEL] = (percent[1] ?? percent[2]).replace(',', '.')
+    return true
+  }
+  for (const { label, pattern } of EXPORT_ONLY_LINES) {
+    const match = pattern.exec(line)
+    if (match !== null) {
+      current.exportFields[label] = match[1].trim()
+      return true
+    }
+  }
+  return parseCaseField(current, line)
+}
+
+// An export case: its labelled lines, then its item rows, read by the columns of the last `ITEM` header. Returns the
+// columns the next row is read by. Any other line is nothing. Under a header of several columns, a row with no colon
+// that fills every one of them is an item whatever its name starts with: a label of the case holds one value, or a
+// colon, and read as a label such a row would lose its item and put its numbers in the freight or the insurance. A
+// row that leaves a column empty is not told apart from a label this way: if its name starts like one, it is still
+// read as that label.
+const parseExportLine = (
+  current: MutableCase,
+  line: string,
+  columns: readonly ExportColumn[],
+): readonly ExportColumn[] => {
+  const parts = cells(line)
+  const fills = columns.length > 1 && parts.length === columns.length + 1 && !line.includes(':')
+  const row = fills ? exportItem(parts, columns) : null
+  if (row !== null) {
+    current.items.push(row)
+    return columns
+  }
+  if (parseExportField(current, line)) return columns
+  if (/^ITEM\b/i.test(line) && parts.length > 1) return parts.slice(1).map(exportColumn)
+  if (parts.length < 2) return columns
+  const item = exportItem(parts, columns)
+  if (item !== null) current.items.push(item)
+  return columns
 }

@@ -55,7 +55,13 @@ import {
 import { longDate } from './words'
 import type { PrintableCommission, PrintableDocument, PrintableItem, PrintableReference } from './parse'
 import { buildRoll, drawRoll, rollHeight } from './roll'
-import { loadBarcodeModule, renderTedBarcodeWith, type BarcodeModule, type StampGeometry } from './stamp'
+import {
+  isStampGeometry,
+  loadBarcodeModule,
+  renderTedBarcodeWith,
+  type BarcodeModule,
+  type StampGeometry,
+} from './stamp'
 
 /**
  * EN: A logo for the top left of the sample.
@@ -96,7 +102,7 @@ export type RenderPrintedSampleOptions = PrintedSampleOptions & {
   readonly paper?: 'sheet' | 'roll'
   /** EN: Print the PDF417 stamp and its legends; default true. `false` is allowed only for receipts, 39 and 41, whose printed stamp is optional from 1 January 2026 (Res. Ex. SII N° 207 of 2025); the legends go with it, and the XML keeps its `TED`. ES: Imprimir el timbre PDF417 y sus leyendas; por defecto true. `false` solo se admite en boletas, 39 y 41, cuyo timbre impreso es opcional desde el 1 de enero de 2026 (Res. Ex. SII N° 207 de 2025); las leyendas se van con él, y el XML conserva su `TED`. */
   readonly stamp?: boolean
-  /** EN: **Unstable**: draw the stamp as `StampGeometry` says instead of the way of every release so far; `'instructions'` is the symbol section A.2.5 of the SII's instructions describes, drawn with one factor for its two sides. For the sheet alone: refused on continuous paper. No stamp drawn this way has been printed and read back with a scanner yet. ES: **Inestable**: dibujar el timbre como dice `StampGeometry` en vez de como en todas las versiones hasta ahora; `'instructions'` es el símbolo que describe la sección A.2.5 del instructivo del SII, dibujado con un solo factor para sus dos lados. Solo para la hoja: se rechaza en papel continuo. Ningún timbre dibujado así se ha impreso y leído de vuelta con un lector todavía. */
+  /** EN: **Unstable**: how the stamp is drawn, as `StampGeometry` says. The sheet draws `'instructions'`, the symbol section A.2.5 of the SII's instructions describes, with one factor for its two sides and a quarter of an inch clear above and below it; `'compact'` draws on the sheet the stamp of every release up to 0.16.0. The continuous paper always draws `'compact'` and refuses `'instructions'`, whose module there is under two dots of a 203 DPI printer. No stamp drawn as `'instructions'` has been printed and read back with a scanner yet. ES: **Inestable**: cómo se dibuja el timbre, según `StampGeometry`. La hoja dibuja `'instructions'`, el símbolo que describe la sección A.2.5 del instructivo del SII, con un solo factor para sus dos lados y un cuarto de pulgada libre sobre y bajo él; `'compact'` dibuja en la hoja el timbre de todas las versiones hasta la 0.16.0. El papel continuo siempre dibuja `'compact'` y rechaza `'instructions'`, cuyo módulo ahí queda bajo dos puntos de una impresora de 203 DPI. Ningún timbre dibujado como `'instructions'` se ha impreso y leído de vuelta con un lector todavía. */
   readonly unstable_stampGeometry?: StampGeometry
 }
 
@@ -659,8 +665,12 @@ const drawAcknowledgement = (canvas: Canvas, legendLines: readonly string[], y: 
   return y + boxHeight
 }
 
-// The size the stamp of every release so far is drawn at: its width and its height held to the stamp box each on its
-// own.
+// The room of the stamp above its legends: the stamp box at its tallest and the space above and below it, which for
+// the symbol of the instructions is the room they ask to keep clear.
+const stampRoom = (geometry: StampGeometry): number =>
+  STAMP.maxHeight + (geometry === 'instructions' ? STAMP.clearance * 2 : GAP.section + STAMP.legendGap)
+
+// The size the compact stamp is drawn at: its width and its height held to the stamp box each on its own.
 const fieldStampSize = (natural: { readonly width: number; readonly height: number }) => {
   const targetWidth = Math.max(STAMP.minWidth, Math.min(STAMP.maxWidth, natural.width))
   const scale = targetWidth / natural.width
@@ -676,16 +686,18 @@ const drawStamp = (
   y: number,
   resolution: string,
   verification: string,
-  geometry: StampGeometry | undefined,
+  geometry: StampGeometry,
 ): number => {
   const black = canvas.paint(COLOURS.black)
   const natural = image.scale(1)
-  // The symbol of the instructions keeps its proportion: both sides by one factor.
-  const { width, height } = geometry === undefined ? fieldStampSize(natural) : stampSize(natural)
+  // The symbol of the instructions keeps its proportion, both sides by one factor, and the room the instructions ask
+  // to keep clear above and below it.
+  const instructions = geometry === 'instructions'
+  const { width, height } = instructions ? stampSize(natural) : fieldStampSize(natural)
   const x = MARGIN + STAMP.marginLeft
-  let yy = y + GAP.section
+  let yy = y + (instructions ? STAMP.clearance : GAP.section)
   canvas.page.drawImage(image, { x, y: canvas.height - yy - height, width, height })
-  yy += height + STAMP.legendGap
+  yy += height + (instructions ? STAMP.clearance : STAMP.legendGap)
   drawText(canvas, 'Timbre Electrónico SII', x, yy, canvas.fonts.bold, FONT.legend, black)
   yy += LINE.legal
   drawText(canvas, resolution, x, yy, canvas.fonts.normal, FONT.legend, black)
@@ -755,7 +767,7 @@ type SheetInput = {
   readonly resolution: string
   readonly verification: string
   readonly transferable: boolean
-  readonly stampGeometry: StampGeometry | undefined
+  readonly stampGeometry: StampGeometry
 }
 
 // A table: its title and column head, kept with its first row, and one block per row. A page that opens with a row
@@ -939,7 +951,7 @@ const sheetBlocks = ({
     ...(stamp
       ? [
           {
-            height: GAP.section + STAMP.maxHeight + STAMP.legendGap + LINE.legal * 3,
+            height: stampRoom(stampGeometry) + LINE.legal * 3,
             gap: 0,
             draw: (canvas: Canvas, y: number) => drawStamp(canvas, stamp, y, resolution, verification, stampGeometry),
           },
@@ -1030,10 +1042,13 @@ const draw = async (
     bold: await document.embedFont(pdf.StandardFonts.HelveticaBold),
   }
   const logo = await embedLogo(document, options.logo)
+  // The sheet draws the symbol of the instructions; the continuous paper, the compact one.
+  const stampGeometry: StampGeometry =
+    options.unstable_stampGeometry ?? (options.paper === 'roll' ? 'compact' : 'instructions')
   const stamp =
     doc.tedXml === '' || options.stamp === false
       ? null
-      : await document.embedPng(await renderTedBarcodeWith(modules.barcode, doc.tedXml, options.unstable_stampGeometry))
+      : await document.embedPng(await renderTedBarcodeWith(modules.barcode, doc.tedXml, stampGeometry))
   // A document with no TED says so where the stamp goes; a receipt printed without its stamp on purpose does not.
   const unstamped = doc.tedXml === '' && options.stamp !== false
   const transferable = options.transferable === true && needsTransferableCopy(doc)
@@ -1053,7 +1068,7 @@ const draw = async (
     resolution,
     verification,
     transferable,
-    stampGeometry: options.unstable_stampGeometry,
+    stampGeometry,
   })
   const single = paginate(headerBottom(doc, fonts, logo, MARGIN, false), blocks)
   // A document of several pages numbers them under the SII office, so its header may be taller.
@@ -1085,7 +1100,7 @@ const draw = async (
 const checkPaperAndStamp = (doc: PrintableDocument, options: RenderPrintedSampleOptions): void => {
   const { paper, stamp, unstable_stampGeometry: geometry } = options
   // The geometry of the instructions is for the sheet: on the roll its module is under two dots of a 203 DPI printer.
-  if (geometry !== undefined && (geometry !== 'instructions' || paper === 'roll'))
+  if (geometry !== undefined && (!isStampGeometry(geometry) || (geometry === 'instructions' && paper === 'roll')))
     throw new DteError('INVALID_OPTION', { field: 'unstable_stampGeometry' })
   if (paper !== undefined && paper !== 'sheet' && paper !== 'roll')
     throw new DteError('INVALID_OPTION', { field: 'paper', value: paper })
