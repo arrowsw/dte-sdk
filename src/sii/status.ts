@@ -156,7 +156,7 @@ export type WaitForUploadStatusInput = QueryUploadStatusInput & {
   readonly intervalMs?: number
   /** EN: Give up after, ms (600 000). ES: Tiempo máximo de espera, ms (600 000). */
   readonly timeoutMs?: number
-  /** EN: Wait before the first poll, ms: the `retryAfterMs` of the upload's receipt, which is what the SII asks to wait. It is waited whole, whatever `timeoutMs` says, and `timeoutMs` counts from the first poll. None when left out, null or 0. ES: Espera antes del primer sondeo, ms: el `retryAfterMs` del recibo del envío, que es lo que el SII pide esperar. Se espera entera, diga lo que diga `timeoutMs`, y `timeoutMs` se cuenta desde el primer sondeo. Ninguna si se omite, es null o es 0. */
+  /** EN: Wait before the first poll, ms: the `retryAfterMs` of the upload's receipt, which is what the SII asks to wait. It is waited whole, whatever `timeoutMs` says, up to one hour, and `timeoutMs` counts from the first poll. None when left out, null or 0. ES: Espera antes del primer sondeo, ms: el `retryAfterMs` del recibo del envío, que es lo que el SII pide esperar. Se espera entera, diga lo que diga `timeoutMs`, hasta una hora, y `timeoutMs` se cuenta desde el primer sondeo. Ninguna si se omite, es null o es 0. */
   readonly initialDelayMs?: number | null
 }
 
@@ -507,9 +507,13 @@ const pollOnce = (sii: SiiClient, input: QueryUploadStatusInput, overrides: Call
     },
   )
 
+// The longest initial delay that is waited: one hour. A longer one would hold the caller for as long as a header
+// says, and past 2^31 - 1 ms a timer does not wait at all.
+const MAX_INITIAL_DELAY_MS = 60 * 60 * 1000
+
 /**
  * EN: Polls `queryUploadStatus` every `intervalMs` until the status is no longer `pending`, up to `timeoutMs`, after
- * waiting `initialDelayMs` when one is given, which is no part of `timeoutMs`. During a
+ * waiting `initialDelayMs` when one is given, which is no part of `timeoutMs` and is cut to one hour. During a
  * wait the polling interval replaces the retry policy: each poll is a single request (the client's and the call's
  * `retry` are ignored), its timeout is the smaller of the normal timeout of the call and the time remaining, and the
  * sleep between polls is the smaller of `intervalMs` and the time remaining, so the wait ends at `timeoutMs` and not
@@ -521,7 +525,7 @@ const pollOnce = (sii: SiiClient, input: QueryUploadStatusInput, overrides: Call
  * query-error code, or the error code of a retryable failure (`REQUEST_TIMEOUT`…), so it tells which. It uses the
  * client's `now` and `sleep`, and stops with `REQUEST_ABORTED` when the caller's `signal` fires.
  * ES: Sondea `queryUploadStatus` cada `intervalMs` hasta que el estado deje de ser `pending`, hasta `timeoutMs`, después
- * de esperar `initialDelayMs` si se entrega, que no es parte de `timeoutMs`.
+ * de esperar `initialDelayMs` si se entrega, que no es parte de `timeoutMs` y se corta a una hora.
  * Durante la espera el intervalo de sondeo reemplaza a la política de reintentos: cada sondeo es una sola petición (el
  * `retry` del cliente y el de la llamada se ignoran), su timeout es el menor entre el timeout normal de la llamada y el
  * tiempo que queda, y la pausa entre sondeos es la menor entre `intervalMs` y el tiempo que queda, así que la espera
@@ -548,8 +552,9 @@ export const waitForUploadStatus = async (
   if (!(Number.isFinite(initialDelayMs) && initialDelayMs >= 0))
     throw new DteError('INVALID_OPTION', { field: 'initialDelayMs' })
   // The wait the SII asked for comes first and is no part of the time to give up, which counts from the first
-  // question: a delay as long as `timeoutMs` would otherwise end the wait before it asked once.
-  if (initialDelayMs > 0) await sii.sleep(initialDelayMs, overrides?.signal)
+  // question: a delay as long as `timeoutMs` would otherwise end the wait before it asked once. It is the SII's
+  // header that says how long, so it has a bound of its own.
+  if (initialDelayMs > 0) await sii.sleep(Math.min(initialDelayMs, MAX_INITIAL_DELAY_MS), overrides?.signal)
   const deadline = sii.now().getTime() + timeoutMs
   const poll = async (polled: number, lastCode: string): Promise<UploadStatus> => {
     // An injected `sleep` may ignore the signal, so it is checked here as well as handed to `sleep`.

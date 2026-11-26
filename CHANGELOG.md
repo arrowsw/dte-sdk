@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   receipt of an upload dropped that header, and `waitForUploadStatus` asked at once and then every five seconds. The
   receipt now carries the wait in milliseconds, or null when the answer names none, and `waitForUploadStatus` takes it
   as `initialDelayMs`: it waits that long before its first poll, whatever `timeoutMs` says, and `timeoutMs` counts
-  from that first poll, so a wait as long as the SII asks for still ends in a question.
+  from that first poll, so a wait as long as the SII asks for still ends in a question. A delay over one hour is
+  cut to the hour: the header is the SII's to write, and a longer one would hold the caller for as long as it says.
   - **What to change:** nothing in a call. Code that builds an `UploadReceipt` of its own, as a test double does, must
     give it `retryAfterMs`.
 - **The documents the counts of an upload leave out** (`documents` of `queryUploadStatus` and `waitForUploadStatus`,
@@ -45,9 +46,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   answers a state with no gloss, so `uploadStatusMessage` gives it the catalog's, and the catalog read a repeated
   upload (`RPT`) as "Rechazado por schema". The SII's OpenAPI of its receipts API lists the states of an upload: "RCH -
   Rechazado por errores en informacion", "RCO - Rechazado por consistencia", "VOF - No se encontro el archivo .xml",
-  "RPT - Envio Repetido Rechazado", and on the REST channel those are now their glosses. That file describes the REST
-  channel alone: on SOAP, where the SII sends its own gloss, the catalog's stay as they were. Their class,
-  `rejected`, does not change.
+  "RPT - Envio Repetido Rechazado", and on the REST channel those are now their glosses, spelled with their accents
+  as the rest of the catalog is. That file describes the REST channel alone: on SOAP, where the SII sends its own
+  gloss, the catalog's stay as they were. Their class, `rejected`, does not change.
 - **A credit note and a debit note need the reference of the document they change.** Formato DTE 2.5 makes the zone
   "Información Referencia" code 1 on both, national (61, 56) and of export (112, 111): "Dato obligatorio. El dato debe
   estar en el documento siempre". The schema leaves `Referencia` optional, since one root serves every type, and
