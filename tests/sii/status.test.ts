@@ -701,6 +701,20 @@ describe('waitForUploadStatus', () => {
     expect(pending.sleeps).toEqual([5000, 1000, 1000, 500])
   })
 
+  // The header is the SII's to write: a delay of days would hold the caller for days, and one past what a timer can
+  // count (2^31 - 1 ms) would not wait at all.
+  test.each([3_600_001, 86_400_000, 3e9])('an initial delay of %p ms is waited for an hour', async (initialDelayMs) => {
+    // The clock stands still, so the cached token outlives the hour.
+    const sleeps: number[] = []
+    const sleep: SleepFn = async (ms) => {
+      sleeps.push(ms)
+    }
+    const { sii, fake } = cachedSii(route(EST_UP, fx('soap-estup-epr.xml')), { sleep })
+    expect((await waitForUploadStatus(sii, { trackId: '9876543210', initialDelayMs })).code).toBe('EPR')
+    expect(sleeps).toEqual([3_600_000])
+    expect(requestsTo(fake.requests, EST_UP)).toBe(1)
+  })
+
   test('the initial delay hears the caller signal: aborted while it waits, no question is asked', async () => {
     const clock = testClock()
     const controller = new AbortController()
