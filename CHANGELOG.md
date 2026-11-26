@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-26
+
 ### Added
 
 - **The wait the SII asks for after an upload** (`UploadReceipt.retryAfterMs`, `initialDelayMs` of
@@ -27,7 +29,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`unreported`, null without `documents` or without counts), so that each of them can be asked for with
   `queryDocumentStatus`. The verdict itself does not change.
   - **What to change:** code that builds an `UploadStatus` of its own must give it `unreported`.
-
 - **Credit notes in the folio consumption report.** `ConsumoFolio_v10.xsd` admits three document types in a summary
   (`TipoConsumoType`): the receipt (39), the exempt receipt (41) and the credit note (61), "Nota de Credito
   Electronica". `createFolioConsumption` refused a 61 (`INVALID_DOCUMENT_TYPE`). It now reports it, after the
@@ -2148,7 +2149,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Jest, ESLint, Prettier, size-limit, Stryker, CI and tag-triggered publish)
   and a single `hello()` export that returns `'dte-sdk is coming'`.
 
-[Unreleased]: https://github.com/arrowsw/dte-sdk/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/arrowsw/dte-sdk/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.17.0
 [0.16.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.16.0
 [0.15.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.15.0
 [0.14.0]: https://github.com/arrowsw/dte-sdk/releases/tag/v0.14.0
