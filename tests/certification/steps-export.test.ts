@@ -273,6 +273,41 @@ describe('the wait for the approval of the export sets', () => {
     expect((await wait(both, ...repeat(progressPage('SET', {}), 5))).outcome).toBe('timedOut')
   })
 
+  // The state of a row is its own: a row that shows none yet must not answer with the state of the row below it.
+  const table = (...rows: readonly string[]) => page(`<table>\n${rows.join('\n')}\n</table>`)
+  const row = (label: string, cell: string) => `<tr><td><font>${label}</font></td><td>${cell}</td></tr>`
+  const APPROVED = '<b>REVISADO CONFORME</b>'
+
+  test('an export row with no state of its own takes none from the rows around it', async () => {
+    const empty = table(row(FIRST, ''), row(SECOND, APPROVED))
+    expect(parseProgressPage(empty).states).toEqual({ export2: { text: 'REVISADO CONFORME', state: 'approved' } })
+    // A hidden input, as the page shows a book that waits, and the simulation approved below it.
+    const hidden = table(row(FIRST, '<input type=hidden name="EST9" value="S21">'), row('SET DE SIMULACION', APPROVED))
+    expect(Object.keys(parseProgressPage(hidden).states)).toEqual(['simulation'])
+    // The sets named in a paragraph, above the table of another set.
+    const mention = page(`<p>Los ${FIRST} se revisan aparte.</p>${table(row('SET BASICO', APPROVED))}`)
+    expect(Object.keys(parseProgressPage(mention).states)).toEqual(['basic'])
+    // A set that was sent and whose row shows nothing is not approved by the row below it.
+    const result = await wait(both, ...repeat(empty, 5))
+    expect(result).toMatchObject({ outcome: 'timedOut', detail: 'not shown by the progress page: export1' })
+  })
+
+  test('the second export set is the one whose label carries a 2, however it is written', () => {
+    for (const label of [
+      'SET DOCUMENTOS DE EXPORTACION 2',
+      'SET DOCUMENTOS DE EXPORTACION (2)',
+      'SET DOC. EXPORTACION(2)',
+    ])
+      expect(Object.keys(parseProgressPage(table(row(label, '<b>EN REVISION</b>'))).states)).toEqual(['export2'])
+    for (const label of ['SET DOCUMENTOS DE EXPORTACION (1)', 'SET DOC. EXPORTACION'])
+      expect(Object.keys(parseProgressPage(table(row(label, '<b>EN REVISION</b>'))).states)).toEqual(['export1'])
+  })
+
+  test('a wait with no set on record reads the rows it read before the export sets had one', async () => {
+    const rejected = progressPage('SET', { [FIRST]: 'RECHAZADO', [SECOND]: 'EN REVISION' })
+    expect((await wait({}, rejected)).outcome).toBe('approved')
+  })
+
   test('the sets the page already showed are waited for as before, with or without export sets', async () => {
     const approved = progressPage('SET', { 'SET BASICO': 'REVISADO CONFORME' })
     expect((await wait({ basic: sent('1') }, approved)).outcome).toBe('approved')

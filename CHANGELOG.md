@@ -47,11 +47,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run asks for folios, and so does the simulation before it asks for its own; a currency the SII does not list is
   refused there with its case (`INVALID_OPTION`, `currency`). The tests hold the documents to field behaviour, total
   by total. Two things have not been seen and are guessed. One is the literal text of an export set: its labels are
-  read tolerantly, a row that fills every column of its header is read as an item whatever its name starts with, two
-  sets named alike are both planned, and the fixture is a reconstruction. The other is the rows the progress page
-  gives these sets: they are looked for by the labels of the declaration form (`SET DOCUMENTOS DE EXPORTACION`, and
-  the same with `(2)`), and an export set that was sent and that the page does not show is not taken as approved,
-  where the other sets are: the wait ends `timedOut` with a `detail` that names it.
+  read tolerantly and the fixture is a reconstruction. A row that fills every column of its header is read as an item
+  whatever its name starts with; one that leaves a column empty and starts like a label is still read as that label. A
+  set whose name carries its number takes the slot of that number, and of two with the same number the last one wins,
+  as for every other kind. The other is the rows the progress page gives these sets: they are looked for as `SET` …
+  `EXPORT` in one label, the second set being the one whose label carries a 2 (the declaration form writes `SET
+  DOCUMENTOS DE EXPORTACION(2)`), and the state of each is the bold text of its own row. An export set that was sent
+  and whose row the page does not show, or shows with no state, is not taken as approved, where the other sets are:
+  the wait ends `timedOut` with a `detail` that names it. A caller who sees the sets approved on a page this reading
+  does not find goes on by saving the state with `setsApproved: true` and `stage: 'books'`.
 - **The share of a percent as a whole amount on an export line** (`wholeShares`). `DescuentoMonto` and `RecargoMonto`
   hold whole numbers only, so an export line keeps the four decimals of the share of a percent and writes the percent
   alone when the share is not whole. A line with `wholeShares` writes the share, rounded once to a whole number,

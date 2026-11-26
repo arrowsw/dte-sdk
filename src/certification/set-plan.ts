@@ -592,16 +592,16 @@ const exportPlan = (set: TestSet): ExportSetPlan => {
 }
 
 // The slot of an export set: the number its name gives in parentheses, else the first one still free. Neither name
-// was seen; the declaration form names the second set `SET DOCUMENTOS DE EXPORTACION(2)`.
+// was seen; the declaration form names the second set `SET DOCUMENTOS DE EXPORTACION(2)`. A set with a number always
+// takes the slot of that number, since its slot is the row it is declared on: of two sets with the same number the
+// last one wins, as for every other kind.
 const EXPORT_SLOT = /\(\s*([12])\s*\)/
 const exportSlot = (
   set: TestSet,
   plan: { readonly export1?: ExportSetPlan; readonly export2?: ExportSetPlan },
 ): 'export1' | 'export2' | null => {
   const named = EXPORT_SLOT.exec(set.name)?.[1]
-  const wanted = named === undefined ? undefined : named === '1' ? 'export1' : 'export2'
-  // The slot its name gives while it is free; else the one that is, so two sets named alike are both planned.
-  if (wanted !== undefined && plan[wanted] === undefined) return wanted
+  if (named !== undefined) return named === '1' ? 'export1' : 'export2'
   if (plan.export1 === undefined) return 'export1'
   return plan.export2 === undefined ? 'export2' : null
 }

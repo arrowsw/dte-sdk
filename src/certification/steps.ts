@@ -403,15 +403,21 @@ export const declareTestSets = async (
  * that fails only uses up its attempt. Of the states the page shows for the sets sent (or of every state, when no set
  * was sent), all approved is approval, and so is a page that shows none of them; a rejected or inconsistent one stops
  * with its wording, and the readable text of the page is kept as the artefact `sets-prueba/avance-rechazo.txt`. An
- * export set is the exception: the page has not been seen with one, so an export set that was sent and that the page
- * does not show is not approved, and a wait that ends without it times out with a `detail` that names it.
+ * export set is the exception: the page has not been seen with one, so an export set that was sent and whose row the
+ * page does not show, or shows with no state, is not approved, and a wait that ends without it times out with a
+ * `detail` that names it. With no set on record the rows of the export sets are not looked at. A caller who sees on
+ * the portal that the export sets are approved, on a page whose rows this reading does not find, goes on by saving
+ * the state it got with `setsApproved: true` and `stage: 'books'` in its store.
  * ES: Espera la aprobación de los sets enviados: 5 intentos cada 10 s, durmiendo primero, leyendo la página de avance.
  * Una lectura que falla solo gasta su intento. De los estados que la página muestra para los sets enviados (o de todos
  * los estados, si no se envió ninguno), todos aprobados es aprobación, y también lo es una página que no muestra
  * ninguno; uno rechazado o inconsistente detiene con su texto, y el texto legible de la página queda como el artefacto
  * `sets-prueba/avance-rechazo.txt`. Un set de exportación es la excepción: la página no se ha visto con uno, así que
- * un set de exportación enviado que la página no muestra no está aprobado, y una espera que termina sin él agota su
- * tiempo con un `detail` que lo nombra.
+ * un set de exportación enviado cuya fila la página no muestra, o muestra sin estado, no está aprobado, y una espera
+ * que termina sin él agota su tiempo con un `detail` que lo nombra. Sin ningún set registrado no se miran las filas
+ * de los sets de exportación. Quien vea en el portal que los sets de exportación están aprobados, en una página cuyas
+ * filas esta lectura no encuentra, sigue guardando en su almacén el estado que recibió con `setsApproved: true` y
+ * `stage: 'books'`.
  */
 export const waitForTestSetsApproval = async (
   deps: CertificationDependencies,
@@ -429,7 +435,10 @@ export const waitForTestSetsApproval = async (
       return null
     })
     if (report === null) continue
-    const relevant = Object.entries(report.states).filter(([key]) => wanted.length === 0 || wanted.includes(key))
+    // With no set on record every state counts, less those of the export sets, which the page was not read for.
+    const relevant = Object.entries(report.states).filter(([key]) =>
+      wanted.length === 0 ? !(EXPORT_SET_KEYS as readonly string[]).includes(key) : wanted.includes(key),
+    )
     // The page has not been seen with an export set: one that was sent and that the page does not show is not
     // approved, where a page that shows none of the other sets is, as field behaviour takes it.
     unseen = EXPORT_SET_KEYS.filter((key) => wanted.includes(key) && report.states[key] === undefined)

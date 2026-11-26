@@ -195,11 +195,16 @@ describe('the export plans', () => {
       ),
     )
     expect([unnamed.export1?.attentionNumber, unnamed.export2?.attentionNumber]).toEqual(['1', '2'])
-    // Two sets named alike are both planned: the second takes the slot left free.
+    // A set never takes the slot of another number: of two sets named alike the last one wins, as for every other
+    // kind, and a set with its number takes its slot from one that had none.
     const twice = planCertificationSets(
       parseTestSetText(header('DOCUMENTOS DE EXPORTACION (2)', 7) + header('DOCUMENTOS DE EXPORTACION (2)', 8)),
     )
-    expect([twice.export1?.attentionNumber, twice.export2?.attentionNumber]).toEqual(['8', '7'])
+    expect([twice.export1?.attentionNumber, twice.export2?.attentionNumber]).toEqual([undefined, '8'])
+    const late = planCertificationSets(
+      parseTestSetText(header('DOCUMENTOS DE EXPORTACION', 5) + header('DOCUMENTOS DE EXPORTACION (1)', 6)),
+    )
+    expect([late.export1?.attentionNumber, late.export2?.attentionNumber]).toEqual(['6', undefined])
   })
 
   test('a set built by hand without customs references plans none', () => {

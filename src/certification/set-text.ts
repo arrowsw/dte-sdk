@@ -788,7 +788,9 @@ const parseExportField = (current: MutableCase, line: string): boolean => {
 // An export case: its labelled lines, then its item rows, read by the columns of the last `ITEM` header. Returns the
 // columns the next row is read by. Any other line is nothing. Under a header of several columns, a row with no colon
 // that fills every one of them is an item whatever its name starts with: a label of the case holds one value, or a
-// colon, and read as a label such a row would lose its item and put its numbers in the freight or the insurance.
+// colon, and read as a label such a row would lose its item and put its numbers in the freight or the insurance. A
+// row that leaves a column empty is not told apart from a label this way: if its name starts like one, it is still
+// read as that label.
 const parseExportLine = (
   current: MutableCase,
   line: string,
