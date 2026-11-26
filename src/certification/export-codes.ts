@@ -23,7 +23,7 @@ export type CustomsCodes = {
   readonly saleModality: (name: string) => number | null
   /** EN: `FmaPagExp` of an export payment form. ES: `FmaPagExp` de una forma de pago de exportación. */
   readonly paymentTerms: (name: string) => number | null
-  /** EN: `CodTpoBultos` of a package type; of a name that several rows begin with, the first of them. ES: `CodTpoBultos` de un tipo de bulto; de un nombre con que empiezan varias filas, la primera. */
+  /** EN: `CodTpoBultos` of a package type; of a container named without its size in feet, the first row of that name. ES: `CodTpoBultos` de un tipo de bulto; de un contenedor nombrado sin su medida en pies, la primera fila de ese nombre. */
   readonly packageType: (name: string) => number | null
   /** EN: `CodUnidMedTara`, `CodUnidPesoBruto`, `CodUnidPesoNeto` of a unit. ES: `CodUnidMedTara`, `CodUnidPesoBruto`, `CodUnidPesoNeto` de una unidad. */
   readonly unit: (name: string) => number | null
@@ -64,10 +64,16 @@ const find = (table: readonly CustomsEntry[], name: string): number | null => {
 }
 
 // A package type the set names without its size (`CONTENEDOR REFRIGERADO`, where Anexo 51-23 lists one of 20 feet and
-// one of 40): the first row of the table that begins with the name.
-const firstBeginning = (table: readonly CustomsEntry[], name: string): number | null => {
+// one of 40): the first row of the table whose name is that name and a size in feet. A name that only begins other
+// rows (`CONTENEDOR`, `CAJAS`) names none of them.
+const SIZE_IN_FEET = /^\d+PIES$/
+const withoutSize = (table: readonly CustomsEntry[], name: string): number | null => {
   const wanted = key(name)
-  return (wanted === '' ? undefined : table.find((entry) => key(entry.name).startsWith(wanted)))?.code ?? null
+  const sized = (entry: CustomsEntry): boolean => {
+    const text = key(entry.name)
+    return text.startsWith(wanted) && SIZE_IN_FEET.test(text.slice(wanted.length))
+  }
+  return (wanted === '' ? undefined : table.find(sized))?.code ?? null
 }
 
 // Every port of Anexo 51-11 is listed under a heading.
@@ -98,8 +104,7 @@ export const loadCustomsCodes = async (): Promise<CustomsCodes> => {
     saleClause: (name) => find(tables.CUSTOMS_SALE_CLAUSES, name),
     saleModality: (name) => find(tables.CUSTOMS_SALE_MODES, name),
     paymentTerms: (name) => find(tables.CUSTOMS_PAYMENT_TERMS, name),
-    packageType: (name) =>
-      find(tables.CUSTOMS_PACKAGE_TYPES, name) ?? firstBeginning(tables.CUSTOMS_PACKAGE_TYPES, name),
+    packageType: (name) => find(tables.CUSTOMS_PACKAGE_TYPES, name) ?? withoutSize(tables.CUSTOMS_PACKAGE_TYPES, name),
     unit: (name) => find(tables.CUSTOMS_UNITS, UNIT_ALIASES[key(name)] ?? name),
   }
 }

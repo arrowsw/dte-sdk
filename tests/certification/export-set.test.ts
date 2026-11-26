@@ -153,7 +153,7 @@ describe('the export plans', () => {
       serviceIndicator: 4,
       currency: 'DOLAR USA',
       customs: { receiverCountry: 'VENEZUELA', destinationCountry: 'VENEZUELA' },
-      customsReferences: [{ type: 812, name: 'RESOLUCION SNA' }],
+      customsReferences: [{ type: 813, name: 'PASAPORTE' }],
     })
   })
 
@@ -163,23 +163,36 @@ describe('the export plans', () => {
         'CASO 7-1',
         'DOCUMENTO  FACTURA DE EXPORTACION ELECTRONICA',
         'ITEM  VALOR LINEA',
-        'ALOJAMIENTO HABITACIONES  42',
-        'MONEDA DE LA OPERACION: DOLAR USA',
-        'NACIONALIDAD: ALEMANIA',
+        'ALOJAMIENTO HABITACIONES  350',
+        'MONEDA DE LA OPERACION: YEN',
+        'NACIONALIDAD: FRANCIA',
         ...more,
       ]).documents[0]
-    expect(lodgingOf().customsReferences).toEqual([{ type: 812, name: 'RESOLUCION SNA' }])
+    // The passport of the guest (813), which Formato DTE 2.5 lists among the documents a reference may name.
+    expect(lodgingOf().customsReferences).toEqual([{ type: 813, name: 'PASAPORTE' }])
     expect(lodgingOf('REFERENCIA: DUS').customsReferences).toEqual([{ type: 807, name: 'DUS' }])
-    expect(lodgingOf().customs).toEqual({ receiverCountry: 'ALEMANIA', destinationCountry: 'ALEMANIA' })
+    expect(lodgingOf('REFERENCIA: RESOLUCION SNA').customsReferences).toEqual([{ type: 812, name: 'RESOLUCION SNA' }])
+    expect(lodgingOf('REFERENCIA: PASAPORTE CLIENTE EXTRANJERO').customsReferences).toEqual([
+      { type: 813, name: 'PASAPORTE' },
+    ])
+    expect(lodgingOf().customs).toEqual({ receiverCountry: 'FRANCIA', destinationCountry: 'FRANCIA' })
     // A service that names none is given none.
     const service = planOf([
       'CASO 7-1',
       'DOCUMENTO  FACTURA DE EXPORTACION ELECTRONICA',
       'ITEM  VALOR LINEA',
-      'ASESORIAS  14',
-      'MONEDA DE LA OPERACION: DOLAR USA',
+      'ASESORIAS  120',
+      'MONEDA DE LA OPERACION: YEN',
     ]).documents[0]
     expect(service).toMatchObject({ serviceIndicator: 3, customsReferences: [] })
+    // A passport is a document any case may name.
+    expect(planOf([...INVOICE, 'REFERENCIA: PASAPORTE DEL CLIENTE']).documents[0].customsReferences).toEqual([
+      { type: 813, name: 'PASAPORTE' },
+    ])
+    // An invoice of goods that names its sale modality is no lodging, whatever its item is called.
+    const kennel = planOf([...INVOICE, 'ALOJAMIENTO PARA MASCOTAS  2  U  30']).documents[0]
+    expect(kennel).not.toHaveProperty('serviceIndicator')
+    expect(kennel.customsReferences).toEqual([])
   })
 
   test('the discount a case states for a numbered line goes to that line alone', () => {
@@ -481,6 +494,11 @@ describe('issuing the export sets', () => {
     expect(lodging.header.options).toEqual({ serviceIndicator: 4 })
     expect(lodging.header.transport).toEqual({ customs: { receiverCountry: 201, destinationCountry: 201 } })
     expect(lodging.header.receiver).toMatchObject({ city: 'VENEZUELA', foreign: { nationality: '201' } })
+    // The case names no document: beside the reference of the set it carries the passport.
+    expect(lodging.references.map((reference) => [reference.documentType, reference.reason])).toEqual([
+      ['SET', `CASO ${id2(3)}`],
+      [813, 'PASAPORTE'],
+    ])
   })
 
   test('each envelope carries its set, every signature and stamp verifies, and both validate against EnvioDTE_v10.xsd', async () => {
@@ -588,17 +606,34 @@ describe('what the run gives an export set', () => {
     const packagesOf = async (type: string, exportSets = options().exportSets) =>
       (await issueTestSet(planOf([...INVOICE, `TIPO DE BULTO: ${type}`, 'TOTAL BULTOS: 1']), options(exportSets)))
         .cases[0].document.header.transport?.customs?.packages
-    // A container carries its identification and its seal, which the set does not give, and no marks.
-    expect(await packagesOf('CONT40')).toEqual([{ code: 74, count: 1, containerId: 'XXXU000000-2', seal: '0000000' }])
-    // The set names a container without its size: the first of the table that begins with the name.
-    expect(await packagesOf('CONTENEDOR REFRIGERADO')).toEqual([
-      { code: 75, count: 1, containerId: 'XXXU000000-2', seal: '0000000' },
-    ])
+    // A container carries its identification and its seal, which the set does not give, beside its marks.
+    const standIns = { marks: 'S/M', containerId: 'XXXU000000-2', seal: '0000000' }
+    expect(await packagesOf('CONT40')).toEqual([{ code: 74, count: 1, ...standIns }])
+    // The set names a container without its size: the first row of the table that is that name and a size.
+    expect(await packagesOf('CONTENEDOR REFRIGERADO')).toEqual([{ code: 75, count: 1, ...standIns }])
     expect(
       await packagesOf('CONTENEDOR REFRIGERADO', { exchangeRates: RATES, containerId: 'ABCU123456-7', seal: 'S-99' }),
-    ).toEqual([{ code: 75, count: 1, containerId: 'ABCU123456-7', seal: 'S-99' }])
+    ).toEqual([{ code: 75, count: 1, marks: 'S/M', containerId: 'ABCU123456-7', seal: 'S-99' }])
     // A package that is no container keeps its marks and takes neither.
     expect(await packagesOf('ROLLOS')).toEqual([{ code: 13, count: 1, marks: 'S/M' }])
+    // Only a size may be missing: a name several unrelated rows begin with is refused, not given the first of them.
+    for (const name of ['CONTENEDOR', 'CAJAS', 'GRANEL', 'C'])
+      expect((await failure(packagesOf(name))).details).toEqual({
+        field: 'transport.customs.packages[0].code',
+        value: name,
+        caseId: '7-1',
+      })
+    // An identification or a seal the run gives must be text the schema takes.
+    for (const [field, value] of [
+      ['containerId', ''],
+      ['containerId', 'X'.repeat(26)],
+      ['containerId', 12345],
+      ['seal', '   '],
+      ['seal', 'S'.repeat(21)],
+    ] as const)
+      expect(
+        await failure(packagesOf('CONT40', { exchangeRates: RATES, [field]: value } as IssueSetOptions['exportSets'])),
+      ).toMatchObject({ code: 'INVALID_OPTION', details: { field: `exportSets.${field}` } })
     // A name with no letter or digit begins nothing: it is refused, not given the first row of the table.
     expect((await failure(packagesOf('---'))).details).toEqual({
       field: 'transport.customs.packages[0].code',

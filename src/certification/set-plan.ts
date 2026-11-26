@@ -529,16 +529,17 @@ const exportItem = (
     surchargePercent,
   })
 
-// The customs document of a lodging invoice that names none: the resolution of the customs service, as field
-// behaviour writes it. Beside the reference of the set it is the second line the review asks of the case.
-const LODGING_DOCUMENT: CustomsDocument = { type: 812, name: 'RESOLUCION SNA' }
+// The document of a lodging invoice that names none: the passport of the guest, 813 among the documents Formato DTE
+// 2.5 lets a reference name (812 is the resolution that qualifies a service as an export). Beside the reference of
+// the set it is the second line of the case, which field behaviour shows the review asks for.
+const LODGING_DOCUMENT: CustomsDocument = { type: 813, name: 'PASAPORTE' }
 
-// 4 for lodging; 3 for an invoice that names no sale modality: Formato DTE 2.5 excuses only a service from it.
+// An invoice that names no sale modality is a service, since Formato DTE 2.5 excuses only a service from it: 4 when
+// it is lodging, 3 otherwise. An invoice that names one sells goods, whatever its items are called.
 const serviceIndicatorOf = (testCase: TestCase): 3 | 4 | undefined => {
-  if (testCase.documentType !== 110) return undefined
+  if (testCase.documentType !== 110 || testCase.exportFields['MODALIDAD DE VENTA'] !== undefined) return undefined
   const words = plainUpper([testCase.documentText, ...testCase.items.map((item) => item.name)].join(' '))
-  if (LODGING.test(words)) return 4
-  return testCase.exportFields['MODALIDAD DE VENTA'] === undefined ? 3 : undefined
+  return LODGING.test(words) ? 4 : 3
 }
 
 const plainUpper = (text: string): string => text.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase()

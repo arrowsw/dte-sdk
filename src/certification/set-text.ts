@@ -692,13 +692,13 @@ const REFERENCE_LABEL = /^.*?REFERENCIA\S*/i
 const EXPORT_NUMBER = /^\d+(?:[.,]\d+)?$/
 
 /**
- * EN: A customs document a reference line of an export case names: its reference type (`TpoDocRef`, 807 to 812) and
+ * EN: A customs document a reference line of an export case names: its reference type (`TpoDocRef`, 807 to 813) and
  * the short name written as the reason.
  * ES: Un documento aduanero que nombra una línea de referencia de un caso de exportación: su tipo de referencia
- * (`TpoDocRef`, 807 a 812) y el nombre corto que se escribe como razón.
+ * (`TpoDocRef`, 807 a 813) y el nombre corto que se escribe como razón.
  */
 export type CustomsDocument = {
-  /** EN: Reference type, by Formato DTE 2.5 (807 DUS to 812 resolution of the customs service). ES: `TpoDocRef` — Tipo de referencia, según el Formato DTE 2.5 (807 DUS a 812 resolución del SNA). */
+  /** EN: Reference type, by Formato DTE 2.5 (807 DUS to 813 passport). ES: `TpoDocRef` — Tipo de referencia, según el Formato DTE 2.5 (807 DUS a 813 pasaporte). */
   readonly type: number
   /** EN: Short name of the document. ES: `RazonRef` — Nombre corto del documento. */
   readonly name: string
@@ -713,6 +713,7 @@ const CUSTOMS_DOCUMENTS: readonly (CustomsDocument & { readonly pattern: RegExp 
   { type: 810, name: 'MIC/DTA', pattern: /\bMIC\b|\bDTA\b/ },
   { type: 811, name: 'CARTA DE PORTE', pattern: /CARTA\s+DE\s+PORTE/ },
   { type: 812, name: 'RESOLUCION SNA', pattern: /\bRESOLUCION\b.*\b(?:SNA|ADUANAS?)\b/ },
+  { type: 813, name: 'PASAPORTE', pattern: /\bPASAPORTE\b/ },
 ]
 
 /**

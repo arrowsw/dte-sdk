@@ -223,13 +223,13 @@ describe('the export sets', () => {
 
   test('the clause of the sale under its long label, its short one and with no colon', () => {
     const clause = (line: string) => exportCase([line]).exportFields['CLAUSULA DE VENTA']
-    expect(clause('CLAUSULA DE VENTA DE EXPORTACION:            CFR')).toBe('CFR')
-    expect(clause('CLAUSULA DE VENTA DE EXPORTACION:\t\tFOB')).toBe('FOB')
+    expect(clause('CLAUSULA DE VENTA DE EXPORTACION:   CIF')).toBe('CIF')
+    expect(clause('CLAUSULA DE VENTA DE EXPORTACION:\tEXW')).toBe('EXW')
     expect(clause('CLAUSULA DE VENTA: S/CL')).toBe('S/CL')
-    expect(clause('CLAUSULA DE VENTA   CIF')).toBe('CIF')
+    expect(clause('CLAUSULA DE VENTA   DAP')).toBe('DAP')
     // The total of the clause is a line of its own.
-    expect(exportCase(['TOTAL CLAUSULA DE VENTA:\t\t\t 831.17']).exportFields).toEqual({
-      'TOTAL CLAUSULA DE VENTA': '831.17',
+    expect(exportCase(['TOTAL CLAUSULA DE VENTA:\t\t 1234.5']).exportFields).toEqual({
+      'TOTAL CLAUSULA DE VENTA': '1234.5',
     })
   })
 

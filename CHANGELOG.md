@@ -40,27 +40,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the sale clause as a third, and a surcharge the case asks for on the line stays on the line, on every item of the
   case; the names the set gives in words (ports, countries, clauses, units, packages) become the codes of the customs
   tables; a document names the customs document its case does beside the reference of the set; a note repeats the
-  price of its invoice. A lodging invoice takes the nationality its case gives as its country and, when the case names
-  no customs document, the resolution of the customs service, as field behaviour writes it. What the set does not give
-  is the run's to say, in `exportSets`: the exchange rate of each currency (`exchangeRates`, with no default: a
-  currency without one stops the set before a folio is taken), the foreign customer (`receiver`), the tare as a
-  percent of the net weight (`tarePercent`, 2 by default), since the set gives the units of the weights and asks for
-  their values, and the identification and the seal of a container (`containerId`, `seal`, each with a stand-in by
-  default), which Formato DTE 2.5 keeps for a package that is one. `checkExportSets` works every document out before
-  the run asks for folios, and so does the simulation before it asks for its own; a currency the SII does not list is
-  refused there with its case (`INVALID_OPTION`, `currency`). The cases are read in the wording of the set: the item
-  table above the labels of its case, `CLAUSULA DE VENTA DE EXPORTACION`, a discount stated for a numbered line
-  (`DESCUENTO LINEA # 1: 5%`), the `NACIONALIDAD` of a lodging case, and a package the set names without its size
-  (`CONTENEDOR REFRIGERADO`), which takes the first row of the customs table that begins with that name. A row that
-  fills every column of its header is read as an item whatever its name starts with; one that leaves a column empty
-  and starts like a label is still read as that label. A set whose name carries its number takes the slot of that
-  number, and of two with the same number the last one wins, as for every other kind. The tests hold the documents to
-  field behaviour, total by total. The rows the progress page gives these sets have not been seen: they are looked for
-  as `SET` … `EXPORT` in one label, the second set being the one whose label carries a 2 (the declaration form writes
-  `SET DOCUMENTOS DE EXPORTACION(2)`), and the state of each is the bold text of its own row. An export set that was
-  sent and whose row the page does not show, or shows with no state, is not taken as approved, where the other sets
-  are: the wait ends `timedOut` with a `detail` that names it. A caller who sees the sets approved on a page this
-  reading does not find goes on by saving the state with `setsApproved: true` and `stage: 'books'`.
+  price of its invoice. An invoice that names no sale modality is a service, and lodging when its item says so. A
+  lodging invoice takes the nationality its case gives as its country and, when the case names no document, the
+  passport of the guest (813, which Formato DTE 2.5 lists among the documents a reference may name), beside the
+  reference of the set. What the set does not give is the run's to say, in `exportSets`: the exchange rate of each
+  currency (`exchangeRates`, with no default: a currency without one stops the set before a folio is taken), the
+  foreign customer (`receiver`), the tare as a percent of the net weight (`tarePercent`, 2 by default), since the set
+  gives the units of the weights and asks for their values, and the identification and the seal of a container
+  (`containerId`, `seal`, each a text within the length the schema gives it, with a stand-in by default). Formato DTE
+  2.5 lets those two be filled only for a container and makes neither mandatory; field behaviour is that the SII's
+  review objects to a container without them, and to a package without its marks, so every package carries `S/M`.
+  `checkExportSets` works every document out before the run asks for folios, and so does the simulation before it asks
+  for its own; a currency the SII does not list is refused there with its case (`INVALID_OPTION`, `currency`). The
+  cases are read in the wording of the set: the item table above the labels of its case, `CLAUSULA DE VENTA DE
+  EXPORTACION`, a discount stated for a numbered line (`DESCUENTO LINEA # 1: 5%`), the `NACIONALIDAD` of a lodging
+  case, and a container the set names without its size (`CONTENEDOR REFRIGERADO`), which takes the first row of the
+  customs table that is that name and a size in feet. A row that fills every column of its header is read as an item
+  whatever its name starts with; one that leaves a column empty and starts like a label is still read as that label. A
+  set whose name carries its number takes the slot of that number, and of two with the same number the last one wins,
+  as for every other kind. The tests hold the documents to field behaviour, total by total. The rows the progress page
+  gives these sets have not been seen: they are looked for as `SET` … `EXPORT` in one label, the second set being the
+  one whose label carries a 2 (the declaration form writes `SET DOCUMENTOS DE EXPORTACION(2)`), and the state of each
+  is the bold text of its own row. An export set that was sent and whose row the page does not show, or shows with no
+  state, is not taken as approved, where the other sets are: the wait ends `timedOut` with a `detail` that names it. A
+  caller who sees the sets approved on a page this reading does not find goes on by saving the state with
+  `setsApproved: true` and `stage: 'books'`.
 - **The share of a percent as a whole amount on an export line** (`wholeShares`). `DescuentoMonto` and `RecargoMonto`
   hold whole numbers only, so an export line keeps the four decimals of the share of a percent and writes the percent
   alone when the share is not whole. A line with `wholeShares` writes the share, rounded once to a whole number,
