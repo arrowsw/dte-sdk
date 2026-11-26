@@ -514,15 +514,24 @@ const exportAmount = (text: string | undefined): number | undefined => {
   return found === null ? undefined : Number(found[0].replace(',', '.'))
 }
 
-const exportItem = (item: TestCaseItem, surchargePercent: number | undefined): PlannedExportItem =>
+// A line takes its discount from its own row, or from the line of the case that states one for its number.
+const exportItem = (
+  item: TestCaseItem,
+  surchargePercent: number | undefined,
+  discount: string | undefined,
+): PlannedExportItem =>
   compact({
     name: item.name,
     quantity: item.quantity,
     unit: item.unit,
     unitPrice: item.unitPrice,
-    discountPercent: exportAmount(item.discount),
+    discountPercent: exportAmount(item.discount) ?? exportAmount(discount),
     surchargePercent,
   })
+
+// The customs document of a lodging invoice that names none: the resolution of the customs service, as field
+// behaviour writes it. Beside the reference of the set it is the second line the review asks of the case.
+const LODGING_DOCUMENT: CustomsDocument = { type: 812, name: 'RESOLUCION SNA' }
 
 // 4 for lodging; 3 for an invoice that names no sale modality: Formato DTE 2.5 excuses only a service from it.
 const serviceIndicatorOf = (testCase: TestCase): 3 | 4 | undefined => {
@@ -543,17 +552,23 @@ const exportPlan = (set: TestSet): ExportSetPlan => {
     .filter((testCase) => EXPORT_TYPES.includes(testCase.documentType ?? 0))
     .map((testCase): PlannedExport => {
       const fields = testCase.exportFields
-      country = fields['PAIS RECEPTOR'] ?? country
+      country = fields['PAIS RECEPTOR'] ?? fields.NACIONALIDAD ?? country
       const surcharge = exportAmount(fields['RECARGO EN LA LINEA'])
       const type = testCase.documentType as PlannedExport['type']
       const note = type !== 110 && testCase.referencedCase !== null
+      const serviceIndicator = serviceIndicatorOf(testCase)
+      const named = [
+        ...new Map(
+          (testCase.customsReferences ?? []).flatMap(customsDocumentsOf).map((found) => [found.type, found]),
+        ).values(),
+      ]
       return compact({
         caseId: testCase.id,
         type,
         currency: testCase.currency || undefined,
-        items: testCase.items.map((item) => exportItem(item, surcharge)),
+        items: testCase.items.map((item, index) => exportItem(item, surcharge, fields[`DESCUENTO LINEA ${index + 1}`])),
         paymentTerms: fields['FORMA DE PAGO EXPORTACION'],
-        serviceIndicator: serviceIndicatorOf(testCase),
+        serviceIndicator,
         customs: compact({
           saleModality: fields['MODALIDAD DE VENTA'],
           saleClause: fields['CLAUSULA DE VENTA'],
@@ -572,11 +587,7 @@ const exportPlan = (set: TestSet): ExportSetPlan => {
           destinationCountry: fields['PAIS DESTINO'] ?? country,
         }),
         foreignCommissionPercent: exportAmount(fields['COMISIONES EN EL EXTRANJERO']),
-        customsReferences: [
-          ...new Map(
-            (testCase.customsReferences ?? []).flatMap(customsDocumentsOf).map((found) => [found.type, found]),
-          ).values(),
-        ],
+        customsReferences: named.length === 0 && serviceIndicator === 4 ? [LODGING_DOCUMENT] : named,
         reference: note
           ? {
               caseId: testCase.referencedCase!,
@@ -591,8 +602,8 @@ const exportPlan = (set: TestSet): ExportSetPlan => {
   return { kind: 'export', attentionNumber: set.attentionNumber, documents, folios }
 }
 
-// The slot of an export set: the number its name gives in parentheses, else the first one still free. Neither name
-// was seen; the declaration form names the second set `SET DOCUMENTOS DE EXPORTACION(2)`. A set with a number always
+// The slot of an export set: the number its name gives in parentheses, else the first one still free. The set names
+// them `SET BASICO DOCUMENTOS DE EXPORTACION (1)` and `(2)`. A set with a number always
 // takes the slot of that number, since its slot is the row it is declared on: of two sets with the same number the
 // last one wins, as for every other kind.
 const EXPORT_SLOT = /\(\s*([12])\s*\)/

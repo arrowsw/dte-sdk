@@ -90,8 +90,12 @@ export type ExportSetOptions = {
   readonly exchangeRates?: Readonly<Record<string, number>>
   /** EN: The foreign customer every export document names; what it leaves out takes `DEFAULT_CERTIFICATION_FOREIGN_RECEIVER`, and its city, the name of the country of the case. ES: `Receptor` — El cliente extranjero que nombra cada documento de exportación; lo que omite se toma de `DEFAULT_CERTIFICATION_FOREIGN_RECEIVER`, y su ciudad, del nombre del país del caso. */
   readonly receiver?: ExportReceiverInput
-  /** EN: The tare as a percent of the net weight, above 0 and at most 100; 2 by default. The set gives the units of the tare and of the weights and asks for their values to be worked out ("CALCULE LOS VALORES"): the net weight is the sum of the quantities of the lines, the tare this percent of it rounded up to a whole number of at least 1, and the gross weight the net weight plus the tare. ES: `Tara` — La tara como porcentaje del peso neto, mayor que 0 y hasta 100; 2 por defecto. El set da las unidades de la tara y de los pesos y pide calcular sus valores ("CALCULE LOS VALORES"): el peso neto es la suma de las cantidades de las líneas, la tara este porcentaje de él redondeado hacia arriba a un entero de al menos 1, y el peso bruto el neto más la tara. */
+  /** EN: The tare as a percent of the net weight, above 0 and at most 100; 2 by default. The set gives the units of the tare and of the weights and asks for their values to be worked out ("CALCULE LOS VALORES CORRESPONDIENTES DEL ENCABEZADO"): the net weight is the sum of the quantities of the lines, the tare this percent of it rounded up to a whole number of at least 1, and the gross weight the net weight plus the tare. ES: `Tara` — La tara como porcentaje del peso neto, mayor que 0 y hasta 100; 2 por defecto. El set da las unidades de la tara y de los pesos y pide calcular sus valores ("CALCULE LOS VALORES CORRESPONDIENTES DEL ENCABEZADO"): el peso neto es la suma de las cantidades de las líneas, la tara este porcentaje de él redondeado hacia arriba a un entero de al menos 1, y el peso bruto el neto más la tara. */
   readonly tarePercent?: number
+  /** EN: The identification of the container of a case whose package is one, which the set does not give; the stand-in `XXXU000000-2` by default. Formato DTE 2.5 keeps this field and the seal for a package that is a container. ES: `IdContainer` — La identificación del contenedor de un caso cuyo bulto es uno, que el set no da; por defecto el valor de relleno `XXXU000000-2`. El Formato DTE 2.5 reserva este campo y el sello para un bulto que es contenedor. */
+  readonly containerId?: string
+  /** EN: The seal of that container; the stand-in `0000000` by default. ES: `Sello` — El sello de ese contenedor; por defecto el valor de relleno `0000000`. */
+  readonly seal?: string
 }
 
 /**
@@ -691,9 +695,13 @@ const ADVANCE_PAYMENT = 32
 const FOREIGN_COMMISSION = 'COMISIONES EN EL EXTRANJERO'
 const FREIGHT = 'FLETE'
 const INSURANCE = 'SEGURO'
-// A container (codes 73 to 76, and 78 of Anexo 51-23) carries no marks; any other package `S/M`, without marks.
+// A container (codes 73 to 76, and 78 of Anexo 51-23) carries its identification and its seal and no marks, as
+// Formato DTE 2.5 keeps those two fields for it and the marks for the rest; any other package `S/M`, without marks.
+// The set gives neither the identification nor the seal, so each has a stand-in the run may replace.
 const CONTAINERS: readonly number[] = [73, 74, 75, 76, 78]
 const NO_MARKS = 'S/M'
+const DEFAULT_CONTAINER_ID = 'XXXU000000-2'
+const DEFAULT_SEAL = '0000000'
 const CITY_LENGTH = 20
 
 /**
@@ -803,6 +811,7 @@ const exportCustoms = (
   const grossWeightUnit = code(customs.grossWeightUnit, codes.unit, 'grossWeightUnit')
   const netWeightUnit = code(customs.netWeightUnit, codes.unit, 'netWeightUnit')
   const packageType = code(customs.packageType, codes.packageType, 'packages[0].code')
+  const container = packageType !== undefined && CONTAINERS.includes(packageType)
   return compact({
     saleModality: code(customs.saleModality, codes.saleModality, 'saleModality'),
     saleClause: code(customs.saleClause, codes.saleClause, 'saleClause'),
@@ -829,7 +838,9 @@ const exportCustoms = (
             compact({
               code: packageType,
               count: customs.totalPackages,
-              marks: CONTAINERS.includes(packageType) ? undefined : NO_MARKS,
+              marks: container ? undefined : NO_MARKS,
+              containerId: container ? (context.options.exportSets?.containerId ?? DEFAULT_CONTAINER_ID) : undefined,
+              seal: container ? (context.options.exportSets?.seal ?? DEFAULT_SEAL) : undefined,
             }),
           ],
     freight: customs.freight,

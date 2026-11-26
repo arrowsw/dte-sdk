@@ -11,7 +11,7 @@ on 2026-11-14 to ship inside the package with their validator as an optional pee
 |---|---|---|---|
 | `dte-sdk` | Documents (export documents included), stamps, signatures, envelopes, books, verification of received documents, the assignment of invoices, SII web services client over `fetch`, public registry of issuers | 50.01 kB | Not by import: it asks the runtime for `node:crypto` at the first signature |
 | `dte-sdk/node` | `createNodeHttpsTransport`, `createDirectoryCapture`, `createDirectoryUploadArchive`, `createDirectoryTokenCache`, `createDirectoryFolioRegistry`, `findCafFiles`, `findLatestCafFile`, `resolveCafFile`, `cafFileScope` | 8.66 kB | Yes, on first use |
-| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 98.64 kB | Yes, on first use |
+| `dte-sdk/portal` | Portal, folio registry, register, MIPYME backup, activity verification, certification sets and runner | 98.92 kB | Yes, on first use |
 | `dte-sdk/pdf` | Printed samples and the SII office of each commune; `pdf-lib` and `bwip-js` are optional peers | 28.46 kB | Yes, on first use |
 | `dte-sdk/catalogs` | The large code tables: the SII's business activities and the customs tables of an export document | 18.03 kB | No |
 | `dte-sdk/schemas` | The SII's schemas as text and the validation of a document against them; `xmllint-wasm` is an optional peer | 24.72 kB | No |
@@ -192,7 +192,8 @@ measured 49.95 kB. The wait for the approval of the export sets, their check bef
 and the whole share rounded once, on 2026-11-25, took `dte-sdk` to 49.96 kB and `dte-sdk/portal` to 98.77 kB, both
 under their limits. The bound of the wait before the first status poll, on 2026-11-26, took `dte-sdk` from 49.96 kB
 to 50.01 kB, over its 50 kB limit, which went to 52 kB; the row of an export set read within its own row left
-`dte-sdk/portal` at 98.64 kB.
+`dte-sdk/portal` at 98.64 kB. The export sets read in the wording of the set, with the container of a case and the
+customs document of a lodging invoice, on 2026-11-26, took `dte-sdk/portal` to 98.92 kB, under its limit.
 
 ## Why
 

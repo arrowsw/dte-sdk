@@ -156,8 +156,8 @@ describe('the export sets', () => {
 
   test('are two sets, each with its attention number, an invoice and two notes, then three invoices', () => {
     expect([first, second].map((set) => [set.name, set.attentionNumber, set.kind])).toEqual([
-      ['DOCUMENTOS DE EXPORTACION (1)', EXPORT_ATTENTION_1, 'export'],
-      ['DOCUMENTOS DE EXPORTACION (2)', EXPORT_ATTENTION_2, 'export'],
+      ['BASICO DOCUMENTOS DE EXPORTACION (1)', EXPORT_ATTENTION_1, 'export'],
+      ['BASICO DOCUMENTOS DE EXPORTACION (2)', EXPORT_ATTENTION_2, 'export'],
     ])
     expect(first.cases.map((testCase) => [testCase.id, testCase.documentType])).toEqual([
       [id1(1), 110],
@@ -191,7 +191,7 @@ describe('the export sets', () => {
         SEGURO: '1215.22',
         'PAIS RECEPTOR': 'ITALIA',
       },
-      customsReferences: ['MIC/DTA'],
+      customsReferences: ['MIC (MANIFIESTO INTERNACIONAL)'],
       items: [{ name: 'CHATARRA DE ALUMINIO', quantity: 687, unit: 'PAR', unitPrice: 159 }],
     })
     // The documentary line is not the document of the case, and the instruction lines are nothing.
@@ -199,26 +199,51 @@ describe('the export sets', () => {
     expect(Object.keys(first.cases[0].exportFields)).toHaveLength(15)
   })
 
-  test('a row reads its columns by the header: a discount, a line value, and two customs documents', () => {
+  test('a row reads its columns by the header, a line value, the discount of a numbered line and two customs documents', () => {
     expect(second.cases[1].items).toEqual([
-      {
-        name: 'CAJAS CIRUELAS TIERNIZADAS SIN CAROZO CALIBRE 60/70',
-        quantity: 1036,
-        unit: 'KN',
-        unitPrice: 194,
-        discount: '5%',
-      },
+      { name: 'CAJAS CIRUELAS TIERNIZADAS SIN CAROZO CALIBRE 60/70', quantity: 1036, unit: 'KN', unitPrice: 194 },
       { name: 'CAJAS DE PASAS DE UVA FLAME MORENA SIN SEMILLA MEDIANAS', quantity: 243, unit: 'KN', unitPrice: 132 },
     ])
+    // The set states the discount in a line of its own, by the number of the line it is for.
+    expect(second.cases[1].exportFields['DESCUENTO LINEA 1']).toBe('5')
     expect(second.cases[1].exportFields['COMISIONES EN EL EXTRANJERO']).toBe('11')
     expect(second.cases[1].customsReferences).toEqual(['DUS', 'AWB'])
     expect(second.cases[0].items).toEqual([{ name: 'ASESORIAS Y PROYECTOS PROFESIONALES', quantity: 1, unitPrice: 94 }])
     expect(second.cases[0].exportFields['RECARGO EN LA LINEA']).toBe('10')
+    // The lodging case gives a nationality in place of a country and names no customs document; the instructions
+    // that close the set are nothing of its case.
     expect(second.cases[2]).toMatchObject({
       currency: 'DOLAR USA',
-      exportFields: { 'PAIS RECEPTOR': 'VENEZUELA' },
-      customsReferences: ['RESOLUCION SNA'],
+      exportFields: { NACIONALIDAD: 'VENEZUELA' },
+      customsReferences: [],
       items: [{ name: 'ALOJAMIENTO HABITACIONES', quantity: 1, unitPrice: 281 }],
+    })
+    expect(Object.keys(second.cases[2].exportFields)).toEqual(['NACIONALIDAD'])
+  })
+
+  test('the clause of the sale under its long label, its short one and with no colon', () => {
+    const clause = (line: string) => exportCase([line]).exportFields['CLAUSULA DE VENTA']
+    expect(clause('CLAUSULA DE VENTA DE EXPORTACION:            CFR')).toBe('CFR')
+    expect(clause('CLAUSULA DE VENTA DE EXPORTACION:\t\tFOB')).toBe('FOB')
+    expect(clause('CLAUSULA DE VENTA: S/CL')).toBe('S/CL')
+    expect(clause('CLAUSULA DE VENTA   CIF')).toBe('CIF')
+    // The total of the clause is a line of its own.
+    expect(exportCase(['TOTAL CLAUSULA DE VENTA:\t\t\t 831.17']).exportFields).toEqual({
+      'TOTAL CLAUSULA DE VENTA': '831.17',
+    })
+  })
+
+  test('the discount of a numbered line, with or without its mark and with a comma', () => {
+    const fields = exportCase([
+      'DESCUENTO LINEA # 1:   5%',
+      'DESCUENTO LINEA 2: 7,5 %',
+      'DESCUENTO EN LA LINEA #03 12%',
+    ]).exportFields
+    expect(fields).toEqual({ 'DESCUENTO LINEA 1': '5', 'DESCUENTO LINEA 2': '7.5', 'DESCUENTO LINEA 3': '12' })
+    // A discount of the whole document is another line.
+    expect(exportCase(['DESCUENTO GLOBAL ITEMES AFECTOS: 7%'])).toMatchObject({
+      globalDiscountPercent: 7,
+      exportFields: {},
     })
   })
 

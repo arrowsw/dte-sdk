@@ -147,11 +147,44 @@ describe('the export plans', () => {
       unitPrice: 194,
       discountPercent: 5,
     })
+    // The lodging case names a nationality and no customs document: the nationality is its country, and the
+    // resolution of the customs service its document.
     expect(lodging).toMatchObject({
       serviceIndicator: 4,
       currency: 'DOLAR USA',
-      customs: { receiverCountry: 'VENEZUELA' },
+      customs: { receiverCountry: 'VENEZUELA', destinationCountry: 'VENEZUELA' },
+      customsReferences: [{ type: 812, name: 'RESOLUCION SNA' }],
     })
+  })
+
+  test('a lodging invoice keeps the customs document it names, and only lodging is given one', () => {
+    const lodgingOf = (...more: readonly string[]) =>
+      planOf([
+        'CASO 7-1',
+        'DOCUMENTO  FACTURA DE EXPORTACION ELECTRONICA',
+        'ITEM  VALOR LINEA',
+        'ALOJAMIENTO HABITACIONES  42',
+        'MONEDA DE LA OPERACION: DOLAR USA',
+        'NACIONALIDAD: ALEMANIA',
+        ...more,
+      ]).documents[0]
+    expect(lodgingOf().customsReferences).toEqual([{ type: 812, name: 'RESOLUCION SNA' }])
+    expect(lodgingOf('REFERENCIA: DUS').customsReferences).toEqual([{ type: 807, name: 'DUS' }])
+    expect(lodgingOf().customs).toEqual({ receiverCountry: 'ALEMANIA', destinationCountry: 'ALEMANIA' })
+    // A service that names none is given none.
+    const service = planOf([
+      'CASO 7-1',
+      'DOCUMENTO  FACTURA DE EXPORTACION ELECTRONICA',
+      'ITEM  VALOR LINEA',
+      'ASESORIAS  14',
+      'MONEDA DE LA OPERACION: DOLAR USA',
+    ]).documents[0]
+    expect(service).toMatchObject({ serviceIndicator: 3, customsReferences: [] })
+  })
+
+  test('the discount a case states for a numbered line goes to that line alone', () => {
+    const planned = planOf([...INVOICE, 'Pasas  5  KN  20', 'DESCUENTO LINEA # 2: 5%']).documents[0]
+    expect(planned.items.map((item) => item.discountPercent)).toEqual([undefined, 5])
   })
 
   test('a case without a country takes the one an earlier case named, and a destination of its own is kept', () => {
@@ -552,8 +585,26 @@ describe('what the run gives an export set', () => {
     // `createDocument` refuses it on that first.
     const nowhere = planOf(INVOICE.filter((line) => !line.startsWith('PAIS')))
     expect((await failure(issueTestSet(nowhere, options()))).details).toEqual({ field: 'receiver.city' })
-    const container = await issueTestSet(planOf([...INVOICE, 'TIPO DE BULTO: CONT40', 'TOTAL BULTOS: 1']), options())
-    expect(container.cases[0].document.header.transport?.customs?.packages).toEqual([{ code: 74, count: 1 }])
+    const packagesOf = async (type: string, exportSets = options().exportSets) =>
+      (await issueTestSet(planOf([...INVOICE, `TIPO DE BULTO: ${type}`, 'TOTAL BULTOS: 1']), options(exportSets)))
+        .cases[0].document.header.transport?.customs?.packages
+    // A container carries its identification and its seal, which the set does not give, and no marks.
+    expect(await packagesOf('CONT40')).toEqual([{ code: 74, count: 1, containerId: 'XXXU000000-2', seal: '0000000' }])
+    // The set names a container without its size: the first of the table that begins with the name.
+    expect(await packagesOf('CONTENEDOR REFRIGERADO')).toEqual([
+      { code: 75, count: 1, containerId: 'XXXU000000-2', seal: '0000000' },
+    ])
+    expect(
+      await packagesOf('CONTENEDOR REFRIGERADO', { exchangeRates: RATES, containerId: 'ABCU123456-7', seal: 'S-99' }),
+    ).toEqual([{ code: 75, count: 1, containerId: 'ABCU123456-7', seal: 'S-99' }])
+    // A package that is no container keeps its marks and takes neither.
+    expect(await packagesOf('ROLLOS')).toEqual([{ code: 13, count: 1, marks: 'S/M' }])
+    // A name with no letter or digit begins nothing: it is refused, not given the first row of the table.
+    expect((await failure(packagesOf('---'))).details).toEqual({
+      field: 'transport.customs.packages[0].code',
+      value: '---',
+      caseId: '7-1',
+    })
     const noCurrency = planOf(INVOICE.filter((line) => !line.startsWith('MONEDA')))
     expect((await failure(issueTestSet(noCurrency, options()))).details).toEqual({ field: 'currency', caseId: '7-1' })
   })
