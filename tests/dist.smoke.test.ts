@@ -1,4 +1,4 @@
-import { execFile, spawnSync } from 'node:child_process'
+import { execFile, spawn, spawnSync } from 'node:child_process'
 import {
   existsSync,
   mkdirSync,
@@ -402,6 +402,74 @@ console.log(JSON.stringify(folios))`
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  // A holder stopped past the stale limit is alive: the other process must wait, never write under it.
+  const withStop = process.platform === 'win32' ? test.skip : test
+  withStop(
+    'a holder stopped past the stale limit keeps its lock, and nobody writes under it',
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'dte-sdk-folio-stopped-'))
+      const registryOf = (options: string, load = '') => `
+const { createDirectoryFolioRegistry } = await import(${JSON.stringify(href(entryFile('node')))})
+const scope = { companyRut: '76543210-3', type: 33, range: { from: 1, to: 60 }, environment: 'certification' }
+const registry = createDirectoryFolioRegistry({ dir: ${JSON.stringify(dir)}, ${options} }${load})`
+      const holder = spawn(process.execPath, [
+        '--input-type=module',
+        '-e',
+        `${registryOf(
+          'lockStaleMs: 1000',
+          `, async () => {
+  const fs = await import('node:fs/promises')
+  const writeFile = async (...args) => {
+    console.log('holding')
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    return fs.writeFile(...args)
+  }
+  return { fs: { ...fs, writeFile }, path: await import('node:path') }
+}`,
+        )}
+console.log(JSON.stringify(await registry.reserve(scope)))`,
+      ])
+      try {
+        const output = { text: '' }
+        const exited = new Promise((resolve) => holder.on('exit', resolve))
+        await new Promise<void>((resolve) =>
+          holder.stdout.on('data', (chunk: Buffer) => {
+            output.text += chunk.toString()
+            if (output.text.includes('holding')) resolve()
+          }),
+        )
+        holder.kill('SIGSTOP')
+        await new Promise((resolve) => setTimeout(resolve, 1300))
+        const waiter = await execFileAsync(process.execPath, [
+          '--input-type=module',
+          '-e',
+          `${registryOf('lockStaleMs: 1000, lockWaitMs: 700')}
+try {
+  console.log(await registry.reserve(scope))
+} catch (error) {
+  console.log(JSON.stringify([error.code, error.details.kind, error.details.holderPid]))
+}`,
+        ])
+        expect(JSON.parse(waiter.stdout)).toEqual(['FOLIO_LEDGER_LOCKED', 'wait', holder.pid])
+        holder.kill('SIGCONT')
+        await exited
+        expect(output.text).toBe('holding\n1\n')
+        const next = await execFileAsync(process.execPath, [
+          '--input-type=module',
+          '-e',
+          `${registryOf('')}
+console.log(await registry.reserve(scope))`,
+        ])
+        expect(next.stdout).toBe('2\n')
+        expect(readdirSync(dir)).toEqual(['folios.json'])
+      } finally {
+        holder.kill('SIGKILL')
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+    20_000,
+  )
 })
 
 // An `any` would let each assignment compile, and the unused `@ts-expect-error` would then be the error.

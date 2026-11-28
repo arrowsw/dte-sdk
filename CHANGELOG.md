@@ -10,8 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`FOLIO_LEDGER_LOCKED`**, a new error code: a change of the directory folio registry did not hold the lock of the
-  ledger. `details.kind` says why: `wait` when it waited `lockWaitMs` for it (with `lockWaitMs` and `attempts`), `lost`
-  when its lock was taken over before its write landed, which then did not.
+  ledger. `details.kind` says why: `wait` when it waited `lockWaitMs` for it (with `lockWaitMs`, `attempts` and, when
+  the holder is a process of this host, its `holderPid`), `lost` when its lock was taken over before its write landed,
+  which then did not.
 
 - **`lock` of `FolioLedgerStore`** (`dte-sdk/portal`), optional: a store that gives it has every change of
   `createFolioRegistry` run inside it, its read, its change and its write, so that the store can make the change
@@ -41,22 +42,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   registries on one directory in one process 25 out of 50; a folio given twice ends in two documents with the same
   folio, and the SII rejects the second. Every change (`reserve`, `markSent`, `markAnnulled`, `release`) now reads,
   changes and writes the ledger holding `folios.json.lock`, a file created exclusively in the directory, readable by
-  its owner only, touched every third of `lockStaleMs` while the change runs, and removed when it ends, a failed one
-  included. Whoever finds it held waits, with a growing pause and some jitter, up to `lockWaitMs` (15 000 ms by
-  default), and then fails with `FOLIO_LEDGER_LOCKED`. A lock older than `lockStaleMs` (10 000 ms by default, at
-  least 1 000), left by a process that died, is taken over, under a second file created exclusively, so that two
-  processes that find it stale at once never remove the lock of whoever took it next; if the taker dies in that step,
-  recovery takes up to two stale periods. Just before its write lands, a holder checks that the lock is still its own,
-  and if it was taken over while the process was stopped it does not write (`FOLIO_LEDGER_LOCKED`, `kind: 'lost'`). A
-  lock that cannot be removed after a change was written does not undo the change's result: it goes stale by itself.
-  `remaining` and `stats` take no lock and never wait for another process or registry by themselves: the ledger is
-  replaced whole, so they read it before or after a change. They still wait their turn behind the changes already asked
-  of their own registry, and see them, so a read can wait as long as one of those waits for the lock. The order of the
-  calls of one registry, and the memory registry, do not change. The lock is for the processes of one host on a local file system: its staleness compares
-  this host's clock with the file's modification time. A reservation costs one lock file more: 200 in a row went from
-  about 55 ms to about 100 ms on a local disk.
-  - **What to change:** nothing, unless a process stays stopped inside a change for longer than `lockStaleMs`, which
-    must then be raised. The directory must not be shared between hosts.
+  its owner only, that names its holder (a token, the process id, the host name and when the machine started), and is
+  removed when the change ends, a failed one included. Whoever finds it held waits, with a growing pause and some
+  jitter, up to `lockWaitMs` (15 000 ms by default), and then fails with `FOLIO_LEDGER_LOCKED`.
+  - A lock whose holder is a process of this host that still exists is never taken over, whatever its age, so a holder
+    that is stopped or blocked keeps its lock and nobody writes under it. A lock is taken over once older than
+    `lockStaleMs` (10 000 ms by default, from 1 000 to about 74 days) when its process is gone or it was written before
+    the machine last started, and when its holder cannot be known: another host's name, or content that does not read.
+    That last case, where age alone decides, is the one the lock does not make safe: it is for the processes of one
+    host on a local file system, and a directory shared between hosts falls back to age, with the limits of clocks that
+    differ and of modification times kept to the second. There the holder renews its own lock every third of
+    `lockStaleMs` through the handle it created it with, and compares the file at the path with its own just before
+    its write lands and before it removes the lock; a holder whose lock was taken over does not write (`kind: 'lost'`).
+  - The price of trusting a process id: a holder killed inside a change leaves its lock, and if another long-lived
+    process of this host later gets the same id, every change fails with `kind: 'wait'` until that process ends. The
+    error names it in `holderPid`; once it is known not to be a holder, `folios.json.lock` may be removed by hand.
+  - A lock that cannot be removed after a change was written does not undo the change's result; the next change then
+    waits a whole `lockStaleMs`. A taker that dies while taking a lock over leaves a second file, freed by the same
+    rules, so recovery can take two stale periods. `remaining` and `stats` take no lock and never wait for another
+    process or registry by themselves: the ledger is replaced whole, so they read it before or after a change. They
+    still wait their turn behind the changes already asked of their own registry, and see them, so a read can wait as
+    long as one of those waits for the lock. The order of the calls of one registry, and the memory registry, do not
+    change. A reservation costs one lock file more: 200 in a row went from about 55 ms to about 100 ms on a local disk.
+  - **What to change:** nothing for the processes of one host. The directory must not be shared between hosts.
 
 ## [0.17.0] - 2026-11-26
 

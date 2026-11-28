@@ -168,6 +168,11 @@ needs no receiver and goes in an envelope of `kind: 'receipt'`: see the
 | `dte-sdk/schemas`  | The SII's schemas and validation against them                                              | Node, with `xmllint-wasm`                  |
 | `dte-sdk/catalogs` | The SII's large code tables, such as the business activities                               | Node, Bun, Deno; bundles for the browser   |
 
+The folio registry of `dte-sdk/node` (`createDirectoryFolioRegistry`) may be shared by the processes of one host on a
+local file system; a directory shared between hosts falls back to the age of its lock, which that lock does not make
+safe. A lock left by a process that was killed names that process in `holderPid` when a change fails with
+`FOLIO_LEDGER_LOCKED`: once that process is known not to be a holder, `folios.json.lock` may be removed by hand.
+
 More on each entry: [Entry points](https://dte.arrowsw.com/documentation/entry-points).
 
 ## Status
