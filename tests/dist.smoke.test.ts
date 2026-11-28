@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { execFile, spawnSync } from 'node:child_process'
 import {
   existsSync,
   mkdirSync,
@@ -13,6 +13,7 @@ import {
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { promisify } from 'node:util'
 import { preProcessFile } from 'typescript'
 
 /**
@@ -24,6 +25,7 @@ const packageRoot = join(__dirname, '..')
 const distRoot = join(packageRoot, 'dist')
 const entryFile = (name: string): string => join(distRoot, `${name}.min.js`)
 const href = (file: string): string => pathToFileURL(file).href
+const execFileAsync = promisify(execFile)
 
 const EXPECTED_FUNCTIONS: Record<string, readonly string[]> = {
   index: [
@@ -378,6 +380,27 @@ guarded('dist smoke (ES modules)', () => {
   const sample = await pdf.renderPrintedSample(doc, { transferable: true })
   console.log(Buffer.from(sample.subarray(0, 5)).toString() + ' ' + (sample.length > 10000))`)
     expect(result).toEqual({ ok: true, output: '%PDF- true\n' })
+  })
+
+  test('processes reserving from one folio registry directory at the same time never get the same folio', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dte-sdk-folio-processes-'))
+    try {
+      const script = `
+const { createDirectoryFolioRegistry } = await import(${JSON.stringify(href(entryFile('node')))})
+const registry = createDirectoryFolioRegistry({ dir: ${JSON.stringify(dir)} })
+const scope = { companyRut: '76543210-3', type: 33, range: { from: 1, to: 60 }, environment: 'certification' }
+const folios = []
+for (let i = 0; i < 5; i += 1) folios.push(await registry.reserve(scope))
+console.log(JSON.stringify(folios))`
+      const outputs = await Promise.all(
+        Array.from({ length: 4 }, () => execFileAsync(process.execPath, ['--input-type=module', '-e', script])),
+      )
+      const folios = outputs.flatMap(({ stdout }) => JSON.parse(stdout) as number[]).sort((a, b) => a - b)
+      expect(folios).toEqual(Array.from({ length: 20 }, (_, index) => index + 1))
+      expect(readdirSync(dir)).toEqual(['folios.json'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

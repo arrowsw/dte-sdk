@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`FOLIO_LEDGER_LOCKED`**, a new error code: a change of the directory folio registry waited `lockWaitMs` for the
+  lock of the ledger and did not get it. `details` carry `lockWaitMs` and `attempts`.
+- **`lock` of `FolioLedgerStore`** (`dte-sdk/portal`), optional: a store that gives it has every change of
+  `createFolioRegistry` run inside it, its read, its change and its write, so that the store can make the change
+  exclusive beyond one registry. A store without it behaves as before.
+
+### Fixed
+
+- **The directory folio registry is safe across processes** (`createDirectoryFolioRegistry`, `dte-sdk/node`). It kept
+  the ledger in one file and ordered the calls of one registry only, and said it was for a single process. Ten
+  processes reserving five folios each from one directory got between 19 and 32 repeated folios out of 50, and two
+  registries on one directory in one process 25 out of 50; a folio given twice ends in two documents with the same
+  folio, and the SII rejects the second. Every change (`reserve`, `markSent`, `markAnnulled`, `release`) now reads,
+  changes and writes the ledger holding `folios.json.lock`, a file created exclusively in the directory, readable by
+  its owner only and removed when the change ends, a failed one included. Whoever finds it held waits, with a growing
+  pause and some jitter, up to `lockWaitMs` (15 000 ms by default), and then fails with `FOLIO_LEDGER_LOCKED`. A lock
+  older than `lockStaleMs` (10 000 ms by default), left by a process that died, is taken over, under a second file
+  created exclusively, so that two processes that find it stale at once never remove the lock of whoever took it next.
+  `remaining` and `stats` take no lock: the ledger is replaced whole, so they read it before or after a change. The
+  order of the calls of one registry, and the memory registry, do not change. A reservation costs one lock file more:
+  200 in a row went from about 55 ms to about 100 ms on a local disk.
+  - **What to change:** nothing. A process that holds a change for more than `lockStaleMs` must raise it, and the
+    directory must be on a file system that honours an exclusive create, as a local disk does.
+
 ## [0.17.0] - 2026-11-26
 
 ### Added

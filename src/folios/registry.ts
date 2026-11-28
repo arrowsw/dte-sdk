@@ -52,6 +52,8 @@ export type FolioLedgerStore = {
   readonly load: () => Promise<FolioLedger | null>
   /** EN: Replaces the stored ledger. ES: Reemplaza el libro guardado. */
   readonly save: (ledger: FolioLedger) => Promise<void>
+  /** EN: Runs one change, its `load`, its change and its `save`, holding a lock that other processes or registries on the same store respect; without it, changes are exclusive inside this registry only. The reads take no lock: a store must replace the ledger whole, so a read sees it before or after a change. ES: Corre un cambio, su `load`, su cambio y su `save`, con un lock que respetan los otros procesos o registros sobre el mismo almacén; sin él, los cambios son exclusivos solo dentro de este registro. Las lecturas no toman lock: un almacén debe reemplazar el libro entero, así una lectura lo ve antes o después de un cambio. */
+  readonly lock?: <T>(run: () => Promise<T>) => Promise<T>
 }
 
 /**
@@ -65,10 +67,12 @@ export const cafFingerprint = (xml: string): string => {
 }
 
 /**
- * EN: A registry over a store. Calls run one after another inside this process, each reading the ledger fresh; several
- * processes need a store or a registry of their own that takes care of it.
- * ES: Un registro sobre un almacén. Las llamadas corren una tras otra dentro de este proceso, cada una leyendo el libro de
- * nuevo; varios procesos necesitan un almacén o un registro propio que se haga cargo.
+ * EN: A registry over a store. Calls run one after another inside this registry, each reading the ledger fresh; several
+ * processes, or several registries on one store, need a store with a `lock` or a registry of their own that takes care
+ * of it.
+ * ES: Un registro sobre un almacén. Las llamadas corren una tras otra dentro de este registro, cada una leyendo el libro
+ * de nuevo; varios procesos, o varios registros sobre un almacén, necesitan un almacén con `lock` o un registro propio
+ * que se haga cargo.
  * @param store EN: where the ledger lives. ES: dónde vive el libro.
  * @param now EN: clock. ES: reloj.
  */
@@ -79,14 +83,17 @@ export const createFolioRegistry = (store: FolioLedgerStore, now: () => Date = (
     queue.tail = turn
     return turn
   }
+  const locked = store.lock ?? (<T>(run: () => Promise<T>) => run())
   const update = <T>(
     change: (ledger: FolioLedger, at: string) => { readonly ledger: FolioLedger; readonly value: T },
   ) =>
-    exclusive(async () => {
-      const { ledger, value } = change((await store.load()) ?? emptyLedger(), now().toISOString())
-      await store.save(ledger)
-      return value
-    })
+    exclusive(() =>
+      locked(async () => {
+        const { ledger, value } = change((await store.load()) ?? emptyLedger(), now().toISOString())
+        await store.save(ledger)
+        return value
+      }),
+    )
   const read = async (): Promise<FolioLedger> => (await store.load()) ?? emptyLedger()
   return {
     reserve: (scope, options) =>
