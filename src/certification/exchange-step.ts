@@ -24,6 +24,8 @@ const COMPLETED_STATE = 'P90'
 export type RunExchangeInput = {
   /** EN: The exchange set, when the caller has it (downloaded by hand from the portal). ES: El set de intercambio, cuando el llamador lo tiene (descargado a mano del portal). */
   readonly setXml?: string
+  /** EN: A receipt of goods for every document of the set, not only for the ones addressed to the company (`createExchangeAnswers`). ES: `Recibo` — Un recibo de mercaderías por cada documento del set, no solo por los dirigidos a la empresa (`createExchangeAnswers`). */
+  readonly receiptsForEveryDocument?: boolean
 }
 
 /**
@@ -82,7 +84,7 @@ const obtainSet = async (rt: Runtime, companyRut: string, given: string | undefi
  * corrida que llega al portal; solo el set se guarda. Cada respuesta del portal queda bajo `intercambio/`.
  * @param deps EN: the dependencies; `contact` names the answers' contact. ES: las dependencias; `contact` nombra el contacto de las respuestas.
  * @param state EN: the current state. ES: el estado actual.
- * @param input EN: the set, when the caller has it. ES: el set, si el llamador lo tiene.
+ * @param input EN: the set, when the caller has it, and which documents get a receipt. ES: el set, si el llamador lo tiene, y qué documentos llevan recibo.
  * @throws {DteError} EN: the codes of `createExchangeAnswers` and of the exchange operations. ES: los códigos de `createExchangeAnswers` y de las operaciones del intercambio.
  */
 export const runExchange = async (
@@ -101,6 +103,9 @@ export const runExchange = async (
     certificate: rt.certificate,
     ...(rt.contact === undefined ? {} : { contact: rt.contact }),
     now: rt.now(),
+    ...(input.receiptsForEveryDocument === undefined
+      ? {}
+      : { receiptsForEveryDocument: input.receiptsForEveryDocument }),
   })
   for (const key of EXCHANGE_ANSWER_KEYS)
     await rt.store.writeArtefact(artefact(answers[key].fileName), answers[key].xml)

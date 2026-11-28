@@ -26,6 +26,7 @@ import type { FakeReply, FakeRoute, RecordedRequest } from '../support/fake-sii'
 import { failure } from '../support/portal'
 import { page } from '../support/portal-pages'
 import { siiFixture } from '../support/sii-client'
+import { ATTENTION, FULL_SET_TEXT, GUIDE_BOOK_ATTENTION, SALES_BOOK_ATTENTION } from '../support/test-set-samples'
 
 const plan = fullPlan()
 const totals = (net: number) => ({
@@ -218,6 +219,71 @@ test('the happy path: history, period, four books sent and kept, the SOAP look, 
       .filter((url) => url.includes('QEstLibro'))
       .map((url) => /year=(\d+)/.exec(url)![1]),
   ).toEqual(['2026', '2025'])
+})
+
+/** The kind of book and the notification folio on the cover of each book sent, in the order they were sent. */
+const coversSent = (harness: { readonly fake: { readonly requests: readonly RecordedRequest[] } }) =>
+  sentBooks(harness).map((request) => {
+    const xml = uploadedXml(request)
+    return [/<TipoLibro>(\w+)</.exec(xml)?.[1], /<FolioNotificacion>(\d+)</.exec(xml)?.[1]]
+  })
+const happyRoutes = (): FakeRoute[] => [
+  ...EMPTY_HISTORY,
+  entry,
+  avance2([rowsPage(), booksForm(), KEPT, ALL_APPROVED]),
+  post('pe_avance3', DECLARATION_ANSWERS.success),
+  fourReceipts(),
+  estUpAlways('LSO'),
+]
+
+test('each book of the test set goes as a special book whose notification folio is the attention number of its own set', async () => {
+  const harness = await certificationHarness(happyRoutes())
+  await runBooks(harness.deps, booksState())
+  // Sent in the order purchase, sales, guide, exempt purchase.
+  expect(coversSent(harness)).toEqual([
+    ['ESPECIAL', ATTENTION],
+    ['ESPECIAL', SALES_BOOK_ATTENTION],
+    ['ESPECIAL', GUIDE_BOOK_ATTENTION],
+    ['ESPECIAL', ATTENTION],
+  ])
+  expect(harness.warnings()).toEqual([])
+})
+
+test('monthlyBooks sends the books as before: the sales and purchase books monthly, the guide book with folio 3', async () => {
+  const harness = await certificationHarness(happyRoutes())
+  await runBooks(harness.deps, booksState(), { monthlyBooks: true })
+  expect(coversSent(harness)).toEqual([
+    ['MENSUAL', undefined],
+    ['MENSUAL', undefined],
+    ['ESPECIAL', '3'],
+    ['MENSUAL', undefined],
+  ])
+})
+
+test('a plan stored without the sales-book and guide-book sets reads them again from the text the state keeps; without the text those books go as before, and the run says so', async () => {
+  const { salesBook, guideBook, ...older } = plan
+  void salesBook
+  void guideBook
+  const reread = await certificationHarness(happyRoutes())
+  await runBooks(reread.deps, booksState({ plan: older, setText: FULL_SET_TEXT }))
+  expect(coversSent(reread).map(([, folio]) => folio)).toEqual([
+    ATTENTION,
+    SALES_BOOK_ATTENTION,
+    GUIDE_BOOK_ATTENTION,
+    ATTENTION,
+  ])
+  const textless = await certificationHarness(happyRoutes())
+  await runBooks(textless.deps, booksState({ plan: older }))
+  expect(coversSent(textless)).toEqual([
+    ['ESPECIAL', ATTENTION],
+    ['MENSUAL', undefined],
+    ['ESPECIAL', '3'],
+    ['ESPECIAL', ATTENTION],
+  ])
+  expect(textless.warnedWith('certification book sent without the attention number of its set')).toEqual([
+    { book: 'salesBook' },
+    { book: 'guideBook' },
+  ])
 })
 
 test('beforeUpload is handed every book before it is sent, and a book it refuses is left as a failed one', async () => {

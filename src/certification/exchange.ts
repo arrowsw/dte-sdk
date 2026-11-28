@@ -48,6 +48,8 @@ export type CreateExchangeAnswersInput = {
   readonly contact?: ExchangeContact
   /** EN: The clock; now by default. ES: El reloj; por defecto ahora. */
   readonly now?: Date
+  /** EN: Write a receipt of goods for every document of the set, the ones addressed to another RUT included; by default only the documents addressed to the company get one. ES: `Recibo` — Escribir un recibo de mercaderías por cada documento del set, también los dirigidos a otro RUT; por defecto solo los documentos dirigidos a la empresa llevan uno. */
+  readonly receiptsForEveryDocument?: boolean
 }
 
 /**
@@ -174,20 +176,22 @@ export const parseExchangeSet = (setXml: string): ExchangeSet => {
 /**
  * EN: Builds and signs the three answers to an exchange set, as the certification expects them: the reception
  * response (the envelope received, every document received when its receiver is the company, else "error en RUT
- * receptor"), the receipts of Ley 19.983 (one per document, signed by the certificate holder) and the commercial
- * approval (accepted when the receiver is the company, else rejected with `CodRchDsc` -1). One line each, UTF-8, no
+ * receptor"), the receipts of Ley 19.983 (one for each document addressed to the company, signed by the certificate
+ * holder; one for every document with `receiptsForEveryDocument`, or when no document is addressed to the company,
+ * since the receipts cannot be empty) and the commercial approval (accepted when the receiver is the company, else rejected with `CodRchDsc` -1). One line each, UTF-8, no
  * declaration; the ids carry the clock in milliseconds and every timestamp is Chile's local time. It is
  * `createReceptionAnswer`, `createGoodsReceipts` and `createResultAnswer` with the certification's decisions; a
  * receiver in production decides each one itself.
  * ES: Arma y firma las tres respuestas a un set de intercambio, como las espera la certificación: la respuesta de
  * recepción (el sobre recibido, cada documento recibido cuando su receptor es la empresa, si no "error en RUT
- * receptor"), los recibos de la Ley 19.983 (uno por documento, firmados por el titular del certificado) y la
- * aprobación comercial (aceptado cuando el receptor es la empresa, si no rechazado con `CodRchDsc` -1). Una línea cada
+ * receptor"), los recibos de la Ley 19.983 (uno por cada documento dirigido a la empresa, firmados por el titular del
+ * certificado; uno por cada documento con `receiptsForEveryDocument`, o cuando ningún documento va dirigido a la
+ * empresa, porque los recibos no pueden ir vacíos) y la aprobación comercial (aceptado cuando el receptor es la empresa, si no rechazado con `CodRchDsc` -1). Una línea cada
  * una, UTF-8, sin declaración; los ids llevan el reloj en milisegundos y cada marca de tiempo es la hora local de Chile.
  * Es `createReceptionAnswer`, `createGoodsReceipts` y `createResultAnswer` con las decisiones de la certificación; un
  * receptor en producción decide cada una por su cuenta.
  * @param setXml EN: the set as the portal served it. ES: el set como lo sirvió el portal.
- * @param input EN: the company, the certificate, the contact and the clock. ES: la empresa, el certificado, el contacto y el reloj.
+ * @param input EN: the company, the certificate, the contact, the clock and which documents get a receipt. ES: la empresa, el certificado, el contacto, el reloj y qué documentos llevan recibo.
  * @returns EN: the three answers and the set read. ES: las tres respuestas y el set leído.
  * @throws {DteError} EN: the codes of `parseExchangeSet`; `INVALID_RUT { field: 'companyRut' }`. ES: los mismos códigos.
  */
@@ -213,7 +217,15 @@ export const createExchangeAnswers = (setXml: string, input: CreateExchangeAnswe
       envelopeCode: position,
     }),
   })
-  const receipts = goodsReceiptsOf(set, { ...answer, contact: input.contact, documents: () => ({}) })
+  // Field behaviour: the exchange stage has been passed with a receipt of goods only for the documents addressed to the
+  // company, the ones the reception takes. The schema of `EnvioRecibos` asks for at least one receipt, so a set with no
+  // document addressed to the company gets one for every document, as `receiptsForEveryDocument` does.
+  const everyDocument = input.receiptsForEveryDocument === true || !set.documents.some(isCompany)
+  const receipts = goodsReceiptsOf(set, {
+    ...answer,
+    contact: input.contact,
+    documents: (document) => (everyDocument || isCompany(document) ? {} : null),
+  })
   return {
     reception: { fileName: EXCHANGE_ANSWER_FILES.reception, xml: reception },
     receipts: { fileName: EXCHANGE_ANSWER_FILES.receipts, xml: receipts },

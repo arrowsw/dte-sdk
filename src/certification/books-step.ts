@@ -20,6 +20,8 @@ import {
 } from './books'
 import { fieldDiagnosis, queryFieldUploadState, type FieldUploadState } from './field-status'
 import { uploadForTrackId } from './field-upload'
+import { planCertificationSets } from './set-plan'
+import { parseTestSetText } from './set-text'
 import { SENT_SET_KEYS, type BooksState, type CertificationState, type SentBook } from './state'
 import {
   declareWithRetries,
@@ -131,15 +133,42 @@ const operationOf = (key: BookKey): 'purchase' | 'sale' => (key === 'salesBook' 
 const keptTotals = (state: CertificationState, period: string, key: BookKey): readonly BookTotals[] | undefined =>
   ADJUSTABLE.includes(key) ? state.books.accumulated[period]?.[operationOf(key)] : undefined
 
+/**
+ * EN: Options of `runBooks`.
+ * ES: Opciones de `runBooks`.
+ */
+export type RunBooksOptions = {
+  /** EN: Send the books as regular ones: the sales and purchase books `MENSUAL` with no notification folio, the guide book (always `ESPECIAL`) with folio 3. By default each book is `ESPECIAL` with the attention number of its own set as its notification folio. ES: `TipoLibro`, `FolioNotificacion` — Enviar los libros como regulares: los de ventas y de compras `MENSUAL` sin folio de notificación, el de guías (siempre `ESPECIAL`) con folio 3. Por defecto cada libro es `ESPECIAL` con el número de atención de su propio set como folio de notificación. */
+  readonly monthlyBooks?: boolean
+}
+
+const NO_ATTENTION = 'certification book sent without the attention number of its set'
+
+// The SII asks for each book of the test set in a set of its own, with a number of attention: the book answers that
+// notification, so it is a special book that names the number as its notification folio (the format of the purchase
+// and sales books, section 1.1, point 3 b). A plan stored before plans carried the sales-book and guide-book sets is
+// read again from the text the state keeps; a book whose set is found nowhere goes as a regular one, and the run says so.
+const notificationFolioOf = (rt: Runtime, state: CertificationState, key: BookKey): number | undefined => {
+  const kept = state.plan?.[key]?.attentionNumber
+  const attention =
+    kept === undefined && state.setText !== undefined
+      ? planCertificationSets(parseTestSetText(state.setText))[key]?.attentionNumber
+      : kept
+  if (attention === undefined) rt.portal.logger.warn(NO_ATTENTION, { book: key })
+  return attention === undefined ? undefined : Number(attention)
+}
+
 const buildBook = (
   rt: Runtime,
   state: CertificationState,
   key: BookKey,
   period: string,
   submission: 'total' | 'adjustment',
+  options: RunBooksOptions,
 ): { readonly xml: string; readonly periodTotals: readonly BookTotals[] | null } => {
   // Only the sales and the purchase book carry the totals of their earlier total submission into an adjustment.
   const previous = keptTotals(state, period, key)
+  const notificationFolio = options.monthlyBooks === true ? undefined : notificationFolioOf(rt, state, key)
   const input: CertificationBookInput = {
     period,
     issuerRut: rt.issuer.rut,
@@ -149,6 +178,7 @@ const buildBook = (
     now: rt.now,
     submission,
     ...(submission === 'adjustment' && previous !== undefined ? { previousTotals: previous } : {}),
+    ...(notificationFolio === undefined ? {} : { notificationFolio }),
   }
   const receiver = { rut: rt.receiver.rut, name: rt.receiver.businessName }
   switch (key) {
@@ -192,6 +222,7 @@ const sendBook = async (
   period: string,
   submission: 'total' | 'adjustment',
   retryHeld: boolean,
+  options: RunBooksOptions,
 ): Promise<CertificationState> => {
   rt.emit({ step: 'BOOK_SENDING', book: key })
   const failed = (error: unknown): Promise<CertificationState> => {
@@ -200,7 +231,7 @@ const sendBook = async (
   }
   let built: ReturnType<typeof buildBook>
   try {
-    built = buildBook(rt, state, key, period, submission)
+    built = buildBook(rt, state, key, period, submission, options)
   } catch (error) {
     return failed(error)
   }
@@ -230,7 +261,7 @@ const sendBook = async (
     return next
   } catch (error) {
     if (retryHeld && submission === 'total' && heldAlready(error))
-      return sendBook(rt, state, key, period, 'adjustment', false)
+      return sendBook(rt, state, key, period, 'adjustment', false, options)
     return failed(error)
   }
 }
@@ -293,9 +324,10 @@ const resendBooks = async (
   period: string,
   submission: 'total' | 'adjustment',
   occupied: Set<string>,
+  options: RunBooksOptions,
 ): Promise<CertificationState> => {
   let current = state
-  for (const key of keys) current = await sendBook(rt, current, key, period, submission, false)
+  for (const key of keys) current = await sendBook(rt, current, key, period, submission, false, options)
   const resent = keys.filter((key) => trackIdOf(current, key) !== null)
   if (resent.length === 0) return current
   const poll = await pollBookStates(rt, current, resent, SOAP_RESEND_POLLS, SOAP_RESEND_ERRORS)
@@ -452,7 +484,8 @@ const utcMonth = (at: Date): string => at.toISOString().slice(0, 7)
  * EN: The books phase. The history of books the SII holds (year by year, until two empty years) marks the occupied
  * periods; the period is the UTC month the test set was read in when the set brought a purchase book, else the current
  * UTC month, or the first free month below it, searched anew on every run. A book the portal shows as `REVISADO
- * CONFORME` is skipped; the purchase, sales, guide and (with a plan) exempt purchase books are built, kept as artefacts
+ * CONFORME` is skipped; the purchase, sales, guide and (with a plan) exempt purchase books are built, each as a special
+ * book whose notification folio is the attention number of its own set (unless `monthlyBooks`), kept as artefacts
  * and uploaded, and a purchase book the SII already holds goes again as an adjustment. Without the three mandatory
  * books sent or skipped the phase ends `incomplete`. Then: the SOAP status of the books is read for a minute; the books
  * are declared together with the four sets; while every declared row comes back empty, at most 24 times, every book
@@ -466,7 +499,8 @@ const utcMonth = (at: Date): string => at.toISOString().slice(0, 7)
  * ES: La fase de libros. El historial de libros que tiene el SII (año a año, hasta dos años vacíos) marca los períodos
  * ocupados; el período es el mes UTC en que se leyó el set de pruebas cuando el set trajo un libro de compras, si no el
  * mes UTC actual, o el primer mes libre bajo él, buscado de nuevo en cada corrida. Un libro que el portal muestra como
- * `REVISADO CONFORME` se omite; los libros de compras, ventas, guías y (con plan) compras para exentos se arman, se
+ * `REVISADO CONFORME` se omite; los libros de compras, ventas, guías y (con plan) compras para exentos se arman, cada uno
+ * como libro especial cuyo folio de notificación es el número de atención de su propio set (salvo `monthlyBooks`), se
  * guardan como artefactos y se suben, y un libro de compras que el SII ya tiene va de nuevo como ajuste. Sin los tres
  * libros obligatorios enviados u omitidos la fase termina `incomplete`. Luego: se lee el estado SOAP de los libros por
  * un minuto; los libros se declaran junto con los cuatro sets; mientras toda fila declarada vuelva vacía, a lo más 24
@@ -482,6 +516,7 @@ const utcMonth = (at: Date): string => at.toISOString().slice(0, 7)
 export const runBooks = async (
   deps: CertificationDependencies,
   state: CertificationState,
+  options: RunBooksOptions = {},
 ): Promise<StepResult<BooksOutcome>> => {
   const rt = runtime(deps)
   const plan = state.plan
@@ -517,7 +552,7 @@ export const runBooks = async (
   const outstanding = wanted.filter((key) => !conforming(key))
   for (const key of wanted) {
     if (!conforming(key)) {
-      current = await sendBook(rt, current, key, period, 'total', key === 'purchaseBook')
+      current = await sendBook(rt, current, key, period, 'total', key === 'purchaseBook', options)
       continue
     }
     rt.emit({ step: 'BOOK_SKIPPED', book: key })
@@ -563,14 +598,14 @@ export const runBooks = async (
         current,
         withBooks(current, { adjustmentTried: [...new Set([...current.books.adjustmentTried, period])] }),
       )
-      current = await resendBooks(rt, current, keys, period, 'adjustment', occupied)
+      current = await resendBooks(rt, current, keys, period, 'adjustment', occupied, options)
       return
     }
     occupied.add(period)
     period = nextFreePeriod(previousPeriod(period), occupied)
     rt.emit({ step: 'BOOK_PERIOD_RETRY', period, attempt })
     current = await saveState(rt, current, withBooks(current, { period, occupiedPeriods: [...occupied] }))
-    current = await resendBooks(rt, current, keys, period, 'total', occupied)
+    current = await resendBooks(rt, current, keys, period, 'total', occupied, options)
   }
   let declaration = await declare()
   const triedEmpty = new Set<string>()

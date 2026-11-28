@@ -38,6 +38,7 @@ import {
   CREATED_REVIEW,
   exchangeRoutes,
   exchangeSetXml,
+  mixedExchangeSetXml,
   NOT_IN_EXCHANGE,
   reviewAnswer,
   SAMPLES_BLOCKED,
@@ -345,6 +346,14 @@ test('after the books the next stage is asked for whatever their outcome; a port
     state: { stage: 'books' },
   })
   expect(refused.steps().slice(-3)).toEqual(['BOOKS_DONE', 'ADVANCE_WAITING', 'ADVANCE_DONE'])
+  // The book is a special one by default; `monthlyBooks` sends it as a monthly one.
+  expect(await refused.store.readArtefact('libro-compras-exentos.xml')).toContain('<TipoLibro>ESPECIAL</TipoLibro>')
+  const monthly = await seeded(
+    [...books(), post('pe_avance4', ADVANCE_ANSWERS.failed), avance6([], () => progressPage('SET DE PRUEBAS', {}))],
+    state,
+  )
+  await runCertification(monthly.deps, { monthlyBooks: true })
+  expect(await monthly.store.readArtefact('libro-compras-exentos.xml')).toContain('<TipoLibro>MENSUAL</TipoLibro>')
   // The portal already stands at the simulation: "already there" moves the run on.
   const there = await seeded(
     [
@@ -620,6 +629,14 @@ test('the exchange answered and confirmed, then the samples: none stops the run,
   await expect(
     runCertification(given.deps, { exchangeSetXml: exchangeSetXml(), until: 'exchange' }),
   ).resolves.toMatchObject({ stopped: 'until', state: { stage: 'printedSamples' } })
+  // The receipts cover the documents addressed to the company, or every document with `receiptsForEveryDocument`.
+  const receiptsOf = async (options: Parameters<typeof runCertification>[1]) => {
+    const harness = await seeded(exchangeRoutes(), confirmedSimulation)
+    await runCertification(harness.deps, { exchangeSetXml: mixedExchangeSetXml(), until: 'exchange', ...options })
+    return ((await harness.store.readArtefact('intercambio/envio-recibos.xml')) ?? '').match(/<Recibo /g)?.length
+  }
+  expect(await receiptsOf({})).toBe(1)
+  expect(await receiptsOf({ receiptsForEveryDocument: true })).toBe(2)
   const unavailable = await seeded(exchangeRoutes({ download: { body: '<html>ERROR</html>' } }), confirmedSimulation)
   await expect(runCertification(unavailable.deps)).resolves.toMatchObject({
     stopped: 'exchange',
