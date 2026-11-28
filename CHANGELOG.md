@@ -31,21 +31,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unchanged.
   - **What to change:** code that builds an `IssuedSimulation` of its own must give it `outsideDeclarableSize`.
 
-- **An envelope verified as it will travel** (`verifyTransmittedEnvelope`). Field behaviour is that the SII checks
-  each `<DTE>` of an envelope on its own, cut from the text of the file: a `<DTE>` that verifies inside the parsed
-  envelope, because it inherits the envelope's namespace, is rejected ("Firma DTE Incorrecta") when the text gives it
-  no `xmlns` of its own, and a stamp is objected to ("Firma Timbre Electrónico Incorrecta") when the bytes of its `DD`
-  in the file are not the ones signed (an empty element written `<RSR/>` where `<RSR></RSR>` was signed).
-  `verifyReceivedDocuments` reads each document from the parsed tree and cannot see either. The new function takes an
-  `EnvioDTE` or `EnvioBOLETA` exactly as it will be sent and reports, for each `<DTE>…</DTE>` cut from the text,
-  whether its signature verifies on that fragment alone and whether the `FRMT` of its stamp verifies over the `DD` as
-  written, with the key of the CAF the stamp carries; whether the envelope's own signature verifies; and one verdict.
-  A failed check is a result, not an error. Pure: no clock, no network.
+- **An envelope verified as it will travel** (`verifyTransmittedEnvelope`). It takes an `EnvioDTE` or `EnvioBOLETA`
+  exactly as it will be sent and reports, for each `<DTE>…</DTE>` cut from the text, whether its signature verifies on
+  that fragment alone and whether the `FRMT` of its stamp verifies, with the key of the CAF the stamp carries; whether
+  the envelope's own signature verifies; and one verdict. A failed check is a result, not an error. Pure: no clock, no
+  network. `verifyReceivedDocuments` reads each document from the parsed tree and can see neither of the two faults
+  this finds.
+  - The signature: field behaviour is that the SII checks each `<DTE>` on its own, cut from the text of the file, and
+    rejects ("Firma DTE Incorrecta") one that verifies inside the parsed envelope only because it inherits the
+    envelope's namespace, when the text gives it no `xmlns` of its own.
+  - The stamp: the SII's "Instructivo Emisión DTE" (A.2.4, pages 19 to 21) says the stamp is signed and verified over
+    the string left once "los caracteres de fin de línea y los blancos y/o tab entre TAGS, así como la referencia a
+    NameSpaces" are removed, "sin modificar la información que va entre el tag de inicio y el tag de fin de los
+    elementos terminales", and "de lo contrario la verificación del timbre electrónico resultará incorrecta". The
+    `FRMT` must verify over the `DD` as written or over that string. A stamp whose content was written again after it
+    was signed (an empty element `<RSR/>` where `<RSR></RSR>` was signed) changes that string, and fails.
+  - The cut: a text with a comment, a CDATA section or a processing instruction past its XML declaration is refused
+    (`XML_PARSE_FAILED`, `field` naming which), since each could hold text that spells a `DTE`; a closing tag may
+    carry blanks before its `>`; and each cut must hold the `ID`, the type and the folio of the element it stands for.
 
 - **Whether a certificate is self-signed** (`Certificate.selfSigned`, `ParsedCertificate.selfSigned`): true when the
-  certificate names itself as its issuer. Nothing refuses one. Field behaviour is that the SII takes no seed signed
-  with a certificate no authority it knows issued, so `runCertification` says so once, when it starts, in the portal
-  client's logger.
+  certificate's issuer name is its subject name, compared as the two are encoded. It says nothing of which key signed
+  the certificate. Nothing refuses one. Field behaviour is that the SII takes no seed signed with a certificate no
+  authority it knows issued, so `runCertification` says so once, when it starts, in the portal client's logger.
   - **What to change:** code that builds a `Certificate` of its own, as a test double does, must give it `selfSigned`.
 
 ### Changed
@@ -60,12 +68,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **What to change:** a run that stops this way should read the lines it names; when none is an item,
     `unreadLines: 'warn'` lets it go on.
 
-- **The certification run verifies every envelope of documents before it uploads it** (`dte-sdk/portal`). The test
-  sets, the simulation and the receipts set (`sendReceiptsSet`) are checked with `verifyTransmittedEnvelope` before
-  `beforeUpload` is called and before anything is sent; one that does not verify stops the step with
-  `SIGNATURE_INVALID`, whose details name the document (`index`, `type`, `folio`) and the check (`signature`,
-  `stamp`) or the envelope (`check: 'envelope'`). The state afterwards is the one a `beforeUpload` that throws leaves:
-  the envelope kept as an artefact, its folios counted as used, nothing sent. It cannot be turned off.
+- **The certification run verifies every envelope of documents before it uploads it** (`dte-sdk/portal`), with
+  `verifyTransmittedEnvelope`. One that does not verify throws `SIGNATURE_INVALID`, whose details name the document
+  (`index`, `type`, `folio`) and the check (`signature`, `stamp`) or the envelope (`check: 'envelope'`), and nothing is
+  sent. It cannot be turned off.
+  - The test sets and the simulation are checked before `beforeUpload` is called, and the step ends as when a
+    `beforeUpload` throws: the envelope kept as an artefact, its folios counted as used.
+  - `sendReceiptsSet` checks the receipts envelope before it uploads anything, and throws.
 
 - **The certification run sends the books of the test set as special books** (`runBooks`, `monthlyBooks` of
   `runCertification`, `RunBooksOptions`, `CertificationBookInput.notificationFolio`, `CertificationPlan.salesBook` and
@@ -109,6 +118,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "Despachar antes del dia 4" was issued as an item of quantity 4. A row now becomes an item only when its cells stand
   apart, after a tab or a run of spaces, as the rows of the item table do; such a line now goes to `unread`. A row
   whose cells stand apart is read as before.
+
 - **Lines of a case that vanished now become what they are, or `unread`** (`parseTestSetText`). In a case of the
   basic, exempt, guide or purchase set, the labels of the export cases were tried first, so a row such as
   `SEGURO DE CARGA` or `FLETE MARITIMO` with its quantity and price became an export field those sets ignore; the
