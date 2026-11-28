@@ -413,6 +413,8 @@ describe('createExchangeAnswers', () => {
       input,
     )
     expect(receipts(elsewhere.receipts.xml)).toHaveLength(2)
+    expect(elsewhere.noDocumentForCompany).toBe(true)
+    expect(answers.noDocumentForCompany).toBe(false)
     expect(elsewhere.reception.xml).not.toContain('<EstadoRecepDTE>0</EstadoRecepDTE>')
   })
 

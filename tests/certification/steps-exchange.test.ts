@@ -9,6 +9,7 @@ import {
   SESSION_CHECK_URL,
   exchangeRoutes,
   exchangeSetXml,
+  elsewhereExchangeSetXml,
   gwtMethodOf,
   mixedExchangeSetXml,
   NOT_IN_EXCHANGE,
@@ -87,6 +88,19 @@ describe('runExchange', () => {
     const every = await certificationHarness(exchangeRoutes())
     await runExchange(every.deps, atExchange(), { setXml: mixedExchangeSetXml(), receiptsForEveryDocument: true })
     expect(await recibos(every)).toHaveLength(2)
+  })
+
+  test('a set with no document addressed to the company: every document gets a receipt, and the run says so', async () => {
+    const harness = await certificationHarness(exchangeRoutes())
+    const result = await runExchange(harness.deps, atExchange(), { setXml: elsewhereExchangeSetXml() })
+    const message = 'certification exchange set has no document addressed to the company: every document gets a receipt'
+    expect(result).toMatchObject({ outcome: 'done', detail: message })
+    expect(harness.warnedWith(message)).toEqual([{ documents: 2 }])
+    expect((await harness.store.readArtefact('intercambio/envio-recibos.xml'))?.match(/<Recibo /g)).toHaveLength(2)
+    const own = await certificationHarness(exchangeRoutes())
+    const plain = await runExchange(own.deps, atExchange(), { setXml: mixedExchangeSetXml() })
+    expect(plain).not.toHaveProperty('detail')
+    expect(own.warnings()).toEqual([])
   })
 
   test('the download is a stage of its own, and the validation, the uploads and the confirmations are one more: two warm-ups but one check of the saved session', async () => {

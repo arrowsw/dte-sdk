@@ -16,6 +16,8 @@ const DIRECTORY = 'intercambio'
 /** EN: The artefact that holds the exchange set; the caller fills it by hand when the download fails. ES: El artefacto que guarda el set de intercambio; el llamador lo llena a mano cuando falla la descarga. */
 export const EXCHANGE_SET_ARTEFACT = `${DIRECTORY}/set-intercambio.xml`
 const COMPLETED_STATE = 'P90'
+const NO_DOCUMENT_FOR_COMPANY =
+  'certification exchange set has no document addressed to the company: every document gets a receipt'
 
 /**
  * EN: Input of `runExchange`.
@@ -24,7 +26,7 @@ const COMPLETED_STATE = 'P90'
 export type RunExchangeInput = {
   /** EN: The exchange set, when the caller has it (downloaded by hand from the portal). ES: El set de intercambio, cuando el llamador lo tiene (descargado a mano del portal). */
   readonly setXml?: string
-  /** EN: A receipt of goods for every document of the set, not only for the ones addressed to the company (`createExchangeAnswers`). ES: `Recibo` — Un recibo de mercaderías por cada documento del set, no solo por los dirigidos a la empresa (`createExchangeAnswers`). */
+  /** EN: A receipt of goods for every document of the set, not only for the ones addressed to the company (`createExchangeAnswers`). A set with no document addressed to the company gets one for every document either way, and the step says so in the portal client's logger and in its `detail`. ES: `Recibo` — Un recibo de mercaderías por cada documento del set, no solo por los dirigidos a la empresa (`createExchangeAnswers`). Un set sin documentos dirigidos a la empresa lleva uno por cada documento de todos modos, y el paso lo dice en el logger del cliente del portal y en su `detail`. */
   readonly receiptsForEveryDocument?: boolean
 }
 
@@ -107,6 +109,9 @@ export const runExchange = async (
       ? {}
       : { receiptsForEveryDocument: input.receiptsForEveryDocument }),
   })
+  // Such a set may be the wrong one, or name another company: the receipts still go, as before, and the run says it.
+  if (answers.noDocumentForCompany)
+    rt.portal.logger.warn(NO_DOCUMENT_FOR_COMPANY, { documents: answers.set.documents.length })
   for (const key of EXCHANGE_ANSWER_KEYS)
     await rt.store.writeArtefact(artefact(answers[key].fileName), answers[key].xml)
   const exchange: ExchangeState = {
@@ -158,7 +163,11 @@ export const runExchange = async (
         stage: laterStage(sent.stage, 'printedSamples'),
       })
       rt.emit({ step: 'INTERCAMBIO_DONE', uploaded: true })
-      return { state: next, outcome: 'done' }
+      return {
+        state: next,
+        outcome: 'done',
+        ...(answers.noDocumentForCompany ? { detail: NO_DOCUMENT_FOR_COMPANY } : {}),
+      }
     },
     obtained.downloaded,
   )
