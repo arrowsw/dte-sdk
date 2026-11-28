@@ -715,7 +715,7 @@ describe('the export sets in the simulation', () => {
   test('each document comes again, a note still names its invoice, and no document carries the SET reference', async () => {
     const one = await issueTestSet(first, options())
     const two = await issueTestSet(second, options())
-    const simulation = await issueSimulation({ export1: first, export2: second }, options())
+    const simulation = await issueSimulation({ export1: first, export2: second }, { ...options(), minimumDocuments: 0 })
     expect(simulation.cases.map((issued) => [issued.caseId, issued.type])).toEqual(
       [...one.cases, ...two.cases].map((issued) => [issued.caseId, issued.type]),
     )
@@ -740,8 +740,8 @@ describe('the export sets in the simulation', () => {
   })
 
   test('its folios are counted with those of the other sets, and a simulation without them is as before', async () => {
-    expect(simulationFolioNeeds({ export1: first, export2: second })).toEqual({ 110: 4, 111: 1, 112: 1 })
-    expect(simulationFolioNeeds({ export2: second })).toEqual({ 110: 3 })
+    expect(simulationFolioNeeds({ export1: first, export2: second }, 0)).toEqual({ 110: 4, 111: 1, 112: 1 })
+    expect(simulationFolioNeeds({ export2: second }, 0)).toEqual({ 110: 3 })
     expect(simulationFolioNeeds(fullPlan())).not.toHaveProperty('110')
     const error = await failure(issueSimulation({ export1: first }, options({})))
     expect(error.details).toMatchObject({ field: 'exportSets.exchangeRates' })

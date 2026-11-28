@@ -2,6 +2,7 @@ import forge from 'node-forge'
 import type { Environment } from '../catalogs/codes'
 import {
   emptyLedger,
+  holdInLedger,
   markAnnulledInLedger,
   markSentInLedger,
   releaseInLedger,
@@ -29,6 +30,8 @@ export type FolioRegistry = {
     folio: number,
     sent?: { readonly trackId?: string; readonly sentAt?: string; readonly extra?: Readonly<Record<string, unknown>> },
   ) => Promise<void>
+  /** EN: Holds a folio for a holder, and says whether it is held: a free folio is recorded as sent for the holder, one already sent for it stays held, and one that is another document's (reserved, sent for another or for none, annulled) is not held and is left as it is. The certification run holds with it the folios of an envelope it keeps to send again, before it asks for or hands out any folio; with a registry without it, the run sends no kept envelope again: it issues each anew, and leaves its folios as that registry has them. `createFolioRegistry` has it. ES: Retiene un folio para un tenedor, y dice si quedó retenido: un folio libre se registra como enviado para el tenedor, uno ya enviado para él sigue retenido, y uno que es de otro documento (reservado, enviado para otro o para ninguno, anulado) no se retiene y queda como está. La corrida de certificación retiene con esto los folios de un sobre que guarda para enviar de nuevo, antes de pedir o entregar cualquier folio; con un registro sin esto, la corrida no envía de nuevo ningún sobre guardado: emite cada uno otra vez, y deja sus folios como ese registro los tenga. `createFolioRegistry` lo tiene. */
+  readonly hold?: (scope: FolioScope, folio: number, holder: string) => Promise<boolean>
   /** EN: Records folios as annulled at the SII. ES: Registra folios como anulados en el SII. */
   readonly markAnnulled: (scope: FolioScope, folios: readonly number[]) => Promise<void>
   /** EN: Gives folios back. ES: Devuelve folios. */
@@ -96,6 +99,11 @@ export const createFolioRegistry = (store: FolioLedgerStore, now: () => Date = (
       }),
     markSent: (scope, folio, sent = {}) =>
       update((ledger, at) => ({ ledger: markSentInLedger(ledger, scope, folio, sent, at), value: undefined })),
+    hold: (scope, folio, holder) =>
+      update((ledger, at) => {
+        const held = holdInLedger(ledger, scope, folio, holder, at)
+        return { ledger: held.ledger, value: held.held }
+      }),
     markAnnulled: (scope, folios) =>
       update((ledger, at) => ({ ledger: markAnnulledInLedger(ledger, scope, folios, at), value: undefined })),
     release: (scope, folios) =>

@@ -132,6 +132,7 @@ export type {
   SettlementSetPlan,
   ExportSetPlan,
   PurchaseBookPlan,
+  BookSetPlan,
   PlannedInvoice,
   PlannedNote,
   PlannedGuide,
@@ -144,6 +145,7 @@ export type {
   PlannedExportCustoms,
   PlannedExportReference,
   SetFolios,
+  UnreadCaseLines,
 } from '../certification/set-plan'
 export { createFolioAllocator } from '../certification/folios'
 export type { FolioSource, FolioAllocatorOptions } from '../certification/folios'
@@ -157,7 +159,7 @@ export type {
   ExportReceiverInput,
 } from '../certification/issue-set'
 export { issueSimulation } from '../certification/simulation'
-export type { IssuedSimulation } from '../certification/simulation'
+export type { IssuedSimulation, IssueSimulationOptions } from '../certification/simulation'
 export {
   createCertificationSalesBook,
   createCertificationPurchaseBook,
@@ -234,6 +236,9 @@ export type {
   BooksState,
   AccumulatedTotals,
   EnvelopeDiagnosis,
+  UnansweredEnvelope,
+  UnansweredEnvelopes,
+  IssuedAnewReason,
 } from '../certification/state'
 export { createDirectoryCertificationStore } from '../certification/node-store'
 export type { DirectoryCertificationStoreOptions } from '../certification/node-store'
@@ -248,6 +253,7 @@ export type {
 } from '../certification/runtime'
 export {
   obtainTestSet,
+  checkTestSetText,
   checkExportSets,
   sendTestSet,
   declareTestSets,
@@ -261,7 +267,7 @@ export {
 export { prepareFolios, setFolioNeeds, simulationFolioNeeds } from '../certification/folios-step'
 export type { PrepareFoliosOptions, PrepareFoliosResult } from '../certification/folios-step'
 export { runBooks, previousPeriod, nextFreePeriod } from '../certification/books-step'
-export type { BooksOutcome } from '../certification/books-step'
+export type { BooksOutcome, RunBooksOptions } from '../certification/books-step'
 
 // Phase 5c-1: the exchange and the printed samples (the two GWT portals).
 export { EXCHANGE_PORTAL, SAMPLES_PORTAL, EXCHANGE_ANSWER_FILES, EXCHANGE_ANSWER_KEYS } from '../catalogs/certification'
@@ -323,6 +329,7 @@ export type { UploadPrintedSamplesInput, SamplesOutcome } from '../certification
 export type { PrintedSampleFile } from '../pdf/samples'
 export { runCertification } from '../certification/runner'
 export type { RunCertificationOptions, RunCertificationResult, RunStop } from '../certification/runner'
+export type { UnreadLinesPolicy, SendTestSetOptions, SendSimulationOptions } from '../certification/steps'
 
 // Phase 5c-2: the certification of receipts (the receipts portal).
 export { RECEIPTS_PORTAL } from '../catalogs/certification'

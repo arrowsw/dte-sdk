@@ -15,8 +15,10 @@ import {
 import { saysNotProcessedYet, saysRejection } from '../portal/pages/certification-progress'
 import { uploadEnvelope } from '../sii/upload'
 import { chileDate } from '../time/chile'
+import { extractTagContent } from '../xml/parse'
 import {
   heldCafs,
+  holdUnansweredFolios,
   prepareFolios,
   registryFolioSource,
   scopeFor,
@@ -26,9 +28,9 @@ import {
 import { fieldDiagnosis, queryFieldUploadState } from './field-status'
 import { assertTransmittable, uploadForTrackId } from './field-upload'
 import { issueTestSet, prepareExportSet, type IssuableSetPlan, type IssuedCase } from './issue-set'
-import { issueSimulation } from './simulation'
-import { planCertificationSets } from './set-plan'
-import { parseTestSetText } from './set-text'
+import { issueSimulation, outsideDeclarableSize, simulationIssueDate } from './simulation'
+import { planCertificationSets, type UnreadCaseLines } from './set-plan'
+import { looksLikeItemRow, parseTestSetText } from './set-text'
 import {
   runtime,
   saveState,
@@ -40,11 +42,15 @@ import {
 import {
   createCertificationState,
   EXPORT_SET_KEYS,
+  ISSUED_ANEW,
   SENT_SET_KEYS,
   type CertificationState,
   type EnvelopeDiagnosis,
+  type IssuedAnewReason,
   type SentCase,
   type SentSetKey,
+  type UnansweredEnvelope,
+  type UnansweredEnvelopes,
 } from './state'
 
 export type {
@@ -161,66 +167,299 @@ const sentCase = (issued: IssuedCase): SentCase => {
 export const markSent = async (
   rt: Runtime,
   held: readonly HeldCaf[],
-  cases: readonly IssuedCase[],
-  sent: { readonly trackId?: string; readonly sentAt: string },
+  cases: readonly { readonly type: number; readonly folio: number }[],
+  sent: { readonly trackId?: string; readonly sentAt: string; readonly extra?: Readonly<Record<string, unknown>> },
 ): Promise<void> => {
   for (const issued of cases) await rt.registry.markSent(scopeFor(held, issued.type, issued.folio), issued.folio, sent)
+}
+
+/**
+ * EN: The envelopes the run may keep to send again: one per set and the simulation's. Internal.
+ * ES: Los sobres que la corrida puede guardar para enviar de nuevo: uno por set y el de la simulación. Interno.
+ */
+export type UnansweredKey = SentSetKey | 'simulation'
+
+const SENT_AGAIN = 'certification envelope sent again'
+
+const withoutBlanks = (text: string | null): string => (text ?? '').replace(/\s+/g, '')
+
+// The certificate of the envelope's own signature, the one after its `SetDTE`: each document carries its own before.
+const envelopeSigner = (xml: string): string =>
+  withoutBlanks(extractTagContent(xml.slice(xml.lastIndexOf('</SetDTE>')), 'X509Certificate'))
+
+const reasonNotAgain = (
+  rt: Runtime,
+  entry: UnansweredEnvelope,
+  xml: string | null,
+  expected: { readonly issueDate: string; readonly documents?: number },
+): IssuedAnewReason | null => {
+  if (xml === null) return 'artefact'
+  if (entry.issueDate !== expected.issueDate) return 'date'
+  if (expected.documents !== undefined && entry.cases.length !== expected.documents) return 'size'
+  if (envelopeSigner(xml) !== withoutBlanks(rt.certificate.certificateBase64)) return 'certificate'
+  if (
+    extractTagContent(xml, 'FchResol') !== rt.resolution.date ||
+    extractTagContent(xml, 'NroResol') !== String(rt.resolution.number)
+  )
+    return 'cover'
+  try {
+    assertTransmittable(xml)
+  } catch {
+    return 'verification'
+  }
+  return null
+}
+
+/**
+ * EN: The envelope kept to be sent again under this key, when it may be: one the SII never answered with a track id
+ * (`unanswered` of the state, whose folios `holdUnansweredFolios` holds), whose artefact is still there, whose
+ * documents carry `expected.issueDate`, that holds `expected.documents` documents when it is given, whose own signature
+ * carries the run's certificate (the `X509Certificate` after its `SetDTE`, compared with the run's
+ * `certificateBase64`), whose cover names the run's resolution (its `FchResol` and its `NroResol`), and that still
+ * verifies as the SII reads it (`assertTransmittable`). Otherwise null, and an envelope that was kept is said in the
+ * portal client's logger with the reason it is issued anew (`IssuedAnewReason`). Internal.
+ * ES: El sobre guardado para enviarse de nuevo bajo esta clave, cuando se puede: uno que el SII nunca respondió con un
+ * track id (`unanswered` del estado, cuyos folios retiene `holdUnansweredFolios`), cuyo artefacto sigue ahí, cuyos
+ * documentos llevan `expected.issueDate`, que trae `expected.documents` documentos cuando se da, cuya propia firma
+ * lleva el certificado de la corrida (el `X509Certificate` tras su `SetDTE`, comparado con el `certificateBase64` de la
+ * corrida), cuya carátula nombra la resolución de la corrida (su `FchResol` y su `NroResol`), y que aún verifica como
+ * lo lee el SII (`assertTransmittable`). Si no, null, y un sobre que estaba guardado se dice en el logger del cliente
+ * del portal con la razón por la que se emite otra vez (`IssuedAnewReason`). Interno.
+ */
+export const envelopeToSendAgain = async (
+  rt: Runtime,
+  state: CertificationState,
+  key: UnansweredKey,
+  expected: { readonly issueDate: string; readonly documents?: number },
+): Promise<{ readonly xml: string; readonly entry: UnansweredEnvelope } | null> => {
+  const entry = state.unanswered?.[key]
+  if (entry === undefined) return null
+  const xml = await rt.store.readArtefact(entry.artefact)
+  const reason = reasonNotAgain(rt, entry, xml, expected)
+  if (reason !== null) {
+    rt.portal.logger.warn(ISSUED_ANEW, { envelope: key, reason })
+    return null
+  }
+  return { xml: xml!, entry }
+}
+
+const withoutUnanswered = (state: CertificationState, key: UnansweredKey): UnansweredEnvelopes =>
+  Object.fromEntries(Object.entries(state.unanswered ?? {}).filter(([name]) => name !== key))
+
+// The failures after which the request of an upload may have reached the SII with no answer that can be read: the
+// network failed or timed out, or was cut, or the SII answered with an HTTP error or a body that is no reception. A
+// failure that is not a `DteError` comes from a transport of the caller's, as a network failure would.
+const NO_READABLE_ANSWER: ReadonlySet<string> = new Set([
+  'TRANSPORT_FAILED',
+  'REQUEST_TIMEOUT',
+  'REQUEST_ABORTED',
+  'SII_HTTP_ERROR',
+  'SII_RESPONSE_INVALID',
+])
+
+/**
+ * EN: Uploads an envelope of documents as the run does (`uploadForTrackId`), and says afterwards whether its request
+ * left this machine. Everything `uploadEnvelope` does before the request is local or goes elsewhere: the file and its
+ * form are built (`INVALID_OPTION` for a cover that names another company or sender or for a declaration that is not
+ * ISO-8859-1, `ENCODING_UNSUPPORTED_CHAR`, `MISSING_FIELD`, `INVALID_RUT`), and the token is read from the cache or
+ * asked for (the seed and token services, `SII_TOKEN_FAILED` and the transport codes of those requests). The request
+ * leaves when the client's transport is called with the URL of `DTEUpload`; only then can the SII have the file.
+ * Internal.
+ * ES: Sube un sobre de documentos como lo hace la corrida (`uploadForTrackId`), y dice después si su petición salió de
+ * esta máquina. Todo lo que `uploadEnvelope` hace antes de la petición es local o va a otra parte: se arman el archivo
+ * y su formulario (`INVALID_OPTION` por una carátula que nombra otra empresa u otro remitente o por una declaración que
+ * no es ISO-8859-1, `ENCODING_UNSUPPORTED_CHAR`, `MISSING_FIELD`, `INVALID_RUT`), y el token se lee del caché o se pide
+ * (los servicios de semilla y token, `SII_TOKEN_FAILED` y los códigos de transporte de esas peticiones). La petición
+ * sale cuando el transporte del cliente se llama con la URL de `DTEUpload`; solo entonces el SII puede tener el archivo.
+ * Interno.
+ */
+export const watchedUpload = (
+  rt: Runtime,
+  xml: string,
+): { readonly upload: () => Promise<string>; readonly left: () => boolean } => {
+  const urls: string[] = []
+  const sii = {
+    ...rt.sii,
+    transport: (request: Parameters<typeof rt.sii.transport>[0]) => {
+      urls.push(request.url)
+      return rt.sii.transport(request)
+    },
+  }
+  return {
+    upload: () =>
+      uploadForTrackId(
+        (overrides) => uploadEnvelope(sii, { envelope: { kind: 'dte', xml } }, overrides),
+        'uploadEnvelope',
+      ),
+    left: () => urls.includes(rt.sii.endpoints.soap.upload),
+  }
+}
+
+// What the state keeps of an envelope after a step that stopped before a track id. When its request left, it is kept
+// only if the answer could not be read (`NO_READABLE_ANSWER`): one the SII refused is not. When nothing left this
+// machine (the check before the upload, `beforeUpload`, a refusal of the upload client, the token), an envelope just
+// issued is not kept, as before envelopes were kept, and one sent again stays as it was: an earlier request of it may
+// have reached the SII.
+const keptAfter = (
+  error: unknown,
+  left: boolean,
+  again: UnansweredEnvelope | null,
+  fresh: UnansweredEnvelope,
+): UnansweredEnvelope | null => {
+  if (!left) return again
+  return !isDteError(error) || NO_READABLE_ANSWER.has(error.code) ? (again ?? fresh) : null
+}
+
+const unansweredWith = (
+  state: CertificationState,
+  key: UnansweredKey,
+  kept: UnansweredEnvelope | null,
+): UnansweredEnvelopes =>
+  kept === null ? withoutUnanswered(state, key) : { ...withoutUnanswered(state, key), [key]: kept }
+
+// The folios of a kept envelope are recorded as held for it, so the next run finds them held in the same registry.
+const failedMark = (sentAt: string, kept: UnansweredEnvelope | null) =>
+  kept === null ? { sentAt } : { sentAt, extra: { heldFor: kept.holder } }
+
+/**
+ * EN: Settles, before the folios of the sets are asked for, which envelopes of the sets kept to be sent again
+ * (`unanswered` of the state) will be: each that `envelopeToSendAgain` does not take, or every one when
+ * `resendUnanswered` is false, is dropped from the state, so its set is issued anew and its folios asked for. Internal.
+ * ES: Resuelve, antes de pedir los folios de los sets, qué sobres de los sets guardados para enviarse de nuevo
+ * (`unanswered` del estado) se enviarán: cada uno que `envelopeToSendAgain` no toma, o todos cuando
+ * `resendUnanswered` es false, se quita del estado, así su set se emite otra vez y se piden sus folios. Interno.
+ */
+export const settleUnansweredSets = async (
+  deps: CertificationDependencies,
+  state: CertificationState,
+  options: { readonly resendUnanswered?: boolean } = {},
+): Promise<CertificationState> => {
+  const rt = runtime(deps)
+  const kept = Object.keys(state.unanswered ?? {}).filter((key) => key !== 'simulation') as SentSetKey[]
+  const dropped: SentSetKey[] = []
+  for (const key of kept)
+    if (
+      options.resendUnanswered === false ||
+      (await envelopeToSendAgain(rt, state, key, { issueDate: chileDate(rt.now()) })) === null
+    )
+      dropped.push(key)
+  if (dropped.length === 0) return state
+  return saveState(rt, state, {
+    unanswered: Object.fromEntries(
+      Object.entries(state.unanswered!).filter(([key]) => !(dropped as string[]).includes(key)),
+    ),
+  })
+}
+
+/**
+ * EN: Options of `sendTestSet`.
+ * ES: Opciones de `sendTestSet`.
+ */
+export type SendTestSetOptions = {
+  /** EN: The set to send. ES: El set a enviar. */
+  readonly kind: SentSetKey
+  /** EN: Send again the envelope of the set the SII never answered, in place of issuing it anew, when it is safe as `resendUnanswered` of `runCertification` says; true by default. False issues anew. ES: Enviar de nuevo el sobre del set que el SII nunca respondió, en vez de emitirlo otra vez, cuando es seguro según dice `resendUnanswered` de `runCertification`; true por defecto. False emite otra vez. */
+  readonly resendUnanswered?: boolean
 }
 
 /**
  * EN: Sends one test set: issues it with the folios of the state's CAFs through the registry, keeps the envelope and
  * every document as artefacts (phase 5a reads them), checks the envelope as the SII reads it (`assertTransmittable`),
  * hands it to `beforeUpload` when there is one, uploads it, marks the folios sent whatever happened, and records the
- * track id and the Chile date of the send.
+ * track id and the Chile date of the send. Before any folio is handed out, the folios of every envelope kept to be sent
+ * again are held in the registry for it. A step whose upload request left for the SII and got no answer that can be
+ * read (a failure of the network, an HTTP error, an answer that is no reception) keeps the envelope in the state
+ * (`unanswered`), and the next call sends that same envelope again in place of issuing the set anew, when it is safe
+ * as `resendUnanswered` of `runCertification` says and `resendUnanswered` is not false: it asks for no folio, issues
+ * nothing, says so in the portal client's logger, hands the envelope to `beforeUpload` again and uploads it; the SII
+ * answers a file it already holds with its first track id. A step that stops before the request leaves (the check,
+ * `beforeUpload`, a refusal of the upload client, the token) keeps nothing, and the next call issues anew.
  * ES: Envía un set de pruebas: lo emite con los folios de los CAF del estado a través del registro, guarda el sobre y
  * cada documento como artefactos (la fase 5a los lee), chequea el sobre como lo lee el SII (`assertTransmittable`),
  * lo entrega a `beforeUpload` si hay uno, lo sube, marca los folios enviados pase lo que pase, y registra el track id
- * y la fecha de Chile del envío.
+ * y la fecha de Chile del envío. Antes de entregar cualquier folio, los folios de cada sobre guardado para enviarse de
+ * nuevo se retienen para él en el registro. Un paso cuya petición de subida salió hacia el SII y no tuvo una respuesta
+ * legible (una falla de red, un error HTTP, una respuesta que no es una recepción) deja el sobre en el estado
+ * (`unanswered`), y la llamada siguiente envía ese mismo sobre de nuevo en vez de emitir el set otra vez, cuando es
+ * seguro según dice `resendUnanswered` de `runCertification` y `resendUnanswered` no es false: no pide folios, no
+ * emite nada, lo dice en el logger del cliente del portal, entrega el sobre a `beforeUpload` de nuevo y lo sube; el SII
+ * responde a un archivo que ya tiene con su primer track id. Un paso que se detiene antes de que salga la petición (el
+ * chequeo, `beforeUpload`, un rechazo del cliente de subida, el token) no guarda nada, y la llamada siguiente emite
+ * otra vez.
  * @throws {DteError} EN: `MISSING_FIELD { field: 'plan', kind }` without the set's plan; the 5b-1, folio and upload codes; `SIGNATURE_INVALID` for an envelope that does not verify as the SII reads it (`assertTransmittable`). ES: `MISSING_FIELD { field: 'plan', kind }` sin el plan del set; los códigos de 5b-1, de folios y de envío; `SIGNATURE_INVALID` por un sobre que no verifica como lo lee el SII (`assertTransmittable`).
  */
 export const sendTestSet = async (
   deps: CertificationDependencies,
-  state: CertificationState,
-  options: { readonly kind: SentSetKey },
+  given: CertificationState,
+  options: SendTestSetOptions,
 ): Promise<StepResult<'sent'>> => {
   const rt = runtime(deps)
-  const plan = state.plan?.[options.kind] as IssuableSetPlan | undefined
+  const plan = given.plan?.[options.kind] as IssuableSetPlan | undefined
   if (plan === undefined) throw new DteError('MISSING_FIELD', { field: 'plan', kind: options.kind })
   rt.emit({ step: 'SET_START', set: options.kind })
+  // Before a folio is handed out, the folios of every envelope kept are held in this registry.
+  const state = await holdUnansweredFolios(rt, given)
   const held = heldCafs(state.cafs, rt.now())
-  const issued = await issueTestSet(plan, {
-    issuer: rt.issuer,
-    receiver: rt.receiver,
-    receivers: rt.receivers,
-    certificate: rt.certificate,
-    folios: registryFolioSource(rt.registry, held),
-    resolution: rt.resolution,
-    now: rt.now,
-    exportSets: rt.exportSets,
-  })
-  await rt.store.writeArtefact(`sets-prueba/envio-set-${SET_FILE_NAMES[options.kind]}.xml`, issued.envelope.xml)
-  for (const document of issued.cases)
-    await rt.store.writeArtefact(
-      documentArtefactName('sets-prueba', document.type, document.folio),
-      document.document.xml,
-    )
+  const again =
+    options.resendUnanswered === false
+      ? null
+      : await envelopeToSendAgain(rt, state, options.kind, { issueDate: chileDate(rt.now()) })
+  const artefact = `sets-prueba/envio-set-${SET_FILE_NAMES[options.kind]}.xml`
+  let xml: string
+  let cases: readonly SentCase[]
+  if (again !== null) {
+    rt.portal.logger.warn(SENT_AGAIN, { envelope: options.kind, documents: again.entry.cases.length })
+    xml = again.xml
+    cases = again.entry.cases
+  } else {
+    const issued = await issueTestSet(plan, {
+      issuer: rt.issuer,
+      receiver: rt.receiver,
+      receivers: rt.receivers,
+      certificate: rt.certificate,
+      folios: registryFolioSource(rt.registry, held),
+      resolution: rt.resolution,
+      now: rt.now,
+      exportSets: rt.exportSets,
+    })
+    await rt.store.writeArtefact(artefact, issued.envelope.xml)
+    for (const document of issued.cases)
+      await rt.store.writeArtefact(
+        documentArtefactName('sets-prueba', document.type, document.folio),
+        document.document.xml,
+      )
+    xml = issued.envelope.xml
+    cases = issued.cases.map(sentCase)
+  }
   const sentAt = rt.now().toISOString()
-  const usedFolios = [...state.usedFolios, ...issued.cases.map((c) => ({ type: c.type, folio: c.folio }))]
+  // The folios of an envelope sent again were counted when it was issued.
+  const usedFolios =
+    again !== null ? state.usedFolios : [...state.usedFolios, ...cases.map((c) => ({ type: c.type, folio: c.folio }))]
+  const watch = watchedUpload(rt, xml)
   try {
-    assertTransmittable(issued.envelope.xml)
-    await rt.beforeUpload?.({ kind: 'testSet', name: options.kind, xml: issued.envelope.xml })
-    const trackId = await uploadForTrackId(
-      (overrides) => uploadEnvelope(rt.sii, { envelope: issued.envelope }, overrides),
-      'uploadEnvelope',
-    )
-    await markSent(rt, held, issued.cases, { trackId, sentAt })
-    const sent = { trackId, date: chileDate(rt.now()), sentAt, cases: issued.cases.map(sentCase) }
-    const next = await saveState(rt, state, { usedFolios, sets: { ...state.sets, [options.kind]: sent } })
+    if (again === null) assertTransmittable(xml)
+    await rt.beforeUpload?.({ kind: 'testSet', name: options.kind, xml })
+    const trackId = await watch.upload()
+    await markSent(rt, held, cases, { trackId, sentAt })
+    const sent = { trackId, date: chileDate(rt.now()), sentAt, cases }
+    const next = await saveState(rt, state, {
+      usedFolios,
+      sets: { ...state.sets, [options.kind]: sent },
+      unanswered: withoutUnanswered(state, options.kind),
+    })
     rt.emit({ step: 'SET_OK', set: options.kind, trackId })
     return { state: next, outcome: 'sent' }
   } catch (error) {
-    await markSent(rt, held, issued.cases, { sentAt })
-    await saveState(rt, state, { usedFolios })
+    const fresh = {
+      artefact,
+      issueDate: cases[0].issueDate,
+      triedAt: sentAt,
+      holder: `${options.kind}@${sentAt}`,
+      cases,
+    }
+    const kept = keptAfter(error, watch.left(), again?.entry ?? null, fresh)
+    await markSent(rt, held, cases, failedMark(sentAt, kept))
+    await saveState(rt, state, { usedFolios, unanswered: unansweredWith(state, options.kind, kept) })
     rt.emit({ step: 'SET_ERROR', set: options.kind, error: errorMessage(error) })
     throw error
   }
@@ -252,6 +491,63 @@ export const checkExportSets = async (deps: CertificationDependencies, state: Ce
     const plan = state.plan?.[kind]
     if (plan === undefined || state.sets[kind] !== undefined) continue
     await prepareExportSet(plan, { issuer: rt.issuer, exportSets: rt.exportSets }, chileDate(rt.now()))
+  }
+}
+
+const NOT_READ = 'certification test set line not read'
+
+/**
+ * EN: What the run does with the lines of the test set the reader did not use: `stop` stops on any of them;
+ * `stopOnRows` stops on a line shaped like a row of items (`looksLikeItemRow`), which the reader cannot tell from a
+ * sentence, and only logs the rest; `warn` only logs them.
+ * ES: Qué hace la corrida con las líneas del set de pruebas que el lector no usó: `stop` se detiene ante cualquiera;
+ * `stopOnRows` se detiene ante una línea con forma de fila de ítems (`looksLikeItemRow`), que el lector no distingue de
+ * una frase, y solo registra las demás; `warn` solo las registra.
+ */
+export type UnreadLinesPolicy = 'stop' | 'stopOnRows' | 'warn'
+
+const unreadOf = (state: CertificationState): readonly UnreadCaseLines[] => {
+  if (state.plan === undefined) return []
+  // A plan stored before plans carried their unread lines is read again from the text the state keeps.
+  if (state.plan.unread === undefined && state.setText !== undefined)
+    return planCertificationSets(parseTestSetText(state.setText)).unread ?? []
+  return state.plan.unread ?? []
+}
+
+/**
+ * EN: Shows, before any folio of the sets is asked for, the lines of the test set the reader did not use: each line a
+ * case of a set not yet sent left unread goes to the portal client's logger, with its set and its case. The lines are
+ * the plan's `unread`, or, for a plan stored without them, those of the text the state keeps, read again. Then, by
+ * `unreadLines` (`stopOnRows` by default), the run stops here, where nothing has been asked of the SII, on the first
+ * case with a line that stops it. A plan read in full, or no plan, logs nothing.
+ * ES: Muestra, antes de pedir cualquier folio de los sets, las líneas del set de pruebas que el lector no usó: cada
+ * línea que un caso de un set aún no enviado dejó sin leer va al logger del cliente del portal, con su set y su caso.
+ * Las líneas son el `unread` del plan, o, para un plan guardado sin ellas, las del texto que guarda el estado, leído de
+ * nuevo. Luego, según `unreadLines` (`stopOnRows` por defecto), la corrida se detiene aquí, donde nada se ha pedido al
+ * SII, en el primer caso con una línea que la detiene. Un plan leído completo, o sin plan, no registra nada.
+ * @throws {DteError} EN: `SII_PORTAL_UNEXPECTED_PAGE { operation: 'checkTestSetText', step: 'set-text', set, caseId, lines }`, `lines` being those of the case that stop the run. ES: `SII_PORTAL_UNEXPECTED_PAGE { operation: 'checkTestSetText', step: 'set-text', set, caseId, lines }`, con `lines` las líneas del caso que detienen la corrida.
+ */
+export const checkTestSetText = async (
+  deps: CertificationDependencies,
+  state: CertificationState,
+  options: { readonly unreadLines?: UnreadLinesPolicy } = {},
+): Promise<void> => {
+  const rt = runtime(deps)
+  const policy = options.unreadLines ?? 'stopOnRows'
+  const pending = unreadOf(state).filter((entry) => state.sets[entry.set] === undefined)
+  for (const entry of pending)
+    for (const line of entry.lines) rt.portal.logger.warn(NOT_READ, { set: entry.set, caseId: entry.caseId, line })
+  if (policy === 'warn') return
+  for (const entry of pending) {
+    const lines = policy === 'stop' ? entry.lines : entry.lines.filter(looksLikeItemRow)
+    if (lines.length > 0)
+      throw new DteError('SII_PORTAL_UNEXPECTED_PAGE', {
+        operation: 'checkTestSetText',
+        step: 'set-text',
+        set: entry.set,
+        caseId: entry.caseId,
+        lines,
+      })
   }
 }
 
@@ -521,72 +817,147 @@ const atLeast = (stage: CertificationStage, floor: CertificationStage): boolean 
   STAGE_ORDER.indexOf(stage) >= STAGE_ORDER.indexOf(floor)
 
 /**
- * EN: Sends the simulation: CAFs of its own for one folio per case (never the sets' CAFs), every case of the four sets
- * issued again in one envelope, the envelope and the documents kept as artefacts, the upload, the folios marked sent
- * whatever happened, and the track id with the Chile date of the send. An attempt that stops before the upload leaves
- * the CAFs it obtained in the state (`simulationCafs`), and the next one issues with them and asks only for what is
- * missing: unused folios are what makes the SII ration. Once the upload was tried they are spent, as field behaviour
- * has it, and a new attempt asks for new ones.
- * ES: Envía la simulación: CAF propios para un folio por caso (nunca los CAF de los sets), cada caso de los cuatro sets
- * reemitido en un sobre, el sobre y los documentos guardados como artefactos, el envío, los folios marcados enviados
- * pase lo que pase, y el track id con la fecha de Chile del envío. Un intento que se detiene antes del envío deja en
- * el estado los CAF que obtuvo (`simulationCafs`), y el siguiente emite con ellos y pide solo lo que falta: los folios
- * sin usar son lo que hace racionar al SII. Una vez intentado el envío quedan gastados, como en el comportamiento de
- * campo, y un intento nuevo pide otros.
- * @throws {DteError} EN: `MISSING_FIELD { field: 'plan' }` without a plan; the folio, 5b-1 and upload codes; `SIGNATURE_INVALID` for an envelope that does not verify as the SII reads it (`assertTransmittable`). ES: `MISSING_FIELD { field: 'plan' }` sin plan; los códigos de folios, de 5b-1 y de envío; `SIGNATURE_INVALID` por un sobre que no verifica como lo lee el SII (`assertTransmittable`).
+ * EN: Options of `sendSimulation`.
+ * ES: Opciones de `sendSimulation`.
+ */
+export type SendSimulationOptions = {
+  /** EN: Send again the envelope of the simulation the SII never answered, in place of issuing it anew, when it is safe as `resendUnanswered` of `runCertification` says; true by default. False issues anew. ES: Enviar de nuevo el sobre de la simulación que el SII nunca respondió, en vez de emitirlo otra vez, cuando es seguro según dice `resendUnanswered` de `runCertification`; true por defecto. False emite otra vez. */
+  readonly resendUnanswered?: boolean
+  /** EN: The fewest documents the envelope holds (`minimumDocuments` of `issueSimulation`); 20 by default, and 0 issues one pass over the plan. ES: La menor cantidad de documentos que trae el sobre (`minimumDocuments` de `issueSimulation`); 20 por defecto, y 0 emite una pasada por el plan. */
+  readonly simulationMinimum?: number
+}
+
+/**
+ * EN: Sends the simulation: CAFs of its own for one folio per case of every pass (never the sets' CAFs), every case of
+ * the sets issued again in one envelope, its pass repeated whole until the envelope holds `simulationMinimum`
+ * documents (20 by default, `issueSimulation`), the envelope and the documents kept as artefacts, the upload, the
+ * folios marked sent whatever happened, and the track id with the Chile date of the send. An attempt that stops before
+ * the upload leaves the CAFs it obtained in the state (`simulationCafs`), and the next one issues with them and asks
+ * only for what is missing: unused folios are what makes the SII ration. Once the upload was tried they are spent, as
+ * field behaviour has it. An attempt whose upload request left and got no answer that can be read keeps the envelope
+ * in the state (`unanswered`), and the next attempt sends it again as `sendTestSet` does, with the local day the
+ * simulation dates its documents with, and only when it holds as many documents as `simulationMinimum` now asks for
+ * (which is checked first, on every path), asking for no folio, unless `resendUnanswered` is false; otherwise a new
+ * attempt asks for new folios. An envelope outside the 20 to 100
+ * documents the declaration takes (`outsideDeclarableSize`) is sent all the same, and the portal client's logger says
+ * so before any folio of the simulation is asked for.
+ * ES: Envía la simulación: CAF propios para un folio por caso de cada pasada (nunca los CAF de los sets), cada caso de
+ * los sets reemitido en un sobre, su pasada repetida entera hasta que el sobre trae `simulationMinimum` documentos (20
+ * por defecto, `issueSimulation`), el sobre y los documentos guardados como artefactos, el envío, los folios marcados
+ * enviados pase lo que pase, y el track id con la fecha de Chile del envío. Un intento que se detiene antes del envío
+ * deja en el estado los CAF que obtuvo (`simulationCafs`), y el siguiente emite con ellos y pide solo lo que falta: los
+ * folios sin usar son lo que hace racionar al SII. Una vez intentado el envío quedan gastados, como en el
+ * comportamiento de campo. Un intento cuya petición de subida salió y no tuvo una respuesta legible deja el sobre en el
+ * estado (`unanswered`), y el intento siguiente lo envía de nuevo como lo hace `sendTestSet`, con el día local con que
+ * la simulación fecha sus documentos, y solo cuando trae tantos documentos como pide ahora `simulationMinimum` (que se
+ * revisa primero, en todo camino), sin pedir folios, salvo que `resendUnanswered` sea false; si no, un intento nuevo
+ * pide folios nuevos. Un sobre fuera de los 20 a 100
+ * documentos que toma la declaración (`outsideDeclarableSize`) se envía igual, y el logger del cliente del portal lo
+ * dice antes de pedir cualquier folio de la simulación.
+ * @throws {DteError} EN: `MISSING_FIELD { field: 'plan' }` without a plan; `INVALID_OPTION { field: 'minimumDocuments' }` for a `simulationMinimum` that is not a whole number from 0 to 100, before any folio is asked for; the folio, 5b-1 and upload codes; `SIGNATURE_INVALID` for an envelope that does not verify as the SII reads it (`assertTransmittable`). ES: `MISSING_FIELD { field: 'plan' }` sin plan; `INVALID_OPTION { field: 'minimumDocuments' }` por un `simulationMinimum` que no es un entero de 0 a 100, antes de pedir cualquier folio; los códigos de folios, de 5b-1 y de envío; `SIGNATURE_INVALID` por un sobre que no verifica como lo lee el SII (`assertTransmittable`).
  */
 export const sendSimulation = async (
   deps: CertificationDependencies,
-  state: CertificationState,
+  given: CertificationState,
+  options: SendSimulationOptions = {},
 ): Promise<StepResult<'sent'>> => {
   const rt = runtime(deps)
-  if (state.plan === undefined) throw new DteError('MISSING_FIELD', { field: 'plan' })
+  const plan = given.plan
+  if (plan === undefined) throw new DteError('MISSING_FIELD', { field: 'plan' })
   rt.emit({ step: 'SIM_START' })
-  // The simulation issues the export sets again, sent or not: they are worked out before a folio is asked for, so a
-  // rate that is missing stops it here, where nothing has been asked of the SII.
-  for (const kind of EXPORT_SET_KEYS) {
-    const plan = state.plan[kind]
-    if (plan !== undefined)
-      await prepareExportSet(plan, { issuer: rt.issuer, exportSets: rt.exportSets }, chileDate(rt.now()))
+  // What the run asks of the simulation, worked out first whether it sends again or issues: a minimum that is not one
+  // stops it here, and a kept envelope of another size is issued anew.
+  const needs = simulationFolioNeeds(plan, options.simulationMinimum)
+  const documents = Object.values(needs).reduce((sum, count) => sum + count, 0)
+  // Before a folio is asked for or handed out, the folios of every envelope kept are held in this registry.
+  const state = await holdUnansweredFolios(rt, given)
+  const again =
+    options.resendUnanswered === false
+      ? null
+      : await envelopeToSendAgain(rt, state, 'simulation', { issueDate: simulationIssueDate(rt.now()), documents })
+  let current = state
+  let held: readonly HeldCaf[]
+  let xml: string
+  let cases: readonly SentCase[]
+  if (again !== null) {
+    rt.portal.logger.warn(SENT_AGAIN, { envelope: 'simulation', documents: again.entry.cases.length })
+    held = heldCafs(state.cafs, rt.now())
+    xml = again.xml
+    cases = again.entry.cases
+  } else {
+    // A kept envelope that is not sent again leaves the state now: it is issued anew, whatever happens next.
+    if (state.unanswered?.simulation !== undefined)
+      current = await saveState(rt, state, { unanswered: withoutUnanswered(state, 'simulation') })
+    // The simulation issues the export sets again, sent or not: they are worked out before a folio is asked for, so a
+    // rate that is missing stops it here, where nothing has been asked of the SII.
+    for (const kind of EXPORT_SET_KEYS) {
+      const exportPlan = plan[kind]
+      if (exportPlan !== undefined)
+        await prepareExportSet(exportPlan, { issuer: rt.issuer, exportSets: rt.exportSets }, chileDate(rt.now()))
+    }
+    // Field behaviour: the declaration of the simulation takes 20 to 100 documents. The passes reach the minimum, but a
+    // smaller minimum or a single pass of more than 100 does not, so the run says it before any folio is asked for, and
+    // sends the envelope all the same.
+    if (outsideDeclarableSize(documents))
+      rt.portal.logger.warn('certification simulation size outside 20 to 100 documents', { documents })
+    const prepared = await prepareFolios(deps, current, { needs, fresh: true })
+    current = prepared.state
+    held = heldCafs(prepared.cafs, rt.now())
+    const issued = await issueSimulation(plan, {
+      issuer: rt.issuer,
+      receiver: rt.receiver,
+      certificate: rt.certificate,
+      folios: registryFolioSource(rt.registry, held),
+      resolution: rt.resolution,
+      exportSets: rt.exportSets,
+      now: rt.now,
+      ...(options.simulationMinimum === undefined ? {} : { minimumDocuments: options.simulationMinimum }),
+    })
+    await rt.store.writeArtefact(SIMULATION_ARTEFACT, issued.envelope.xml)
+    for (const document of issued.cases)
+      await rt.store.writeArtefact(
+        documentArtefactName('simulacion', document.type, document.folio),
+        document.document.xml,
+      )
+    xml = issued.envelope.xml
+    cases = issued.cases.map(sentCase)
   }
-  const prepared = await prepareFolios(deps, state, { needs: simulationFolioNeeds(state.plan), fresh: true })
-  const held = heldCafs(prepared.cafs, rt.now())
-  const issued = await issueSimulation(state.plan, {
-    issuer: rt.issuer,
-    receiver: rt.receiver,
-    certificate: rt.certificate,
-    folios: registryFolioSource(rt.registry, held),
-    resolution: rt.resolution,
-    exportSets: rt.exportSets,
-    now: rt.now,
-  })
-  await rt.store.writeArtefact(SIMULATION_ARTEFACT, issued.envelope.xml)
-  for (const document of issued.cases)
-    await rt.store.writeArtefact(
-      documentArtefactName('simulacion', document.type, document.folio),
-      document.document.xml,
-    )
   rt.emit({ step: 'SIM_SENDING' })
   const sentAt = rt.now().toISOString()
-  const usedFolios = [...prepared.state.usedFolios, ...issued.cases.map((c) => ({ type: c.type, folio: c.folio }))]
+  // The folios of an envelope sent again were counted when it was issued.
+  const usedFolios =
+    again !== null
+      ? current.usedFolios
+      : [...current.usedFolios, ...cases.map((c) => ({ type: c.type, folio: c.folio }))]
+  const watch = watchedUpload(rt, xml)
   try {
-    assertTransmittable(issued.envelope.xml)
-    await rt.beforeUpload?.({ kind: 'simulation', name: 'simulation', xml: issued.envelope.xml })
-    const trackId = await uploadForTrackId(
-      (overrides) => uploadEnvelope(rt.sii, { envelope: issued.envelope }, overrides),
-      'uploadEnvelope',
-    )
-    await markSent(rt, held, issued.cases, { trackId, sentAt })
-    const next = await saveState(rt, prepared.state, {
+    if (again === null) assertTransmittable(xml)
+    await rt.beforeUpload?.({ kind: 'simulation', name: 'simulation', xml })
+    const trackId = await watch.upload()
+    await markSent(rt, held, cases, { trackId, sentAt })
+    const next = await saveState(rt, current, {
       usedFolios,
       simulationCafs: [],
       simulation: { trackId, date: chileDate(rt.now()), sentAt },
+      unanswered: withoutUnanswered(current, 'simulation'),
     })
     rt.emit({ step: 'SIM_OK', trackId })
     return { state: next, outcome: 'sent' }
   } catch (error) {
-    await markSent(rt, held, issued.cases, { sentAt })
-    await saveState(rt, prepared.state, { usedFolios, simulationCafs: [] })
+    const fresh = {
+      artefact: SIMULATION_ARTEFACT,
+      issueDate: cases[0].issueDate,
+      triedAt: sentAt,
+      holder: `simulation@${sentAt}`,
+      cases,
+    }
+    const kept = keptAfter(error, watch.left(), again?.entry ?? null, fresh)
+    await markSent(rt, held, cases, failedMark(sentAt, kept))
+    await saveState(rt, current, {
+      usedFolios,
+      simulationCafs: [],
+      unanswered: unansweredWith(current, 'simulation', kept),
+    })
     throw error
   }
 }

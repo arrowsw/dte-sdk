@@ -1,6 +1,12 @@
 import { planCertificationSets } from '../../src/certification/set-plan'
 import { parseTestSetText } from '../../src/certification/set-text'
-import { ATTENTION, FULL_SET_TEXT, purchaseSetText } from '../support/test-set-samples'
+import {
+  ATTENTION,
+  FULL_SET_TEXT,
+  GUIDE_BOOK_ATTENTION,
+  purchaseSetText,
+  SALES_BOOK_ATTENTION,
+} from '../support/test-set-samples'
 
 const plan = planCertificationSets(parseTestSetText(FULL_SET_TEXT))
 const id = (n: number) => `${ATTENTION}-${n}`
@@ -198,15 +204,19 @@ test('the purchase-book sets carry their documents and factor, and a missing fac
   })
 })
 
-test('sales-book and unknown sets have no plan entry, and the last set of a kind wins', () => {
+test('the sales-book and guide-book sets keep only their attention number, unknown sets have no plan entry, and the last set of a kind wins', () => {
   expect(Object.keys(plan).sort()).toEqual([
     'basic',
     'exempt',
     'exemptPurchaseBook',
     'guide',
+    'guideBook',
     'purchase',
     'purchaseBook',
+    'salesBook',
   ])
+  expect(plan.salesBook).toEqual({ kind: 'salesBook', attentionNumber: SALES_BOOK_ATTENTION })
+  expect(plan.guideBook).toEqual({ kind: 'guideBook', attentionNumber: GUIDE_BOOK_ATTENTION })
   const twice = planCertificationSets(
     parseTestSetText(
       `SET BASICO - NUMERO DE ATENCION: 1\nCASO 1-1\nDOCUMENTO FACTURA\n\nSET BASICO - NUMERO DE ATENCION: 2\nCASO 2-1\nDOCUMENTO FACTURA\n`,
@@ -294,4 +304,41 @@ test('a basic note whose row has a discount or a unit keeps only name, quantity 
   const basic = planCertificationSets(parseTestSetText(text)).basic!
   expect(basic.invoices[0].items).toEqual([{ name: 'Cemento', quantity: 10, unitPrice: 8000 }])
   expect(basic.debitNotes[0].items).toEqual([{ name: 'Cemento', quantity: 2, unitPrice: 9000 }])
+})
+
+test('the lines a case left unread go with the plan, by set and case, from the sets the plan keeps', () => {
+  expect(plan.unread).toBeUndefined()
+  const text = [
+    'SET BASICO - NUMERO DE ATENCION: 1',
+    'CASO 1-1',
+    'DOCUMENTO FACTURA',
+    'Tornillo  4  100',
+    'Despachar antes del dia 4',
+    'SET BASICO - NUMERO DE ATENCION: 2',
+    'CASO 2-1',
+    'DOCUMENTO FACTURA',
+    'Tornillo  4  100',
+    'CASO 2-2',
+    'DOCUMENTO NOTA DE CREDITO',
+    'NOTA: sin despacho',
+    'Revisar el saldo 3',
+    'SET GUIA DE DESPACHO - NUMERO DE ATENCION: 3',
+    'CASO 3-1',
+    'DOCUMENTO GUIA DE DESPACHO',
+    'Llevar en la tarde',
+    'SET BASICO DOCUMENTOS DE EXPORTACION (2) - NUMERO DE ATENCION: 4',
+    'CASO 4-1',
+    'DOCUMENTO FACTURA DE EXPORTACION ELECTRONICA',
+    'EMBALAR POR SEPARADO',
+    'SET FACTURA DE COMPRA - NUMERO DE ATENCION: 5',
+    'CASO 5-1',
+    'DOCUMENTO NOTA DE CREDITO',
+    'Sin factura',
+    'SET LIBRO DE VENTAS - NUMERO DE ATENCION: 6',
+  ].join('\n')
+  expect(planCertificationSets(parseTestSetText(text)).unread).toEqual([
+    { set: 'basic', caseId: '2-2', lines: ['NOTA: sin despacho', 'Revisar el saldo 3'] },
+    { set: 'guide', caseId: '3-1', lines: ['Llevar en la tarde'] },
+    { set: 'export2', caseId: '4-1', lines: ['EMBALAR POR SEPARADO'] },
+  ])
 })

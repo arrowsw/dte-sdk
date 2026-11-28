@@ -326,10 +326,36 @@ export type PurchaseBookPlan = {
 }
 
 /**
- * EN: What the certification issues, per set kind; a kind the text lacks is absent. The sales and guide books have no
- * plan: they come from the issued basic and guide sets.
+ * EN: The sales-book or guide-book set: an instruction to build the book from the documents of an issued set, so only its
+ * attention number is kept, the folio of the notification the book answers.
+ * ES: El set de libro de ventas o de libro de guías: una instrucción de armar el libro con los documentos de un set
+ * emitido, así que solo se guarda su número de atención, el folio de la notificación que el libro responde.
+ */
+export type BookSetPlan = {
+  /** EN: Set kind: `salesBook` or `guideBook`. ES: Tipo de set: `salesBook` o `guideBook`. */
+  readonly kind: 'salesBook' | 'guideBook'
+  /** EN: `NUMERO DE ATENCION` of the set. ES: `NUMERO DE ATENCION` del set. */
+  readonly attentionNumber: string
+}
+
+/**
+ * EN: The lines a case of an issued set left unread (`TestCase.unread`).
+ * ES: Las líneas que un caso de un set que se emite dejó sin leer (`TestCase.unread`).
+ */
+export type UnreadCaseLines = {
+  /** EN: The plan of the set the case belongs to. ES: El plan del set al que pertenece el caso. */
+  readonly set: 'basic' | 'exempt' | 'guide' | 'purchase' | 'settlement' | 'export1' | 'export2'
+  /** EN: Id of the case, for example `4256-1`. ES: Id del caso, por ejemplo `4256-1`. */
+  readonly caseId: string
+  /** EN: The unread lines, in order and as the set writes them. ES: Las líneas sin leer, en orden y tal como las escribe el set. */
+  readonly lines: readonly string[]
+}
+
+/**
+ * EN: What the certification issues, per set kind; a kind the text lacks is absent. The sales and guide books come from
+ * the issued basic and guide sets: their plan holds only the attention number of their set.
  * ES: Lo que la certificación emite, por tipo de set; un tipo que el texto no trae está ausente. Los libros de ventas
- * y de guías no tienen plan: salen de los sets básico y de guías emitidos.
+ * y de guías salen de los sets básico y de guías emitidos: su plan solo guarda el número de atención de su set.
  */
 export type CertificationPlan = {
   /** EN: Plan of the `basic` set, when the text has it. ES: Plan del set `basic`, cuando el texto lo trae. */
@@ -350,6 +376,12 @@ export type CertificationPlan = {
   readonly purchaseBook?: PurchaseBookPlan
   /** EN: Plan of the `exemptPurchaseBook` set, when the text has it. ES: Plan del set `exemptPurchaseBook`, cuando el texto lo trae. */
   readonly exemptPurchaseBook?: PurchaseBookPlan
+  /** EN: The `salesBook` set, when the text has it. ES: El set `salesBook`, cuando el texto lo trae. */
+  readonly salesBook?: BookSetPlan
+  /** EN: The `guideBook` set, when the text has it. ES: El set `guideBook`, cuando el texto lo trae. */
+  readonly guideBook?: BookSetPlan
+  /** EN: The lines the cases of the sets above left unread, in the order of the sets and of their cases; absent when every line was read. ES: Las líneas que los casos de los sets de arriba dejaron sin leer, en el orden de los sets y de sus casos; ausente cuando se leyó cada línea. */
+  readonly unread?: readonly UnreadCaseLines[]
 }
 
 const DEFAULT_PROPORTIONALITY_FACTOR = 0.6
@@ -638,8 +670,9 @@ const bookPlan = (set: TestSet, kind: PurchaseBookPlan['kind']): PurchaseBookPla
  * the line), its payment form, its customs area in words, its commission abroad as a percent of the sale clause, the
  * customs documents it names (`customsDocumentsOf`), on a note the case it refers to with the code of its reason, and
  * the service indicator of an export of services (4 for lodging, 3 for an invoice that names no sale modality); a case
- * that names no country takes the one of an earlier case of the set. The sales-book and guide-book instructions and
- * unknown sets are left out: the books come from the issued sets.
+ * that names no country takes the one of an earlier case of the set. Of the sales-book and guide-book instructions only
+ * the attention number is kept (`BookSetPlan`): the books come from the issued sets. Unknown sets are left out. The lines the cases of an issued set left unread
+ * (`TestCase.unread`) go in `unread`, by set and case, for the run to show before it asks for folios.
  * ES: Los casos que emite cada set, con los folios que necesita cada tipo de documento, a partir de los sets parseados.
  * Por cada tipo gana el último set del texto. Cada caso del set de liquidación es una liquidación factura (43): sus
  * ítems pasan a ser líneas con su cantidad, su total de línea como monto (con su signo), el tipo del documento
@@ -653,25 +686,62 @@ const bookPlan = (set: TestSet, kind: PurchaseBookPlan['kind']): PurchaseBookPla
  * como porcentaje de la cláusula de venta, los documentos aduaneros que nombra (`customsDocumentsOf`), en una nota el
  * caso que refiere con el código de su razón, y el indicador de servicio de una exportación de servicios (4 para
  * alojamiento, 3 para una factura que no nombra modalidad de venta); un caso que no nombra país toma el de un caso
- * anterior del set. Las instrucciones de libro de ventas y de guías y los sets desconocidos quedan fuera: los libros
- * salen de los sets emitidos.
+ * anterior del set. De las instrucciones de libro de ventas y de guías solo se guarda el número de atención
+ * (`BookSetPlan`): los libros salen de los sets emitidos. Los sets desconocidos quedan fuera. Las líneas que los casos de un set emitido dejaron sin leer (`TestCase.unread`) van en
+ * `unread`, por set y caso, para que la corrida las muestre antes de pedir folios.
  * @param sets EN: the parsed sets. ES: los sets parseados.
  */
 export const planCertificationSets = (sets: readonly TestSet[]): CertificationPlan => {
   const plan: {
     -readonly [K in keyof CertificationPlan]: CertificationPlan[K]
   } = {}
+  // The set each issued plan was made from, for the lines its cases left unread.
+  const planned: Partial<Record<UnreadCaseLines['set'], TestSet>> = {}
   for (const set of sets) {
-    if (set.kind === 'basic') plan.basic = basicPlan(set, 'basic') as BasicSetPlan
-    else if (set.kind === 'exempt') plan.exempt = basicPlan(set, 'exempt') as ExemptSetPlan
-    else if (set.kind === 'guide') plan.guide = guidePlan(set)
-    else if (set.kind === 'purchase') plan.purchase = purchasePlan(set) ?? plan.purchase
-    else if (set.kind === 'settlement') plan.settlement = settlementPlan(set)
-    else if (set.kind === 'export') {
+    if (set.kind === 'basic') {
+      plan.basic = basicPlan(set, 'basic') as BasicSetPlan
+      planned.basic = set
+    } else if (set.kind === 'exempt') {
+      plan.exempt = basicPlan(set, 'exempt') as ExemptSetPlan
+      planned.exempt = set
+    } else if (set.kind === 'guide') {
+      plan.guide = guidePlan(set)
+      planned.guide = set
+    } else if (set.kind === 'purchase') {
+      const purchase = purchasePlan(set)
+      if (purchase !== undefined) {
+        plan.purchase = purchase
+        planned.purchase = set
+      }
+    } else if (set.kind === 'settlement') {
+      plan.settlement = settlementPlan(set)
+      planned.settlement = set
+    } else if (set.kind === 'export') {
       const slot = exportSlot(set, plan)
-      if (slot !== null) plan[slot] = exportPlan(set)
+      if (slot !== null) {
+        plan[slot] = exportPlan(set)
+        planned[slot] = set
+      }
     } else if (set.kind === 'purchaseBook') plan.purchaseBook = bookPlan(set, 'purchaseBook')
     else if (set.kind === 'exemptPurchaseBook') plan.exemptPurchaseBook = bookPlan(set, 'exemptPurchaseBook')
+    else if (set.kind === 'salesBook' || set.kind === 'guideBook')
+      plan[set.kind] = { kind: set.kind, attentionNumber: set.attentionNumber }
   }
+  const unread = UNREAD_ORDER.flatMap((key) =>
+    (planned[key]?.cases ?? [])
+      .filter((testCase) => testCase.unread.length > 0)
+      .map((testCase): UnreadCaseLines => ({ set: key, caseId: testCase.id, lines: testCase.unread })),
+  )
+  if (unread.length > 0) plan.unread = unread
   return plan
 }
+
+const UNREAD_ORDER: readonly UnreadCaseLines['set'][] = [
+  'basic',
+  'exempt',
+  'guide',
+  'purchase',
+  'settlement',
+  'export1',
+  'export2',
+]

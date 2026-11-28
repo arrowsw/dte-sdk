@@ -70,6 +70,68 @@ export type SentSet = SentEnvelope & {
 }
 
 /**
+ * EN: An envelope of documents the run issued, kept and tried to upload, and that the SII never answered with a track
+ * id: what the next run needs to send the same envelope again in place of issuing it anew. Only an envelope whose
+ * upload request left for the SII and got no answer that can be read (a failure of the network, an HTTP error, an
+ * answer that is not a reception) is kept here; one that was refused, or that never left, is not.
+ * ES: Un sobre de documentos que la corrida emitió, guardó e intentó subir, y que el SII nunca respondió con un track
+ * id: lo que la corrida siguiente necesita para enviar el mismo sobre de nuevo en vez de emitirlo otra vez. Solo se
+ * guarda aquí un sobre cuya petición de subida salió hacia el SII y no tuvo una respuesta legible (una falla de red, un
+ * error HTTP, una respuesta que no es una recepción); uno rechazado, o que nunca salió, no.
+ */
+export type UnansweredEnvelope = {
+  /** EN: The name of the artefact that holds the envelope as it was to be uploaded. ES: El nombre del artefacto que guarda el sobre tal como se iba a subir. */
+  readonly artefact: string
+  /** EN: The issue date its documents carry, `YYYY-MM-DD`. ES: `FchEmis` — La fecha de emisión que llevan sus documentos, `AAAA-MM-DD`. */
+  readonly issueDate: string
+  /** EN: Instant of the upload that got no answer, ISO. ES: Instante de la subida que no tuvo respuesta, ISO. */
+  readonly triedAt: string
+  /** EN: Who its folios are held for in the folio registry (`FolioRegistry.hold`): the envelope and the instant it was first kept. ES: Para quién están retenidos sus folios en el registro de folios (`FolioRegistry.hold`): el sobre y el instante en que se guardó por primera vez. */
+  readonly holder: string
+  /** EN: Its documents, in the envelope's order. ES: Sus documentos, en el orden del sobre. */
+  readonly cases: readonly SentCase[]
+}
+
+/**
+ * EN: Why an envelope kept to be sent again is issued anew: its artefact is gone (`artefact`), its documents carry
+ * another day than the ones issued now would (`date`), its own signature carries another certificate than the run's
+ * (`certificate`), its cover names another resolution than the run's (`cover`), it holds another number of documents
+ * than the simulation now asks for (`size`), a folio of it is in no CAF the run holds unexpired (`folios`), the folio
+ * registry cannot hold its folios (`ledger`, a registry without `hold`) or holds one for another document (`taken`),
+ * or it no longer verifies as the SII reads it (`verification`).
+ * ES: Por qué un sobre guardado para enviarse de nuevo se emite otra vez: su artefacto ya no está (`artefact`), sus
+ * documentos llevan otro día que los que se emitirían ahora (`date`), su propia firma lleva otro certificado que el de
+ * la corrida (`certificate`), su carátula nombra otra resolución que la de la corrida (`cover`), trae otra cantidad de
+ * documentos que la que la simulación pide ahora (`size`), un folio suyo no está en ningún CAF vigente que tenga la
+ * corrida (`folios`), el registro de folios no puede retener sus folios (`ledger`, un registro sin `hold`) o retiene
+ * uno para otro documento (`taken`), o ya no verifica como lo lee el SII (`verification`).
+ */
+export type IssuedAnewReason =
+  | 'artefact'
+  | 'date'
+  | 'certificate'
+  | 'cover'
+  | 'size'
+  | 'folios'
+  | 'ledger'
+  | 'taken'
+  | 'verification'
+
+/**
+ * EN: What the run says in the portal client's logger, with the envelope and an `IssuedAnewReason`, when it issues anew
+ * an envelope it had kept. Internal.
+ * ES: Lo que la corrida dice en el logger del cliente del portal, con el sobre y una `IssuedAnewReason`, cuando emite
+ * otra vez un sobre que tenía guardado. Interno.
+ */
+export const ISSUED_ANEW = 'certification envelope issued anew'
+
+/**
+ * EN: The envelopes kept to be sent again: one per set (`SentSetKey`) and one for the simulation (`simulation`).
+ * ES: Los sobres guardados para enviarse de nuevo: uno por set (`SentSetKey`) y uno para la simulación (`simulation`).
+ */
+export type UnansweredEnvelopes = Readonly<Partial<Record<SentSetKey | 'simulation', UnansweredEnvelope>>>
+
+/**
  * EN: A book sent: its period, its submission kind, and whether the portal approved it.
  * ES: Un libro enviado: su período, su tipo de envío, y si el portal lo aprobó.
  */
@@ -88,7 +150,15 @@ export type SentBook = {
  * ES: Los totales de período acumulados por período y operación, para los envíos de ajuste.
  */
 export type AccumulatedTotals = Readonly<
-  Record<string, { readonly purchase?: readonly BookTotals[]; readonly sale?: readonly BookTotals[] }>
+  Record<
+    string,
+    {
+      readonly purchase?: readonly BookTotals[]
+      readonly sale?: readonly BookTotals[]
+      /** EN: The notification folio of the special book each operation's totals were sent with; an operation absent here sent a monthly book, as every book of a state stored before books went special did. ES: `FolioNotificacion` — El folio de notificación del libro especial con que se enviaron los totales de cada operación; una operación ausente aquí envió un libro mensual, como todo libro de un estado guardado antes de que los libros fueran especiales. */
+      readonly notificationFolio?: { readonly purchase?: number; readonly sale?: number }
+    }
+  >
 >
 
 /**
@@ -192,6 +262,8 @@ export type CertificationState = {
   readonly annulledRanges?: Readonly<Record<string, readonly string[]>>
   /** EN: The sets sent. ES: Los sets enviados. */
   readonly sets: Readonly<Partial<Record<SentSetKey, SentSet>>>
+  /** EN: The envelopes whose upload the SII never answered, kept for the next run to send again; a state without it has none. ES: Los sobres cuya subida el SII nunca respondió, guardados para que la corrida siguiente los envíe de nuevo; un estado sin él no tiene ninguno. */
+  readonly unanswered?: UnansweredEnvelopes
   /** EN: The sets sent are approved. ES: Los sets enviados están aprobados. */
   readonly setsApproved: boolean
   /** EN: The books phase. ES: La fase de libros. */

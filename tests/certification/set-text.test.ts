@@ -17,9 +17,11 @@ import {
   EXPORT_ATTENTION_2,
   EXPORT_SET_TEXT,
   FULL_SET_TEXT,
+  GUIDE_BOOK_ATTENTION,
   GUIDE_SET_TEXT,
   PURCHASE_BOOK_SET_TEXT,
   purchaseSetText,
+  SALES_BOOK_ATTENTION,
 } from '../support/test-set-samples'
 
 describe('the whole download', () => {
@@ -34,8 +36,15 @@ describe('the whole download', () => {
       'salesBook',
       'purchaseBook',
       'exemptPurchaseBook',
+      'guideBook',
     ])
-    expect(sets.every((set) => set.attentionNumber === ATTENTION)).toBe(true)
+    expect(sets.map((set) => set.attentionNumber)).toEqual([
+      ...Array<string>(4).fill(ATTENTION),
+      SALES_BOOK_ATTENTION,
+      ATTENTION,
+      ATTENTION,
+      GUIDE_BOOK_ATTENTION,
+    ])
     expect(sets[0].name).toBe('BASICO')
     expect(sets[3].name).toBe('CASO GENERAL FACTURA COMPRA')
   })
@@ -573,6 +582,157 @@ describe('item rows', () => {
   test('MODIFICA MONTO turns the value of a two-part row into the new price', () => {
     expect(parseItems('Cajon  3100', 'MODIFICA MONTO')).toEqual([{ name: 'Cajon', quantity: 1, unitPrice: 3100 }])
     expect(parseItems('Cajon  3100', 'DEVOLUCION')).toEqual([{ name: 'Cajon', quantity: 3100 }])
+  })
+
+  test('a line of prose that ends in a number is never an item: a row has its cells apart, like its header', () => {
+    expect(parseItems('ITEM\t\tCANTIDAD\nTornillo largo\t\t8\nDespachar antes del dia 4')).toEqual([
+      { name: 'Tornillo largo', quantity: 8 },
+    ])
+    expect(parseItems('ITEM 1 56')).toEqual([])
+    expect(parseItems('Caja grande x 5')).toEqual([])
+    expect(parseItems('Llamar al cliente  antes de 3')).toEqual([])
+    expect(parseItems('Caja grande x\t5')).toEqual([{ name: 'Caja grande x', quantity: 5 }])
+  })
+})
+
+describe('the lines the reader did not use', () => {
+  const unreadOf = (text: string) => parseTestSetText(text)[0].cases.map((testCase) => testCase.unread)
+  const basic = (lines: string) => `SET BASICO - NUMERO DE ATENCION: 1\nCASO 1-1\n==========\n${lines}\n`
+
+  test('are kept per case, in order and as written, leaving out blank and separator lines', () => {
+    const text = basic(
+      [
+        'DOCUMENTO\tFACTURA ELECTRONICA',
+        '',
+        'ITEM\t\tCANTIDAD\tPRECIO UNITARIO',
+        'Tornillo largo\t\t8\t\t120',
+        'Despachar antes del dia 4',
+        '   ',
+        '\t',
+        '-----',
+        '***',
+        'NOTA: entregar en la bodega norte',
+        'a  b  c  d  e',
+        'ITEM  5',
+        'CANTIDAD TOTAL  5',
+      ].join('\n'),
+    )
+    const [testCase] = parseTestSetText(text)[0].cases
+    expect(testCase.items).toEqual([{ name: 'Tornillo largo', quantity: 8, unitPrice: 120 }])
+    expect(testCase.unread).toEqual([
+      'Despachar antes del dia 4',
+      'NOTA: entregar en la bodega norte',
+      'a  b  c  d  e',
+      'ITEM  5',
+      'CANTIDAD TOTAL  5',
+    ])
+  })
+
+  test('a case the grammar reads in full has none, and the sample sets read in full', () => {
+    expect(unreadOf(basic('DOCUMENTO\tFACTURA ELECTRONICA\nITEM\tCANTIDAD\nTornillo\t3'))).toEqual([[]])
+    for (const text of [
+      BASIC_SET_TEXT,
+      EXEMPT_SET_TEXT,
+      GUIDE_SET_TEXT,
+      EXPORT_SET_TEXT,
+      purchaseSetText('SET FACTURA DE COMPRA'),
+    ])
+      for (const set of parseTestSetText(text))
+        expect(set.cases.every((testCase) => testCase.unread.length === 0)).toBe(true)
+  })
+
+  test('the sentence that asks a note for the prices of its document is known prose and is left out', () => {
+    const text = basic(
+      [
+        'DOCUMENTO\tNOTA DE CREDITO ELECTRONICA',
+        'Los precios unitarios deben ser los mismos de la factura',
+        'EL PRECIO UNITARIO DEL ITEM DEBE SER EL MISMO DE LA FACTURA',
+        'EL PRECIO UNITARIO DEBE SUBIR',
+      ].join('\n'),
+    )
+    expect(unreadOf(text)).toEqual([['EL PRECIO UNITARIO DEBE SUBIR']])
+  })
+
+  test('the known sentence is only the sentence: a line that goes on after it is unread', () => {
+    const goesOn = 'Los precios unitarios deben ser los mismos de la factura, salvo el segundo que sube a 70'
+    const changes = 'Los precios unitarios deben ser los mismos, salvo el segundo que sube a 70'
+    expect(unreadOf(basic(`DOCUMENTO\tNOTA DE CREDITO ELECTRONICA\n${goesOn}\n${changes}`))).toEqual([
+      [goesOn, changes],
+    ])
+  })
+
+  test('in a case of any other set the export labels are no labels: such a row is an item, a labelled line unread', () => {
+    const [testCase] = parseTestSetText(
+      basic(
+        [
+          'DOCUMENTO\tFACTURA ELECTRONICA',
+          'ITEM\t\tCANTIDAD\tPRECIO UNITARIO',
+          'SEGURO DE CARGA\t\t2\t\t500',
+          'FLETE MARITIMO\t\t1\t\t900',
+          'FLETE: 100',
+        ].join('\n'),
+      ),
+    )[0].cases
+    expect(testCase.items).toEqual([
+      { name: 'SEGURO DE CARGA', quantity: 2, unitPrice: 500 },
+      { name: 'FLETE MARITIMO', quantity: 1, unitPrice: 900 },
+    ])
+    expect(testCase.exportFields).toEqual({})
+    expect(testCase.unread).toEqual(['FLETE: 100'])
+  })
+
+  test('a row that starts with a header word and holds a number is no header: it is unread, never dropped', () => {
+    const [testCase] = parseTestSetText(
+      basic(
+        [
+          'DOCUMENTO\tFACTURA ELECTRONICA',
+          'CANTIDAD\tPRECIO',
+          'PRECIO UNITARIO ESPECIAL\t2\t500',
+          'CANTIDAD MINIMA DE COMPRA\t10\t300',
+          'ITEM  5',
+        ].join('\n'),
+      ),
+    )[0].cases
+    expect(testCase.items).toEqual([])
+    expect(testCase.unread).toEqual([
+      'PRECIO UNITARIO ESPECIAL\t2\t500',
+      'CANTIDAD MINIMA DE COMPRA\t10\t300',
+      'ITEM  5',
+    ])
+  })
+
+  test('a settlement case and an export case report theirs too', () => {
+    const settlement = [
+      'SET BASICO LIQUIDACIONES - NUMERO DE ATENCION: 2',
+      'CASO 2-1',
+      'DOCUMENTO\tLIQUIDACION FACTURA ELECTRONICA',
+      'ITEM\t\tCANTIDAD\tTOTAL LINEA',
+      'NETO FACTURAS\t\t2\t\t9000',
+      'Revisar con el mandante 2',
+      'COMISIONES Y OTROS CARGOS\tTOTAL LINEA',
+      'NETO COMISION DE COBRANZA\t\t300',
+      'OBSERVACION: sin cargos extra',
+    ].join('\n')
+    expect(unreadOf(settlement)).toEqual([['Revisar con el mandante 2', 'OBSERVACION: sin cargos extra']])
+    const exportCase = [
+      'SET BASICO DOCUMENTOS DE EXPORTACION (1) - NUMERO DE ATENCION: 3',
+      'CASO 3-1',
+      'DOCUMENTO\tFACTURA DE EXPORTACION ELECTRONICA',
+      'ITEM                CANTIDAD\tPRECIO UNITARIO',
+      'LANA CRUDA          12\t\t40',
+      'LANA PEINADA        x\t\t40',
+      'EMBALAR POR SEPARADO',
+      'MONEDA DE LA OPERACION:     DOLAR USA',
+      'RECARGO EN LA LINEA DE ITEM POR GASTOS',
+    ].join('\n')
+    const [testCase] = parseTestSetText(exportCase)[0].cases
+    expect(testCase.items).toEqual([{ name: 'LANA CRUDA', quantity: 12, unitPrice: 40 }])
+    expect(testCase.exportFields).toEqual({})
+    expect(testCase.unread).toEqual([
+      'LANA PEINADA        x\t\t40',
+      'EMBALAR POR SEPARADO',
+      'RECARGO EN LA LINEA DE ITEM POR GASTOS',
+    ])
   })
 })
 

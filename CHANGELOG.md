@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the certificate. Nothing refuses one. Field behaviour is that the SII takes no seed signed with a certificate no
   authority it knows issued, so `runCertification` says so once, when it starts, in the portal client's logger.
   - **What to change:** code that builds a `Certificate` of its own, as a test double does, must give it `selfSigned`.
+
 - **What to look at for a state** (`uploadStatusChecks`, `UploadStatusCheck`). For `RFR`, `EPR`, `RSC`, `RCT` and the
   book states `LRF`, `LRS`, `LRC`, `LRH`, `LNC`, a few short checks in Spanish, each with its basis: a document of the
   SII, named, or field behaviour. `EPR` rests on the SII's manual of `QueryEstUp`, whose test steps (chapter 5) give
@@ -42,12 +43,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   especial se distingue de los libros regulares, en que indica el folio de la notificación en la carátula";
   `RECTIFICA` is a `TipoLibro`, not a `TipoEnvio`). `RSC` and `LRS` point to `validateBeforeUpload`, which stops the upload.
   Any other state has none.
+
 - **A check before a plain upload** (`beforeUpload` of `uploadEnvelope`, `uploadBook` and `uploadFolioConsumption`,
   `UploadCheck`, `UploadCheckFile`). It is handed the kind of the file, its multipart name and the exact text about to
   be sent, and awaited; when it throws, the upload stops with nothing sent, not even a token asked for, and throws
   what it threw; a call whose `signal` is already aborted does not run it (`REQUEST_ABORTED`). A check written against
   `UploadCheckFile` (an `UploadCheck`) serves both these uploads and the certification run, whose `CertificationUpload`
   is an `UploadCheckFile` with a narrower `kind`; a check written against `CertificationUpload` serves the run alone.
+
 - **A ready-made check against the SII's schema** (`validateBeforeUpload`, `dte-sdk/schemas`). It holds the document
   element of each file to what its kind of upload takes (an `EnvioDTE` for `dte` and for the run's test sets and
   simulation, an `EnvioBOLETA` for `receipt`, a `LibroCompraVenta` or a `LibroGuia` for `book`, a `ConsumoFolios` for
@@ -59,6 +62,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - When the certification run's `beforeUpload` throws for a book, the run reports the book by its message, as it
     did, and now also gives the error's code and details to the portal client's logger (`certification book refused
     before upload`).
+
+- **The lines of the test set the reader did not use** (`TestCase.unread`, `CertificationPlan.unread`,
+  `checkTestSetText`, `unreadLines` of `runCertification`, `UnreadLinesPolicy`; `dte-sdk/portal`). `parseTestSetText`
+  never throws, and a line of a case its grammar did not know vanished: nothing said that a case was issued without
+  it. Each case now keeps those lines in `unread`, in order and as the set writes them, leaving out blank lines,
+  separator lines and the sentence that asks a note for the unit prices of its document ("EL PRECIO UNITARIO DEL ITEM
+  DEBE SER EL MISMO DE LA FACTURA", singular or plural, and nothing after it), which the notes already take when
+  issued. The plan carries them by set and case, and the run, before it asks for any folio, logs each line of a set
+  not yet sent through the portal client's logger; `unreadLines` says whether it then stops (see Changed). A plan
+  stored without `unread`, made before this change, is checked against the set text the state keeps, read again.
+  - **What to change:** code that builds a `TestCase` of its own must give it `unread`. A caller who keeps a plan of
+    its own, made before this change, should plan again from the text (`planCertificationSets(parseTestSetText(text))`):
+    that plan may hold a line of prose read as an item, which the run issues as it is.
+
+- **The size of the simulation envelope** (`IssuedSimulation.outsideDeclarableSize`). The SII's certification manual
+  ("Manual para empresas usuarias, ambiente de certificación factura electrónica", page 27) gives the simulation a
+  maximum of 100 documents, and field behaviour shows the "Declarar avance" form asking of the simulation envelope for
+  20 to 100. `issueSimulation` now says when its envelope is outside 20 to 100 documents, and the run logs it through
+  the portal client's logger, from the plan, before it asks for any folio of the simulation; it still sends the
+  envelope. Since the simulation now repeats its pass to reach 20 documents (see Changed), that happens only with a
+  `simulationMinimum` below 20 or a single pass of more than 100. `fewerThanRecommended` is
+  unchanged.
+  - **What to change:** code that builds an `IssuedSimulation` of its own must give it `outsideDeclarableSize`.
+
+- **An envelope the SII never answered is sent again** (`resendUnanswered` of `runCertification`, `sendTestSet` and
+  `sendSimulation`, `SendTestSetOptions`, `SendSimulationOptions`, `CertificationState.unanswered`,
+  `UnansweredEnvelope`, `UnansweredEnvelopes`, `IssuedAnewReason`, `FolioRegistry.hold`; `dte-sdk/portal`). A set or a
+  simulation whose upload failed before the SII gave a track id had its folios counted as used, and the next run
+  issued it again with new folios: in certification the SII hands out few, and each network failure cost a set's
+  worth. The state now keeps such an envelope (its artefact, the issue date of its documents, its cases and who its
+  folios are held for), and the next run uploads the same bytes in place of issuing anew, asks for no folio, and says
+  so in the portal client's logger (`certification envelope sent again`). The upload already reads the SII's answer to
+  a file it holds (`STATUS` 7 with its `TRACKID`) as that file's first track id.
+  - An envelope is kept only when its upload request left this machine and got no answer that can be read: a failure
+    of the network, an HTTP error, an answer that is no reception. One the SII refused is not kept, and neither is one
+    that never left: the check before the upload, a `beforeUpload` that throws, a refusal of the upload client (a
+    cover that names another company or sender, a character outside the encoding, a missing field), or a failure
+    getting the token. The run then does what it did before: the folios count as used and the next run issues anew,
+    with what the caller corrected in the meantime.
+  - Before any folio is asked for or handed out, every folio of every kept envelope is held for it in the folio
+    registry the run has now (`FolioRegistry.hold`, which `createFolioRegistry` implements), so a set issued with
+    another registry, or with a ledger that lost them, never takes them. An envelope whose folio the registry holds for
+    another document is issued anew and never sent, and its other folios stay held.
+  - It is sent again only when it is safe, and otherwise issued anew with the reason logged (`certification envelope
+    issued anew`, with an `IssuedAnewReason`): its folios could all be held, in CAFs the run holds unexpired; the
+    artefact is still there; its documents carry the date a document issued now would (the sets are dated on the
+    Chile day of the run, "Agregue fecha del día" in the SII's instructions for the set; the simulation on the local
+    day); a simulation holds as many documents as `simulationMinimum` now asks for, which is validated on every path;
+    the certificate in the envelope's own signature is the run's; its cover names the run's resolution, date and
+    number; and it still verifies as the SII reads it (`verifyTransmittedEnvelope`).
+  - The envelopes of the sets that will not be sent again are dropped before the sets' folios are asked for, a set
+    whose envelope is kept needs none, and its folios are never given back as unreceived. A state stored before this
+    change has nothing to send again. `resendUnanswered: false` issues anew every time, as before. The receipts set is
+    unchanged.
+  - Two runs resumed at once from one state on one registry hold the same folios for the same envelope and may both
+    send it (the SII answers the second with the first's track id); on two registries neither holds against the
+    other's documents. A state written by this version and then run by an earlier one keeps its `unanswered` entries
+    untouched, and this version would send such an envelope if that set were ever run again.
+  - **What to change:** a caller of `sendTestSet` or `sendSimulation` that wants an attempt after a failed upload to
+    issue anew with new folios, as before, passes `resendUnanswered: false`. A registry of its own sends no kept
+    envelope again until it implements `hold`.
 
 ### Changed
 
@@ -114,6 +178,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   VAT, another tax or a deposit guarantee, none of which a receipt carries. `ConsumoFolio_v10.xsd` admits the credit
   note in a summary; the format of the report, of 2020, names the two receipts alone.
   - **What to change:** nothing. Code that relied on the refusal of a 61 now gets its line.
+
+- **The simulation repeats its pass over the plan until it holds 20 documents** (`IssueSimulationOptions`, `minimumDocuments` of
+  `issueSimulation`, `simulationMinimum` of `runCertification` and `sendSimulation`, `IssuedSimulation.passes`,
+  `simulationFolioNeeds`; `dte-sdk/portal`). Field behaviour is that the "Declarar avance" form takes a simulation
+  envelope of 20 to 100 documents, and the basic set alone holds eight: a company whose sets added up to fewer sent a
+  simulation the form does not take. When one pass over the plan's sets holds fewer than the minimum, 20 by default,
+  the simulation now repeats the pass whole, each pass with folios of its own and each note referring to the document
+  of its own pass, until it holds that many, never past the 100 documents the SII's certification manual gives as
+  the maximum (page 27). `simulationFolioNeeds` counts the folios of every pass. A plan whose one pass holds the
+  minimum is issued byte for byte as before. A minimum that is not a whole number from 0 to 100 throws
+  `INVALID_OPTION { field: 'minimumDocuments' }` before any folio is taken; 0 issues one pass.
+  - **What to change:** code that calls `issueSimulation` or `simulationFolioNeeds` on a plan of fewer than 20
+    documents and wants one pass gives `minimumDocuments: 0` (or `simulationFolioNeeds(plan, 0)`); a run gives
+    `simulationMinimum: 0`. Code that builds an `IssuedSimulation` of its own must give it `passes`.
+
+- **The certification run stops on a line of the test set shaped like a row of items it did not read**
+  (`unreadLines`, `dte-sdk/portal`). A line of a case left unread that is words, a space and a whole number at the
+  end (`Caja chica 5` in a set whose cells are written apart by single spaces) may be an item the reader did not
+  take, and issuing without it spends folios on a document short of a line. By default (`unreadLines: 'stopOnRows'`)
+  the run now stops there, before any folio is asked for, with `SII_PORTAL_UNEXPECTED_PAGE` naming the set, the case
+  and those lines, as it stops on an export set it cannot issue; any other unread line is only logged. `'stop'` stops
+  on any unread line, `'warn'` only logs them all.
+  - **What to change:** a run that stops this way should read the lines it names; when none is an item,
+    `unreadLines: 'warn'` lets it go on.
+
+- **The certification run sends the books of the test set as special books** (`runBooks`, `monthlyBooks` of
+  `runCertification`, `RunBooksOptions`, `CertificationBookInput.notificationFolio`, `CertificationPlan.salesBook` and
+  `guideBook`, `BookSetPlan`; `dte-sdk/portal`). The SII's "Formato de Información de Compras y Ventas" (version 2.2),
+  section 1.1, point 3 b, calls special the files the SII asks for through a notification, and says a special file is
+  told from the regular books by the folio of the notification on its cover; the text of the test set asks for each
+  book in a set of its own with a number of attention. Field behaviour is that the SII's review takes each book of the
+  test set as a special book whose notification folio is the number of attention of its own set, and that a book sent
+  as a monthly one has had its cover refused. The sales, purchase, exempt purchase and guide books now go `ESPECIAL`,
+  each with the number of attention of its own set as `FolioNotificacion`; before, the sales and purchase books went
+  `MENSUAL` with no folio and the guide book with folio 3. The plan keeps the number of attention of the sales-book and
+  guide-book sets, and a plan stored before this change is read again from the set text the state keeps. A book whose
+  number is found nowhere, or is one `FolioNotificacion` cannot carry (not a positive integer of at most 10 digits;
+  leading zeros are dropped), goes as before, and the run says so once in the portal client's logger. The period and
+  the kind of submission are chosen as before. The totals kept for an adjustment now name the notification folio of the
+  book they went with (`AccumulatedTotals.notificationFolio`), and an adjustment carries only the totals of a book of
+  its own kind: totals stored before this change belong to a monthly book, and do not carry into a special one.
+  `createCertificationSalesBook` and `createCertificationPurchaseBook` take a `notificationFolio` that makes the book
+  special, and stay `MENSUAL` without it. None of this has been run against the SII yet: the format identifies a special
+  book by its notification folio and says its period is the first one it covers, so what the SII answers when the run
+  sends a special book again on an earlier period (a second total sending under the same folio) is not known.
+  - **What to change:** `monthlyBooks: true` sends the books as before. Code that compares a whole plan of
+    `planCertificationSets` finds two more keys when the text has those sets.
+
+- **The exchange answers acknowledge the goods only of the documents addressed to the company**
+  (`createExchangeAnswers`, `runExchange`, `receiptsForEveryDocument` of `runCertification`; `dte-sdk/portal`). Field
+  behaviour is that the exchange stage has been passed with a receipt of goods only for the document addressed to the
+  company; the receipts (`EnvioRecibos`) acknowledged every document of the set, also the one the reception marks as
+  not received for its receiver and the result rejects. They now hold a receipt for each document addressed to the
+  company, the ones the reception takes. The schema of `EnvioRecibos` asks for at least one `Recibo`, so a set with no
+  document addressed to the company still gets a receipt for every document; `ExchangeAnswers.noDocumentForCompany`
+  says so, and `runExchange` says it in the portal client's logger and in its `detail`. The reception and the result do
+  not change.
+  - **What to change:** `receiptsForEveryDocument: true` keeps a receipt for every document.
+
+### Fixed
+
+- **A line of prose in a case is no longer an item** (`parseTestSetText`). A line of a case of the basic, exempt,
+  guide or purchase set that started with a letter and ended in a number became an item: a sentence such as
+  "Despachar antes del dia 4" was issued as an item of quantity 4. A row now becomes an item only when its cells stand
+  apart, after a tab or a run of spaces, as the rows of the item table do; such a line now goes to `unread`. A row
+  whose cells stand apart is read as before.
+
+- **Lines of a case that vanished now become what they are, or `unread`** (`parseTestSetText`). In a case of the
+  basic, exempt, guide or purchase set, the labels of the export cases were tried first, so a row such as
+  `SEGURO DE CARGA` or `FLETE MARITIMO` with its quantity and price became an export field those sets ignore; the
+  export labels are now read in export cases only, and such a row is an item. A row whose first cell holds
+  `CANTIDAD` or `UNITARIO` was dropped as a header even when it held numbers; it is a header now only when it holds
+  none, and otherwise goes to `unread`. In an export case, `RECARGO EN LA LINEA` with no percent counted as read and
+  kept nothing; it goes to `unread`.
 
 ## [0.17.0] - 2026-11-26
 

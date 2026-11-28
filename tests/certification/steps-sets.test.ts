@@ -142,14 +142,25 @@ describe('folio needs', () => {
     expect(all[33]).toBe(plan.basic!.folios[33])
     expect(all[61]).toBe(plan.basic!.folios[61] + plan.exempt!.folios[61] + plan.purchase!.folios[61])
     expect(setFolioNeeds(plan, ['basic', 'guide', 'exempt', 'purchase'])).toEqual({})
-    const simulation = simulationFolioNeeds(plan)
+    const simulation = simulationFolioNeeds(plan, 0)
     expect(simulation[33]).toBe(plan.basic!.invoices.length)
     expect(simulation[52]).toBe(plan.guide!.guides.length)
     expect(simulation[46]).toBe(1)
     expect(simulationFolioNeeds({})).toEqual({})
-    expect(simulationFolioNeeds({ purchase: { ...plan.purchase!, creditNote: null, debitNote: null } })).toEqual({
-      46: 1,
-    })
+    const lone = { purchase: { ...plan.purchase!, creditNote: null, debitNote: null } }
+    expect(simulationFolioNeeds(lone, 0)).toEqual({ 46: 1 })
+  })
+
+  test('the simulation counts the folios of every pass it issues to reach its minimum', () => {
+    // Eighteen documents a pass: two passes reach 20, and every type takes twice its folios.
+    const once = simulationFolioNeeds(plan, 0)
+    expect(simulationFolioNeeds(plan)).toEqual(Object.fromEntries(Object.entries(once).map(([t, n]) => [t, n * 2])))
+    expect(simulationFolioNeeds(plan, 18)).toEqual(once)
+    // The basic set alone holds eight a pass: three passes, 24 documents.
+    expect(simulationFolioNeeds({ basic: plan.basic }, 20)).toEqual({ 33: 9, 61: 9, 56: 6 })
+    const lone = { purchase: { ...plan.purchase!, creditNote: null, debitNote: null } }
+    expect(simulationFolioNeeds(lone)).toEqual({ 46: 20 })
+    expect(() => simulationFolioNeeds(plan, 101)).toThrow(expect.objectContaining({ code: 'INVALID_OPTION' }))
   })
 })
 

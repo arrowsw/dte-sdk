@@ -344,7 +344,7 @@ describe('createExchangeAnswers', () => {
     })
   })
 
-  test('the receipts carry one signed receipt per document, every document, and the set signature over them', () => {
+  test('the receipts carry one signed receipt per document addressed to the company, and the set signature over them', () => {
     const root = node(parseXml(answers.receipts.xml)['EnvioRecibos'])
     expect(root['@_xsi:schemaLocation']).toBe(`${SII_NS} EnvioRecibos_v10.xsd`)
     const set = node(root['SetRecibos'])
@@ -359,7 +359,7 @@ describe('createExchangeAnswers', () => {
       TmstFirmaEnv: STAMP,
     })
     const recibos = list(set['Recibo'])
-    expect(recibos).toHaveLength(3)
+    expect(recibos).toHaveLength(2)
     expect(recibos.map((recibo) => node(recibo['DocumentoRecibo']))).toEqual([
       {
         '@_ID': 'REC-1',
@@ -375,8 +375,7 @@ describe('createExchangeAnswers', () => {
           'El acuse de recibo que se declara en este acto, de acuerdo a lo dispuesto en la letra b) del Art. 4, y la letra c) del Art. 5 de la Ley 19.983, acredita que la entrega de mercaderias o servicio(s) prestado(s) ha(n) sido recibido(s).',
         TmstFirmaRecibo: STAMP,
       },
-      expect.objectContaining({ '@_ID': 'REC-2', TipoDoc: '61', RUTRecep: OTHER_RECEIVER }),
-      expect.objectContaining({ '@_ID': 'REC-3', TipoDoc: '56', MntTotal: '0' }),
+      expect.objectContaining({ '@_ID': 'REC-2', TipoDoc: '56', RUTRecep: COMPANY, MntTotal: '0' }),
     ])
     expect(recibos.every((recibo) => recibo['@_version'] === '1.0' && 'Signature' in recibo)).toBe(true)
     expect(verifyEnveloped(answers.receipts.xml, { elementTag: 'SetRecibos', rootTag: 'EnvioRecibos' })).toMatchObject({
@@ -384,7 +383,7 @@ describe('createExchangeAnswers', () => {
       valid: true,
     })
     const fragments = receipts(answers.receipts.xml)
-    expect(fragments).toHaveLength(3)
+    expect(fragments).toHaveLength(2)
     fragments.forEach((fragment, index) => {
       expect(verifyEnveloped(standalone(fragment), { elementTag: 'DocumentoRecibo', rootTag: 'Recibo' })).toMatchObject(
         {
@@ -393,6 +392,30 @@ describe('createExchangeAnswers', () => {
         },
       )
     })
+  })
+
+  test('receiptsForEveryDocument writes a receipt for every document of the set, the rejected one included', () => {
+    const every = createExchangeAnswers(SET, { ...input, contact, receiptsForEveryDocument: true })
+    const recibos = list(node(node(parseXml(every.receipts.xml)['EnvioRecibos'])['SetRecibos'])['Recibo'])
+    expect(recibos.map((recibo) => node(recibo['DocumentoRecibo']))).toEqual([
+      expect.objectContaining({ '@_ID': 'REC-1', TipoDoc: '33', RUTRecep: COMPANY }),
+      expect.objectContaining({ '@_ID': 'REC-2', TipoDoc: '61', RUTRecep: OTHER_RECEIVER }),
+      expect.objectContaining({ '@_ID': 'REC-3', TipoDoc: '56', RUTRecep: COMPANY }),
+    ])
+    // The reception and the result do not change with it.
+    expect(every.reception.xml).toBe(answers.reception.xml)
+    expect(every.approval.xml).toBe(answers.approval.xml)
+  })
+
+  test('a set with no document addressed to the company gets a receipt for every document, since the receipts cannot be empty', () => {
+    const elsewhere = createExchangeAnswers(
+      envelope('EnvioDTE', document(33, 1, OTHER_RECEIVER) + document(34, 2, OTHER_RECEIVER)),
+      input,
+    )
+    expect(receipts(elsewhere.receipts.xml)).toHaveLength(2)
+    expect(elsewhere.noDocumentForCompany).toBe(true)
+    expect(answers.noDocumentForCompany).toBe(false)
+    expect(elsewhere.reception.xml).not.toContain('<EstadoRecepDTE>0</EstadoRecepDTE>')
   })
 
   test('without a contact the covers name none, and the responses never carry the phone', () => {
