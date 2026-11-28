@@ -103,6 +103,11 @@ describe('validateBeforeUpload', () => {
       ),
     ).toMatchObject({ code: 'SCHEMA_INVALID', details: { element: 'EnvioDTE' } })
     expect(load).toHaveBeenCalledTimes(1)
+    // Text before the element does not hide it either: the file goes on to the schema, which refuses it.
+    const refused = await failure(
+      validateBeforeUpload({ load: refusing })({ kind: 'book', name: 'x.xml', xml: 'texto <LibroGuia version="1.0">' }),
+    )
+    expect(refused).toMatchObject({ code: 'SCHEMA_INVALID', details: { issues: [expect.anything()] } })
   })
 
   test('a file with no element is refused as one with the wrong one, and a kind no upload has is an invalid option', async () => {

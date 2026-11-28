@@ -256,6 +256,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   none, and otherwise goes to `unread`. In an export case, `RECARGO EN LA LINEA` with no percent counted as read and
   kept nothing; it goes to `unread`.
 
+### Fixed
+
+- **The document element of a file with a comment before it** (`schemaOf`, `validateAgainstSchema`). The element was
+  found after removing every processing instruction, then every comment, wherever it stood, so a comment that held
+  `<?` before the root, with a processing instruction later in the file, hid the root, and a file the schema takes
+  was refused with `INVALID_OPTION { field: 'schema' }`. What may come before the root (white space, a byte order
+  mark, processing instructions, comments, a document type) is now skipped in the order it comes, in one pass; text
+  before the root is passed over to the first element after it, as before, and that element's schema says the file
+  is wrong.
+  - **What to change:** nothing.
+
 ## [0.17.0] - 2026-11-26
 
 ### Added

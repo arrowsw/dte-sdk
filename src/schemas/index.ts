@@ -163,10 +163,14 @@ const PROLOGUE: readonly (readonly [RegExp, string])[] = [
   [DOCTYPE, '>'],
 ]
 
-// Where the document element starts: what may come before it is skipped in the order it comes, one piece after
-// another from the start, so a comment that holds `<?` or an element hides nothing, and a piece left open ends the
-// search in one pass. -1 when the text has no document element there.
-const rootStart = (text: string): number => {
+const ROOT_AT = /<(?:[A-Za-z_][\w.-]*:)?([A-Za-z_][\w.-]*)[\s/>]/y
+
+// The local name of the document element and the text from it on, or null when there is none. What may come before
+// it is skipped in the order it comes, one piece after another from the start, so a comment that holds `<?` or an
+// element hides nothing. Anything else that is not the start of an element (text, a closing tag) is passed over to
+// the next `<`, as the first element after it was always read, and the schema then says the file is wrong. Every step
+// moves forward, and a piece left open ends the search, so the text is read once.
+const rootOf = (text: string): { readonly name: string; readonly rest: string } | null => {
   let at = 0
   for (;;) {
     BLANK.lastIndex = at
@@ -176,33 +180,33 @@ const rootStart = (text: string): number => {
       opening.lastIndex = at
       return opening.test(text)
     })
-    if (piece === undefined) return at
-    const end = text.indexOf(piece[1], piece[0].lastIndex)
-    if (end < 0) return -1
-    at = end + piece[1].length
+    if (piece !== undefined) {
+      const end = text.indexOf(piece[1], piece[0].lastIndex)
+      if (end < 0) return null
+      at = end + piece[1].length
+      continue
+    }
+    ROOT_AT.lastIndex = at
+    const name = ROOT_AT.exec(text)?.[1]
+    if (name !== undefined) return { name, rest: text.slice(at) }
+    at = text.indexOf('<', at + 1)
+    if (at < 0) return null
   }
-}
-
-const ROOT_AT = /<(?:[A-Za-z_][\w.-]*:)?([A-Za-z_][\w.-]*)[\s/>]/y
-
-// The local name of the document element and the text from it on, or null when there is none.
-const rootOf = (text: string): { readonly name: string; readonly rest: string } | null => {
-  const at = rootStart(text)
-  if (at < 0) return null
-  ROOT_AT.lastIndex = at
-  const name = ROOT_AT.exec(text)?.[1]
-  return name === undefined ? null : { name, rest: text.slice(at) }
 }
 
 /**
  * EN: The schema of a document, by the name of its document element, or null when dte-sdk carries none for it. It reads
- * the first element after what may come before it (white space, the declaration and other processing instructions,
- * comments, a document type), skipped in the order it comes; it validates nothing. A
+ * the first element after what may come before it (white space, a byte order mark, the declaration and other
+ * processing instructions, comments, a document type), skipped in the order it comes, so a comment that holds `<?` or
+ * an element hides nothing; text or anything else that does not start an element is passed over to the first element
+ * after it, whose schema then says the file is wrong. It validates nothing. A
  * receipt (39, 41) on its own has none: `DTE_v10.xsd` does not declare its `DTE`, which only `EnvioBOLETA_v11.xsd`
  * does, so a receipt is validated inside its `EnvioBOLETA`.
  * ES: El esquema de un documento, según el nombre de su elemento raíz, o null si dte-sdk no trae ninguno para él. Lee
- * el primer elemento después de lo que puede venir antes de él (espacios, la declaración y otras instrucciones de
- * procesamiento, comentarios, un tipo de documento), saltado en el orden en que viene; no valida nada.
+ * el primer elemento después de lo que puede venir antes de él (espacios, una marca de orden de bytes, la declaración
+ * y otras instrucciones de procesamiento, comentarios, un tipo de documento), saltado en el orden en que viene, así un
+ * comentario que trae `<?` o un elemento no oculta nada; el texto u otra cosa que no abre un elemento se pasa hasta el
+ * primer elemento después de él, cuyo esquema dice entonces que el archivo está mal. No valida nada.
  * Una boleta (39, 41) sola no tiene ninguno: `DTE_v10.xsd` no declara su `DTE`, que solo declara
  * `EnvioBOLETA_v11.xsd`, así que una boleta se valida dentro de su `EnvioBOLETA`.
  * @param xml EN: the document, as text or as the bytes of its file. ES: el documento, como texto o como los bytes de su archivo.

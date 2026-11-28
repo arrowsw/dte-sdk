@@ -84,11 +84,16 @@ describe('schemaOf', () => {
     expect(schemaOf(`${declaration}<!-- sin cerrar <EnvioDTE>`)).toBeNull()
     expect(schemaOf('<?xml sin cerrar <EnvioDTE>')).toBeNull()
     expect(schemaOf('<!DOCTYPE sin cerrar')).toBeNull()
-    expect(schemaOf('texto <EnvioDTE>')).toBeNull()
+    // Text before the element is no piece of the prologue: the first element after it is read, as it always was, and
+    // the schema says the file is wrong.
+    expect(schemaOf('texto <EnvioDTE version="1.0"></EnvioDTE>')).toBe('EnvioDTE')
+    expect(schemaOf(`${declaration}texto </fin> <!-- <LibroGuia> --> <?pi x?> <EnvioDTE>`)).toBe('EnvioDTE')
+    expect(schemaOf('texto sin elemento <')).toBeNull()
     // Many unclosed processing instructions cost one pass, not one per instruction.
     const started = Date.now()
     expect(schemaOf('<?'.repeat(200_000))).toBeNull()
     expect(schemaOf(`<!--${'<?'.repeat(200_000)}-->`)).toBeNull()
+    expect(schemaOf(`texto ${'</a '.repeat(200_000)}`)).toBeNull()
     expect(Date.now() - started).toBeLessThan(1000)
   })
 
@@ -169,6 +174,11 @@ describe('validateAgainstSchema', () => {
     expect(issues.length).toBeGreaterThan(0)
     expect(issues.some((issue) => issue.message.includes('{http://www.sii.cl/SiiDte}TipoDTE'))).toBe(true)
     for (const issue of issues) expect(typeof issue.line === 'number' && issue.line > 0).toBe(true)
+  })
+
+  test('a file with text before its element is validated by the schema of that element, which speaks against it', async () => {
+    const issues = await validateAgainstSchema('texto <EnvioDTE version="1.0"></EnvioDTE>')
+    expect(issues.length).toBeGreaterThan(0)
   })
 
   test('a text that is not XML comes back as an issue too', async () => {
