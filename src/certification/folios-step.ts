@@ -128,7 +128,9 @@ const holdEnvelope = async (
  * be held is dropped from the state, said in the portal client's logger with its reason, and issued anew: a folio of
  * it in no CAF the run holds unexpired (`folios`), a folio the registry holds for another document (`taken`), or a
  * registry without `hold` or an entry with no holder (`ledger`). Every folio of it that can be held is, even when it is dropped: an earlier
- * request may have reached the SII with them, so they are never handed to another document. Called before any folio
+ * request may have reached the SII with them, so no other document is handed them, until the SII says it did not
+ * receive them: they stay among the run's used folios, which `prepareFolios` gives back when the SII never received
+ * them. Called before any folio
  * is asked for or handed out: by `settleUnansweredSets`, `prepareFolios`, `sendTestSet` and `sendSimulation`. Two runs resumed at once from
  * one state on one registry hold the same folios for the same envelope, so both may send it (the SII answers the
  * second with the first's track id) while each saves a state the other does not see; on two registries neither holds
@@ -139,8 +141,9 @@ const holdEnvelope = async (
  * folios. Un sobre que no se puede retener se quita del estado, se dice en el logger del cliente del portal con su
  * razón, y se emite otra vez: un folio suyo en ningún CAF vigente que tenga la corrida (`folios`), un folio que el
  * registro retiene para otro documento (`taken`), o un registro sin `hold` o una entrada sin tenedor (`ledger`). Cada folio suyo que se puede
- * retener se retiene, aunque se quite: una petición anterior pudo llegar al SII con ellos, así que nunca se entregan a
- * otro documento. Se llama antes de pedir o entregar cualquier folio: desde `settleUnansweredSets`, `prepareFolios`, `sendTestSet` y
+ * retener se retiene, aunque se quite: una petición anterior pudo llegar al SII con ellos, así que no se entregan a
+ * otro documento, hasta que el SII diga que no los recibió: siguen entre los folios usados de la corrida, que
+ * `prepareFolios` devuelve cuando el SII nunca los recibió. Se llama antes de pedir o entregar cualquier folio: desde `settleUnansweredSets`, `prepareFolios`, `sendTestSet` y
  * `sendSimulation`. Dos corridas retomadas a la vez desde un mismo estado sobre un mismo registro retienen los mismos
  * folios para el mismo sobre, así que ambas pueden enviarlo (el SII responde al segundo con el track id del primero)
  * mientras cada una guarda un estado que la otra no ve; sobre dos registros ninguna retiene frente a los documentos de

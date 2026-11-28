@@ -326,9 +326,9 @@ const keptAfter = (
   return mayHaveReached(error) ? (again ?? fresh) : null
 }
 
-// The HTTP statuses after which the SII may hold the file or could not answer: a timeout of the request, too many
-// requests, and an error of the server; with 405, which the client retries as the SII's transient state. Any other
-// status is an answer: the SII did not take the file.
+// The HTTP statuses after which the SII may hold the file or could not answer (405, a timeout of the request, too
+// many requests, an error of the server): the envelope is kept and the same bytes go again, so no folio is spent. Any
+// other status is an answer: the SII did not take the file.
 const NO_ANSWER_STATUS = (status: number): boolean =>
   status === 405 || status === 408 || status === 429 || status >= 500
 
@@ -345,6 +345,15 @@ const unansweredWith = (
 ): UnansweredEnvelopes =>
   kept === null ? withoutUnanswered(state, key) : { ...withoutUnanswered(state, key), [key]: kept }
 
+// A write after a step already failed: a second failure is dropped, so the first error is the one the caller gets.
+const despite = async (write: () => Promise<unknown>): Promise<void> => {
+  try {
+    await write()
+  } catch {
+    // The step's own error is thrown after it.
+  }
+}
+
 // The folios of a kept envelope are recorded as held for it, so the next run finds them held in the same registry.
 const failedMark = (sentAt: string, kept: UnansweredEnvelope | null) =>
   kept === null ? { sentAt } : { sentAt, extra: { heldFor: kept.holder } }
@@ -353,12 +362,12 @@ const failedMark = (sentAt: string, kept: UnansweredEnvelope | null) =>
  * EN: Settles, before the folios of the sets are asked for, which envelopes of the sets kept to be sent again
  * (`unanswered` of the state) will be: the folios of every kept envelope are held first (`holdUnansweredFolios`), then
  * each that `envelopeToSendAgain` does not take, or every one when `resendUnanswered` is false, is dropped from the
- * state, so its set is issued anew and its folios asked for, while the folios it carried stay held. Internal.
+ * state, so its set is issued anew and its folios asked for, while the folios it carried stay held until the SII says it did not receive them. Internal.
  * ES: Resuelve, antes de pedir los folios de los sets, qué sobres de los sets guardados para enviarse de nuevo
  * (`unanswered` del estado) se enviarán: primero se retienen los folios de cada sobre guardado
  * (`holdUnansweredFolios`), luego cada uno que `envelopeToSendAgain` no toma, o todos cuando `resendUnanswered` es
  * false, se quita del estado, así su set se emite otra vez y se piden sus folios, mientras los folios que llevaba
- * siguen retenidos. Interno.
+ * siguen retenidos hasta que el SII diga que no los recibió. Interno.
  */
 export const settleUnansweredSets = async (
   deps: CertificationDependencies,
@@ -498,8 +507,9 @@ export const sendTestSet = async (
       cases,
     }
     const kept = keptAfter(error, watch.outcome(), again?.entry ?? null, fresh)
-    await markSent(rt, held, cases, failedMark(sentAt, kept))
-    await saveState(rt, state, { usedFolios, unanswered: unansweredWith(state, options.kind, kept) })
+    // What must survive is saved first, and neither write stops the other: the error thrown is the first one.
+    await despite(() => saveState(rt, state, { usedFolios, unanswered: unansweredWith(state, options.kind, kept) }))
+    await despite(() => markSent(rt, held, cases, failedMark(sentAt, kept)))
     rt.emit({ step: 'SET_ERROR', set: options.kind, error: errorMessage(error) })
     throw error
   }
@@ -992,12 +1002,15 @@ export const sendSimulation = async (
       cases,
     }
     const kept = keptAfter(error, watch.outcome(), again?.entry ?? null, fresh)
-    await markSent(rt, held, cases, failedMark(sentAt, kept))
-    await saveState(rt, current, {
-      usedFolios,
-      simulationCafs: [],
-      unanswered: unansweredWith(current, 'simulation', kept),
-    })
+    // What must survive is saved first, and neither write stops the other: the error thrown is the first one.
+    await despite(() =>
+      saveState(rt, current, {
+        usedFolios,
+        simulationCafs: [],
+        unanswered: unansweredWith(current, 'simulation', kept),
+      }),
+    )
+    await despite(() => markSent(rt, held, cases, failedMark(sentAt, kept)))
     throw error
   }
 }
