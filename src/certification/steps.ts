@@ -92,18 +92,24 @@ const pad = (folio: number): string => String(folio).padStart(6, '0')
 
 /**
  * EN: Downloads the test set, parses it, plans the sets and keeps the text and the plan as artefacts. Downloading
- * generates the set anew at the SII, so a run that already had a plan starts over: everything sent is void.
+ * generates the set anew at the SII, so a run that already had a plan starts over: everything sent is void, and every
+ * envelope kept to be sent again is dropped, once its folios are held in the folio registry (`holdUnansweredFolios`)
+ * so no document of the new plan takes them.
  * ES: Descarga el set de pruebas, lo parsea, planifica los sets y guarda el texto y el plan como artefactos. Descargar
  * genera el set de nuevo en el SII, así que una corrida que ya tenía plan parte de cero: todo lo enviado queda sin
- * efecto.
+ * efecto, y cada sobre guardado para enviarse de nuevo se quita, una vez retenidos sus folios en el registro de folios
+ * (`holdUnansweredFolios`) para que ningún documento del plan nuevo los tome.
  * @throws {DteError} EN: `SII_PORTAL_UNEXPECTED_PAGE` when the text holds no set; the portal codes. ES: `SII_PORTAL_UNEXPECTED_PAGE` si el texto no trae ningún set; los códigos del portal.
  */
 export const obtainTestSet = async (
   deps: CertificationDependencies,
-  state: CertificationState,
+  given: CertificationState,
   options: { readonly optionalSets?: readonly string[] } = {},
 ): Promise<StepResult<'loaded' | 'regenerated'>> => {
   const rt = runtime(deps)
+  // A plan obtained again drops every envelope kept to be sent again: their folios are held first, so they stay used
+  // in this registry, as the folios the run used do.
+  const state = await holdUnansweredFolios(rt, given)
   rt.emit({ step: 'SETS_DOWNLOADING' })
   const downloaded = await downloadTestSet(rt.portal, {
     ...(options.optionalSets === undefined ? {} : { optionalSets: options.optionalSets }),

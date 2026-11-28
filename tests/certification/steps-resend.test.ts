@@ -3,7 +3,7 @@ import { createMemoryFolioRegistry } from '../../src/folios/registry'
 import { toSiiRut } from '../../src/model/rut'
 import { runCertification } from '../../src/certification/runner'
 import type { CertificationState } from '../../src/certification/state'
-import { sendSimulation, sendTestSet, settleUnansweredSets } from '../../src/certification/steps'
+import { obtainTestSet, sendSimulation, sendTestSet, settleUnansweredSets } from '../../src/certification/steps'
 import { DteError } from '../../src/errors'
 import { fullPlan } from '../support/certification-fixtures'
 import {
@@ -11,7 +11,9 @@ import {
   certificationCafXmls,
   certificationHarness,
   EST_DTE,
+  get,
   MAULLIN,
+  post,
   reception,
   stampingRoutes,
   stateWith,
@@ -21,6 +23,7 @@ import {
   uploadRoute,
   type CertificationHarness,
 } from '../support/certification-harness'
+import { SET_ENTRY, setDownloadPage, setGenerationForm } from '../support/certification-pages'
 import type { FakeReply, FakeRoute } from '../support/fake-sii'
 import { FIXED_NOW, ISSUER_RUT } from '../support/fixtures'
 import { failure } from '../support/portal'
@@ -776,5 +779,27 @@ describe('the entry of a kept set', () => {
     })
     expect(harness.warnedWith(SENT_AGAIN)).toHaveLength(1)
     expect(uploaded(harness)[1]).toBe(uploaded(harness)[0])
+  })
+})
+
+describe('a plan obtained again while an envelope is kept', () => {
+  test('the kept folios are held before the new plan drops the entry: no other document takes them', async () => {
+    const { harness, state, first } = await guideFailedOnce(reception('71'))
+    // A registry that never saw the kept folios, and a set generated again at the SII.
+    const registry = createMemoryFolioRegistry(() => FIXED_NOW)
+    const setPages = await certificationHarness([
+      get('pe_generar', SET_ENTRY),
+      post('pe_generar1', setGenerationForm()),
+      post('pe_generar2', setDownloadPage()),
+    ])
+    const deps = { ...harness.deps, registry, portal: setPages.deps.portal }
+    const obtained = await obtainTestSet(deps, state)
+    expect(obtained.outcome).toBe('regenerated')
+    expect(obtained.state.unanswered).toBeUndefined()
+    const prepared = await prepareFolios({ ...harness.deps, registry }, obtained.state, { needs: {} })
+    await sendTestSet({ ...harness.deps, registry }, prepared.state, { kind: 'guide' })
+    const kept = foliosOf(first)
+    expect(kept).toEqual(['52-1', '52-2', '52-3'])
+    expect(foliosOf(uploaded(harness)[1]).filter((folio) => kept.includes(folio))).toEqual([])
   })
 })
