@@ -470,7 +470,109 @@ describe('folioConsumptionEntryFromDocument', () => {
     expect(report.summaries[0]).toMatchObject({ netAmount: 840, vatAmount: 160, totalAmount: 1000 })
   })
 
-  test('rejects a document that is not a receipt', () => {
-    expectCodeOf(() => folioConsumptionEntryFromDocument(createDocument(base)), 'INVALID_DOCUMENT_TYPE')
+  // A credit note that takes back a receipt, with a taxed line and an exempt one, so its line carries every amount.
+  const creditNote: DocumentInput = {
+    ...base,
+    type: 61,
+    folio: 7,
+    items: [
+      { name: 'Café', quantity: 1, unitPrice: 1000 },
+      { name: 'Libro', unitPrice: 500, exempt: true },
+    ],
+    references: [{ documentType: 39, folio: '3', date: '2026-10-15', code: 1, reason: 'Anula boleta' }],
+  }
+
+  test('a credit note carries its folio, date, net, VAT, exempt amount and total', () => {
+    expect(folioConsumptionEntryFromDocument(createDocument(creditNote))).toEqual({
+      type: 61,
+      folio: 7,
+      issueDate: '2026-10-15',
+      netAmount: 1000,
+      vatAmount: 190,
+      exemptAmount: 500,
+      totalAmount: 1690,
+    })
+  })
+
+  test('the line of a credit note builds a report beside the line of a receipt', () => {
+    const report = createFolioConsumption({
+      cover: reportCover,
+      entries: [receipt, creditNote].map((input) => folioConsumptionEntryFromDocument(createDocument(input))),
+    })
+    expect(report.summaries.map(({ type }) => type)).toEqual([39, 61])
+    expect(report.summaries[1]).toMatchObject({
+      netAmount: 1000,
+      vatAmount: 190,
+      exemptAmount: 500,
+      totalAmount: 1690,
+      issuedCount: 1,
+      usedRanges: [{ from: 7, to: 7 }],
+    })
+  })
+
+  test('a non-billable amount stays out of the line of a credit note, as it stays out of its total', () => {
+    const note = createDocument({
+      ...creditNote,
+      items: [...creditNote.items, { name: 'Propina', unitPrice: 300, exemptIndicator: 2 }],
+    })
+    expect(note.header.totals.nonBillableAmount).toBe(300)
+    expect(folioConsumptionEntryFromDocument(note)).toMatchObject({
+      netAmount: 1000,
+      exemptAmount: 500,
+      totalAmount: 1690,
+    })
+  })
+
+  // Field 6 of the format of the report: the total of a summary is the sum of its net, its VAT and its exempt amount. A
+  // receipt always adds up; a credit note may carry what a receipt cannot, and then its total is something else.
+  test.each<[string, Partial<DocumentInput>, { expected: number; actual: number }]>([
+    [
+      'withholds its VAT',
+      {
+        withholdVat: true,
+        references: [{ documentType: 46, folio: '7', date: '2026-10-15', code: 3, reason: 'Devolución' }],
+      },
+      { expected: 1690, actual: 1500 },
+    ],
+    [
+      'carries a deposit guarantee',
+      { items: [...creditNote.items, { name: 'Envase', unitPrice: 300, exemptIndicator: 3 }] },
+      { expected: 1690, actual: 1990 },
+    ],
+    [
+      'carries another tax',
+      {
+        items: [{ name: 'Bebida', quantity: 1, unitPrice: 1000, additionalTaxCodes: [27] }],
+        totals: {
+          netAmount: 1000,
+          vatRate: 19,
+          vatAmount: 190,
+          withholdings: [{ taxCode: 27, rate: 18, amount: 180 }],
+          totalAmount: 1370,
+        },
+      },
+      { expected: 1190, actual: 1370 },
+    ],
+  ])('refuses a credit note that %s, whose line would not add up', (_name, extra, amounts) => {
+    const note = createDocument({ ...creditNote, ...extra })
+    expect(() => folioConsumptionEntryFromDocument(note)).toThrow(
+      expect.objectContaining({ code: 'BOOK_TOTAL_MISMATCH', details: { field: 'totalAmount', ...amounts } }),
+    )
+  })
+
+  test.each<[string, DocumentInput]>([
+    ['an invoice', base],
+    [
+      'a debit note',
+      {
+        ...base,
+        type: 56,
+        references: [{ documentType: 33, folio: '10', date: '2026-10-15', code: 3, reason: 'Corrige monto' }],
+      },
+    ],
+  ])('rejects %s, which the report does not take', (_name, input) => {
+    expect(() => folioConsumptionEntryFromDocument(createDocument(input))).toThrow(
+      expect.objectContaining({ code: 'INVALID_DOCUMENT_TYPE', details: { field: 'type', type: input.type } }),
+    )
   })
 })

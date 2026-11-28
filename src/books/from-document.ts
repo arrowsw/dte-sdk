@@ -131,20 +131,28 @@ export const guideEntryFromDocument = (document: Document): GuideEntryInput => {
 }
 
 /**
- * EN: Derives a folio consumption line from a receipt (39 or 41).
- * ES: Deriva una línea del reporte de consumo de folios desde una boleta (39 o 41).
- * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE` when the document is not a receipt. ES: `INVALID_DOCUMENT_TYPE` si el documento no es una boleta.
+ * EN: Derives a folio consumption line from a receipt (39 or 41) or a credit note (61), the three types
+ * `ConsumoFolio_v10.xsd` admits in a summary; the format of the report, of 2020, names the two receipts alone. A credit
+ * note carries its net, its VAT and its exempt amount, as a receipt does. Which credit notes go in a report is the
+ * caller's to say: the function does not look at the document the note changes. It refuses a note whose total is not the
+ * sum of those three amounts, which is how field 6 of the format defines the total of a summary: one with withheld VAT,
+ * another tax or a deposit guarantee, none of which a receipt carries.
+ * ES: Deriva una línea del reporte de consumo de folios desde una boleta (39 o 41) o una nota de crédito (61), los tres
+ * tipos que `ConsumoFolio_v10.xsd` admite en un resumen; el formato del reporte, de 2020, nombra solo las dos boletas.
+ * Una nota de crédito lleva su neto, su IVA y su exento, como una boleta. Qué notas de crédito van en un reporte lo
+ * decide quien llama: la función no mira el documento que la nota cambia. Rechaza una nota cuyo total no es la suma de
+ * esos tres montos, que es como el campo 6 del formato define el total de un resumen: una con IVA retenido, otro
+ * impuesto o una garantía por depósito de envases, que una boleta no lleva.
+ * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE` when the document is neither a receipt nor a credit note; `BOOK_TOTAL_MISMATCH` when the total of a credit note is not its net plus its VAT plus its exempt amount. ES: `INVALID_DOCUMENT_TYPE` si el documento no es una boleta ni una nota de crédito; `BOOK_TOTAL_MISMATCH` si el total de una nota de crédito no es su neto más su IVA más su exento.
  */
 export const folioConsumptionEntryFromDocument = (document: Document): FolioConsumptionEntry => {
   const { type, folio, issueDate, totals } = document.header
-  if (type !== 39 && type !== 41) throw new DteError('INVALID_DOCUMENT_TYPE', { field: 'type', type })
-  return compact({
-    type,
-    folio,
-    issueDate,
-    netAmount: totals.netAmount,
-    vatAmount: totals.vatAmount,
-    exemptAmount: totals.exemptAmount,
-    totalAmount: totals.totalAmount,
-  })
+  if (type !== 39 && type !== 41 && type !== CREDIT_NOTE_TYPE)
+    throw new DteError('INVALID_DOCUMENT_TYPE', { field: 'type', type })
+  const { netAmount, vatAmount, exemptAmount, totalAmount } = totals
+  // A receipt's total is always the sum; `createDocument` refuses on a receipt what would make it something else.
+  const expected = (netAmount ?? 0) + (vatAmount ?? 0) + (exemptAmount ?? 0)
+  if (type === CREDIT_NOTE_TYPE && totalAmount !== expected)
+    throw new DteError('BOOK_TOTAL_MISMATCH', { field: 'totalAmount', expected, actual: totalAmount })
+  return compact({ type, folio, issueDate, netAmount, vatAmount, exemptAmount, totalAmount })
 }
