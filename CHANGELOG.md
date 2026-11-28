@@ -11,9 +11,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`FOLIO_LEDGER_LOCKED`**, a new error code: a change of the directory folio registry waited `lockWaitMs` for the
   lock of the ledger and did not get it. `details` carry `lockWaitMs` and `attempts`.
+
 - **`lock` of `FolioLedgerStore`** (`dte-sdk/portal`), optional: a store that gives it has every change of
   `createFolioRegistry` run inside it, its read, its change and its write, so that the store can make the change
   exclusive beyond one registry. A store without it behaves as before.
+
+### Changed
+
+- **A credit note's line in the folio consumption report.** `createFolioConsumption` reports credit notes (61) since
+  0.17.0, but `folioConsumptionEntryFromDocument`, which derives a line of the report from an issued document, took a
+  receipt alone and refused a 61 (`INVALID_DOCUMENT_TYPE`), so the line of a credit note was built by hand. It now
+  derives it, with the net, the VAT and the exempt amount of the note, and still refuses every other type. Which
+  credit notes go in a report stays the caller's to say: the function does not look at the document a note changes.
+  It refuses a note whose total is not the sum of its net, its VAT and its exempt amount (`BOOK_TOTAL_MISMATCH`,
+  `totalAmount`), which is how field 6 of the report's format defines the total of a summary: a note with withheld
+  VAT, another tax or a deposit guarantee, none of which a receipt carries. `ConsumoFolio_v10.xsd` admits the credit
+  note in a summary; the format of the report, of 2020, names the two receipts alone.
+  - **What to change:** nothing. Code that relied on the refusal of a 61 now gets its line.
 
 ### Fixed
 
