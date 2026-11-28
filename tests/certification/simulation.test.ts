@@ -1,4 +1,9 @@
-import { issueSimulation, outsideDeclarableSize, type IssuedSimulation } from '../../src/certification/simulation'
+import {
+  issueSimulation,
+  outsideDeclarableSize,
+  simulationPasses,
+  type IssuedSimulation,
+} from '../../src/certification/simulation'
 import { verifyEnvelopeSignature } from '../../src/envelope/sign'
 import { chileTimestamp } from '../../src/time/chile'
 import { calculateTotals } from '../../src/totals/calculate'
@@ -7,6 +12,8 @@ import { ISSUER_RUT, RECEIVER_RUT } from '../support/fixtures'
 import { failure } from '../support/portal'
 import { ATTENTION } from '../support/test-set-samples'
 
+// One pass over the plan, as the simulation issued it before it repeated its pass: what most of these tests look at.
+const single = (cafs?: Parameters<typeof issueOptions>[0]) => ({ ...issueOptions(cafs), minimumDocuments: 0 })
 const id = (n: number) => `${ATTENTION}-${n}`
 const plan = fullPlan()
 const byCase = (simulation: IssuedSimulation, n: number) => simulation.cases.find((issued) => issued.caseId === id(n))!
@@ -14,7 +21,7 @@ const byCase = (simulation: IssuedSimulation, n: number) => simulation.cases.fin
 describe('the simulation of the whole plan', () => {
   let simulation: IssuedSimulation
   beforeAll(async () => {
-    simulation = await issueSimulation(plan, issueOptions())
+    simulation = await issueSimulation(plan, single())
   })
 
   test('issues every case of the four sets in order, in one envelope, with the types it holds', () => {
@@ -118,7 +125,7 @@ describe('edges', () => {
           debitNotes: [basic.debitNotes[1]],
         },
       },
-      issueOptions(),
+      single(),
     )
     expect(simulation.cases.map((issued) => issued.caseId)).toEqual([id(2), id(3), id(4), id(8)])
     expect(byCase(simulation, 4).document.references).toEqual([])
@@ -146,7 +153,7 @@ describe('edges', () => {
           debitNotes: [{ ...plan.basic!.debitNotes[1], items: [{ name: 'Desconocido', quantity: 1, unitPrice: 500 }] }],
         },
       },
-      issueOptions(),
+      single(),
     )
     expect(byCase(simulation, 17).document.items[0]).toMatchObject({
       name: 'Otra cosa',
@@ -182,7 +189,7 @@ describe('edges', () => {
           debitNotes: [],
         },
       },
-      { ...issueOptions(), now: undefined },
+      { ...single(), now: undefined },
     )
     const items = (index: number) =>
       simulation.cases[index].document.items.map((item) => [item.name, item.quantity, item.unitPrice])
@@ -198,7 +205,7 @@ describe('edges', () => {
     const exempt = plan.exempt!
     const simulation = await issueSimulation(
       { exempt: { ...exempt, creditNotes: [{ ...exempt.creditNotes[0], reasonText: '', items: [] }], debitNotes: [] } },
-      issueOptions(),
+      single(),
     )
     expect(simulation.cases[1].document.items.map((item) => [item.name, item.exemptIndicator])).toEqual([
       ['CORRECCION', 1],
@@ -206,8 +213,8 @@ describe('edges', () => {
   })
 
   test('an empty plan is MISSING_FIELD, and only the guide set is fewer than recommended', async () => {
-    expect((await failure(issueSimulation({}, issueOptions()))).details).toEqual({ field: 'cases' })
-    const guides = await issueSimulation({ guide: plan.guide }, issueOptions([cafFor(52)]))
+    expect((await failure(issueSimulation({}, single()))).details).toEqual({ field: 'cases' })
+    const guides = await issueSimulation({ guide: plan.guide }, single([cafFor(52)]))
     expect(guides.cases).toHaveLength(3)
     expect(guides.fewerThanRecommended).toBe(true)
     expect(guides.types).toEqual([52])
@@ -218,7 +225,7 @@ describe('edges', () => {
 describe('what the SII receives, as the field writes it', () => {
   let simulation: IssuedSimulation
   beforeAll(async () => {
-    simulation = await issueSimulation(plan, issueOptions())
+    simulation = await issueSimulation(plan, single())
   })
 
   test('a guide never carries the dispatch type, and a guide with no amounts totals 0 with the VAT rate', () => {
@@ -257,7 +264,7 @@ describe('what the SII receives, as the field writes it', () => {
 describe('the clocks of the simulation', () => {
   test('dated on the local day, stamped on UTC seconds, enveloped on Chile time, named on the local clock', async () => {
     const at = new Date(2026, 10, 5, 23, 30, 15, 123)
-    const simulation = await issueSimulation({ guide: plan.guide }, { ...issueOptions([cafFor(52)]), now: () => at })
+    const simulation = await issueSimulation({ guide: plan.guide }, { ...single([cafFor(52)]), now: () => at })
     const stamp = at.toISOString().slice(0, 19)
     for (const issued of simulation.cases) {
       expect(issued.document.header.issueDate).toBe('2026-11-05')
@@ -271,7 +278,7 @@ describe('the clocks of the simulation', () => {
 
 describe('the party fields', () => {
   test('only the fields the simulation writes reach the documents', async () => {
-    const options = issueOptions([cafFor(52)])
+    const options = single([cafFor(52)])
     const simulation = await issueSimulation(
       { guide: { ...plan.guide!, guides: [plan.guide!.guides[0]] } },
       {
@@ -304,7 +311,7 @@ describe('the party fields', () => {
     const long = 'Venta al por mayor de maquinaria y equipo de oficina'
     const simulation = await issueSimulation(
       { purchase: plan.purchase! },
-      { ...issueOptions(), issuer: { ...issuer, businessActivity: long } },
+      { ...single(), issuer: { ...issuer, businessActivity: long } },
     )
     const header = simulation.cases[0].document.header
     expect(header.issuer.businessActivity).toBe(long)
@@ -319,9 +326,9 @@ describe('the party fields', () => {
     const { businessActivity, ...nameless } = receiver
     void businessActivity
     await expect(
-      issueSimulation(guide, { ...issueOptions([cafFor(52)]), issuer: bare, receiver: nameless }),
+      issueSimulation(guide, { ...single([cafFor(52)]), issuer: bare, receiver: nameless }),
     ).rejects.toMatchObject({ code: 'MISSING_FIELD', details: { field: 'issuer.activityCode' } })
-    const simulation = await issueSimulation(guide, { ...issueOptions([cafFor(52)]), receiver: nameless })
+    const simulation = await issueSimulation(guide, { ...single([cafFor(52)]), receiver: nameless })
     expect(simulation.cases[0].document.header.receiver.businessActivity).toBeUndefined()
   })
 })
@@ -329,7 +336,7 @@ describe('the party fields', () => {
 describe('the items of the notes, as the field resolves them', () => {
   const basic = plan.basic!
   const run = (creditNotes: typeof basic.creditNotes, invoices = basic.invoices) =>
-    issueSimulation({ basic: { ...basic, invoices, creditNotes, debitNotes: [] } }, issueOptions())
+    issueSimulation({ basic: { ...basic, invoices, creditNotes, debitNotes: [] } }, single())
   const itemsOf = (simulation: IssuedSimulation, caseId: string) =>
     simulation.cases
       .find((issued) => issued.caseId === caseId)!
@@ -376,7 +383,7 @@ describe('the items of the notes, as the field resolves them', () => {
 describe('the purchase notes, as the field prices them', () => {
   const purchase = plan.purchase!
   const run = (creditNote: typeof purchase.creditNote) =>
-    issueSimulation({ purchase: { ...purchase, creditNote, debitNote: null } }, issueOptions())
+    issueSimulation({ purchase: { ...purchase, creditNote, debitNote: null } }, single())
 
   test('a note whose invoice is not in the simulation keeps its own price, and a price of nothing is no price', async () => {
     const simulation = await run({
@@ -409,7 +416,7 @@ describe('the purchase notes, as the field prices them', () => {
     const invoice = { ...purchase.invoice, items: [{ name: 'Chatarra de fierro', quantity: 0, unitPrice: 1200 }] }
     const simulation = await issueSimulation(
       { purchase: { ...purchase, invoice, creditNote: null, debitNote: null } },
-      issueOptions(),
+      single(),
     )
     const document = simulation.cases[0].document
     expect(document.items[0]).toMatchObject({ quantity: 1, unitPrice: 1200, amount: 1200 })
@@ -441,7 +448,7 @@ describe('the lines of an invoice, as createDocument writes them', () => {
     ]
     const simulation = await issueSimulation(
       { basic: { ...basic, invoices: [{ ...basic.invoices[0], items }], creditNotes: [], debitNotes: [] } },
-      issueOptions(),
+      single(),
     )
     const { document } = simulation.cases[0]
     expect(document.items.map((item) => item.amount)).toEqual([15, 14, 340])
@@ -461,7 +468,7 @@ describe('a credit note that corrects a text', () => {
           debitNotes: [],
         },
       },
-      issueOptions(),
+      single(),
     )
     const note = byCase(simulation, 5).document
     expect(note.references[0]).toMatchObject({ code: 2 })
@@ -482,7 +489,7 @@ describe('the global discount', () => {
           debitNotes: [],
         },
       },
-      issueOptions(),
+      single(),
     )
     expect(simulation.cases[0].document.globalAdjustments).toEqual([])
   })
@@ -494,12 +501,89 @@ describe('the global discount', () => {
     const invoice = { ...basic.invoices[0], items: [{ name: 'Tornillo', quantity: 1, unitPrice: 100 }] }
     const simulation = await issueSimulation(
       { basic: { ...basic, invoices: [{ ...invoice, globalDiscountPercent: 14.5 }], creditNotes: [], debitNotes: [] } },
-      issueOptions(),
+      single(),
     )
     const { document } = simulation.cases[0]
     expect(document.header.totals).toEqual({ netAmount: 85, vatRate: 19, vatAmount: 16, totalAmount: 101 })
     expect(document.header.totals).toEqual(
       calculateTotals(document.items, { type: 33, globalAdjustments: document.globalAdjustments }),
     )
+  })
+})
+
+// Field behaviour: the "Declarar avance" form takes a simulation envelope of 20 to 100 documents. A pass over a plan
+// that holds fewer is repeated whole until the envelope holds the minimum, never past 100.
+describe('the passes of a simulation', () => {
+  test('a pass that holds the minimum is issued alone, as one pass was', async () => {
+    const alone = await issueSimulation(plan, { ...issueOptions(), minimumDocuments: 18 })
+    const once = await issueSimulation(plan, single())
+    expect(alone.passes).toBe(1)
+    expect(once.passes).toBe(1)
+    expect(alone.envelope.xml).toBe(once.envelope.xml)
+  })
+
+  test('a pass of fewer documents is repeated whole, each note referring to the document of its own pass', async () => {
+    const simulation = await issueSimulation({ basic: plan.basic }, issueOptions())
+    expect(simulation.passes).toBe(3)
+    expect(simulation.cases).toHaveLength(24)
+    expect(simulation.envelope.documents).toHaveLength(24)
+    expect(simulation.fewerThanRecommended).toBe(false)
+    expect(simulation.outsideDeclarableSize).toBe(false)
+    const pass = [33, 33, 33, 61, 61, 61, 56, 56]
+    expect(simulation.cases.map((issued) => issued.type)).toEqual([...pass, ...pass, ...pass])
+    expect(simulation.cases.slice(8, 16).map((issued) => issued.caseId)).toEqual(
+      simulation.cases.slice(0, 8).map((issued) => issued.caseId),
+    )
+    expect(simulation.types).toEqual([33, 61, 56])
+    // Every document takes a folio of its own, and the credit note of case 4 refers to the invoice of its own pass.
+    expect(new Set(simulation.cases.map((issued) => `${issued.type}-${issued.folio}`)).size).toBe(24)
+    const invoices = simulation.cases.filter((issued) => issued.caseId === id(1)).map((issued) => issued.folio)
+    const notes = simulation.cases.filter((issued) => issued.caseId === id(4))
+    expect(new Set(invoices).size).toBe(3)
+    expect(notes.map((issued) => issued.document.references[0].folio)).toEqual(invoices.map(String))
+  })
+
+  test('a note never refers to a document of an earlier pass', async () => {
+    const basic = plan.basic!
+    // The credit note names the debit note, which its pass issues after it: no pass finds it, the later ones neither.
+    const creditNote = { ...basic.creditNotes[0], referencedCase: basic.debitNotes[0].caseId }
+    const simulation = await issueSimulation(
+      {
+        basic: {
+          ...basic,
+          invoices: [basic.invoices[0]],
+          creditNotes: [creditNote],
+          debitNotes: [basic.debitNotes[0]],
+        },
+      },
+      issueOptions(),
+    )
+    expect(simulation.passes).toBe(7)
+    const credits = simulation.cases.filter((issued) => issued.type === 61)
+    expect(credits).toHaveLength(7)
+    expect(credits.every((issued) => issued.document.references.length === 0)).toBe(true)
+  })
+
+  test('a minimum of 0 issues one pass, and one that is not a whole number from 0 to 100 takes no folio', async () => {
+    const guides = await issueSimulation({ guide: plan.guide }, single([cafFor(52)]))
+    expect(guides.passes).toBe(1)
+    expect(guides.outsideDeclarableSize).toBe(true)
+    for (const minimumDocuments of [-1, 101, 2.5]) {
+      const options = { ...issueOptions([cafFor(52)]), minimumDocuments }
+      expect((await failure(issueSimulation({ guide: plan.guide }, options))).details).toEqual({
+        field: 'minimumDocuments',
+      })
+    }
+  })
+
+  test('the passes reach the minimum and never go past 100 documents', () => {
+    expect([8, 18, 19, 20, 0, 120].map((documents) => simulationPasses(documents))).toEqual([3, 2, 2, 1, 1, 1])
+    expect(simulationPasses(1)).toBe(20)
+    expect(simulationPasses(40, 100)).toBe(2)
+    // Two passes of 60 would be 120: one pass, short of the minimum asked for, stays within 100.
+    expect(simulationPasses(60, 100)).toBe(1)
+    expect(simulationPasses(30, 100)).toBe(3)
+    expect(simulationPasses(8, 0)).toBe(1)
+    expect(() => simulationPasses(8, 101)).toThrow(expect.objectContaining({ code: 'INVALID_OPTION' }))
   })
 })

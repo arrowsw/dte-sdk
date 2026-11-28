@@ -70,6 +70,31 @@ export type SentSet = SentEnvelope & {
 }
 
 /**
+ * EN: An envelope of documents the run issued, kept and tried to upload, and that the SII never answered with a track
+ * id: what the next run needs to send the same envelope again in place of issuing it anew. Only an envelope that
+ * verified before the upload and that the SII did not refuse is kept here.
+ * ES: Un sobre de documentos que la corrida emitió, guardó e intentó subir, y que el SII nunca respondió con un track
+ * id: lo que la corrida siguiente necesita para enviar el mismo sobre de nuevo en vez de emitirlo otra vez. Solo se
+ * guarda aquí un sobre que verificó antes de la subida y que el SII no rechazó.
+ */
+export type UnansweredEnvelope = {
+  /** EN: The name of the artefact that holds the envelope as it was to be uploaded. ES: El nombre del artefacto que guarda el sobre tal como se iba a subir. */
+  readonly artefact: string
+  /** EN: The issue date its documents carry, `YYYY-MM-DD`. ES: `FchEmis` — La fecha de emisión que llevan sus documentos, `AAAA-MM-DD`. */
+  readonly issueDate: string
+  /** EN: Instant of the upload that got no answer, ISO. ES: Instante de la subida que no tuvo respuesta, ISO. */
+  readonly triedAt: string
+  /** EN: Its documents, in the envelope's order. ES: Sus documentos, en el orden del sobre. */
+  readonly cases: readonly SentCase[]
+}
+
+/**
+ * EN: The envelopes kept to be sent again: one per set (`SentSetKey`) and one for the simulation (`simulation`).
+ * ES: Los sobres guardados para enviarse de nuevo: uno por set (`SentSetKey`) y uno para la simulación (`simulation`).
+ */
+export type UnansweredEnvelopes = Readonly<Partial<Record<SentSetKey | 'simulation', UnansweredEnvelope>>>
+
+/**
  * EN: A book sent: its period, its submission kind, and whether the portal approved it.
  * ES: Un libro enviado: su período, su tipo de envío, y si el portal lo aprobó.
  */
@@ -192,6 +217,8 @@ export type CertificationState = {
   readonly annulledRanges?: Readonly<Record<string, readonly string[]>>
   /** EN: The sets sent. ES: Los sets enviados. */
   readonly sets: Readonly<Partial<Record<SentSetKey, SentSet>>>
+  /** EN: The envelopes whose upload the SII never answered, kept for the next run to send again; a state without it has none. ES: Los sobres cuya subida el SII nunca respondió, guardados para que la corrida siguiente los envíe de nuevo; un estado sin él no tiene ninguno. */
+  readonly unanswered?: UnansweredEnvelopes
   /** EN: The sets sent are approved. ES: Los sets enviados están aprobados. */
   readonly setsApproved: boolean
   /** EN: The books phase. ES: La fase de libros. */
