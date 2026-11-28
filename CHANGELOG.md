@@ -76,6 +76,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `beforeUpload` throws: the envelope kept as an artefact, its folios counted as used.
   - `sendReceiptsSet` checks the receipts envelope before it uploads anything, and throws.
 
+- **The certification run sends the books of the test set as special books** (`runBooks`, `monthlyBooks` of
+  `runCertification`, `RunBooksOptions`, `CertificationBookInput.notificationFolio`, `CertificationPlan.salesBook` and
+  `guideBook`, `BookSetPlan`; `dte-sdk/portal`). The SII's "Formato de Información de Compras y Ventas" (version 2.2),
+  section 1.1, point 3 b, calls special the files the SII asks for through a notification, and says a special file is
+  told from the regular books by the folio of the notification on its cover; the text of the test set asks for each
+  book in a set of its own with a number of attention. Field behaviour is that the SII's review takes each book of the
+  test set as a special book whose notification folio is the number of attention of its own set, and that a book sent
+  as a monthly one has had its cover refused. The sales, purchase, exempt purchase and guide books now go `ESPECIAL`,
+  each with the number of attention of its own set as `FolioNotificacion`; before, the sales and purchase books went
+  `MENSUAL` with no folio and the guide book with folio 3. The plan keeps the number of attention of the sales-book and
+  guide-book sets, and a plan stored before this change is read again from the set text the state keeps. A book whose
+  number is found nowhere, or is one `FolioNotificacion` cannot carry (not a positive integer of at most 10 digits;
+  leading zeros are dropped), goes as before, and the run says so once in the portal client's logger. The period and
+  the kind of submission are chosen as before. The totals kept for an adjustment now name the notification folio of the
+  book they went with (`AccumulatedTotals.notificationFolio`), and an adjustment carries only the totals of a book of
+  its own kind: totals stored before this change belong to a monthly book, and do not carry into a special one.
+  `createCertificationSalesBook` and `createCertificationPurchaseBook` take a `notificationFolio` that makes the book
+  special, and stay `MENSUAL` without it. None of this has been run against the SII yet: the format identifies a special
+  book by its notification folio and says its period is the first one it covers, so what the SII answers when the run
+  sends a special book again on an earlier period (a second total sending under the same folio) is not known.
+  - **What to change:** `monthlyBooks: true` sends the books as before. Code that compares a whole plan of
+    `planCertificationSets` finds two more keys when the text has those sets.
+
+- **The exchange answers acknowledge the goods only of the documents addressed to the company**
+  (`createExchangeAnswers`, `runExchange`, `receiptsForEveryDocument` of `runCertification`; `dte-sdk/portal`). Field
+  behaviour is that the exchange stage has been passed with a receipt of goods only for the document addressed to the
+  company; the receipts (`EnvioRecibos`) acknowledged every document of the set, also the one the reception marks as
+  not received for its receiver and the result rejects. They now hold a receipt for each document addressed to the
+  company, the ones the reception takes. The schema of `EnvioRecibos` asks for at least one `Recibo`, so a set with no
+  document addressed to the company still gets a receipt for every document; `ExchangeAnswers.noDocumentForCompany`
+  says so, and `runExchange` says it in the portal client's logger and in its `detail`. The reception and the result do
+  not change.
+  - **What to change:** `receiptsForEveryDocument: true` keeps a receipt for every document.
+
 - **The glosses of the states of an upload follow the SII's table.** The SII's "Manual de Desarrollador Externo -
   Consulta de Estado de Upload Dte" (OI2004_CEUPDTE_MDE 1.10, `estado_envio.pdf`), 3.3 "Estados de Salida", glosses
   `SOK` "Schema Validado", `CRT` "Carátula OK", `FOK` "Firma de Envió Validada" and `PDR` "Envió en Proceso";

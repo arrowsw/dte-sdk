@@ -19,6 +19,17 @@ export const exchangeSetXml = (count = 2): string =>
     (_, index) => exchangeDocument(index === 0 ? 33 : 61, index + 1, ISSUER_RUT),
   ).join('')}</SetDTE></EnvioDTE>`
 
+/** An exchange set of two documents: the first addressed to the company, the second to another RUT. */
+export const mixedExchangeSetXml = (): string =>
+  exchangeSetXml(1).replace('</SetDTE>', () => `${exchangeDocument(33, 2, '66666666-6')}</SetDTE>`)
+
+/** An exchange set of two documents, neither addressed to the company. */
+export const elsewhereExchangeSetXml = (): string =>
+  exchangeSetXml(0).replace(
+    '</SetDTE>',
+    () => `${exchangeDocument(33, 1, '66666666-6')}${exchangeDocument(61, 2, '66666666-6')}</SetDTE>`,
+  )
+
 /** The method of a GWT-RPC body: the fourth string of its table. */
 export const gwtMethodOf = (request: RecordedRequest): string => request.text.split('|')[6]
 

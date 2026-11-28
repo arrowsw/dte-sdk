@@ -17,9 +17,11 @@ import {
   EXPORT_ATTENTION_2,
   EXPORT_SET_TEXT,
   FULL_SET_TEXT,
+  GUIDE_BOOK_ATTENTION,
   GUIDE_SET_TEXT,
   PURCHASE_BOOK_SET_TEXT,
   purchaseSetText,
+  SALES_BOOK_ATTENTION,
 } from '../support/test-set-samples'
 
 describe('the whole download', () => {
@@ -34,8 +36,15 @@ describe('the whole download', () => {
       'salesBook',
       'purchaseBook',
       'exemptPurchaseBook',
+      'guideBook',
     ])
-    expect(sets.every((set) => set.attentionNumber === ATTENTION)).toBe(true)
+    expect(sets.map((set) => set.attentionNumber)).toEqual([
+      ...Array<string>(4).fill(ATTENTION),
+      SALES_BOOK_ATTENTION,
+      ATTENTION,
+      ATTENTION,
+      GUIDE_BOOK_ATTENTION,
+    ])
     expect(sets[0].name).toBe('BASICO')
     expect(sets[3].name).toBe('CASO GENERAL FACTURA COMPRA')
   })

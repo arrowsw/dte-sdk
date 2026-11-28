@@ -167,8 +167,16 @@ OBS: NOTA DE CREDITO POR DESCUENTO FACTURA ELECTRONICA 77
 FACTOR DE PROPORCIONALIDAD IVA: 0.60
 `
 
-export const SALES_BOOK_SET_TEXT = `SET LIBRO DE VENTAS - NUMERO DE ATENCION: ${ATTENTION}
+/** The attention numbers of the sales-book and guide-book sets, each its own, as the SII gives every set. */
+export const SALES_BOOK_ATTENTION = '2410012'
+export const GUIDE_BOOK_ATTENTION = '2410014'
+
+export const SALES_BOOK_SET_TEXT = `SET LIBRO DE VENTAS - NUMERO DE ATENCION: ${SALES_BOOK_ATTENTION}
 Usar DTEs del SET BASICO
+`
+
+export const GUIDE_BOOK_SET_TEXT = `SET LIBRO DE GUIAS - NUMERO DE ATENCION: ${GUIDE_BOOK_ATTENTION}
+Usar las guias del SET GUIA DE DESPACHO
 `
 
 /** The whole download, every set, with the corrupted accent the portal sometimes sends and some junk lines. */
@@ -182,6 +190,7 @@ export const FULL_SET_TEXT = [
   SALES_BOOK_SET_TEXT,
   PURCHASE_BOOK_SET_TEXT,
   EXEMPT_PURCHASE_BOOK_SET_TEXT,
+  GUIDE_BOOK_SET_TEXT,
   'Fin del set',
 ].join('\n')
 

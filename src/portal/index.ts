@@ -132,6 +132,7 @@ export type {
   SettlementSetPlan,
   ExportSetPlan,
   PurchaseBookPlan,
+  BookSetPlan,
   PlannedInvoice,
   PlannedNote,
   PlannedGuide,
@@ -263,7 +264,7 @@ export {
 export { prepareFolios, setFolioNeeds, simulationFolioNeeds } from '../certification/folios-step'
 export type { PrepareFoliosOptions, PrepareFoliosResult } from '../certification/folios-step'
 export { runBooks, previousPeriod, nextFreePeriod } from '../certification/books-step'
-export type { BooksOutcome } from '../certification/books-step'
+export type { BooksOutcome, RunBooksOptions } from '../certification/books-step'
 
 // Phase 5c-1: the exchange and the printed samples (the two GWT portals).
 export { EXCHANGE_PORTAL, SAMPLES_PORTAL, EXCHANGE_ANSWER_FILES, EXCHANGE_ANSWER_KEYS } from '../catalogs/certification'
