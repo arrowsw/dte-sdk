@@ -77,6 +77,16 @@ describe('sendSimulation', () => {
     expect(harness.steps().filter((step) => step === 'CAF_OK')).toHaveLength(6)
     expect(harness.steps().slice(-2)).toEqual(['SIM_SENDING', 'SIM_OK'])
     expect(harness.events[0]).toEqual({ step: 'SIM_START' })
+    // Eighteen documents: fewer than the declaration of the simulation takes, logged and sent all the same.
+    expect(harness.warnedWith('certification simulation size outside 20 to 100 documents')).toEqual([{ documents: 18 }])
+  })
+
+  test('says the size is outside 20 to 100 before any folio of the simulation is asked for', async () => {
+    // No stamping page: asking for the first folio fails, and the size was said before it.
+    const harness = await certificationHarness([])
+    await failure(sendSimulation(harness.deps, stateWith({ plan, cafs: [] })))
+    expect(harness.warnedWith('certification simulation size outside 20 to 100 documents')).toEqual([{ documents: 18 }])
+    expect(harness.steps()).not.toContain('CAF_OK')
   })
 
   test('beforeUpload is handed the envelope of the simulation, and one that throws sends nothing', async () => {

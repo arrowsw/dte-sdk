@@ -144,6 +144,7 @@ export type {
   PlannedExportCustoms,
   PlannedExportReference,
   SetFolios,
+  UnreadCaseLines,
 } from '../certification/set-plan'
 export { createFolioAllocator } from '../certification/folios'
 export type { FolioSource, FolioAllocatorOptions } from '../certification/folios'
@@ -248,6 +249,7 @@ export type {
 } from '../certification/runtime'
 export {
   obtainTestSet,
+  checkTestSetText,
   checkExportSets,
   sendTestSet,
   declareTestSets,
@@ -323,6 +325,7 @@ export type { UploadPrintedSamplesInput, SamplesOutcome } from '../certification
 export type { PrintedSampleFile } from '../pdf/samples'
 export { runCertification } from '../certification/runner'
 export type { RunCertificationOptions, RunCertificationResult, RunStop } from '../certification/runner'
+export type { UnreadLinesPolicy } from '../certification/steps'
 
 // Phase 5c-2: the certification of receipts (the receipts portal).
 export { RECEIPTS_PORTAL } from '../catalogs/certification'

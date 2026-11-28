@@ -35,9 +35,30 @@ export type IssuedSimulation = {
   readonly types: readonly DocumentType[]
   /** EN: True with fewer than the ten documents the SII asks for. ES: True con menos de los diez documentos que pide el SII. */
   readonly fewerThanRecommended: boolean
+  /** EN: True when the envelope holds fewer than 20 or more than 100 documents (`outsideDeclarableSize`): the run still sends it, and says so in the portal client's logger before it asks for the folios of the simulation. ES: True cuando el sobre trae menos de 20 o más de 100 documentos (`outsideDeclarableSize`): la corrida lo envía igual, y lo dice en el logger del cliente del portal antes de pedir los folios de la simulación. */
+  readonly outsideDeclarableSize: boolean
 }
 
 const RECOMMENDED_MINIMUM = 10
+const DECLARABLE_MINIMUM = 20
+const DECLARABLE_MAXIMUM = 100
+
+/**
+ * EN: True when a simulation envelope of this many documents is outside 20 to 100. The 100 is the maximum the SII's
+ * certification manual states for the simulation ("Manual para empresas usuarias, ambiente de certificación factura
+ * electrónica", 2 February 2009, page 27: "con un máximo de 100 documentos"); the 20 is field behaviour: the "Declarar
+ * avance" form asks of the simulation envelope for 20 to 100 documents, above the minimum of 10 the manual gives a
+ * company with little billing (`fewerThanRecommended`). Internal.
+ * ES: True cuando un sobre de simulación con esta cantidad de documentos queda fuera de 20 a 100. El 100 es el máximo
+ * que el manual de certificación del SII da para la simulación ("Manual para empresas usuarias, ambiente de
+ * certificación factura electrónica", 2 de febrero de 2009, página 27: "con un máximo de 100 documentos"); el 20 es
+ * comportamiento del campo: el formulario "Declarar avance" pide del sobre de simulación de 20 a 100 documentos, sobre
+ * el mínimo de 10 que el manual da a una empresa con poca facturación (`fewerThanRecommended`). Interno.
+ * @param documents EN: the documents in the envelope. ES: los documentos del sobre.
+ */
+export const outsideDeclarableSize = (documents: number): boolean =>
+  documents < DECLARABLE_MINIMUM || documents > DECLARABLE_MAXIMUM
+
 const CORRECTION = 'CORRECCION'
 
 const pad = (value: number, width = 2): string => String(value).padStart(width, '0')
@@ -296,5 +317,11 @@ export const issueSimulation = async (plan: CertificationPlan, options: IssueSet
     localSetId(sealedAt),
   )
   const types = [...new Set(context.issued.map((issued) => issued.type))]
-  return { cases: context.issued, envelope, types, fewerThanRecommended: context.issued.length < RECOMMENDED_MINIMUM }
+  return {
+    cases: context.issued,
+    envelope,
+    types,
+    fewerThanRecommended: context.issued.length < RECOMMENDED_MINIMUM,
+    outsideDeclarableSize: outsideDeclarableSize(context.issued.length),
+  }
 }

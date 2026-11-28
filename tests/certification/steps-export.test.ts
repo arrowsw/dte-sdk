@@ -343,4 +343,12 @@ describe('the simulation of a run that sent the export sets', () => {
     expect(envelope).not.toContain('<TpoDocRef>SET</TpoDocRef>')
     expect((envelope.match(/<TipoDTE>110<\/TipoDTE>/g) ?? []).length).toBeGreaterThanOrEqual(4)
   })
+
+  test('with the four sets besides, its twenty-four documents are within what the declaration takes: nothing logged', async () => {
+    const harness = await certificationHarness([...stampingRoutes(), uploadRoute(reception('903'))])
+    const deps = { ...harness.deps, exportSets: { exchangeRates: RATES } }
+    const result = await sendSimulation(deps, stateWith({ plan, cafs: [] }))
+    expect(result.state.usedFolios).toHaveLength(24)
+    expect(harness.warnings()).not.toContain('certification simulation size outside 20 to 100 documents')
+  })
 })
