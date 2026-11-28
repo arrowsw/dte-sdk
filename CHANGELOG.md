@@ -96,8 +96,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so in the portal client's logger (`certification envelope sent again`). The upload already reads the SII's answer to
   a file it holds (`STATUS` 7 with its `TRACKID`) as that file's first track id.
   - An envelope is kept only when its upload request left this machine and got no answer that can be read: a failure
-    of the network, an HTTP status that says the SII may hold the file or could not answer (405, 408, 429 or 5xx, the
-    statuses the client retries, with 408), an answer that is no reception. One the SII refused is not kept (another
+    of the network, an HTTP status that says the SII may hold the file or could not answer (405, 408, 429 or 5xx:
+    after them the same bytes go again and no folio is spent), an answer that is no reception. One the SII refused is not kept (another
     HTTP status included), and neither is one that never left: the check before the upload, a `beforeUpload` that
     throws, a refusal of the upload client (a cover that names another company or sender, a character outside the
     encoding, a missing field), a TLS failure, or a failure getting the token. The run then does what it did before:
@@ -108,7 +108,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     envelope is held for it in the folio registry the run has now (`FolioRegistry.hold`, which `createFolioRegistry`
     implements), so a set issued with another registry, or with a ledger that lost them, never takes them. An
     envelope whose folio the registry holds for another document, or whose entry names no holder, is issued anew and
-    never sent, and its other folios stay held. The ledger marks a failed upload leaves on a kept envelope's folios now
+    never sent, and its other folios stay held, and stay among the run's used folios: the step that gives back the
+    folios the SII never received can still give them back once the SII says it did not receive them. When the ledger
+    fails after the SII answered, the state is saved first, and the error thrown is the first one. The ledger marks a failed upload leaves on a kept envelope's folios now
     name its holder (`extra.heldFor` of the folio's sent record), and a successful send replaces them with the track
     id: a caller that reads its ledger sees them.
   - It is sent again only when it is safe, and otherwise issued anew with the reason logged (`certification envelope

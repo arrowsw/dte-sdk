@@ -684,6 +684,51 @@ describe('an envelope the SII answered with a track id, and something failed aft
     expect(uploaded(harness)[1]).toBe(uploaded(harness)[0])
   })
 
+  test('a ledger that fails on every call after the answer: the set is kept, and the first error is the one thrown', async () => {
+    const harness = await certificationHarness([
+      uploadRoute(reception('73'), { body: siiFixture('reception-duplicate-7.xml') }),
+    ])
+    const first = new DteError('INVALID_OPTION', { field: 'first' })
+    const box = { failures: 0 }
+    const registry = {
+      ...harness.registry,
+      markSent: async (): Promise<void> => {
+        box.failures += 1
+        throw box.failures === 1 ? first : LEDGER_DOWN
+      },
+    }
+    const start = stateWith({ plan, cafs: certificationCafXmls() })
+    const error = await failure(sendTestSet({ ...harness.deps, registry }, start, { kind: 'guide' }))
+    expect(error).toBe(first)
+    expect(box.failures).toBeGreaterThan(1)
+    const state = (await harness.store.load())!
+    expect(state.unanswered?.guide?.cases).toHaveLength(3)
+    // The ledger that failed holds the folios as reserved and unmarked; one that replaces it holds them for the envelope.
+    const fresh = createMemoryFolioRegistry(() => FIXED_NOW)
+    const second = await sendTestSet({ ...harness.deps, registry: fresh }, state, { kind: 'guide' })
+    expect(second.state.sets.guide?.trackId).toBe(TRACK_ID)
+    expect(uploaded(harness)[1]).toBe(uploaded(harness)[0])
+  })
+
+  test('a ledger that fails on every call after the answer: the simulation is kept, and the first error is the one thrown', async () => {
+    const harness = await certificationHarness([...stampingRoutes(), uploadRoute(reception('74'))])
+    const first = new DteError('INVALID_OPTION', { field: 'first' })
+    const box = { failures: 0 }
+    const registry = {
+      ...harness.registry,
+      markSent: async (): Promise<void> => {
+        box.failures += 1
+        throw box.failures === 1 ? first : LEDGER_DOWN
+      },
+    }
+    const error = await failure(
+      sendSimulation({ ...harness.deps, registry }, stateWith({ plan: guidePlan, cafs: [] }), ONE_PASS),
+    )
+    expect(error).toBe(first)
+    expect(box.failures).toBeGreaterThan(1)
+    expect((await harness.store.load())!.unanswered?.simulation?.cases).toHaveLength(3)
+  })
+
   test('a state store that fails keeps it as well', async () => {
     const harness = await certificationHarness([
       uploadRoute(reception('78'), { body: siiFixture('reception-duplicate-7.xml') }),
