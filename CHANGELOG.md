@@ -16,13 +16,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `INVALID_AMOUNT` and nothing saying why. Its line now takes the exempt amount and the total in pesos: the
   document's own when its currency is the peso, those it carries in `OtraMoneda` (written when it was issued with
   `exchangeRate`), or, when it carries none, its own converted with the new `exchangeRate` option, each rounded once,
-  half away from zero, to a whole peso, as `convertToPesos` does. Without either it is refused with `MISSING_FIELD`
-  and `exchangeRate` in `details.field`: a rate the document does not carry is not guessed. A rate that differs from
-  the one the document carries, or one given with a document that is not an export one, is refused with
-  `INVALID_OPTION`; totals in pesos with decimals, with `INVALID_AMOUNT` naming the amount. The line of any other
-  document is as before.
+  half away from zero, to a whole peso, as `convertToPesos` does. Formato DTE 2.5 asks that conversion of every export
+  document (its changes of 2017-05-31: "es obligatorio informar la conversión a pesos chilenos"), and the rate is the
+  one of its field 130: that of the issue date, published by the Banco Central de Chile. The option is checked as
+  `createDocument` checks its `exchangeRate`, rounded to four decimals and refused unless it is above zero and,
+  rounded, below 10^6, and it is compared with the rate a document carries after that rounding. Without either it is
+  refused with `MISSING_FIELD` and `exchangeRate` in `details.field`: a rate the document does not carry is not
+  guessed. A rate that differs from the one the document carries, or one given with a document that is not an export
+  one, is refused with `INVALID_OPTION`; an amount in pesos that is not a whole number, whichever way it was reached,
+  with `INVALID_AMOUNT` naming the amount (and `converted` in `details.kind` when the option converted it). A
+  document issued elsewhere whose `OtraMoneda` carries pesos with decimals, which the schema admits, stays refused,
+  and is booked with a line written by hand. The book RUT is still checked before anything else. `creditNoteSign:
+  'negative'` now negates an export credit note (112) as it negates a credit note (61). Not solved here: an export
+  without payment (`FmaPagExp` 21) enters with its exempt amount in pesos and a total of zero, which the book reports
+  in `totalMismatches` and refuses under `strictTotals`. The line of any other document is as before.
   - **What to change:** pass `exchangeRate` to `bookEntryFromDocument` for an export document issued without one.
-    Code that booked export documents took their amounts as pesos, and the books it sent need a look.
+    Code that booked export documents took their amounts as pesos, and the books it sent need a look. Code that
+    books credit notes with `creditNoteSign: 'negative'` now gets an export credit note negative too.
 
 - **A credit note's line in the folio consumption report.** `createFolioConsumption` reports credit notes (61) since
   0.17.0, but `folioConsumptionEntryFromDocument`, which derives a line of the report from an issued document, took a

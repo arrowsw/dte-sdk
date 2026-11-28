@@ -306,6 +306,15 @@ const positive = (value: number | undefined, type: keyof typeof DECIMAL_TYPES, p
   return fitted
 }
 
+/**
+ * EN: An exchange rate checked as `createDocument` checks its `exchangeRate`: rounded half away from zero to the four
+ * decimals of `TpoCambio`, and refused unless it is above zero and, rounded, below 10^6. Internal.
+ * ES: Un tipo de cambio revisado como `createDocument` revisa su `exchangeRate`: redondeado, la mitad lejos de cero, a
+ * los cuatro decimales de `TpoCambio`, y rechazado salvo que esté sobre cero y, redondeado, bajo 10^6. Interno.
+ * @throws {DteError} EN: `INVALID_AMOUNT` with `exchangeRate` in `details.field`. ES: `INVALID_AMOUNT` con `exchangeRate` en `details.field`.
+ */
+export const exchangeRateOf = (value: number): number => positive(value, 'rate', 'exchangeRate') as number
+
 // A `positiveInteger` of the schema with at most `digits` digits: a code of a customs table or a count.
 const whole = (value: number | undefined, digits: number, path: string): number | undefined => {
   if (value !== undefined && !(Number.isSafeInteger(value) && value >= 1 && value < 10 ** digits))
