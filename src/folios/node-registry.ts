@@ -229,9 +229,12 @@ const directoryLock = (
       return { removable: true, pid: holder.pid, identity: stats }
     // The machine has certainly started again since the lock was written when it names another boot, or when it has
     // now been up for less time than it had then.
+    // With both boot identifiers, they alone decide: a container's uptime may be its own while the identifier is the
+    // machine's. The uptime decides only when one of them is missing.
     const restarted =
-      (holder.bootId !== undefined && here.bootId !== null && holder.bootId !== here.bootId) ||
-      here.uptime() < holder.uptime
+      holder.bootId !== undefined && here.bootId !== null
+        ? holder.bootId !== here.bootId
+        : here.uptime() < holder.uptime
     const gone = restarted || !here.exists(holder.pid)
     return { removable: old && gone, pid: holder.pid, identity: stats }
   }
@@ -276,7 +279,8 @@ const directoryLock = (
           },
         )
       } finally {
-        await fs.rm(temp, { force: true })
+        // Once linked, the lock is this change's own: a temp name that cannot be removed is left, never thrown.
+        await fs.rm(temp, { force: true }).catch(nothing)
       }
     })().catch(async (error: unknown) => {
       await handle.close()
@@ -344,7 +348,14 @@ const directoryLock = (
       await pause(Math.min(retryDelay(attempt), Math.max(1, deadline - Date.now())))
     }
     const { handle, token } = box.created
-    const own = await handle.stat({ bigint: true })
+    // Between the instant the lock exists and the change, nothing may stay behind: no other change takes a lock of this
+    // instance whose token is held, so the file at the path is still this change's own.
+    const own = await handle.stat({ bigint: true }).catch(async (error: unknown) => {
+      await fs.rm(lock, { force: true }).catch(nothing)
+      heldTokens().delete(token)
+      await handle.close().catch(nothing)
+      throw error
+    })
     holding.identity = own
     // Through the handle: the holder can only ever touch its own file, never a taker's put at the path.
     const renewal = setInterval(() => {
@@ -386,17 +397,20 @@ const directoryLock = (
  * and the tokens of the locks the process holds right now, so a lock that carries this instance's identifier with a
  * token none of its changes holds belongs to a change that has ended and is taken at once by any of them. The
  * identifier is what proves that this very process wrote the lock: a process id does not, since two processes of
- * another table of process ids (containers on one volume) can share it and a host name, and a lock that only names
- * this process id, with another identifier or none, goes through the age and existence tests like any other. A
- * lock is taken over once older than `lockStaleMs` plus two seconds when its holder is known not to exist (its process
- * is gone, or the lock was written before this machine last started), or when its holder cannot be known: another
- * host's name, or content that does not read. The machine has started again when the lock names another boot (Linux),
- * or when the machine has now been up for less time than it had been when the lock was written; neither moves with the
- * wall clock. What that misses is a machine that started again and has since been up longer than it had been, where
- * there is no boot identifier: the process test then decides, and a process that got the same id keeps the lock. A
- * holder that died and has not been reaped by its parent still exists for that test, so its lock stays until it is
- * reaped. Processes that share a host name but not a table of process ids (containers on one volume) test the holder's
- * id in the wrong table: the lock is for the processes of one host and one table of process ids.
+ * another table of process ids (containers on one volume) can share it and a host name, and a lock that only names this
+ * process id, with another identifier or none, goes through the age and existence tests like any other. A lock is taken
+ * over once older than `lockStaleMs` plus two seconds when its holder is known not to exist (its process is gone, or
+ * the lock was written before this machine last started), or when its holder cannot be known: another host's name, or
+ * content that does not read. When the lock and the machine both carry a boot identifier (Linux), they alone tell
+ * whether the machine has started again; when one is missing, it has when the machine has now been up for less time
+ * than it had been when the lock was written. Neither moves with the wall clock. What that misses is a machine that
+ * started again and has since been up longer than it had been, where there is no boot identifier: the process test then
+ * decides, and a process that got the same id keeps the lock. A holder that died and has not been reaped by its parent
+ * still exists for that test, so its lock stays until it is reaped. Processes that share a host name but not a table of
+ * process ids (containers on one volume) test the holder's id in the wrong table: the lock is for the processes of one
+ * host and one table of process ids. Each worker thread has its own global state, so it is an instance of its own with
+ * the process's id: a lock a worker failed to remove before it ended names a process that exists and an instance nobody
+ * is any more, and it stays until the process ends or the file is removed by hand.
  *
  * When the holder cannot be known, age alone decides, and that is the case this lock does not make safe: a directory
  * shared between hosts falls back to age, with the limits of clocks that differ and of coarse modification times. There
@@ -444,14 +458,17 @@ const directoryLock = (
  * identificador o ninguno, pasa por las pruebas de edad y de existencia como cualquier otro. Un lock se toma cuando es
  * más viejo que `lockStaleMs` más dos segundos y se sabe que su dueño no existe (su proceso terminó, o el lock se
  * escribió antes del último arranque de este equipo), o cuando no se puede saber quién es: el nombre de otro equipo, o
- * un contenido que no se lee. El equipo arrancó de nuevo cuando el lock nombra otro arranque (Linux), o cuando el
- * equipo lleva ahora encendido menos tiempo del que llevaba al escribirse el lock; ninguna de las dos cosas se mueve
- * con el reloj. Lo que eso no ve es un equipo que arrancó de nuevo y lleva desde entonces más tiempo encendido del que
- * llevaba, donde no hay identificador de arranque: decide entonces la prueba del proceso, y un proceso que recibió el
- * mismo id conserva el lock. Un dueño que murió y que su padre todavía no recogió sigue existiendo para esa prueba, así
- * que su lock queda hasta que lo recojan. Procesos que comparten nombre de equipo pero no tabla de ids de proceso
- * (contenedores sobre un mismo volumen) prueban el id del dueño en la tabla equivocada: el lock es para los procesos de
- * un mismo equipo y una misma tabla de ids de proceso.
+ * un contenido que no se lee. Cuando el lock y el equipo traen ambos un identificador de arranque (Linux), solo ellos
+ * dicen si el equipo arrancó de nuevo; cuando falta uno, arrancó si el equipo lleva ahora encendido menos tiempo del
+ * que llevaba al escribirse el lock. Ninguna de las dos cosas se mueve con el reloj. Lo que eso no ve es un equipo que
+ * arrancó de nuevo y lleva desde entonces más tiempo encendido del que llevaba, donde no hay identificador de arranque:
+ * decide entonces la prueba del proceso, y un proceso que recibió el mismo id conserva el lock. Un dueño que murió y
+ * que su padre todavía no recogió sigue existiendo para esa prueba, así que su lock queda hasta que lo recojan.
+ * Procesos que comparten nombre de equipo pero no tabla de ids de proceso (contenedores sobre un mismo volumen) prueban
+ * el id del dueño en la tabla equivocada: el lock es para los procesos de un mismo equipo y una misma tabla de ids de
+ * proceso. Cada hilo de trabajo (worker thread) tiene su propio estado global, así que es una instancia propia con el
+ * id del proceso: un lock que un hilo no pudo borrar antes de terminar nombra un proceso que existe y una instancia que
+ * ya nadie es, y queda hasta que el proceso termine o el archivo se borre a mano.
  *
  * Cuando no se puede saber quién es el dueño decide solo la edad, y ese es el caso que este lock no deja seguro: un
  * directorio compartido entre equipos vuelve a la edad, con los límites de relojes que difieren y de horas de

@@ -651,7 +651,8 @@ describe('createDirectoryFolioRegistry', () => {
       await withLiveChild(async (pid) => {
         const dir = tempDir()
         const uptime = (await loadLockSystem()).uptime() + 86_400_000
-        writeFileSync(lockOf(dir), await holderLock({ pid, uptime }))
+        // Where there is no boot identifier to compare, as on macOS: the uptime decides.
+        writeFileSync(lockOf(dir), await holderLock({ pid, uptime, bootId: undefined }))
         const young = await failure(createDirectoryFolioRegistry({ dir, lockWaitMs: 60 }).reserve(scope))
         expect(young.details).toMatchObject({ kind: 'wait', holderPid: pid })
         utimesSync(lockOf(dir), anHourAgo(), anHourAgo())
@@ -1069,20 +1070,28 @@ describe('createDirectoryFolioRegistry', () => {
     )
 
     test.each([
-      ['an uptime equal to its own', { uptime: 5000 }, { uptime: () => 5000 }, false],
-      ['an uptime one millisecond smaller than its own', { uptime: 5001 }, { uptime: () => 5000 }, true],
-      ['the same boot identifier', { bootId: 'boot-a' }, { bootId: 'boot-a' }, false],
-      ['another boot identifier', { bootId: 'boot-a' }, { bootId: 'boot-b' }, true],
-      ['no boot identifier where the lock has one', { bootId: 'boot-a' }, { bootId: null }, false],
-      ['a boot identifier where the lock has none', { bootId: undefined }, { bootId: 'boot-b' }, false],
+      ['no boot identifiers and an uptime equal to its own', { uptime: 5000 }, { uptime: () => 5000 }, false],
+      ['no boot identifiers and an uptime 1 ms smaller', { uptime: 5001 }, { uptime: () => 5000 }, true],
+      ['equal boot identifiers and a smaller uptime', { bootId: 'boot-a', uptime: 9001 }, { bootId: 'boot-a' }, false],
+      ['different boot identifiers and a larger uptime', { bootId: 'boot-a' }, { bootId: 'boot-b' }, true],
+      ['the lock alone with an identifier, a smaller uptime', { bootId: 'boot-a', uptime: 9001 }, {}, true],
+      ['the lock alone with an identifier, a larger uptime', { bootId: 'boot-a' }, {}, false],
+      ['the machine alone with an identifier, a smaller uptime', { uptime: 9001 }, { bootId: 'boot-b' }, true],
+      ['the machine alone with an identifier, a larger uptime', {}, { bootId: 'boot-b' }, false],
     ])(
       'a machine that has %s takes a live holder for one written before this start: %p, %p, %p',
       async (_, lockFields, systemFields, taken) => {
         await withLiveChild(async (pid) => {
           const dir = tempDir()
-          writeFileSync(lockOf(dir), await holderLock({ pid, uptime: 1000, ...lockFields }))
+          // Neither side has a boot identifier unless the case gives it one.
+          writeFileSync(lockOf(dir), await holderLock({ pid, uptime: 1000, bootId: undefined, ...lockFields }))
           utimesSync(lockOf(dir), anHourAgo(), anHourAgo())
-          const here = async () => ({ ...(await loadLockSystem()), uptime: () => 9000, ...systemFields })
+          const here = async () => ({
+            ...(await loadLockSystem()),
+            bootId: null,
+            uptime: () => 9000,
+            ...(systemFields as { readonly uptime?: () => number; readonly bootId?: string }),
+          })
           // A short wait only where the lock must be waited for: a takeover under load may take longer than that.
           const lockWaitMs = taken ? 5000 : 60
           const reserved = createDirectoryFolioRegistry({ dir, lockWaitMs }, undefined, here).reserve(scope)
@@ -1162,6 +1171,49 @@ describe('createDirectoryFolioRegistry', () => {
       await expect(Promise.all([first, second])).resolves.toEqual([1, 2])
       expect(readdirSync(dir)).toEqual(['folios.json'])
     }, 20_000)
+
+    test.each([
+      ['the stat of its own handle', 'stat'],
+      ['the removal of its temp file', 'rm'],
+    ])('a failure of %s right after the lock exists leaves nothing held', async (_, step) => {
+      const dir = tempDir()
+      const modules = await loadNodeFs()
+      const once = { done: false }
+      const failOnce = (): never => {
+        once.done = true
+        throw Object.assign(new Error('EIO: i/o error'), { code: 'EIO' })
+      }
+      const registry = createDirectoryFolioRegistry({ dir }, async () => ({
+        ...modules,
+        fs: {
+          ...modules.fs,
+          open: async (...args: Parameters<typeof modules.fs.open>) => {
+            const handle = await modules.fs.open(...args)
+            const lockTemp = String(args[0]).startsWith(`${lockOf(dir)}.`) && !String(args[0]).includes('.takeover.')
+            if (step !== 'stat' || !lockTemp) return handle
+            return Object.assign(Object.create(handle), {
+              stat: async (...options: Parameters<typeof handle.stat>) =>
+                once.done ? handle.stat(...options) : failOnce(),
+              writeFile: (...data: Parameters<typeof handle.writeFile>) => handle.writeFile(...data),
+              utimes: (...times: Parameters<typeof handle.utimes>) => handle.utimes(...times),
+              close: () => handle.close(),
+            })
+          },
+          rm: async (file: string, options: Parameters<typeof modules.fs.rm>[1]) => {
+            const lockTemp = file.startsWith(`${lockOf(dir)}.`) && file.endsWith('.tmp') && !file.includes('.takeover.')
+            if (step === 'rm' && lockTemp && !once.done) failOnce()
+            return modules.fs.rm(file, options)
+          },
+        } as typeof modules.fs,
+      }))
+      if (step === 'stat') await expect(registry.reserve(scope)).rejects.toThrow('EIO')
+      else await expect(registry.reserve(scope)).resolves.toBe(1)
+      expect(once.done).toBe(true)
+      expect(existsSync(lockOf(dir))).toBe(false)
+      expect([...heldTokens()]).toEqual([])
+      const other = createDirectoryFolioRegistry({ dir, lockWaitMs: 60 })
+      await expect(other.reserve(scope)).resolves.toBe(step === 'stat' ? 1 : 2)
+    })
 
     test('the process test: a process that exists, one refused for lack of permission, one that is gone', () => {
       const os = { hostname: () => 'here', uptime: () => 60 }

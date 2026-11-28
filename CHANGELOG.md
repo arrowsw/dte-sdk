@@ -61,12 +61,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the two seconds that the coarsest modification times in use (FAT) can hide, when its process is gone or it was
     written before the machine last started, and when its holder cannot be known: another host's name, or content that
     does not read, such as a lock created in place and not yet written where the file system has no hard links. The
-    machine has started again when the lock names another boot (Linux) or the machine has now been up for less time than
-    it had been when the lock was written; neither moves with the wall clock. A holder that died and has not been reaped
-    by its parent still exists for the process test, so its lock stays until it is reaped.
+    machine has started again when the lock and the machine carry different boot identifiers (Linux), and, when one of
+    them has none, when the machine has now been up for less time than it had been when the lock was written; neither
+    moves with the wall clock. A holder that died and has not been reaped by its parent still exists for the process
+    test, so its lock stays until it is reaped. Each worker thread is an instance of its own with the process's id, so a
+    lock a worker failed to remove before it ended stays until the process ends or the file is removed by hand.
   - Where age alone decides is the case the lock does not make safe: it is for the processes of one host and one table
-    of process ids on a local file system, and a directory shared between hosts, or containers that share a volume but
-    not their process ids, fall back to age, with the limits of clocks that differ and of coarse modification times.
+    of process ids on a local file system. A directory shared between hosts, or by containers with different host names,
+    falls back to age, with the limits of clocks that differ and of coarse modification times; containers that share
+    a volume and a host name but not their process ids test the holder's id in the wrong table.
     There the holder renews its own lock every third of `lockStaleMs` through the handle it created it with, and
     compares the file at the path with its own just before its write lands and before it removes the lock; a holder
     whose lock was taken over does not write (`kind: 'lost'`).
