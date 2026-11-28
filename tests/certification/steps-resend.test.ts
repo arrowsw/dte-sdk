@@ -141,6 +141,31 @@ describe('a test set the SII never answered', () => {
     expect((await harness.store.load())!.unanswered).toEqual({})
   })
 
+  test('a check of the caller’s that throws an error of its own stops it before it leaves: nothing is kept', async () => {
+    const harness = await certificationHarness([uploadRoute(reception('59'))])
+    const stop = (): void => {
+      throw new Error('not yet')
+    }
+    const start = stateWith({ plan, cafs: certificationCafXmls() })
+    await expect(sendTestSet({ ...harness.deps, beforeUpload: stop }, start, { kind: 'guide' })).rejects.toThrow(
+      'not yet',
+    )
+    expect(harness.urls()).toEqual([])
+    expect((await harness.store.load())!.unanswered).toEqual({})
+  })
+
+  test('a token that cannot be asked for stops it before it leaves: nothing is kept', async () => {
+    const harness = await certificationHarness([uploadRoute(reception('60'))])
+    // No token in the cache and no route for the seed: the request for the token fails, the upload is never tried.
+    const tokenCache = { get: async () => null, set: async () => undefined, delete: async () => undefined }
+    const sii = { ...harness.deps.sii, tokenCache }
+    await failure(
+      sendTestSet({ ...harness.deps, sii }, stateWith({ plan, cafs: certificationCafXmls() }), { kind: 'guide' }),
+    )
+    expect(harness.urls()).not.toContain(UPLOAD)
+    expect((await harness.store.load())!.unanswered).toEqual({})
+  })
+
   test('kept after a network failure, an unreadable answer or a failure of a transport of the caller’s', async () => {
     for (const reply of [
       new DteError('TRANSPORT_FAILED', { reason: 'ECONNREFUSED' }),
