@@ -4,6 +4,7 @@ import { breakLongLines, buildDocumentXml, documentElementName } from '../src/do
 import { createDocument } from '../src/document/create'
 import { issueDocument } from '../src/document/issue'
 import { signDocument, verifyDocumentSignature } from '../src/document/sign'
+import { verifyReceivedDocuments } from '../src/document/verify-received'
 import { stampDocument, verifyTed } from '../src/ted/build'
 import { encodeLatin1 } from '../src/text/latin1'
 import { fixtureText, FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from './support/fixtures'
@@ -267,5 +268,49 @@ describe('signDocument / issueDocument', () => {
     expect(
       verifyDocumentSignature(signed.xml.replace('<MntTotal>172550</MntTotal>', '<MntTotal>1</MntTotal>')).valid,
     ).toBe(false)
+  })
+})
+
+describe('issueDocument with verify', () => {
+  const issue = (overrides: Partial<Parameters<typeof issueDocument>[0]> = {}) =>
+    issueDocument({ document: invoiceInput, caf: caf33, certificate, now: FIXED_NOW, verify: true, ...overrides })
+
+  test('a document whose signature and stamp verify is returned as without it', () => {
+    expect(issue().xml).toBe(issueDocument({ document: invoiceInput, caf: caf33, certificate, now: FIXED_NOW }).xml)
+  })
+
+  // A certificate is loaded only with its own key; one put together by hand from another certificate's parts signs
+  // with one key and carries the other's certificate, and the signature does not verify with what it carries.
+  test('a signature that does not verify with the certificate it carries is refused', () => {
+    const other = loadCertificateFromPem({
+      privateKeyPem: fixtureText('tls-localhost.key.pem'),
+      certificatePem: fixtureText('tls-localhost.pem'),
+    })
+    const mismatched = { ...certificate, certificateBase64: other.certificateBase64 }
+    expect(() => issue({ certificate: mismatched })).toThrow(
+      expect.objectContaining({ code: 'SIGNATURE_INVALID', details: { field: 'DTE' } }),
+    )
+    // Without the option the document is returned, and its signature does not verify.
+    const unchecked = issueDocument({ document: invoiceInput, caf: caf33, certificate: mismatched, now: FIXED_NOW })
+    expect(verifyDocumentSignature(unchecked.xml).valid).toBe(false)
+  })
+
+  // The stamp is checked as a receiver checks it: from the signed XML, with the `RSAPK` of the CAF the stamp carries.
+  // A CAF put together by hand with the `<CAF>` block of another stamps a `FRMT` that block's key does not verify.
+  test('a stamp that does not verify with the key of the CAF it carries is refused', () => {
+    const foreignBlock = { ...caf33, xml: caf39.xml }
+    expect(() => issue({ caf: foreignBlock })).toThrow(
+      expect.objectContaining({ code: 'SIGNATURE_INVALID', details: { field: 'TED', mismatches: [] } }),
+    )
+    // Without the option the document is returned, and a receiver finds its stamp invalid.
+    const unchecked = issueDocument({ document: invoiceInput, caf: foreignBlock, certificate, now: FIXED_NOW })
+    expect(verifyReceivedDocuments(unchecked.xml).documents[0].ted.valid).toBe(false)
+  })
+
+  // `Caf.publicKey` is not what a receiver checks the stamp with: the block the stamp carries holds the key that signed
+  // it, so the stamp verifies, as a receiver finds.
+  test('a stamp the key of the CAF it carries verifies is returned, whatever publicKey the caller gives', () => {
+    const signed = issue({ caf: { ...caf33, publicKey: caf39.publicKey } })
+    expect(verifyReceivedDocuments(signed.xml).documents[0].ted.valid).toBe(true)
   })
 })

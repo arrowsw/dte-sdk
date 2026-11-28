@@ -1,5 +1,5 @@
 import { buildDocumentXml } from '../src/document/build-xml'
-import { createDocument, FIELD_LIMITS } from '../src/document/create'
+import { createDocument, FIELD_LIMITS, findTextProblems } from '../src/document/create'
 import { fromSiiDocument, toSiiDocument } from '../src/model/codec'
 import { DteError } from '../src/errors'
 import { calculateLineAmount } from '../src/totals/calculate'
@@ -3087,6 +3087,9 @@ describe('the references a document admits', () => {
     expect(doc.warnings).toEqual([{ rule: 'globalReferenceFolio', field: 'references[0].folio' }])
     expect(global(0).warnings).toBeUndefined()
     expect(global('0').warnings).toBeUndefined()
+    // A folio of zeros alone is zero however many it holds; one with another digit among them is not.
+    expect(global('000').warnings).toBeUndefined()
+    expect(global('010').warnings).toEqual([{ rule: 'globalReferenceFolio', field: 'references[0].folio' }])
     expect(invoice({ references: cited(2) }).warnings).toBeUndefined()
   })
 })
@@ -3115,5 +3118,368 @@ describe('the receiver of an internal transfer', () => {
     expect(guide(5, ISSUER_RUT).warnings).toBeUndefined()
     expect(guide(5, '76.543.210-3').warnings).toBeUndefined()
     expect(guide(1, RECEIVER_RUT).warnings).toBeUndefined()
+  })
+})
+
+// Every text of a document is checked before any is refused: a caller fixing a form sees all of them at once.
+describe('every text problem of a document at once', () => {
+  const OMEGA = 'Ω'.codePointAt(0)
+  const unsupported = (path: string, field: string, index: number) => ({
+    code: 'ENCODING_UNSUPPORTED_CHAR',
+    path,
+    details: { field, index, codePoint: OMEGA },
+  })
+  const tooLong = (path: string, field: string, maxLength: number) => {
+    const value = 'x'.repeat(maxLength + 1)
+    const problem = { code: 'FIELD_TOO_LONG', path, details: { field, maxLength, length: maxLength + 1, value } }
+    return [value, problem] as const
+  }
+  // What `createDocument` throws: the first problem, with its own details, and the whole list.
+  const thrown = (input: DocumentInput): DteError => {
+    try {
+      createDocument(input)
+    } catch (error) {
+      return error as DteError
+    }
+    throw new Error('expected DteError')
+  }
+  const expectAll = (
+    input: DocumentInput,
+    problems: readonly { code: string; details: object }[],
+    stoppedBy: { code: string; details: object } | null = null,
+  ) => {
+    const error = thrown(input)
+    expect(error).toBeInstanceOf(DteError)
+    expect(error.code).toBe(problems[0].code)
+    expect(error.details).toEqual({ ...problems[0].details, problems })
+    expect(findTextProblems(input)).toEqual({ problems, stoppedBy })
+  }
+  const invoiceOf = (): DocumentInput => ({ type: 33, folio: 1, issueDate: '2026-11-15', issuer, receiver, items })
+
+  test('an invoice: the issuer, the receiver, a line, a reference, a global adjustment and the transport', () => {
+    const [receiverName, receiverProblem] = tooLong('receiver.businessName', 'RznSocRecep', 100)
+    const [reason, reasonProblem] = tooLong('references[0].reason', 'RazonRef', 90)
+    const [glosa, glosaProblem] = tooLong('globalAdjustments[0].description', 'GlosaDR', 45)
+    const [plate, plateProblem] = tooLong('transport.licensePlate', 'Patente', 8)
+    expectAll(
+      {
+        ...invoiceOf(),
+        issuer: { ...issuer, businessName: 'Comercial Ω SpA' },
+        receiver: { ...receiver, businessName: receiverName },
+        items: [items[0], { ...items[1], name: 'Horas Ω' }],
+        references: [{ documentType: 801, folio: '45', date: '2026-11-01', reason }],
+        globalAdjustments: [{ kind: 'discount', valueType: 'percent', value: 5, description: glosa }],
+        transport: { licensePlate: plate },
+      },
+      [
+        unsupported('issuer.businessName', 'RznSoc', 10),
+        receiverProblem,
+        unsupported('items[1].name', 'NmbItem', 6),
+        reasonProblem,
+        glosaProblem,
+        plateProblem,
+      ],
+    )
+  })
+
+  test('a settlement invoice: the receiver, a line and a commission', () => {
+    const [activity, activityProblem] = tooLong('receiver.businessActivity', 'GiroRecep', 40)
+    const [glosa, glosaProblem] = tooLong('commissions[0].description', 'Glosa', 60)
+    expectAll(
+      {
+        ...invoiceOf(),
+        type: 43,
+        receiver: { ...receiver, businessActivity: activity },
+        items: [{ ...items[0], description: 'Ωmega', settledDocumentType: '33' }],
+        commissions: [{ kind: 'commission', description: glosa, rate: 10, netValue: 1000 }],
+      },
+      [activityProblem, unsupported('items[0].description', 'DscItem', 0), glosaProblem],
+    )
+  })
+
+  const foreignReceiver = {
+    rut: FOREIGN_RECEIVER_RUT,
+    businessName: 'Andes Trading LLC',
+    address: '1200 Harbor Blvd',
+    city: 'Miami',
+  }
+  const exportCustoms = {
+    saleModality: 1,
+    saleClause: 2,
+    saleClauseTotal: 1250,
+    transportRoute: 1,
+    receiverCountry: 225,
+  }
+  const exportOf = (): DocumentInput => ({
+    ...invoiceOf(),
+    type: 110,
+    receiver: foreignReceiver,
+    currency: 'DOLAR USA',
+    items: [{ name: 'Uva', quantity: 100, unit: 'KN', unitPrice: 12.5 }],
+    transport: { customs: exportCustoms },
+  })
+
+  test('an export invoice: the foreign receiver, a line and the customs, each text once', () => {
+    const [carrier, carrierProblem] = tooLong('transport.customs.carrierName', 'NomCiaTransp', 40)
+    // An export invoice of goods asks each line for its unit, which is read once for that and once to be written.
+    const [unit, unitProblem] = tooLong('items[0].unit', 'UnmdItem', 4)
+    expectAll(
+      {
+        ...exportOf(),
+        receiver: { ...foreignReceiver, foreign: { nationality: 'Ω' } },
+        items: [{ name: 'Uva Ω', quantity: 100, unit, unitPrice: 12.5 }],
+        transport: { customs: { ...exportCustoms, carrierName: carrier } },
+      },
+      [
+        unsupported('receiver.foreign.nationality', 'Nacionalidad', 0),
+        unitProblem,
+        unsupported('items[0].name', 'NmbItem', 4),
+        carrierProblem,
+      ],
+    )
+  })
+
+  const receiptOf = (): DocumentInput => ({
+    type: 39,
+    folio: 1,
+    issueDate: '2026-11-15',
+    issuer,
+    items: [{ name: 'Café', unitPrice: 1500 }],
+    pricesIncludeVat: true,
+  })
+
+  test('a receipt: the issuer, a line, a reference and a subtotal', () => {
+    const [address, addressProblem] = tooLong('issuer.address', 'DirOrigen', 70)
+    const [reason, reasonProblem] = tooLong('receiptReferences[0].reason', 'RazonRef', 90)
+    const [glosa, glosaProblem] = tooLong('subtotals[0].description', 'GlosaSTI', 40)
+    expectAll(
+      {
+        ...receiptOf(),
+        issuer: { ...issuer, address },
+        items: [{ name: 'Café Ω', unitPrice: 1500 }],
+        receiptReferences: [{ code: 'CAJA', reason }],
+        subtotals: [{ number: 1, description: glosa, totalAmount: 1500 }],
+      },
+      [addressProblem, unsupported('items[0].name', 'NmbItem', 5), reasonProblem, glosaProblem],
+    )
+  })
+
+  test('the same problem on two lines or two references is told apart by its path', () => {
+    const lines = Array.from({ length: 10 }, (_, index) => ({
+      name: index === 2 || index === 6 ? 'Ω' : `Línea ${index}`,
+      unitPrice: 1000,
+    }))
+    const reference = (reason: string) => ({ documentType: 801, folio: '45', date: '2026-11-01', reason })
+    expectAll({ ...invoiceOf(), items: lines, references: [reference('Ω'), reference('Ω')] }, [
+      unsupported('items[2].name', 'NmbItem', 0),
+      unsupported('items[6].name', 'NmbItem', 0),
+      unsupported('references[0].reason', 'RazonRef', 0),
+      unsupported('references[1].reason', 'RazonRef', 0),
+    ])
+  })
+
+  // Each text the builder reads, set to a character with no form in ISO-8859-1 in a document that takes it, is
+  // reported with its own path.
+  test.each<[string, DocumentInput]>([
+    ...[
+      'issuer.commune',
+      'issuer.businessName',
+      'issuer.businessActivity',
+      'issuer.branch',
+      'issuer.address',
+      'issuer.city',
+      'issuer.salespersonCode',
+      'receiver.address',
+      'receiver.commune',
+      'receiver.city',
+      'receiver.internalCode',
+      'receiver.businessName',
+      'receiver.businessActivity',
+      'receiver.contact',
+      'receiver.postalAddress',
+      'receiver.postalCommune',
+      'receiver.postalCity',
+      'items[0].name',
+      'items[0].description',
+      'items[0].referenceUnit',
+      'items[0].unit',
+      'references[0].reason',
+      'globalAdjustments[0].description',
+      'subtotals[0].description',
+      'transport.licensePlate',
+      'transport.trailerLicensePlate',
+      'transport.driver.name',
+      'transport.destinationAddress',
+      'transport.destinationCommune',
+      'transport.destinationCity',
+    ].map((path): [string, DocumentInput] => [
+      path,
+      {
+        ...invoiceOf(),
+        references: [{ documentType: 801, folio: '45', date: '2026-11-01', reason: 'Orden' }],
+        globalAdjustments: [{ kind: 'discount', valueType: 'percent', value: 5, description: 'Promo' }],
+        subtotals: [{ number: 1, description: 'Bienes', totalAmount: 1 }],
+        transport: { driver: { rut: RECEIVER_RUT, name: 'Juan Soto' } },
+      },
+    ]),
+    ...['items[0].settledDocumentType', 'commissions[0].description'].map((path): [string, DocumentInput] => [
+      path,
+      {
+        ...invoiceOf(),
+        type: 43,
+        items: [{ ...items[0], settledDocumentType: '33' }],
+        commissions: [{ kind: 'commission', description: 'Comisión', rate: 10, netValue: 1000 }],
+      },
+    ]),
+    ...[
+      'issuer.additionalBranchCode',
+      'issuer.additionalId',
+      'receiver.foreign.id',
+      'receiver.foreign.nationality',
+      'receiver.foreign.additionalId',
+      'items[0].unit',
+      'references[0].otherAdditionalId',
+      'transport.customs.transportName',
+      'transport.customs.carrierName',
+      'transport.customs.carrierAdditionalId',
+      'transport.customs.booking',
+      'transport.customs.operator',
+      'transport.customs.loadingPortAdditionalId',
+      'transport.customs.unloadingPortAdditionalId',
+      'transport.customs.packages[0].marks',
+      'transport.customs.packages[0].containerId',
+      'transport.customs.packages[0].seal',
+      'transport.customs.packages[0].sealIssuer',
+    ].map((path): [string, DocumentInput] => [
+      path,
+      {
+        ...exportOf(),
+        references: [{ documentType: 807, folio: '123', date: '2026-11-10' }],
+        transport: { customs: { ...exportCustoms, totalPackages: 1, packages: [{ code: 75, count: 1 }] } },
+      },
+    ]),
+    ...[
+      'receiptReferences[0].documentType',
+      'receiptReferences[0].folio',
+      'receiptReferences[0].code',
+      'receiptReferences[0].reason',
+      'subtotals[0].description',
+    ].map((path): [string, DocumentInput] => [
+      path,
+      {
+        ...receiptOf(),
+        receiptReferences: [{ code: 'CAJA', reason: 'Venta' }],
+        subtotals: [{ number: 1, totalAmount: 1500 }],
+      },
+    ]),
+  ])('the text at %s is reported with its path', (path, base) => {
+    // Sets the text at `path` on a copy of the input.
+    const input = structuredClone(base) as unknown as Record<string, unknown>
+    const keys = path.replace(/\[(\d+)\]/g, '.$1').split('.')
+    const parent = keys.slice(0, -1).reduce<Record<string, unknown>>((node, key) => {
+      node[key] ??= {}
+      return node[key] as Record<string, unknown>
+    }, input)
+    parent[keys[keys.length - 1]] = 'Ω'
+    const found = findTextProblems(input as unknown as DocumentInput)
+    expect(found.problems).toEqual([expect.objectContaining({ code: 'ENCODING_UNSUPPORTED_CHAR', path })])
+    expect(found.stoppedBy).toBeNull()
+  })
+
+  test('one problem throws what it threw alone, with a list of one', () => {
+    const [name, problem] = tooLong('issuer.businessName', 'RznSoc', 100)
+    const error = thrown({ ...invoiceOf(), issuer: { ...issuer, businessName: name } })
+    expect(error.code).toBe('FIELD_TOO_LONG')
+    expect(error.details).toEqual({ ...problem.details, problems: [problem] })
+  })
+
+  test('texts that are fine give no problem, with every text read', () => {
+    expect(findTextProblems(invoiceOf())).toEqual({ problems: [], stoppedBy: null })
+  })
+
+  test('a refusal of another kind ends the reading, and the result says what stopped it', () => {
+    const badIssuer = { ...issuer, businessName: 'Ω' }
+    // Met before any text, it is thrown as before, and no text is read.
+    const unnumbered = { ...invoiceOf(), folio: 0, issuer: badIssuer }
+    expectError(() => createDocument(unnumbered), 'INVALID_FOLIO', { folio: 0 })
+    expect(findTextProblems(unnumbered)).toEqual({
+      problems: [],
+      stoppedBy: { code: 'INVALID_FOLIO', details: { folio: 0 } },
+    })
+    for (const input of [{}, { ...invoiceOf(), type: 99 }])
+      expect(findTextProblems(input as DocumentInput)).toEqual({
+        problems: [],
+        stoppedBy: { code: 'INVALID_DOCUMENT_TYPE', details: { type: (input as { type?: number }).type } },
+      })
+    // Met after a text problem, it stops the reading there: the texts past it are not read.
+    expectAll(
+      { ...invoiceOf(), issuer: badIssuer, receiver: undefined, items: [{ ...items[0], name: 'Ω' }] },
+      [unsupported('issuer.businessName', 'RznSoc', 0)],
+      { code: 'MISSING_FIELD', details: { field: 'receiver' } },
+    )
+    expectAll(
+      {
+        ...invoiceOf(),
+        issuer: badIssuer,
+        items: [
+          { ...items[0], quantity: -1 },
+          { ...items[1], name: 'Ω' },
+        ],
+      },
+      [unsupported('issuer.businessName', 'RznSoc', 0)],
+      { code: 'INVALID_AMOUNT', details: { field: 'items[0].quantity' } },
+    )
+  })
+
+  // What a text throws that is not a text problem is the caller's own error, and is thrown as it was.
+  test('an error a text throws of its own is thrown as before, not listed', () => {
+    const mine = new Error('mine')
+    const throwing = {
+      toString: () => {
+        throw mine
+      },
+    } as unknown as string
+    for (const businessName of [throwing, Object.create(null) as string]) {
+      const input = { ...invoiceOf(), issuer: { ...issuer, businessName } }
+      for (const run of [() => createDocument(input), () => findTextProblems(input)]) {
+        let caught: unknown
+        try {
+          run()
+        } catch (error) {
+          caught = error
+        }
+        expect(caught).not.toBeInstanceOf(DteError)
+        if (businessName === throwing) expect(caught).toBe(mine)
+        else expect(caught).toBeInstanceOf(TypeError)
+      }
+    }
+    expect(() => findTextProblems(null as unknown as DocumentInput)).toThrow(TypeError)
+  })
+
+  // A document built while another is being built, from a getter of its input, keeps the problems of each to itself.
+  test('a document built inside the build of another keeps its problems apart', () => {
+    const good = invoiceOf()
+    const bad = { ...invoiceOf(), receiver: { ...receiver, businessName: 'Ω' } }
+    const outer = (base: DocumentInput, inner: DocumentInput): DocumentInput => {
+      const input = { ...base }
+      Object.defineProperty(input, 'items', {
+        get: () => {
+          try {
+            createDocument(inner)
+          } catch {
+            // the inner document's own refusal
+          }
+          return items
+        },
+      })
+      return input
+    }
+    // A good one inside a bad one: the outer problem is still there once the inner build has ended.
+    expect(findTextProblems(outer({ ...invoiceOf(), issuer: { ...issuer, businessName: 'Ω' } }, good))).toEqual({
+      problems: [unsupported('issuer.businessName', 'RznSoc', 0)],
+      stoppedBy: null,
+    })
+    // A bad one inside a good one: the inner problems do not reach the outer document.
+    expect(createDocument(outer(good, bad)).header.receiver.businessName).toBe(receiver.businessName.replace(/'/g, ''))
   })
 })

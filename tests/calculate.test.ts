@@ -700,6 +700,10 @@ describe('calculateTotals with additional taxes and withholdings', () => {
     expect(() => calculateTotals([taxed(1000, [49])], { type: 46, withholdVat: false })).toThrow(
       refusal('INVALID_AMOUNT', { field: 'items[0].additionalTaxCodes', taxCode: 49 }),
     )
+    // The field named is the first line that carries the code.
+    expect(() =>
+      calculateTotals([line(1000), taxed(1000, [49]), taxed(500, [49])], { type: 46, withholdVat: false }),
+    ).toThrow(refusal('INVALID_AMOUNT', { field: 'items[1].additionalTaxCodes', taxCode: 49 }))
     for (const rate of [0.004, 1000, -1])
       expect(() =>
         calculateTotals([taxed(1000, [27])], { type: 33, additionalTaxes: [{ taxCode: 27, rate }] }),

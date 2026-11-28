@@ -184,8 +184,8 @@ export type { LineAmountInput, LineAmount, TotalsOptions } from './totals/calcul
 export { calculateExportLineAmount, calculateExportTotals, convertToPesos } from './totals/export'
 export type { ExportLineAmountInput, ExportLineAmount, ExportTotalsOptions } from './totals/export'
 
-export { createDocument, FIELD_LIMITS } from './document/create'
-export type { CreateDocumentOptions } from './document/create'
+export { createDocument, FIELD_LIMITS, findTextProblems } from './document/create'
+export type { CreateDocumentOptions, TextProblem, TextProblems } from './document/create'
 export { buildDocumentXml, documentElementName } from './document/build-xml'
 export type { BuildDocumentXmlOptions } from './document/build-xml'
 export { signDocument, verifyDocumentSignature } from './document/sign'
