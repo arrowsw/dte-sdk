@@ -1,6 +1,14 @@
 /**
- * EN: Structured context attached to a log line. May carry RUTs or codes; the message itself never does.
- * ES: Contexto estructurado de una línea de log. Puede traer RUT o códigos; el mensaje nunca.
+ * EN: Structured context attached to a log line. May carry RUTs or codes; the message itself never does. It may also
+ * carry text of a file: the certification run logs the `details` of the error a book's `beforeUpload` throws
+ * (`certification book refused before upload`), and the `SCHEMA_INVALID` of `validateBeforeUpload` carries in them the
+ * schema's messages, which can quote the file (a RUT, a date, a line of it). A logger that keeps or forwards contexts
+ * should treat them as it treats the files.
+ * ES: Contexto estructurado de una línea de log. Puede traer RUT o códigos; el mensaje nunca. También puede traer
+ * texto de un archivo: la corrida de certificación registra los `details` del error que lanza el `beforeUpload` de un
+ * libro (`certification book refused before upload`), y el `SCHEMA_INVALID` de `validateBeforeUpload` trae en ellos
+ * los mensajes del esquema, que pueden citar el archivo (un RUT, una fecha, una línea de él). Un logger que guarde o
+ * reenvíe contextos debe tratarlos como trata los archivos.
  */
 export type LogContext = Readonly<Record<string, unknown>>
 

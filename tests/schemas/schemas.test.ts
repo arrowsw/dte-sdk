@@ -77,6 +77,21 @@ describe('schemaOf', () => {
     expect(schemaOf('')).toBeNull()
   })
 
+  test('what comes before the element is skipped in the order it comes: a comment may hold `<?` or an element', () => {
+    const declaration = '﻿<?xml version="1.0" encoding="ISO-8859-1"?>\n'
+    expect(schemaOf(`${declaration}<!-- antes de <? -->\n<EnvioDTE version="1.0"><?dentro x?>`)).toBe('EnvioDTE')
+    expect(schemaOf(`${declaration}<!-- <LibroGuia> -->\n<?pi x?><!DOCTYPE EnvioDTE>\n<EnvioDTE>`)).toBe('EnvioDTE')
+    expect(schemaOf(`${declaration}<!-- sin cerrar <EnvioDTE>`)).toBeNull()
+    expect(schemaOf('<?xml sin cerrar <EnvioDTE>')).toBeNull()
+    expect(schemaOf('<!DOCTYPE sin cerrar')).toBeNull()
+    expect(schemaOf('texto <EnvioDTE>')).toBeNull()
+    // Many unclosed processing instructions cost one pass, not one per instruction.
+    const started = Date.now()
+    expect(schemaOf('<?'.repeat(200_000))).toBeNull()
+    expect(schemaOf(`<!--${'<?'.repeat(200_000)}-->`)).toBeNull()
+    expect(Date.now() - started).toBeLessThan(1000)
+  })
+
   test('a receipt on its own has no schema: only its envelope declares its DTE', () => {
     const document = (type: string): string =>
       `<DTE version="1.0"><Documento ID="D"><Encabezado><IdDoc><TipoDTE>${type}</TipoDTE><Folio>1</Folio>`

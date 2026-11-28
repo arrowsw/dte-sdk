@@ -169,7 +169,7 @@ export type UploadStatusCheck = {
 const ESTADO_ENVIO = 'Consulta de Estado de Upload Dte (OI2004_CEUPDTE_MDE 1.10), 3.3'
 const ESTADO_ENVIO_EPR = 'Consulta de Estado de Upload Dte (OI2004_CEUPDTE_MDE 1.10), 3.4.1 y capítulo 5'
 const FORMATO_IECV = 'Formato de Información de Compras y Ventas 2.2'
-const BOOK_TYPES = 'LceSiiTypes_v10.xsd, DoctoType'
+const BOOK_TYPES = 'LibroCV_v10.xsd, DoctoType (TpoDoc)'
 const sii = (check: string, source: string): UploadStatusCheck => ({ check, basis: 'siiDocument', source })
 const field = (check: string): UploadStatusCheck => ({ check, basis: 'fieldBehaviour', source: null })
 
@@ -187,9 +187,9 @@ const VALIDATE =
 // What to look at for each state. A state's own gloss rests where the table above says; each check here says where it
 // rests. The manual of `QueryEstUp` gives the counts of the documents with `EPR` alone, in the test steps of its
 // chapter 5 ("ACEPTADOS (Solo si Estado es EPR)"), and its example of an `EPR` (3.4.1) reports one document rejected
-// and none accepted. The schema of the purchase and sales book (`DoctoType` of `LceSiiTypes_v10.xsd`) lists no
-// type 52, so a dispatch guide has no place there. The format of the books says what a
-// special book is ("Archivos ESPECIALES: corresponden a archivos requeridos por el SII vía una notificación", "Un
+// and none accepted. The schema of the purchase and sales book declares its own `DoctoType` (`LibroCV_v10.xsd`), the
+// type of the `TpoDoc` of each of its lines, and it lists no type 52, so a dispatch guide has no place there. The
+// format of the books says what a special book is ("Archivos ESPECIALES: corresponden a archivos requeridos por el SII vía una notificación", "Un
 // archivo especial se distingue de los libros regulares, en que indica el folio de la notificación en la carátula")
 // and lists `RECTIFICA` among the values of `TipoLibro`, not of `TipoEnvio`.
 const UPLOAD_STATUS_CHECKS: Readonly<Record<string, readonly UploadStatusCheck[]>> = {

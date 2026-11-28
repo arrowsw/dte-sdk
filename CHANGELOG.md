@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   book states `LRF`, `LRS`, `LRC`, `LRH`, `LNC`, a few short checks in Spanish, each with its basis: a document of the
   SII, named, or field behaviour. `EPR` rests on the SII's manual of `QueryEstUp`, whose test steps (chapter 5) give
   the counts "(Solo si Estado es EPR)" and whose example of an `EPR` (3.4.1) has none accepted; the dispatch guide that
-  has no place in a purchase or sales book of `LRS` on `DoctoType` of `LceSiiTypes_v10.xsd`, which lists no 52; the
+  has no place in a purchase or sales book of `LRS` on the `DoctoType` that `LibroCV_v10.xsd` declares for the `TpoDoc` of a line, which lists no 52; the
   special book and the rectification of `LRC` on the SII's format of the books ("Un archivo
   especial se distingue de los libros regulares, en que indica el folio de la notificación en la carátula";
   `RECTIFICA` is a `TipoLibro`, not a `TipoEnvio`). `RSC` and `LRS` point to `validateBeforeUpload`, which stops the upload.
@@ -135,11 +135,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now `rejected`, glossed "Libro rechazado por error en schema", "… en carátula" and "… en firma", and the run keeps
   them as a rejected diagnosis. The comment of the catalog says which glosses rest on the SII's table (the eight of 3.3
   of "Consulta de Estado de Upload Dte") and which on field behaviour (these three, and `LOK`, `LSO`, `LRH`, `LNC`).
-  - In the books phase, a book refused with `LRS` or `LRF` is not sent again: the same file is refused the same way on
-    any period, so the run takes no other period for it and marks none occupied. It stops with its diagnosis, and the
-    portal client's logger says what to look at (`certification book refused for its file`, with
-    `uploadStatusChecks`). A book refused with `LRC` goes again on another period, as one refused with `LNC` does: the
-    cover carries the period and the kind of submission, which is what a book sent again changes.
+  - In the books phase, a book refused with `LRS`, `LRF` or `LRC` is not sent again: a book sent again changes only
+    its period and its kind of submission, and its file, its kind of book and its notification folio would be refused
+    the same way. Wherever its status is read (the first status check, the cross-check of the approval wait, after a
+    resend), the run takes no other period for it, marks none occupied, and takes it out of the results at once, so no
+    later declaration names the track id the SII refused. It stops with its diagnosis, and the portal client's logger
+    says once what to look at (`certification book refused, not sent again`, with `uploadStatusChecks`). When no book
+    is left to send, the search for a free period stops, and an adjustment is decided from the totals of the books
+    that go, not of a refused one.
   - **What to change:** code that branches on `unknown`, or compares the gloss, for `LRS`, `LRC` or `LRF`.
 
 - **The status of an export document** (`queryDocumentStatus`, types 110, 111 and 112). It refused them with

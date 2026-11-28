@@ -151,26 +151,58 @@ const textOf = (xml: string | Uint8Array): string => {
 const asUtf8 = (text: string): string =>
   text.replace(DECLARATION, (declaration) => declaration.replace(DECLARED_ENCODING, 'encoding="UTF-8"'))
 
-const ROOT_ELEMENT = /<(?:[A-Za-z_][\w.-]*:)?([A-Za-z_][\w.-]*)[\s/>]/
 const RECEIPT_TYPE = /<TipoDTE>\s*(?:39|41)\s*<\/TipoDTE>/
 
-// The text past the declaration, the comments, the processing instructions and the document type.
-const bodyOf = (text: string): string =>
-  text
-    .replace(/<\?[\s\S]*?\?>/g, '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<!DOCTYPE[^>]*>/gi, '')
+const BLANK = /[\s\ufeff]*/y
+const DOCTYPE = /<!DOCTYPE/iy
+// What may stand before the document element, each with what closes it: the declaration and any other processing
+// instruction, a comment and a document type.
+const PROLOGUE: readonly (readonly [RegExp, string])[] = [
+  [/<\?/y, '?>'],
+  [/<!--/y, '-->'],
+  [DOCTYPE, '>'],
+]
 
-// The local name of the document element, or null when there is none.
-const rootOf = (body: string): string | null => ROOT_ELEMENT.exec(body)?.[1] ?? null
+// Where the document element starts: what may come before it is skipped in the order it comes, one piece after
+// another from the start, so a comment that holds `<?` or an element hides nothing, and a piece left open ends the
+// search in one pass. -1 when the text has no document element there.
+const rootStart = (text: string): number => {
+  let at = 0
+  for (;;) {
+    BLANK.lastIndex = at
+    BLANK.exec(text)
+    at = BLANK.lastIndex
+    const piece = PROLOGUE.find(([opening]) => {
+      opening.lastIndex = at
+      return opening.test(text)
+    })
+    if (piece === undefined) return at
+    const end = text.indexOf(piece[1], piece[0].lastIndex)
+    if (end < 0) return -1
+    at = end + piece[1].length
+  }
+}
+
+const ROOT_AT = /<(?:[A-Za-z_][\w.-]*:)?([A-Za-z_][\w.-]*)[\s/>]/y
+
+// The local name of the document element and the text from it on, or null when there is none.
+const rootOf = (text: string): { readonly name: string; readonly rest: string } | null => {
+  const at = rootStart(text)
+  if (at < 0) return null
+  ROOT_AT.lastIndex = at
+  const name = ROOT_AT.exec(text)?.[1]
+  return name === undefined ? null : { name, rest: text.slice(at) }
+}
 
 /**
  * EN: The schema of a document, by the name of its document element, or null when dte-sdk carries none for it. It reads
- * the first element after the declaration, the comments and the processing instructions; it validates nothing. A
+ * the first element after what may come before it (white space, the declaration and other processing instructions,
+ * comments, a document type), skipped in the order it comes; it validates nothing. A
  * receipt (39, 41) on its own has none: `DTE_v10.xsd` does not declare its `DTE`, which only `EnvioBOLETA_v11.xsd`
  * does, so a receipt is validated inside its `EnvioBOLETA`.
  * ES: El esquema de un documento, según el nombre de su elemento raíz, o null si dte-sdk no trae ninguno para él. Lee
- * el primer elemento después de la declaración, los comentarios y las instrucciones de procesamiento; no valida nada.
+ * el primer elemento después de lo que puede venir antes de él (espacios, la declaración y otras instrucciones de
+ * procesamiento, comentarios, un tipo de documento), saltado en el orden en que viene; no valida nada.
  * Una boleta (39, 41) sola no tiene ninguno: `DTE_v10.xsd` no declara su `DTE`, que solo declara
  * `EnvioBOLETA_v11.xsd`, así que una boleta se valida dentro de su `EnvioBOLETA`.
  * @param xml EN: the document, as text or as the bytes of its file. ES: el documento, como texto o como los bytes de su archivo.
@@ -178,11 +210,11 @@ const rootOf = (body: string): string | null => ROOT_ELEMENT.exec(body)?.[1] ?? 
  * @throws {DteError} EN: `INVALID_OPTION` with `field: 'encoding'` for bytes whose declaration names a charset other than ISO-8859-1 or UTF-8. ES: `INVALID_OPTION` con `field: 'encoding'` ante bytes cuya declaración nombra un charset que no es ISO-8859-1 ni UTF-8.
  */
 export const schemaOf = (xml: string | Uint8Array): SiiSchemaName | null => {
-  const body = bodyOf(textOf(xml))
-  const root = rootOf(body)
-  if (root === SII_SCHEMAS.DTE.root && RECEIPT_TYPE.test(body)) return null
+  const root = rootOf(textOf(xml))
+  if (root === null) return null
+  if (root.name === SII_SCHEMAS.DTE.root && RECEIPT_TYPE.test(root.rest)) return null
   const names = Object.keys(SII_SCHEMAS) as SiiSchemaName[]
-  return names.find((name) => SII_SCHEMAS[name].root === root) ?? null
+  return names.find((name) => SII_SCHEMAS[name].root === root.name) ?? null
 }
 
 /**
@@ -286,7 +318,7 @@ export const validateBeforeUpload =
     if (!Object.prototype.hasOwnProperty.call(UPLOAD_ROOTS, file.kind))
       throw new DteError('INVALID_OPTION', { field: 'kind', kind: file.kind })
     const expected = UPLOAD_ROOTS[file.kind]
-    const element = rootOf(bodyOf(file.xml))
+    const element = rootOf(file.xml)?.name ?? null
     if (element === null || !expected.includes(element))
       throw new DteError('SCHEMA_INVALID', { kind: file.kind, name: file.name, element, expected })
     const issues = await validateAgainstSchema(file.xml, { load: options.load })

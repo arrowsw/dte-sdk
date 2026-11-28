@@ -175,8 +175,8 @@ describe('what to look at for a state', () => {
   const FORMATO_IECV = 'Formato de Información de Compras y Ventas 2.2'
   // The counts come "(Solo si Estado es EPR)" in the test steps of chapter 5; the example of 3.4.1 has none accepted.
   const ESTADO_ENVIO_EPR = 'Consulta de Estado de Upload Dte (OI2004_CEUPDTE_MDE 1.10), 3.4.1 y capítulo 5'
-  // `DoctoType` of the books' types lists no 52: a dispatch guide has no place in a purchase or sales book.
-  const BOOK_TYPES = 'LceSiiTypes_v10.xsd, DoctoType'
+  // `DoctoType` of the purchase and sales book, the type of its `TpoDoc`, lists no 52: a dispatch guide has no place in a purchase or sales book.
+  const BOOK_TYPES = 'LibroCV_v10.xsd, DoctoType (TpoDoc)'
   const VALIDATE =
     'Validar el archivo contra su esquema del SII antes de enviarlo: validateBeforeUpload de dte-sdk/schemas detiene ' +
     'la subida (validateAgainstSchema solo valida).'

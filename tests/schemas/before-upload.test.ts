@@ -90,6 +90,21 @@ describe('validateBeforeUpload', () => {
     expect(load).toHaveBeenCalledTimes(1)
   })
 
+  test('a comment before the element, holding `<?` or another element, does not hide it', async () => {
+    const load = jest.fn(valid)
+    const check = validateBeforeUpload({ load })
+    const head = '<?xml version="1.0" encoding="ISO-8859-1"?>\n'
+    await expect(
+      check({ kind: 'book', name: 'x.xml', xml: `${head}<!-- antes de <? -->\n<LibroGuia version="1.0"><?dentro x?>` }),
+    ).resolves.toBeUndefined()
+    expect(
+      await failure(
+        check({ kind: 'book', name: 'x.xml', xml: `${head}<!-- <LibroGuia> -->\n<EnvioDTE version="1.0">` }),
+      ),
+    ).toMatchObject({ code: 'SCHEMA_INVALID', details: { element: 'EnvioDTE' } })
+    expect(load).toHaveBeenCalledTimes(1)
+  })
+
   test('a file with no element is refused as one with the wrong one, and a kind no upload has is an invalid option', async () => {
     const load = jest.fn(valid)
     const check = validateBeforeUpload({ load })
