@@ -444,11 +444,13 @@ try {
         ])
       // The other process cannot tell an ended change of a living process from one under way: it waits.
       expect(JSON.parse((await other(300)).stdout)).toEqual(['wait', process.pid])
-      // A change here takes the lock at once, as its token is held by none of this process's changes.
+      // A change here takes the leftover lock at once, as its token is held by none of this process's changes. Once it
+      // is gone the two processes take their turns in either order: each gets a folio of its own.
       const waiting = other(10_000)
       await new Promise((resolve) => setTimeout(resolve, 300))
-      await expect(createDirectoryFolioRegistry({ dir }).reserve(scope)).resolves.toBe(2)
-      expect((await waiting).stdout).toBe('3\n')
+      const here = await createDirectoryFolioRegistry({ dir }).reserve(scope)
+      const there = Number((await waiting).stdout)
+      expect([here, there].sort()).toEqual([2, 3])
       expect(readdirSync(dir)).toEqual(['folios.json'])
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -482,7 +484,8 @@ const registry = createDirectoryFolioRegistry({ dir: ${JSON.stringify(dir)}, ${o
     if (!once.done && !String(args[1]).endsWith('.takeover')) {
       once.done = true
       console.log('holding')
-      await new Promise((resolve) => setTimeout(resolve, 200))
+      await new Promise((resolve) => process.stdin.once('data', resolve))
+      process.stdin.pause()
     }
     return result
   }
@@ -514,6 +517,7 @@ try {
         ])
         expect(JSON.parse(waiter.stdout)).toEqual(['FOLIO_LEDGER_LOCKED', 'wait', holder.pid])
         holder.kill('SIGCONT')
+        holder.stdin.end('go\n')
         await exited
         expect(output.text).toBe('holding\n1\n')
         const next = await execFileAsync(process.execPath, [
