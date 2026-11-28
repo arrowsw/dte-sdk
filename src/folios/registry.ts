@@ -52,7 +52,7 @@ export type FolioLedgerStore = {
   readonly load: () => Promise<FolioLedger | null>
   /** EN: Replaces the stored ledger. ES: Reemplaza el libro guardado. */
   readonly save: (ledger: FolioLedger) => Promise<void>
-  /** EN: Runs one change, its `load`, its change and its `save`, holding a lock that other processes or registries on the same store respect; without it, changes are exclusive inside this registry only. The registry expects it to call `run` exactly once, to return what `run` returns or throw what it throws, and to release the lock on every path: a `lock` that never settles holds up every later change of the registry, with no error. With a `lock`, the reads take no lock and no turn: they do not wait behind a change, so the store must replace the ledger whole, and a read sees it as it was before or after a change. ES: Corre un cambio, su `load`, su cambio y su `save`, con un lock que respetan los otros procesos o registros sobre el mismo almacén; sin él, los cambios son exclusivos solo dentro de este registro. El registro espera que llame a `run` exactamente una vez, que devuelva lo que `run` devuelve o lance lo que lanza, y que libere el lock en todo camino: un `lock` que nunca termina detiene todos los cambios siguientes del registro, sin error. Con `lock`, las lecturas no toman lock ni turno: no esperan detrás de un cambio, así que el almacén debe reemplazar el libro entero, y una lectura lo ve como estaba antes o después de un cambio. */
+  /** EN: Runs one change, its `load`, its change and its `save`, holding a lock that other processes or registries on the same store respect; without it, changes are exclusive inside this registry only. The registry expects it to call `run` exactly once, to return what `run` returns or throw what it throws, and to release the lock on every path: a `lock` that never settles holds up every later change of the registry, with no error. The reads never take the `lock`, so the store must replace the ledger whole, and a read sees it as it was before or after a change of another process or registry; a read still waits its turn behind the changes already asked of its own registry, so it sees them, and it can wait as long as one of them waits for the lock. ES: Corre un cambio, su `load`, su cambio y su `save`, con un lock que respetan los otros procesos o registros sobre el mismo almacén; sin él, los cambios son exclusivos solo dentro de este registro. El registro espera que llame a `run` exactamente una vez, que devuelva lo que `run` devuelve o lance lo que lanza, y que libere el lock en todo camino: un `lock` que nunca termina detiene todos los cambios siguientes del registro, sin error. Las lecturas nunca toman el `lock`, así que el almacén debe reemplazar el libro entero, y una lectura lo ve como estaba antes o después de un cambio de otro proceso o registro; una lectura igual espera su turno detrás de los cambios ya pedidos a su propio registro, así los ve, y puede esperar tanto como uno de ellos espera por el lock. */
   readonly lock?: <T>(run: () => Promise<T>) => Promise<T>
 }
 
@@ -69,10 +69,10 @@ export const cafFingerprint = (xml: string): string => {
 /**
  * EN: A registry over a store. Calls run one after another inside this registry, each reading the ledger fresh; several
  * processes, or several registries on one store, need a store with a `lock` or a registry of their own that takes care
- * of it.
+ * of it. Only the changes take the `lock`; a read keeps its turn, so it sees the changes asked before it.
  * ES: Un registro sobre un almacén. Las llamadas corren una tras otra dentro de este registro, cada una leyendo el libro
  * de nuevo; varios procesos, o varios registros sobre un almacén, necesitan un almacén con `lock` o un registro propio
- * que se haga cargo.
+ * que se haga cargo. Solo los cambios toman el `lock`; una lectura conserva su turno, así ve los cambios pedidos antes.
  * @param store EN: where the ledger lives. ES: dónde vive el libro.
  * @param now EN: clock. ES: reloj.
  */
@@ -84,9 +84,6 @@ export const createFolioRegistry = (store: FolioLedgerStore, now: () => Date = (
     return turn
   }
   const locked = store.lock ?? (<T>(run: () => Promise<T>) => run())
-  // A store with a lock replaces its ledger whole, so a read needs no turn: it does not wait behind a change of this
-  // registry that waits for the lock. Without one, a read keeps its turn and sees every change made before it.
-  const reading = store.lock === undefined ? exclusive : <T>(run: () => Promise<T>) => run()
   const update = <T>(
     change: (ledger: FolioLedger, at: string) => { readonly ledger: FolioLedger; readonly value: T },
   ) =>
@@ -110,8 +107,8 @@ export const createFolioRegistry = (store: FolioLedgerStore, now: () => Date = (
       update((ledger, at) => ({ ledger: markAnnulledInLedger(ledger, scope, folios, at), value: undefined })),
     release: (scope, folios) =>
       update((ledger, at) => ({ ledger: releaseInLedger(ledger, scope, folios, at), value: undefined })),
-    remaining: (scope) => reading(async () => remainingInLedger(await read(), scope)),
-    stats: (query) => reading(async () => statsOfLedger(await read(), query)),
+    remaining: (scope) => exclusive(async () => remainingInLedger(await read(), scope)),
+    stats: (query) => exclusive(async () => statsOfLedger(await read(), query)),
   }
 }
 

@@ -67,11 +67,14 @@ test('calls run one after another, so concurrent reservations never repeat', asy
   expect(folios).toEqual([1, 2, 3, 4, 5])
 })
 
-test('in memory, a read made after a change sees it', async () => {
+test('in memory, a read asked for after changes, without awaiting them, sees them', async () => {
   const registry = createMemoryFolioRegistry()
-  const reserved = registry.reserve(scope)
-  await expect(registry.remaining(scope)).resolves.toBe(4)
-  await expect(reserved).resolves.toBe(1)
+  const changes = [registry.reserve(scope), registry.reserve(scope), registry.markSent(scope, 1)]
+  const remaining = registry.remaining(scope)
+  const stats = registry.stats({ companyRut: scope.companyRut, type: 33 })
+  await expect(remaining).resolves.toBe(3)
+  await expect(stats).resolves.toMatchObject({ totalEntries: 1, totalUsed: 2, totalSent: 1 })
+  await expect(Promise.all(changes)).resolves.toEqual([1, 2, undefined])
 })
 
 test('a failed call does not stop the next one', async () => {
@@ -508,18 +511,15 @@ describe('createDirectoryFolioRegistry', () => {
       },
     )
 
-    test('a read does not wait behind a change of its own registry that waits for the lock', async () => {
+    test('a read asked for after changes, without awaiting them, sees them', async () => {
       const dir = tempDir()
-      const registry = createDirectoryFolioRegistry({ dir, lockWaitMs: 5000 })
-      await registry.reserve(scope)
-      writeFileSync(lockOf(dir), 'held')
-      const change = registry.reserve(scope)
-      const read = registry.remaining(scope)
-      expect(await settled(read)).toBe(true)
-      await expect(read).resolves.toBe(4)
-      expect(await settled(change)).toBe(false)
-      rmSync(lockOf(dir))
-      await expect(change).resolves.toBe(2)
+      const registry = createDirectoryFolioRegistry({ dir })
+      const changes = [registry.reserve(scope), registry.reserve(scope), registry.markSent(scope, 1)]
+      const remaining = registry.remaining(scope)
+      const stats = registry.stats({ companyRut: scope.companyRut, type: 33 })
+      await expect(remaining).resolves.toBe(3)
+      await expect(stats).resolves.toMatchObject({ totalEntries: 1, totalUsed: 2, totalSent: 1 })
+      await expect(Promise.all(changes)).resolves.toEqual([1, 2, undefined])
     })
 
     test('a lock that cannot be removed on the way out does not undo a change that was written', async () => {

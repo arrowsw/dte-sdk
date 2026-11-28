@@ -160,9 +160,10 @@ const directoryLock = (
  * own just before its write lands, and if it is not, it does not write and throws `FOLIO_LEDGER_LOCKED { kind: 'lost' }`;
  * what remains is a process stopped between that check and the rename for longer than `lockStaleMs`. When the lock
  * cannot be removed after a change was written, the change still returns its result and the caller learns nothing of
- * it: the lock goes stale by itself. `remaining` and `stats` take no lock and do not wait behind a change, even one of
- * the same registry: the ledger is replaced whole, so they read it as it was before or after a change. Inside one
- * registry, changes still run in the order they were made. The lock is for the processes of one host on a local file
+ * it: the lock goes stale by itself. `remaining` and `stats` take no lock and never wait for another process or registry
+ * by themselves: the ledger is replaced whole, so they read it as it was before or after a change. Inside one registry,
+ * calls still run in the order they were made: a read waits its turn behind the changes already asked of it and sees
+ * them, so it can wait as long as one of them waits for the lock. The lock is for the processes of one host on a local file
  * system: staleness compares this host's clock with the file's modification time, which hosts with different clocks,
  * coarse modification times or cached attributes get wrong, and it needs an exclusive create. `load` exists for tests
  * only.
@@ -180,8 +181,9 @@ const directoryLock = (
  * escribe y lanza `FOLIO_LEDGER_LOCKED { kind: 'lost' }`; queda un proceso detenido entre esa comprobación y el
  * renombre por más de `lockStaleMs`. Si el lock no se puede borrar después de escribir un cambio, el cambio igual
  * devuelve su resultado y quien llama no se entera: el lock envejece solo. `remaining` y `stats` no toman lock ni
- * esperan detrás de un cambio, tampoco de uno del mismo registro: el libro se reemplaza entero, así lo leen como estaba
- * antes o después de un cambio. Dentro de un registro, los cambios siguen corriendo en el orden en que se hicieron. El
+ * esperan por sí mismas a otro proceso o registro: el libro se reemplaza entero, así lo leen como estaba antes o después
+ * de un cambio. Dentro de un registro, las llamadas siguen corriendo en el orden en que se hicieron: una lectura espera
+ * su turno detrás de los cambios ya pedidos y los ve, así que puede esperar tanto como uno de ellos espera por el lock. El
  * lock es para los procesos de un mismo equipo sobre un sistema de archivos local: la vejez compara el reloj de este
  * equipo con la hora de modificación del archivo, que equipos con relojes distintos, horas de modificación gruesas o
  * atributos en caché calculan mal, y necesita una creación exclusiva. `load` existe solo para tests.

@@ -16,9 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`lock` of `FolioLedgerStore`** (`dte-sdk/portal`), optional: a store that gives it has every change of
   `createFolioRegistry` run inside it, its read, its change and its write, so that the store can make the change
   exclusive beyond one registry. The registry expects it to call the function once, return its result and release on
-  every path; a `lock` that never settles holds up every later change. With a `lock`, `remaining` and `stats` no longer
-  wait their turn behind the changes of the registry, so the store must replace its ledger whole. A store without it
-  behaves as before.
+  every path; a `lock` that never settles holds up every later change. The reads never take it, so the store must
+  replace its ledger whole; they still wait their turn behind the changes already asked of their registry. A store
+  without it behaves as before.
 
 ### Changed
 
@@ -49,9 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recovery takes up to two stale periods. Just before its write lands, a holder checks that the lock is still its own,
   and if it was taken over while the process was stopped it does not write (`FOLIO_LEDGER_LOCKED`, `kind: 'lost'`). A
   lock that cannot be removed after a change was written does not undo the change's result: it goes stale by itself.
-  `remaining` and `stats` take no lock and do not wait behind a change, even one of their own registry: the ledger is
-  replaced whole, so they read it before or after a change. The order of the changes of one registry, and the memory
-  registry, do not change. The lock is for the processes of one host on a local file system: its staleness compares
+  `remaining` and `stats` take no lock and never wait for another process or registry by themselves: the ledger is
+  replaced whole, so they read it before or after a change. They still wait their turn behind the changes already asked
+  of their own registry, and see them, so a read can wait as long as one of those waits for the lock. The order of the
+  calls of one registry, and the memory registry, do not change. The lock is for the processes of one host on a local file system: its staleness compares
   this host's clock with the file's modification time. A reservation costs one lock file more: 200 in a row went from
   about 55 ms to about 100 ms on a local disk.
   - **What to change:** nothing, unless a process stays stopped inside a change for longer than `lockStaleMs`, which
