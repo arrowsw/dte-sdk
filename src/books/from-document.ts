@@ -1,11 +1,13 @@
-import { VAT_RATE, WITHHOLDING_TAX_CODES } from '../catalogs/codes'
+import { CHILEAN_PESO, VAT_RATE, WITHHOLDING_TAX_CODES } from '../catalogs/codes'
 import type { BookOperation } from '../catalogs/book-codes'
+import { isExport } from '../catalogs/document-types'
 import { DteError } from '../errors'
 import type { BookEntryInput, FolioConsumptionEntry, GuideEntryInput } from '../model/book'
 import { compact } from '../model/codec'
-import type { Document, Withholding } from '../model/document'
+import type { Document, Totals, Withholding } from '../model/document'
 import { toSiiRut } from '../model/rut'
 import { truncateText } from '../text/sanitize'
+import { convertToPesos, roundHalfAwayFromZero } from '../totals/export'
 import { RETENTION_TAX_CODES } from './entry'
 
 const MAX_NAME = 50
@@ -24,6 +26,62 @@ export type BookEntryFromDocumentOptions = {
   readonly operation: BookOperation
   /** EN: `negative` negates exempt, net, VAT and total of a credit note (61), and refuses one with a deposit guarantee (`GrntDep`), since the book's `DepEnvase` holds no amount below zero. `positive` by default, as the format has it. ES: `negative` niega exento, neto, IVA y total de una nota de crédito (61), y rechaza una con garantía por depósito de envases (`GrntDep`), porque el `DepEnvase` del libro no admite montos bajo cero. `positive` por defecto, como dice el formato. */
   readonly creditNoteSign?: 'positive' | 'negative'
+  /** EN: Pesos per unit of the currency of an export document (110, 111, 112) that does not carry its totals in pesos (`OtraMoneda`): its exempt amount and its total are each converted with it and rounded once, half away from zero, to a whole peso, as `convertToPesos` does. Rounded to four decimals, above zero and below 10^6, as the document's `TpoCambio`. Refused on a document that already carries its totals in pesos unless it is the rate the document carries. ES: `TpoCambio` — Pesos por unidad de la moneda de un documento de exportación (110, 111, 112) que no lleva sus totales en pesos (`OtraMoneda`): su monto exento y su total se convierten cada uno con él y se redondean una vez, la mitad lejos de cero, a un peso entero, como hace `convertToPesos`. Redondeado a cuatro decimales, sobre cero y bajo 10^6, como el `TpoCambio` del documento. Se rechaza en un documento que ya lleva sus totales en pesos, salvo que sea el tipo de cambio que el documento lleva. */
+  readonly exchangeRate?: number
+}
+
+// `TpoCambio` of `DTE_v10.xsd`: six digits, four of them decimals.
+const RATE_DECIMALS = 4
+const RATE_LIMIT = 1_000_000
+
+const rateOf = (value: number): number => {
+  const rate = Number.isFinite(value) && Math.abs(value) < RATE_LIMIT ? roundHalfAwayFromZero(value, RATE_DECIMALS) : 0
+  if (!(rate > 0)) throw new DteError('INVALID_AMOUNT', { field: 'exchangeRate' })
+  return rate
+}
+
+// The book takes whole pesos (`ValorType`), and `MntExeOtrMnda` and `MntTotOtrMnda` admit four decimals.
+const assertWholePesos = (value: number | undefined, field: string): void => {
+  if (value !== undefined && !Number.isSafeInteger(value)) throw new DteError('INVALID_AMOUNT', { field })
+}
+
+// "Formato de Información de Compras y Ventas" 2.2, section 1.4: "Todos los valores de montos deben venir en pesos".
+// An export document (110, 111, 112) carries its amounts in its own currency (`Totales/TpoMoneda`), exempt as a whole,
+// and in pesos only in `OtraMoneda`, which Formato DTE 2.5 leaves optional. The book takes the document's own totals
+// when its currency is the peso, those of `OtraMoneda` when they are in pesos and bring the exempt amount the document
+// has, or the two converted with a rate the caller gives; a rate the document does not carry is refused, and nothing
+// is guessed.
+const exportTotalsInPesos = (document: Document, exchangeRate: number | undefined): Totals => {
+  const { type, currency, totals, otherCurrency } = document.header
+  const rate = exchangeRate === undefined ? undefined : rateOf(exchangeRate)
+  const assertCarried = (carried: number | undefined): void => {
+    if (rate !== undefined && rate !== carried) throw new DteError('INVALID_OPTION', { field: 'exchangeRate' })
+  }
+  if (currency === CHILEAN_PESO) {
+    assertCarried(undefined)
+    return totals
+  }
+  if (
+    otherCurrency?.currency === CHILEAN_PESO &&
+    (otherCurrency.exemptAmount !== undefined || totals.exemptAmount === undefined)
+  ) {
+    assertCarried(otherCurrency.exchangeRate)
+    assertWholePesos(otherCurrency.exemptAmount, 'otherCurrency.exemptAmount')
+    assertWholePesos(otherCurrency.totalAmount, 'otherCurrency.totalAmount')
+    return { exemptAmount: otherCurrency.exemptAmount, totalAmount: otherCurrency.totalAmount }
+  }
+  if (rate === undefined) throw new DteError('MISSING_FIELD', { field: 'exchangeRate', type })
+  return {
+    exemptAmount: totals.exemptAmount === undefined ? undefined : convertToPesos(totals.exemptAmount, rate),
+    totalAmount: convertToPesos(totals.totalAmount, rate),
+  }
+}
+
+// A rate is of an export document alone: on any other it is a mistake, as `createDocument` has it.
+const totalsInPesos = (document: Document, exchangeRate: number | undefined): Totals => {
+  if (isExport(document.header.type)) return exportTotalsInPesos(document, exchangeRate)
+  if (exchangeRate !== undefined) throw new DteError('INVALID_OPTION', { field: 'exchangeRate' })
+  return document.header.totals
 }
 
 /**
@@ -35,7 +93,11 @@ export type BookEntryFromDocumentOptions = {
  * The other taxes of the document travel in `otherTaxes` on both sides, and its deposit guarantee for containers
  * (`GrntDep`), which its total includes, in `containerDeposit` (`DepEnvase`). The name is truncated to 50 because the
  * document admits 100 and the book field is optional on electronic documents. `Emisor`, `IndFactCompra` and the
- * voided-document reference are not inferred: spread them into the result when the case needs them.
+ * voided-document reference are not inferred: spread them into the result when the case needs them. Every amount of
+ * a book is in pesos ("Formato de Información de Compras y Ventas" 2.2, section 1.4), so an export document (110, 111,
+ * 112) enters it with its exempt amount and its total in pesos: its own when its currency is the peso, those it carries
+ * in `OtraMoneda` (written when it was issued with `exchangeRate`), or, when it carries none, its own converted with the
+ * `exchangeRate` option. Its foreign receiver (`Extranjero`) is not inferred either.
  * ES: Deriva una línea del libro desde un documento de la fase 1. La contraparte es el receptor si el dueño del libro
  * emitió el documento y el emisor en caso contrario, lo que cubre ventas, compras recibidas y facturas de compra (46) en
  * cualquier lado. El IVA que retiene una factura de compra va donde lo lleva cada lado. Una línea de venta tiene dos
@@ -45,10 +107,15 @@ export type BookEntryFromDocumentOptions = {
  * depósito de envases (`GrntDep`), que su total incluye, en `containerDeposit` (`DepEnvase`). El nombre se trunca a
  * 50 porque el documento admite 100 y el campo del libro es opcional en documentos electrónicos. `Emisor`,
  * `IndFactCompra` y la referencia al documento anulado no se infieren: se agregan al resultado si el caso los necesita.
- * @throws {DteError} EN: `INVALID_RUT`; `INVALID_OPTION` with `creditNoteSign` in `details.field` for a `negative` sign on a credit note with a deposit guarantee, which `DepEnvase` (`MontoType`) cannot carry negated. ES: `INVALID_RUT`; `INVALID_OPTION` con `creditNoteSign` en `details.field` ante un signo `negative` en una nota de crédito con garantía por depósito de envases, que `DepEnvase` (`MontoType`) no admite negada.
+ * Todos los montos de un libro van en pesos ("Formato de Información de Compras y Ventas" 2.2, sección 1.4), así que un
+ * documento de exportación (110, 111, 112) entra con su monto exento y su total en pesos: los suyos si su moneda es el
+ * peso, los que lleva en `OtraMoneda` (escritos si se emitió con `exchangeRate`) o, si no lleva, los suyos convertidos
+ * con la opción `exchangeRate`. Su receptor extranjero (`Extranjero`) tampoco se infiere.
+ * @throws {DteError} EN: `INVALID_RUT`; `INVALID_OPTION` with `creditNoteSign` in `details.field` for a `negative` sign on a credit note with a deposit guarantee, which `DepEnvase` (`MontoType`) cannot carry negated; `MISSING_FIELD` with `exchangeRate` in `details.field` and the type in `details.type` for an export document without its totals in pesos and without the option; `INVALID_AMOUNT` with `exchangeRate` in `details.field` for a rate that is not above zero and below 10^6 with four decimals, and with `otherCurrency.exemptAmount` or `otherCurrency.totalAmount` for totals in pesos that are not whole; `INVALID_OPTION` with `exchangeRate` in `details.field` for a rate on a document that is not an export one, or that differs from the one an export document carries. ES: `INVALID_RUT`; `INVALID_OPTION` con `creditNoteSign` en `details.field` ante un signo `negative` en una nota de crédito con garantía por depósito de envases, que `DepEnvase` (`MontoType`) no admite negada; `MISSING_FIELD` con `exchangeRate` en `details.field` y el tipo en `details.type` ante un documento de exportación sin sus totales en pesos y sin la opción; `INVALID_AMOUNT` con `exchangeRate` en `details.field` ante un tipo de cambio que no está sobre cero y bajo 10^6 con cuatro decimales, y con `otherCurrency.exemptAmount` u `otherCurrency.totalAmount` ante totales en pesos que no son enteros; `INVALID_OPTION` con `exchangeRate` en `details.field` ante un tipo de cambio en un documento que no es de exportación, o distinto del que lleva un documento de exportación.
  */
 export const bookEntryFromDocument = (document: Document, options: BookEntryFromDocumentOptions): BookEntryInput => {
-  const { type, folio, issueDate, issuer, receiver, totals } = document.header
+  const { type, folio, issueDate, issuer, receiver } = document.header
+  const totals = totalsInPesos(document, options.exchangeRate)
   const counterparty = issuer.rut === toSiiRut(options.bookRut, 'bookRut') ? receiver : issuer
   const negate = options.creditNoteSign === 'negative' && type === CREDIT_NOTE_TYPE
   // `DepEnvase` is a `MontoType` of `LibroCV_v10.xsd`, from zero up: a negated guarantee has no field to go in.

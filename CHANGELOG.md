@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **An export document enters a book in pesos.** "Formato de Información de Compras y Ventas", version 2.2, section
+  1.4, says of every book: "Todos los valores de montos deben venir en pesos". `bookEntryFromDocument` copied the
+  totals of an export document (110, 111, 112) as the document has them, in its own currency: an export invoice for
+  1000 US dollars entered the book as 1000 pesos, and one whose total had decimals was refused later, by the book,
+  with `INVALID_AMOUNT` and nothing saying why. Its line now takes the exempt amount and the total in pesos: the
+  document's own when its currency is the peso, those it carries in `OtraMoneda` (written when it was issued with
+  `exchangeRate`), or, when it carries none, its own converted with the new `exchangeRate` option, each rounded once,
+  half away from zero, to a whole peso, as `convertToPesos` does. Without either it is refused with `MISSING_FIELD`
+  and `exchangeRate` in `details.field`: a rate the document does not carry is not guessed. A rate that differs from
+  the one the document carries, or one given with a document that is not an export one, is refused with
+  `INVALID_OPTION`; totals in pesos with decimals, with `INVALID_AMOUNT` naming the amount. The line of any other
+  document is as before.
+  - **What to change:** pass `exchangeRate` to `bookEntryFromDocument` for an export document issued without one.
+    Code that booked export documents took their amounts as pesos, and the books it sent need a look.
+
 ## [0.17.0] - 2026-11-26
 
 ### Added
