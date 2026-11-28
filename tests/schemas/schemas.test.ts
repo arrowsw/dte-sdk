@@ -81,8 +81,9 @@ describe('schemaOf', () => {
     const declaration = '﻿<?xml version="1.0" encoding="ISO-8859-1"?>\n'
     expect(schemaOf(`${declaration}<!-- antes de <? -->\n<EnvioDTE version="1.0"><?dentro x?>`)).toBe('EnvioDTE')
     expect(schemaOf(`${declaration}<!-- <LibroGuia> -->\n<?pi x?><!DOCTYPE EnvioDTE>\n<EnvioDTE>`)).toBe('EnvioDTE')
-    expect(schemaOf(`${declaration}<!-- sin cerrar <EnvioDTE>`)).toBeNull()
-    expect(schemaOf('<?xml sin cerrar <EnvioDTE>')).toBeNull()
+    // A piece left open is passed over from its opening, as text is: the first element after it is read.
+    expect(schemaOf(`${declaration}<!-- sin cerrar <EnvioDTE>`)).toBe('EnvioDTE')
+    expect(schemaOf('<?xml sin cerrar <EnvioDTE>')).toBe('EnvioDTE')
     expect(schemaOf('<!DOCTYPE sin cerrar')).toBeNull()
     // Text before the element is no piece of the prologue: the first element after it is read, as it always was, and
     // the schema says the file is wrong.
@@ -93,6 +94,7 @@ describe('schemaOf', () => {
     const started = Date.now()
     expect(schemaOf('<?'.repeat(200_000))).toBeNull()
     expect(schemaOf(`<!--${'<?'.repeat(200_000)}-->`)).toBeNull()
+    expect(schemaOf(`${'<!--'.repeat(100_000)}${'<?'.repeat(100_000)} <LibroGuia>`)).toBe('LibroGuia')
     expect(schemaOf(`texto ${'</a '.repeat(200_000)}`)).toBeNull()
     expect(Date.now() - started).toBeLessThan(1000)
   })
@@ -175,6 +177,17 @@ describe('validateAgainstSchema', () => {
     expect(issues.some((issue) => issue.message.includes('{http://www.sii.cl/SiiDte}TipoDTE'))).toBe(true)
     for (const issue of issues) expect(typeof issue.line === 'number' && issue.line > 0).toBe(true)
   })
+
+  test.each([
+    ['a comment', '<!-- sin cerrar\n<EnvioDTE version="1.0"></EnvioDTE>'],
+    ['a processing instruction', '<?pi sin cerrar\n<EnvioDTE version="1.0"></EnvioDTE>'],
+  ])(
+    'a file with %s left open before its element is validated, and the schema says why it is broken',
+    async (_label, xml) => {
+      expect(schemaOf(xml)).toBe('EnvioDTE')
+      expect((await validateAgainstSchema(xml)).length).toBeGreaterThan(0)
+    },
+  )
 
   test('a file with text before its element is validated by the schema of that element, which speaks against it', async () => {
     const issues = await validateAgainstSchema('texto <EnvioDTE version="1.0"></EnvioDTE>')

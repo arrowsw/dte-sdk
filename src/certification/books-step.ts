@@ -353,7 +353,29 @@ const diagnose = async (
   if (!FINAL_REFUSALS.has(code)) return saveState(rt, state, { diagnosis })
   refused.add(key)
   rt.portal.logger.warn(REFUSED, { book: key, trackId, code, checks: uploadStatusChecks(code) })
-  return saveState(rt, state, { diagnosis, ...withBooks(state, { results: without(state.books.results, key) }) })
+  // A diagnosed book is one sent, so it is in the results.
+  const accumulated = withoutRefusedTotals(state.books.accumulated, key, state.books.results[key]!)
+  return saveState(rt, state, {
+    diagnosis,
+    ...withBooks(state, { results: without(state.books.results, key), accumulated }),
+  })
+}
+
+// The totals a refused book's total submission kept for an adjustment are those of a book the SII never took, so they
+// leave with it, and a period left with none leaves too. A refused adjustment leaves the totals of the total
+// submission it adjusted, which the SII took. A total submission of the sales or the purchase book always kept its
+// totals when it was sent.
+const withoutRefusedTotals = (accumulated: AccumulatedTotals, key: BookKey, sent: SentBook): AccumulatedTotals => {
+  if (!ADJUSTABLE.includes(key) || sent.submission !== 'total') return accumulated
+  const { period } = sent
+  const operation = operationOf(key)
+  const { [period]: entry, ...others } = accumulated
+  const { [operation]: dropped, notificationFolio, ...rest } = entry!
+  void dropped
+  const { [operation]: droppedFolio, ...folios } = notificationFolio ?? {}
+  void droppedFolio
+  const left = { ...rest, ...(Object.keys(folios).length === 0 ? {} : { notificationFolio: folios }) }
+  return Object.keys(left).length === 0 ? others : { ...others, [period]: left }
 }
 
 type StatePoll = {

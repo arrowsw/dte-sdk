@@ -1063,6 +1063,11 @@ test.each(REFUSALS)(
       { book: 'purchaseBook', trackId: '101', code, checks: uploadStatusChecks(code) },
     ])
     expect(polls(harness)).toBe(1 + 2)
+    // The totals of the refused purchase book leave with it; the sales book, which the SII took, keeps its own.
+    const accumulated = result.state.books.accumulated['2026-11']
+    expect(accumulated).not.toHaveProperty('purchase')
+    expect(accumulated.sale).toBeDefined()
+    expect(accumulated.notificationFolio).toEqual({ sale: Number(SALES_BOOK_ATTENTION) })
   },
 )
 
@@ -1122,6 +1127,25 @@ test.each(REFUSALS)(
   },
 )
 
+test('a refused adjustment of the sales book leaves the totals of its total submission, which the SII took', async () => {
+  const after = booksForm({ purchaseBook: '111', guideBook: '113', exemptPurchaseBook: '114' })
+  const harness = await certificationHarness([
+    ...EMPTY_HISTORY,
+    entry,
+    avance2([rowsPage(), booksForm(), booksForm(), booksForm(), after]),
+    post('pe_avance3', ...repeat(DECLARATION_ANSWERS.success, 2)),
+    uploads(...[101, 102, 103, 104, 111, 112, 113, 114].map((id) => reception(String(id)))),
+    estUpBy({ '112': 'LRS' }),
+  ])
+  const result = await runBooks(harness.deps, booksState())
+  expect(uploadedXml(sentBooks(harness)[5])).toContain('<TipoEnvio>AJUSTE')
+  expect(result.state.diagnosis?.['112']).toMatchObject({ code: 'LRS', status: 'rejected' })
+  expect(result.state.books.accumulated['2026-11']).toMatchObject({
+    notificationFolio: { purchase: Number(ATTENTION), sale: Number(SALES_BOOK_ATTENTION) },
+  })
+  expect(result.state.books.accumulated['2026-11'].sale).toBeDefined()
+})
+
 test('every row empty decides on an adjustment from the books it sends: a refused monthly sales book carries none', async () => {
   const { salesBook, ...older } = plan
   void salesBook
@@ -1149,6 +1173,8 @@ test('every row empty decides on an adjustment from the books it sends: a refuse
     expect(uploadedXml(request)).toContain('<PeriodoTributario>2026-10')
   }
   expect(result.state.books.occupiedPeriods).toEqual(['2026-11'])
+  // The refused sales book was the only one whose totals 2026-11 kept: the period keeps none.
+  expect(result.state.books.accumulated).not.toHaveProperty('2026-11')
 })
 
 test('a declaration that never stands is diagnosed: the envelope it names first, then the others as they are declared', async () => {

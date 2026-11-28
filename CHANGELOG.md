@@ -148,7 +148,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     later declaration names the track id the SII refused. It stops with its diagnosis, and the portal client's logger
     says once what to look at (`certification book refused, not sent again`, with `uploadStatusChecks`). When no book
     is left to send, the search for a free period stops, and an adjustment is decided from the totals of the books
-    that go, not of a refused one.
+    that go, not of a refused one. The totals a refused total submission of the sales or the purchase book kept for
+    an adjustment leave the state with it; a refused adjustment leaves the totals of the total submission it
+    adjusted, which the SII took.
   - **What to change:** code that branches on `unknown`, or compares the gloss, for `LRS`, `LRC` or `LRF`.
 
 - **The status of an export document** (`queryDocumentStatus`, types 110, 111 and 112). It refused them with
@@ -266,9 +268,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   found after removing every processing instruction, then every comment, wherever it stood, so a comment that held
   `<?` before the root, with a processing instruction later in the file, hid the root, and a file the schema takes
   was refused with `INVALID_OPTION { field: 'schema' }`. What may come before the root (white space, a byte order
-  mark, processing instructions, comments, a document type) is now skipped in the order it comes, in one pass; text
-  before the root is passed over to the first element after it, as before, and that element's schema says the file
-  is wrong.
+  mark, processing instructions, comments, a document type) is now skipped in the order it comes, in one pass. Text
+  before the root, and a comment or a processing instruction left open there, are passed over to the first element
+  after them, as before, and that element's schema says what is wrong with the file.
   - **What to change:** nothing.
 
 ## [0.17.0] - 2026-11-26
