@@ -295,3 +295,40 @@ test('a basic note whose row has a discount or a unit keeps only name, quantity 
   expect(basic.invoices[0].items).toEqual([{ name: 'Cemento', quantity: 10, unitPrice: 8000 }])
   expect(basic.debitNotes[0].items).toEqual([{ name: 'Cemento', quantity: 2, unitPrice: 9000 }])
 })
+
+test('the lines a case left unread go with the plan, by set and case, from the sets the plan keeps', () => {
+  expect(plan.unread).toBeUndefined()
+  const text = [
+    'SET BASICO - NUMERO DE ATENCION: 1',
+    'CASO 1-1',
+    'DOCUMENTO FACTURA',
+    'Tornillo  4  100',
+    'Despachar antes del dia 4',
+    'SET BASICO - NUMERO DE ATENCION: 2',
+    'CASO 2-1',
+    'DOCUMENTO FACTURA',
+    'Tornillo  4  100',
+    'CASO 2-2',
+    'DOCUMENTO NOTA DE CREDITO',
+    'NOTA: sin despacho',
+    'Revisar el saldo 3',
+    'SET GUIA DE DESPACHO - NUMERO DE ATENCION: 3',
+    'CASO 3-1',
+    'DOCUMENTO GUIA DE DESPACHO',
+    'Llevar en la tarde',
+    'SET BASICO DOCUMENTOS DE EXPORTACION (2) - NUMERO DE ATENCION: 4',
+    'CASO 4-1',
+    'DOCUMENTO FACTURA DE EXPORTACION ELECTRONICA',
+    'EMBALAR POR SEPARADO',
+    'SET FACTURA DE COMPRA - NUMERO DE ATENCION: 5',
+    'CASO 5-1',
+    'DOCUMENTO NOTA DE CREDITO',
+    'Sin factura',
+    'SET LIBRO DE VENTAS - NUMERO DE ATENCION: 6',
+  ].join('\n')
+  expect(planCertificationSets(parseTestSetText(text)).unread).toEqual([
+    { set: 'basic', caseId: '2-2', lines: ['NOTA: sin despacho', 'Revisar el saldo 3'] },
+    { set: 'guide', caseId: '3-1', lines: ['Llevar en la tarde'] },
+    { set: 'export2', caseId: '4-1', lines: ['EMBALAR POR SEPARADO'] },
+  ])
+})

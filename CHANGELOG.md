@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The lines of the test set the reader did not use** (`TestCase.unread`, `CertificationPlan.unread`,
+  `checkTestSetText`, `strictTestSet` of `runCertification`; `dte-sdk/portal`). `parseTestSetText` never throws, and a
+  line of a case its grammar did not know vanished: nothing said that a case was issued without it. Each case now
+  keeps those lines in `unread`, in order and as the set writes them, leaving out blank lines, separator lines and the
+  sentence that asks a note for the unit prices of its document, which the notes already take when issued. The plan
+  carries them by set and case, and the run, before it asks for any folio, logs each line of a set not yet sent
+  through the portal client's logger. With `strictTestSet: true` it stops there instead, with
+  `SII_PORTAL_UNEXPECTED_PAGE` naming the set and the case, as it stops on an export set it cannot issue.
+  - **What to change:** code that builds a `TestCase` of its own must give it `unread`.
+- **The size of the simulation envelope** (`IssuedSimulation.outsideDeclarableSize`). The SII's certification manual
+  ("Manual para empresas usuarias, ambiente de certificación factura electrónica", page 27) gives the simulation a
+  maximum of 100 documents, and field behaviour shows the "Declarar avance" form asking of the simulation envelope for
+  20 to 100. `issueSimulation` now says when its envelope is outside 20 to 100 documents, and the run logs it through
+  the portal client's logger; it still sends the envelope, and issues no document more. `fewerThanRecommended` is
+  unchanged.
+  - **What to change:** code that builds an `IssuedSimulation` of its own must give it `outsideDeclarableSize`.
+
+### Fixed
+
+- **A line of prose in a case is no longer an item** (`parseTestSetText`). A line of a case of the basic, exempt,
+  guide or purchase set that started with a capital and ended in a number became an item: a sentence such as
+  "Despachar antes del dia 4" was issued as an item of quantity 4. A row now becomes an item only when its cells stand
+  apart, after a tab or a run of spaces, as the rows of the item table do; such a line now goes to `unread`. A
+  row whose cells stand apart is read as before.
+
 ## [0.17.0] - 2026-11-26
 
 ### Added

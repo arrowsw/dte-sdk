@@ -1,4 +1,4 @@
-import { issueSimulation, type IssuedSimulation } from '../../src/certification/simulation'
+import { issueSimulation, outsideDeclarableSize, type IssuedSimulation } from '../../src/certification/simulation'
 import { verifyEnvelopeSignature } from '../../src/envelope/sign'
 import { chileTimestamp } from '../../src/time/chile'
 import { calculateTotals } from '../../src/totals/calculate'
@@ -27,6 +27,11 @@ describe('the simulation of the whole plan', () => {
     expect(simulation.envelope.setId).toMatch(/^DTE_SetDoc_/)
     expect(simulation.envelope.cover.receiverRut).toBe('60803000-K')
     expect(verifyEnvelopeSignature(simulation.envelope.xml).valid).toBe(true)
+  })
+
+  test('says when the envelope is outside the 20 to 100 documents the declaration of the simulation takes', () => {
+    expect(simulation.outsideDeclarableSize).toBe(true)
+    expect([19, 20, 100, 101].map(outsideDeclarableSize)).toEqual([true, false, false, true])
   })
 
   test('no document carries the SET reference; notes carry one reference to their document', () => {

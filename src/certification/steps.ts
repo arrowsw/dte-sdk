@@ -252,6 +252,39 @@ export const checkExportSets = async (deps: CertificationDependencies, state: Ce
   }
 }
 
+const NOT_READ = 'certification test set line not read'
+
+/**
+ * EN: Shows, before any folio of the sets is asked for, the lines of the test set the reader did not use: each line a
+ * case of a set not yet sent left unread (the plan's `unread`) goes to the portal client's logger, with its set and its
+ * case. With `strict` the run stops here, where nothing has been asked of the SII, on the first such case. A plan read
+ * in full, or no plan, logs nothing.
+ * ES: Muestra, antes de pedir cualquier folio de los sets, las líneas del set de pruebas que el lector no usó: cada
+ * línea que un caso de un set aún no enviado dejó sin leer (el `unread` del plan) va al logger del cliente del portal,
+ * con su set y su caso. Con `strict` la corrida se detiene aquí, donde nada se ha pedido al SII, en el primer caso así.
+ * Un plan leído completo, o sin plan, no registra nada.
+ * @throws {DteError} EN: `SII_PORTAL_UNEXPECTED_PAGE { operation: 'checkTestSetText', step: 'set-text', set, caseId, lines }` with `strict` and a line unread. ES: `SII_PORTAL_UNEXPECTED_PAGE { operation: 'checkTestSetText', step: 'set-text', set, caseId, lines }` con `strict` y una línea sin leer.
+ */
+export const checkTestSetText = async (
+  deps: CertificationDependencies,
+  state: CertificationState,
+  options: { readonly strict?: boolean } = {},
+): Promise<void> => {
+  const rt = runtime(deps)
+  const pending = (state.plan?.unread ?? []).filter((entry) => state.sets[entry.set] === undefined)
+  for (const entry of pending)
+    for (const line of entry.lines) rt.portal.logger.warn(NOT_READ, { set: entry.set, caseId: entry.caseId, line })
+  const first = pending[0]
+  if (options.strict === true && first !== undefined)
+    throw new DteError('SII_PORTAL_UNEXPECTED_PAGE', {
+      operation: 'checkTestSetText',
+      step: 'set-text',
+      set: first.set,
+      caseId: first.caseId,
+      lines: first.lines,
+    })
+}
+
 /**
  * EN: The entry that declares an envelope: its track id with today's Chile date, whatever day it was sent on. Internal.
  * ES: La entrada que declara un envío: su track id con la fecha de hoy en Chile, sea cual sea el día en que se envió.
@@ -523,13 +556,15 @@ const atLeast = (stage: CertificationStage, floor: CertificationStage): boolean 
  * whatever happened, and the track id with the Chile date of the send. An attempt that stops before the upload leaves
  * the CAFs it obtained in the state (`simulationCafs`), and the next one issues with them and asks only for what is
  * missing: unused folios are what makes the SII ration. Once the upload was tried they are spent, as field behaviour
- * has it, and a new attempt asks for new ones.
+ * has it, and a new attempt asks for new ones. An envelope outside the 20 to 100 documents the declaration takes
+ * (`outsideDeclarableSize`) is sent all the same, and the portal client's logger says so.
  * ES: Envía la simulación: CAF propios para un folio por caso (nunca los CAF de los sets), cada caso de los cuatro sets
  * reemitido en un sobre, el sobre y los documentos guardados como artefactos, el envío, los folios marcados enviados
  * pase lo que pase, y el track id con la fecha de Chile del envío. Un intento que se detiene antes del envío deja en
  * el estado los CAF que obtuvo (`simulationCafs`), y el siguiente emite con ellos y pide solo lo que falta: los folios
  * sin usar son lo que hace racionar al SII. Una vez intentado el envío quedan gastados, como en el comportamiento de
- * campo, y un intento nuevo pide otros.
+ * campo, y un intento nuevo pide otros. Un sobre fuera de los 20 a 100 documentos que toma la declaración
+ * (`outsideDeclarableSize`) se envía igual, y el logger del cliente del portal lo dice.
  * @throws {DteError} EN: `MISSING_FIELD { field: 'plan' }` without a plan; the folio, 5b-1 and upload codes. ES: `MISSING_FIELD { field: 'plan' }` sin plan; los códigos de folios, de 5b-1 y de envío.
  */
 export const sendSimulation = async (
@@ -557,6 +592,11 @@ export const sendSimulation = async (
     exportSets: rt.exportSets,
     now: rt.now,
   })
+  // Field behaviour: the declaration of the simulation takes 20 to 100 documents. The run sends it all the same.
+  if (issued.outsideDeclarableSize)
+    rt.portal.logger.warn('certification simulation size outside 20 to 100 documents', {
+      documents: issued.cases.length,
+    })
   await rt.store.writeArtefact(SIMULATION_ARTEFACT, issued.envelope.xml)
   for (const document of issued.cases)
     await rt.store.writeArtefact(

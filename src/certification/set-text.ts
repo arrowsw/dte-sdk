@@ -69,6 +69,8 @@ export type TestCase = {
   readonly customsReferences?: readonly string[]
   /** EN: Every line of the case after its header, trimmed. ES: Cada línea del caso tras su cabecera, recortada. */
   readonly raw: readonly string[]
+  /** EN: The lines of the case the grammar did not use, trimmed, in order; blank lines, separator lines and the known prose of the set are left out. ES: Las líneas del caso que la gramática no usó, recortadas, en orden; se omiten las líneas en blanco, las de separación y la prosa conocida del set. */
+  readonly unread: readonly string[]
 }
 
 /**
@@ -127,7 +129,18 @@ const GLOBAL_DISCOUNT_LINE = /^DESCUENTO\s+GLOBAL.+?(\d+)%/i
 const CURRENCY_LINE = /^MONEDA\s+DE\s+LA\s+OPERACION[:\s]+(.+)$/i
 const ITEM_HEADER = /^ITEM\s+(CANTIDAD|VALOR)/i
 const ITEM_SPLIT = /\t+|\s{2,}/
-const ITEM_FALLBACK = /^(ITEM\s+\d+|[A-Z][^0-9]+?)\s+(\d+)$/i
+// A row whose cells the main reading does not take, read as its name and the quantity in its last cell: the quantity
+// stands apart, as a cell of the table does (after a tab or a run of spaces), so a line of prose that ends in a number
+// is never an item.
+const ITEM_FALLBACK = /^(ITEM\s+\d+|[A-Z][^0-9]+?)(?:\s*\t\s*|\s{2,})(\d+)$/i
+// A separator inside a case: a run of dashes, equals signs, underscores or stars, none of it text of the case.
+const SEPARATOR_LINE = /^[-=_*]+$/
+// The prose of a case the grammar knows it may leave unread: the sentence that asks a note for the unit prices of the
+// document it refers to, which the notes take when issued ("LOS PRECIOS UNITARIOS ... DEBEN SER LOS MISMOS DE LA
+// FACTURA", "EL PRECIO UNITARIO DEL ITEM DEBE SER EL MISMO ...").
+const KNOWN_PROSE: readonly RegExp[] = [
+  /^(?:EL|LOS)\s+PRECIOS?\s+UNITARIOS?\b.*\bDEBEN?\s+SER\s+(?:EL|LOS)\s+MISMOS?\b/i,
+]
 const BOOK_DOCUMENT_LINE = /^(FACTURA DE COMPRA ELECTRONICA|FACTURA ELECTRONICA|FACTURA|NOTA DE CREDITO)\s+(\d+)\s*$/i
 const BOOK_OBSERVATION_LINE =
   /^(FACTURA DEL GIRO|FACTURA CON IVA|NOTA DE CREDITO POR|ENTREGA GRATUITA|COMPRA CON RETENCION)/i
@@ -327,7 +340,8 @@ const cells = (line: string): readonly string[] =>
     .map((part) => part.trim())
     .filter((part) => part !== '')
 
-const parseItemRow = (line: string, reasonText: string): TestCaseItem | null => {
+// An item, `header` for a row whose first cell is a header word, or null.
+const parseItemRow = (line: string, reasonText: string): TestCaseItem | 'header' | null => {
   const parts = line
     .split(ITEM_SPLIT)
     .map((part) => part.trim())
@@ -336,7 +350,7 @@ const parseItemRow = (line: string, reasonText: string): TestCaseItem | null => 
   // capitals only, so "Razones varias" is an item and a lower-case "modifica monto" leaves the value a quantity.
   if (parts.length >= 2 && !line.includes(':') && !/^(DOCUMENTO|REFERENCIA|RAZON)/.test(line)) {
     const first = parts[0]
-    if (first === 'ITEM' || first.includes('CANTIDAD') || first.includes('UNITARIO')) return null
+    if (first === 'ITEM' || first.includes('CANTIDAD') || first.includes('UNITARIO')) return 'header'
     {
       if (parts.length === 4) {
         if (/^[A-Za-z]+$/.test(parts[2]))
@@ -390,6 +404,7 @@ const newCase = (setId: string, number: number): MutableCase => ({
   currency: '',
   exportFields: {},
   raw: [],
+  unread: [],
 })
 
 const newBookDocument = (documentText: string, folio: number): MutableBookDocument => ({
@@ -424,7 +439,10 @@ const observe = (document: MutableBookDocument, observation: string): void => {
  * (`customsReferences`), and item rows read by the columns of the `ITEM` header above them, decimals included; its
  * labels are read as the set writes them (`CLAUSULA DE VENTA DE EXPORTACION`, `DESCUENTO LINEA # 1`, `NACIONALIDAD`)
  * and loosely around that wording.
- * Lines the grammar does not know are ignored and a set of unknown kind is `other`, so the function never throws. The
+ * A line of a case the grammar does not use is kept in the case's `unread`, unless it is blank, a separator or prose
+ * the grammar knows; a row becomes an item only when its cells stand apart, as a row of the table does, so a line of
+ * prose is never one. Lines outside a case that the grammar does not know are ignored and a set of unknown kind is
+ * `other`, so the function never throws. The
  * text is the portal page with its tags turned into line breaks and its entities decoded, or a file holding the same.
  * ES: Parsea el texto del set de pruebas del SII: sets, sus casos con ítems y referencias, los documentos de proveedor
  * de los sets de libro de compras y el factor de proporcionalidad. Los casos de un set de liquidación se leen por sus
@@ -433,9 +451,12 @@ const observe = (document: MutableBookDocument, observation: string): void => {
  * de tara y pesos, un país de destino y un recargo en la línea), los documentos aduaneros que nombran sus líneas de
  * referencia (`customsReferences`), y filas de ítems leídas por las columnas del encabezado `ITEM` sobre ellas, con
  * decimales; sus rótulos se leen como los escribe el set (`CLAUSULA DE VENTA DE EXPORTACION`, `DESCUENTO LINEA # 1`,
- * `NACIONALIDAD`) y con holgura alrededor de esa redacción. Las
- * líneas que la gramática no conoce se ignoran y un set de tipo desconocido es `other`, así que la función nunca lanza. El texto es la página del portal con las etiquetas vueltas saltos de línea y las entidades
- * decodificadas, o un archivo con lo mismo.
+ * `NACIONALIDAD`) y con holgura alrededor de esa redacción. Una
+ * línea de un caso que la gramática no usa queda en `unread` del caso, salvo que esté en blanco, sea de separación o
+ * sea prosa que la gramática conoce; una fila es ítem solo cuando sus celdas van separadas, como una fila de la tabla,
+ * así que una línea de prosa nunca lo es. Las líneas fuera de un caso que la gramática no conoce se ignoran y un set de
+ * tipo desconocido es `other`, así que la función nunca lanza. El texto es la página del portal con las etiquetas
+ * vueltas saltos de línea y las entidades decodificadas, o un archivo con lo mismo.
  * @param text EN: the set text. ES: el texto del set.
  */
 export const parseTestSetText = (text: string): readonly TestSet[] => {
@@ -510,9 +531,12 @@ export const parseTestSetText = (text: string): readonly TestSet[] => {
     }
     if (current !== null) {
       current.raw.push(line)
-      if (set.kind === TEST_SET_KINDS.settlement) settlementTable = parseSettlementLine(current, line, settlementTable)
-      else if (set.kind === TEST_SET_KINDS.export) exportColumns = parseExportLine(current, line, exportColumns)
-      else parseCaseLine(current, line)
+      let used: boolean
+      if (set.kind === TEST_SET_KINDS.settlement)
+        [settlementTable, used] = parseSettlementLine(current, line, settlementTable)
+      else if (set.kind === TEST_SET_KINDS.export) [exportColumns, used] = parseExportLine(current, line, exportColumns)
+      else used = parseCaseLine(current, line)
+      if (!used && !skippable(line)) current.unread.push(line)
       continue
     }
     if (!booksOpen && (set.kind === TEST_SET_KINDS.purchaseBook || set.kind === TEST_SET_KINDS.exemptPurchaseBook))
@@ -635,10 +659,17 @@ const parseCaseField = (current: MutableCase, line: string): boolean => {
   return false
 }
 
-const parseCaseLine = (current: MutableCase, line: string): void => {
-  if (parseCaseField(current, line) || ITEM_HEADER.test(line)) return
+// A line of a case the grammar may leave out of `unread`: blank, a separator, or prose it knows.
+const skippable = (line: string): boolean =>
+  line === '' || SEPARATOR_LINE.test(line) || KNOWN_PROSE.some((pattern) => pattern.test(line))
+
+// A line of a case of the basic, exempt, guide or purchase set. Returns whether the grammar used it.
+const parseCaseLine = (current: MutableCase, line: string): boolean => {
+  if (parseCaseField(current, line) || ITEM_HEADER.test(line)) return true
   const item = parseItemRow(line, current.reasonText)
-  if (item !== null) current.items.push(item)
+  if (item === null) return false
+  if (item !== 'header') current.items.push(item)
+  return true
 }
 
 type SettlementTable = 'items' | 'commissions'
@@ -646,20 +677,22 @@ type SettlementTable = 'items' | 'commissions'
 // A settlement case holds two tables: its items (`ITEM  CANTIDAD  TOTAL LINEA`) and, on some cases, its commissions
 // and other charges (`COMISIONES Y OTROS CARGOS  TOTAL LINEA`). A row is its name and its numbers: the last number is
 // the line total, negative for what is taken off, and on an item the number before it is the quantity, 1 when there is
-// none. Any other line is read as a labelled line or as nothing. Returns the table the next row goes to.
-const parseSettlementLine = (current: MutableCase, line: string, table: SettlementTable): SettlementTable => {
-  if (COMMISSIONS_HEADER.test(line)) return 'commissions'
-  if (ITEM_HEADER.test(line)) return 'items'
+// none. Any other line is read as a labelled line or as nothing. Returns the table the next row goes to, and whether
+// the line was used.
+const parseSettlementLine = (
+  current: MutableCase,
+  line: string,
+  table: SettlementTable,
+): readonly [SettlementTable, boolean] => {
+  if (COMMISSIONS_HEADER.test(line)) return ['commissions', true]
+  if (ITEM_HEADER.test(line)) return ['items', true]
   const parts = cells(line)
   const last = parts[parts.length - 1]
-  if (parts.length < 2 || !SIGNED_INTEGER.test(last)) {
-    parseCaseField(current, line)
-    return table
-  }
+  if (parts.length < 2 || !SIGNED_INTEGER.test(last)) return [table, parseCaseField(current, line)]
   const lineTotal = int(last)
   if (table === 'commissions') current.commissions = [...current.commissions!, { name: parts[0], lineTotal }]
   else current.items.push({ name: parts[0], quantity: (parts.length > 2 && int(parts[1])) || 1, lineTotal })
-  return table
+  return [table, true]
 }
 
 // The lines only an export case is read for, each label read loosely: the units of the tare and of the weights, whose
@@ -798,27 +831,27 @@ const parseExportField = (current: MutableCase, line: string): boolean => {
 }
 
 // An export case: its labelled lines, then its item rows, read by the columns of the last `ITEM` header. Returns the
-// columns the next row is read by. Any other line is nothing. Under a header of several columns, a row with no colon
-// that fills every one of them is an item whatever its name starts with: a label of the case holds one value, or a
-// colon, and read as a label such a row would lose its item and put its numbers in the freight or the insurance. A
-// row that leaves a column empty is not told apart from a label this way: if its name starts like one, it is still
-// read as that label.
+// columns the next row is read by, and whether the line was used. Any other line is nothing. Under a header of several
+// columns, a row with no colon that fills every one of them is an item whatever its name starts with: a label of the
+// case holds one value, or a colon, and read as a label such a row would lose its item and put its numbers in the
+// freight or the insurance. A row that leaves a column empty is not told apart from a label this way: if its name
+// starts like one, it is still read as that label.
 const parseExportLine = (
   current: MutableCase,
   line: string,
   columns: readonly ExportColumn[],
-): readonly ExportColumn[] => {
+): readonly [readonly ExportColumn[], boolean] => {
   const parts = cells(line)
   const fills = columns.length > 1 && parts.length === columns.length + 1 && !line.includes(':')
   const row = fills ? exportItem(parts, columns) : null
   if (row !== null) {
     current.items.push(row)
-    return columns
+    return [columns, true]
   }
-  if (parseExportField(current, line)) return columns
-  if (/^ITEM\b/i.test(line) && parts.length > 1) return parts.slice(1).map(exportColumn)
-  if (parts.length < 2) return columns
+  if (parseExportField(current, line)) return [columns, true]
+  if (/^ITEM\b/i.test(line) && parts.length > 1) return [parts.slice(1).map(exportColumn), true]
+  if (parts.length < 2) return [columns, false]
   const item = exportItem(parts, columns)
   if (item !== null) current.items.push(item)
-  return columns
+  return [columns, item !== null]
 }

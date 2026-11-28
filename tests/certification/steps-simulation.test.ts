@@ -73,6 +73,8 @@ describe('sendSimulation', () => {
     expect(harness.steps().filter((step) => step === 'CAF_OK')).toHaveLength(6)
     expect(harness.steps().slice(-2)).toEqual(['SIM_SENDING', 'SIM_OK'])
     expect(harness.events[0]).toEqual({ step: 'SIM_START' })
+    // Eighteen documents: fewer than the declaration of the simulation takes, logged and sent all the same.
+    expect(harness.warnedWith('certification simulation size outside 20 to 100 documents')).toEqual([{ documents: 18 }])
   })
 
   test('beforeUpload is handed the envelope of the simulation, and one that throws sends nothing', async () => {

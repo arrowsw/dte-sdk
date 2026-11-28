@@ -270,6 +270,7 @@ const PORTAL_EXPORTS = [
   'DEFAULT_CERTIFICATION_RECEIVER',
   'DEFAULT_CERTIFICATION_FOREIGN_RECEIVER',
   'obtainTestSet',
+  'checkTestSetText',
   'checkExportSets',
   'sendTestSet',
   'declareTestSets',

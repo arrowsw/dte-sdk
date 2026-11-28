@@ -144,6 +144,7 @@ export type {
   PlannedExportCustoms,
   PlannedExportReference,
   SetFolios,
+  UnreadCaseLines,
 } from '../certification/set-plan'
 export { createFolioAllocator } from '../certification/folios'
 export type { FolioSource, FolioAllocatorOptions } from '../certification/folios'
@@ -248,6 +249,7 @@ export type {
 } from '../certification/runtime'
 export {
   obtainTestSet,
+  checkTestSetText,
   checkExportSets,
   sendTestSet,
   declareTestSets,
