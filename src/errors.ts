@@ -52,6 +52,7 @@ export const DTE_ERROR_CODES = {
   SII_PORTAL_UNEXPECTED_PAGE: 'SII_PORTAL_UNEXPECTED_PAGE',
   DEPENDENCY_UNAVAILABLE: 'DEPENDENCY_UNAVAILABLE',
   PDF_RENDER_FAILED: 'PDF_RENDER_FAILED',
+  SCHEMA_INVALID: 'SCHEMA_INVALID',
 } as const
 
 /**
@@ -116,6 +117,7 @@ const MESSAGES: Readonly<Record<DteErrorCode, string>> = {
   SII_PORTAL_UNEXPECTED_PAGE: 'SII portal answered a page that could not be interpreted',
   DEPENDENCY_UNAVAILABLE: 'A library this function needs could not be loaded',
   PDF_RENDER_FAILED: 'The PDF library failed while drawing the printed sample',
+  SCHEMA_INVALID: 'XML does not validate against the SII schema',
 }
 
 // Only these detail keys are safe to show: field names, codes and numbers, never user text, URLs or bodies.

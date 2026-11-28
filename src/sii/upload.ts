@@ -51,6 +51,35 @@ export type UploadReceipt = {
 }
 
 /**
+ * EN: A file about to be uploaded, as a check before the upload receives it: what kind of file it is, its name, and the
+ * exact text about to be sent. The certification run hands its own checks a file of this shape too
+ * (`CertificationUpload`, whose `kind` is `testSet`, `simulation` or `book` and whose `name` is the key of the set or
+ * the book), so one `UploadCheck` can be given both to an upload and to the run.
+ * ES: Un archivo que está por subirse, tal como lo recibe una revisión antes de la subida: qué tipo de archivo es, su
+ * nombre y el texto exacto que está por enviarse. La corrida de certificación entrega a sus revisiones un archivo de
+ * esta misma forma (`CertificationUpload`, cuyo `kind` es `testSet`, `simulation` o `book` y cuyo `name` es la clave
+ * del set o del libro), así que una misma `UploadCheck` se puede dar a una subida y a la corrida.
+ */
+export type UploadCheckFile = {
+  /** EN: What the file is: the `UploadKind` of an upload (`dte`, `receipt`, `book`, `folioConsumption`), or the run's own kind. ES: Qué es el archivo: el `UploadKind` de una subida (`dte`, `receipt`, `book`, `folioConsumption`), o el tipo propio de la corrida. */
+  readonly kind: string
+  /** EN: Which file: the multipart file name on an upload, the key of the set or the book in the run. ES: `filename` — Cuál archivo: el nombre del archivo del multipart en una subida, la clave del set o del libro en la corrida. */
+  readonly name: string
+  /** EN: The file as it will be sent. ES: El archivo tal como se enviará. */
+  readonly xml: string
+}
+
+/**
+ * EN: A check run on a file before it is uploaded, and awaited: throwing stops the upload with nothing sent, and what
+ * it throws is what the upload throws. `validateBeforeUpload` of `dte-sdk/schemas` returns one that validates the file
+ * against its schema of the SII.
+ * ES: Una revisión que corre sobre un archivo antes de subirlo, y que se espera: lanzar detiene la subida sin enviar
+ * nada, y lo que lanza es lo que lanza la subida. `validateBeforeUpload` de `dte-sdk/schemas` devuelve una que valida
+ * el archivo contra su esquema del SII.
+ */
+export type UploadCheck = (file: UploadCheckFile) => void | Promise<void>
+
+/**
  * EN: A signed envelope from phase 1, or just its kind and XML (for XML produced elsewhere, which must open with an XML
  * declaration naming ISO-8859-1, as the phase 1 envelopes do).
  * ES: Un sobre firmado de la fase 1, o solo su tipo y XML (para XML generado en otra parte, que debe abrir con una
@@ -71,6 +100,8 @@ export type UploadEnvelopeInput = {
   readonly senderRut?: string
   /** EN: Force a channel for receipts (`rest` or `soap`); `EnvioDTE` always uses `soap`. ES: Forzar el canal de boletas (`rest` o `soap`); `EnvioDTE` siempre usa `soap`. */
   readonly channel?: TokenChannel
+  /** EN: Run on the file once it is checked and before anything is sent, a token included; throwing stops the upload. ES: Corre sobre el archivo una vez revisado y antes de enviar nada, ni siquiera pedir un token; lanzar detiene la subida. */
+  readonly beforeUpload?: UploadCheck
 }
 
 /**
@@ -86,6 +117,8 @@ export type UploadXmlInput = {
   readonly senderRut?: string
   /** EN: Name of the multipart file; letters, digits, `_`, `.` and `-`, ending in `.xml`. Defaults to `LibroGuia.xml` for a guide book, `LibroCV.xml` for any other book and `ConsumoFolios.xml` for a report. ES: Nombre del archivo del multipart; letras, dígitos, `_`, `.` y `-`, terminado en `.xml`. Por defecto `LibroGuia.xml` en un libro de guías, `LibroCV.xml` en otro libro y `ConsumoFolios.xml` en un reporte. */
   readonly fileName?: string
+  /** EN: Run on the file once it is checked and before anything is sent, a token included; throwing stops the upload. ES: Corre sobre el archivo una vez revisado y antes de enviar nada, ni siquiera pedir un token; lanzar detiene la subida. */
+  readonly beforeUpload?: UploadCheck
 }
 
 type ReceptionBase = {
@@ -528,6 +561,21 @@ export const performUpload = (sii: SiiClient, job: UploadJob, overrides?: CallOv
   )
 }
 
+// The caller's check sees the text the bytes of the job were made from, and the upload starts only once it is done.
+const checkedUpload = async (
+  sii: SiiClient,
+  job: UploadJob,
+  xml: string,
+  check: UploadCheck | undefined,
+  overrides: CallOverrides | undefined,
+): Promise<UploadReceipt> => {
+  if (check !== undefined) {
+    if (typeof check !== 'function') throw new DteError('INVALID_OPTION', { field: 'beforeUpload' })
+    await check({ kind: job.kind, name: job.fileName, xml: latin1Xml(xml) })
+  }
+  return performUpload(sii, job, overrides)
+}
+
 /**
  * EN: Uploads a signed envelope: `EnvioDTE` through `DTEUpload` (ISO-8859-1 multipart), `EnvioBOLETA` through the
  * receipts REST API in production or `DTEUpload` in certification (`channel` overrides). Duplicate uploads are
@@ -544,7 +592,7 @@ export const performUpload = (sii: SiiClient, job: UploadJob, overrides?: CallOv
  * envía como bytes ISO-8859-1, así que debe abrir con una declaración XML que nombre ISO-8859-1 (en cualquier caja y con
  * cualquier tipo de comillas); el espacio antes de ella se descarta y cualquier otra cosa se rechaza antes de enviar
  * nada.
- * @throws {DteError} EN: `SII_UPLOAD_REJECTED { status (a number), errors, body }`, `SII_TOKEN_INVALID`, `SII_HTTP_ERROR`, `SII_RESPONSE_INVALID`, `INVALID_OPTION { field: 'channel' | 'xml' }`, `INVALID_OPTION { field: 'companyRut' | 'senderRut' }` when the cover of the file names another company or another sender (nothing is sent), `MISSING_FIELD`, `INVALID_RUT`, `ENCODING_UNSUPPORTED_CHAR`, transport codes. ES: los mismos códigos; `INVALID_OPTION { field: 'companyRut' | 'senderRut' }` cuando la carátula del archivo nombra otra empresa u otro remitente (no se envía nada).
+ * @throws {DteError} EN: `SII_UPLOAD_REJECTED { status (a number), errors, body }`, `SII_TOKEN_INVALID`, `SII_HTTP_ERROR`, `SII_RESPONSE_INVALID`, `INVALID_OPTION { field: 'channel' | 'xml' | 'beforeUpload' }`, `INVALID_OPTION { field: 'companyRut' | 'senderRut' }` when the cover of the file names another company or another sender (nothing is sent), `MISSING_FIELD`, `INVALID_RUT`, `ENCODING_UNSUPPORTED_CHAR`, transport codes, and whatever `beforeUpload` throws (nothing is sent). ES: los mismos códigos; `INVALID_OPTION { field: 'companyRut' | 'senderRut' }` cuando la carátula del archivo nombra otra empresa u otro remitente (no se envía nada), y lo que lance `beforeUpload` (no se envía nada).
  */
 export const uploadEnvelope = async (
   sii: SiiClient,
@@ -561,7 +609,8 @@ export const uploadEnvelope = async (
     if (count > MAX_REST_RECEIPTS)
       throw new DteError('SII_UPLOAD_REJECTED', { status: 'TOO_MANY', count, operation: 'uploadEnvelope' })
   }
-  return performUpload(sii, buildJob(sii, kind, 'uploadEnvelope', input.envelope.xml, input, channel), overrides)
+  const job = buildJob(sii, kind, 'uploadEnvelope', input.envelope.xml, input, channel)
+  return checkedUpload(sii, job, input.envelope.xml, input.beforeUpload, overrides)
 }
 
 /**
@@ -577,7 +626,13 @@ export const uploadBook = async (
   input: UploadXmlInput,
   overrides?: CallOverrides,
 ): Promise<UploadReceipt> =>
-  performUpload(sii, buildJob(sii, 'book', 'uploadBook', input.xml, input, 'soap'), overrides)
+  checkedUpload(
+    sii,
+    buildJob(sii, 'book', 'uploadBook', input.xml, input, 'soap'),
+    input.xml,
+    input.beforeUpload,
+    overrides,
+  )
 
 /**
  * EN: Uploads a signed folio consumption report (RCOF, `ConsumoFolios`) through `DTEUpload` as `ConsumoFolios.xml`, unless
@@ -592,4 +647,10 @@ export const uploadFolioConsumption = async (
   input: UploadXmlInput,
   overrides?: CallOverrides,
 ): Promise<UploadReceipt> =>
-  performUpload(sii, buildJob(sii, 'folioConsumption', 'uploadFolioConsumption', input.xml, input, 'soap'), overrides)
+  checkedUpload(
+    sii,
+    buildJob(sii, 'folioConsumption', 'uploadFolioConsumption', input.xml, input, 'soap'),
+    input.xml,
+    input.beforeUpload,
+    overrides,
+  )

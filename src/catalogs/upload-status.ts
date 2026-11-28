@@ -30,7 +30,11 @@ const QUERY_ERROR_MESSAGE = 'Error de consulta del SII, reintentar más tarde'
 // 1.10, estado_envio.pdf of factura_mercado on sii.cl), 3.3 "Estados de Salida", lists are glossed as it glosses them:
 // "RSC Rechazado por Error en Schema", "SOK Schema Validado", "CRT Carátula OK", "RFR Rechazado por Error en Firma",
 // "FOK Firma de Envió Validada", "PDR Envió en Proceso", "RCT Rechazado por Error en Carátula" and "EPR Envió
-// Procesado", spelled in sentence case and with their accents. The other states are not in that table.
+// Procesado", spelled in sentence case and with their accents. Those eight glosses rest on that table; the other
+// states are not in it. No document of the SII that lists the states of a book has been found, so the gloss and the
+// class of every state of a book rest on field behaviour: `LOK`, `LSO`, `LRH` and `LNC`, and `LRS`, `LRC` and `LRF`,
+// which the SII has answered to the upload of a book that does not validate against its schema, whose cover it
+// refuses, and whose signature does not verify, each a rejection.
 const UPLOAD_STATUS: Readonly<Record<string, StatusEntry>> = {
   EPR: { cls: 'accepted', message: 'Envío procesado' },
   LOK: { cls: 'accepted', message: 'Envío de libro aceptado' },
@@ -54,6 +58,9 @@ const UPLOAD_STATUS: Readonly<Record<string, StatusEntry>> = {
   RLV: { cls: 'rejected', message: 'Rechazado, error en documento' },
   LNC: { cls: 'rejected', message: 'Tipo de envío de libro no corresponde' },
   LRH: { cls: 'rejected', message: 'Libro rechazado con historial' },
+  LRS: { cls: 'rejected', message: 'Libro rechazado por error en schema' },
+  LRC: { cls: 'rejected', message: 'Libro rechazado por error en carátula' },
+  LRF: { cls: 'rejected', message: 'Libro rechazado por error en firma' },
   '-1': { cls: 'queryError', message: 'Campo estado no retornado por el SII, reintentar más tarde' },
   '-2': { cls: 'queryError', message: QUERY_ERROR_MESSAGE },
   '-3': { cls: 'queryError', message: 'RUT de usuario no existe en el SII, verificar autenticación' },
@@ -137,6 +144,99 @@ export const uploadVerdict = (cls: UploadStatusClass, counts: UploadVerdictCount
  */
 export const uploadStatusMessage = (code: string, channel: UploadChannel = 'soap'): string =>
   lookup(code, channel)?.message ?? `Estado desconocido: ${code}`
+
+/**
+ * EN: Where a check of `uploadStatusChecks` rests: a document of the SII, or field behaviour (what the SII has been seen
+ * to do, which no document found says).
+ * ES: En qué se apoya una revisión de `uploadStatusChecks`: un documento del SII, o el comportamiento de campo (lo que
+ * se ha visto hacer al SII, que ningún documento encontrado dice).
+ */
+export type UploadStatusCheckBasis = 'siiDocument' | 'fieldBehaviour'
+
+/**
+ * EN: One thing to look at when the SII answers a state to an upload.
+ * ES: Una cosa que revisar cuando el SII responde un estado a un envío.
+ */
+export type UploadStatusCheck = {
+  /** EN: What to check, in Spanish, as the glosses are. ES: Qué revisar, en español, como las glosas. */
+  readonly check: string
+  /** EN: Where the check rests. ES: En qué se apoya la revisión. */
+  readonly basis: UploadStatusCheckBasis
+  /** EN: The document of the SII it rests on, or null for field behaviour. ES: El documento del SII en que se apoya, o null si es comportamiento de campo. */
+  readonly source: string | null
+}
+
+const ESTADO_ENVIO = 'Consulta de Estado de Upload Dte (OI2004_CEUPDTE_MDE 1.10), 3.3'
+const FORMATO_IECV = 'Formato de Información de Compras y Ventas 2.2'
+const sii = (check: string, source: string): UploadStatusCheck => ({ check, basis: 'siiDocument', source })
+const field = (check: string): UploadStatusCheck => ({ check, basis: 'fieldBehaviour', source: null })
+
+const SIGNATURE_CHECKS: readonly UploadStatusCheck[] = [
+  field(
+    'A menudo no es la firma: el RUT que firma el envío necesita permiso para enviar documentos en ese ambiente, y ' +
+      'certificación y producción llevan registros de usuarios separados, así que un permiso dado en uno no vale en el otro.',
+  ),
+  field('Después, la firma del archivo.'),
+]
+const VALIDATE =
+  'Validar el archivo contra su esquema del SII antes de enviarlo (validateAgainstSchema de dte-sdk/schemas).'
+
+// What to look at for each state. A state's own gloss rests where the table above says; each check here says where it
+// rests. "EPR Envió Procesado" comes with the counts of the documents ("ACEPTADOS (Solo si Estado es EPR)"), and the
+// manual's own example of it reports one document rejected and none accepted. The format of the books says what a
+// special book is ("Archivos ESPECIALES: corresponden a archivos requeridos por el SII vía una notificación", "Un
+// archivo especial se distingue de los libros regulares, en que indica el folio de la notificación en la carátula")
+// and lists `RECTIFICA` among the values of `TipoLibro`, not of `TipoEnvio`.
+const UPLOAD_STATUS_CHECKS: Readonly<Record<string, readonly UploadStatusCheck[]>> = {
+  RFR: SIGNATURE_CHECKS,
+  LRF: SIGNATURE_CHECKS,
+  EPR: [
+    sii(
+      'Procesado no es aceptado: leer las cantidades de documentos aceptados, con reparos y rechazados.',
+      ESTADO_ENVIO,
+    ),
+  ],
+  RSC: [sii(VALIDATE, ESTADO_ENVIO)],
+  LRS: [
+    field(VALIDATE),
+    field('Que cada tipo de documento sea de ese libro: una guía de despacho va en el libro de guías.'),
+  ],
+  RCT: [
+    sii('La carátula del envío.', ESTADO_ENVIO),
+    field('El número y la fecha de resolución de la carátula deben ser los de la empresa en ese ambiente.'),
+  ],
+  LRC: [
+    field('La carátula del libro: su tipo (TipoLibro) y su folio de notificación (FolioNotificacion).'),
+    sii(
+      'Un libro que pide el SII por una notificación es un libro especial (TipoLibro ESPECIAL) y lleva el folio de ' +
+        'la notificación en la carátula (FolioNotificacion).',
+      FORMATO_IECV,
+    ),
+    sii(
+      'La rectificación de un período es un tipo de libro (TipoLibro RECTIFICA, con CodAutRec), no un tipo de envío.',
+      FORMATO_IECV,
+    ),
+  ],
+  LRH: [
+    field('Visto en un libro cuyos totales no cuadran con sus líneas.'),
+    field('Por ejemplo, un campo del libro de compras escrito en uno de ventas.'),
+    field('O las comisiones de una liquidación factura dejadas fuera de su línea.'),
+  ],
+  LNC: [field('Visto al enviar de nuevo un período que ya tiene un libro aceptado.')],
+}
+
+/**
+ * EN: What to look at when the SII answers a state to an upload: a few short checks, each with the basis it rests on.
+ * It lists `RFR`, `EPR`, `RSC`, `RCT` and the states of a book `LRF`, `LRS`, `LRC`, `LRH` and `LNC`; any other state
+ * has none. The glosses say what the SII answered; these say where to start.
+ * ES: Qué revisar cuando el SII responde un estado a un envío: unas pocas revisiones cortas, cada una con aquello en que
+ * se apoya. Trae `RFR`, `EPR`, `RSC`, `RCT` y los estados de un libro `LRF`, `LRS`, `LRC`, `LRH` y `LNC`; cualquier
+ * otro estado no tiene ninguna. Las glosas dicen qué respondió el SII; estas dicen por dónde empezar.
+ * @param code EN: `ESTADO` as returned by the SII. ES: `ESTADO` tal como lo devuelve el SII.
+ * @returns EN: the checks, in the order to make them; empty when none is listed. ES: las revisiones, en el orden en que hacerlas; vacío si no hay ninguna.
+ */
+export const uploadStatusChecks = (code: string): readonly UploadStatusCheck[] =>
+  Object.prototype.hasOwnProperty.call(UPLOAD_STATUS_CHECKS, code) ? UPLOAD_STATUS_CHECKS[code] : []
 
 /**
  * EN: True when the status is a transient query error (`-1` … `-14`) worth retrying.

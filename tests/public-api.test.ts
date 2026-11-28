@@ -207,6 +207,7 @@ const ROOT_EXPORTS = [
   'uploadBook',
   'uploadEnvelope',
   'uploadFolioConsumption',
+  'uploadStatusChecks',
   'uploadStatusMessage',
   'uploadVerdict',
   'unstable_verifyAssignment',
@@ -416,6 +417,7 @@ const SCHEMAS_EXPORTS = [
   'loadSchemaValidator',
   'schemaOf',
   'validateAgainstSchema',
+  'validateBeforeUpload',
 ] as const
 
 const ENTRIES: ReadonlyArray<readonly [string, Record<string, unknown>, readonly string[]]> = [

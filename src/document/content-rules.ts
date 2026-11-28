@@ -109,7 +109,13 @@ export const totalsWarnings = (type: DocumentType, totals: Totals): readonly Doc
 const MAX_EXPORT_AMOUNT = 1e14
 const EXPORT_AMOUNTS = ['exemptAmount', 'totalAmount'] as const
 
-const isExportAmount = (amount: number): boolean =>
+/**
+ * EN: Whether an amount is one `Exportaciones` takes for `MntExe` or `MntTotal`: a number from zero, below 10^14, with
+ * four decimals at most. Internal.
+ * ES: Si un monto es uno que `Exportaciones` acepta en `MntExe` o `MntTotal`: un número desde cero, bajo 10^14, con
+ * cuatro decimales a lo más. Interno.
+ */
+export const isExportAmount = (amount: number): boolean =>
   typeof amount === 'number' &&
   Number.isFinite(amount) &&
   amount >= 0 &&

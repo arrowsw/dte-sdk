@@ -1,4 +1,5 @@
 import { DteError, errorMessage } from '../errors'
+import type { UploadCheckFile } from '../sii/upload'
 import { decodeLatin1 } from '../text/latin1'
 import { SCHEMA_SOURCES } from './sources'
 
@@ -226,3 +227,34 @@ export const validateAgainstSchema = async (
   })
   return result.errors.map((error) => ({ message: error.message, line: error.loc?.lineNumber ?? null }))
 }
+
+/**
+ * EN: Options of `validateBeforeUpload`.
+ * ES: Opciones de `validateBeforeUpload`.
+ */
+export type ValidateBeforeUploadOptions = {
+  /** EN: Loader of the validator library, for tests. ES: Cargador de la librería de validación, para tests. */
+  readonly load?: () => Promise<SchemaValidatorModule>
+}
+
+/**
+ * EN: A ready-made `beforeUpload`: it validates each file against its schema of the SII with `validateAgainstSchema`,
+ * by the file's document element, and throws when the schema says anything against it, so the file is not sent. The
+ * same function can be given to `uploadEnvelope`, `uploadBook` and `uploadFolioConsumption` and to the certification
+ * run (`CertificationDependencies.beforeUpload`). Its validator is the optional peer `xmllint-wasm`, loaded on first
+ * use.
+ * ES: Un `beforeUpload` listo para usar: valida cada archivo contra su esquema del SII con `validateAgainstSchema`,
+ * según el elemento raíz del archivo, y lanza cuando el esquema dice algo contra él, así el archivo no se envía. La
+ * misma función se puede dar a `uploadEnvelope`, `uploadBook` y `uploadFolioConsumption` y a la corrida de
+ * certificación (`CertificationDependencies.beforeUpload`). Su validador es el peer opcional `xmllint-wasm`, que se
+ * carga en el primer uso.
+ * @param options EN: the loader of the validator, for tests. ES: el cargador del validador, para tests.
+ * @returns EN: the check, an `UploadCheck`. ES: la revisión, una `UploadCheck`.
+ * @throws {DteError} EN: the check throws `SCHEMA_INVALID` with the `kind` and the `name` of the file and the `issues` the schema reports (which may quote the file, so they live in `details` alone), and what `validateAgainstSchema` throws. ES: la revisión lanza `SCHEMA_INVALID` con el `kind` y el `name` del archivo y los `issues` que informa el esquema (que pueden citar el archivo, así que viven solo en `details`), y lo que lance `validateAgainstSchema`.
+ */
+export const validateBeforeUpload =
+  (options: ValidateBeforeUploadOptions = {}): ((file: UploadCheckFile) => Promise<void>) =>
+  async (file) => {
+    const issues = await validateAgainstSchema(file.xml, { load: options.load })
+    if (issues.length > 0) throw new DteError('SCHEMA_INVALID', { kind: file.kind, name: file.name, issues })
+  }

@@ -32,6 +32,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the certificate. Nothing refuses one. Field behaviour is that the SII takes no seed signed with a certificate no
   authority it knows issued, so `runCertification` says so once, when it starts, in the portal client's logger.
   - **What to change:** code that builds a `Certificate` of its own, as a test double does, must give it `selfSigned`.
+- **Three states of a book** (`classifyUploadStatus`, `uploadStatusMessage`). No document of the SII that was found
+  lists the states of a book. Field behaviour is that the SII answers the upload of a book `LRS` when it does not
+  validate against its schema, `LRC` when its cover is refused and `LRF` when its signature does not verify, each a
+  rejection. They were `unknown`: `waitForUploadStatus` already returned on them, but the certification run read them
+  as no rejection, so a book refused with one was declared and its approval wait ran its course. They are now
+  `rejected`, glossed "Libro rechazado por error en schema", "… en carátula" and "… en firma". The comment of the
+  catalog says which glosses rest on the SII's table (the eight of 3.3 of "Consulta de Estado de Upload Dte") and
+  which on field behaviour (these three, and `LOK`, `LSO`, `LRH`, `LNC`).
+- **What to look at for a state** (`uploadStatusChecks`, `UploadStatusCheck`). For `RFR`, `EPR`, `RSC`, `RCT` and the
+  book states `LRF`, `LRS`, `LRC`, `LRH`, `LNC`, a few short checks in Spanish, each with its basis: a document of the
+  SII, named, or field behaviour. `EPR` rests on the SII's manual of `QueryEstUp`, which gives the counts "Solo si
+  Estado es EPR"; the special book and the rectification of `LRC` on the SII's format of the books ("Un archivo
+  especial se distingue de los libros regulares, en que indica el folio de la notificación en la carátula";
+  `RECTIFICA` is a `TipoLibro`, not a `TipoEnvio`). Any other state has none.
+- **The status of an export document** (`queryDocumentStatus`, types 110, 111 and 112). It refused them with
+  `INVALID_DOCUMENT_TYPE`. The SII's manual of `QueryEstDte` gives `MontoDte` as "String numérico 1-15" (`xsd:string`
+  in its WSDL); field behaviour is that the SII compares it with the total the document declares, in its own currency
+  and with its decimals, and answers that the data do not match an accepted export document asked with its total
+  rounded, truncated or in pesos. An export document is now asked with its total as the document writes its
+  `MntTotal`; a total `Exportaciones` does not take (below zero, more than four decimals) is `INVALID_AMOUNT`. Every
+  other type is asked as before. The SII's advanced query (`QueryEstDteAv`) is not in dte-sdk.
+- **A check before a plain upload** (`beforeUpload` of `uploadEnvelope`, `uploadBook` and `uploadFolioConsumption`,
+  `UploadCheck`, `UploadCheckFile`). It is handed the kind of the file, its multipart name and the exact text about to
+  be sent, and awaited; when it throws, the upload stops with nothing sent, not even a token asked for, and throws
+  what it threw. The certification run hands its `beforeUpload` a file of the same shape, so one function serves both.
+- **A ready-made check against the SII's schema** (`validateBeforeUpload`, `dte-sdk/schemas`). It validates each file
+  with `validateAgainstSchema` and throws the new code `SCHEMA_INVALID`, with the file's `kind` and `name` and the
+  `issues` the schema reports in `details` (they may quote the file, so they stay out of the message). Its validator
+  is the optional peer `xmllint-wasm`, which no other entry loads.
 
 ### Changed
 

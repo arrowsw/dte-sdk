@@ -88,12 +88,15 @@ export {
   classifyDocumentStatus,
   documentStatusMessage,
   isTokenErrorStatus,
+  uploadStatusChecks,
 } from './catalogs/upload-status'
 export type {
   UploadStatusClass,
   UploadVerdictCounts,
   UploadChannel,
   DocumentStatusClass,
+  UploadStatusCheck,
+  UploadStatusCheckBasis,
 } from './catalogs/upload-status'
 export { RECEPTION_STATUS, classifyReceptionStatus, receptionStatusMessage } from './catalogs/reception-status'
 export type { ReceptionStatusClass } from './catalogs/reception-status'
@@ -437,6 +440,8 @@ export type {
   UploadableEnvelope,
   UploadEnvelopeInput,
   UploadXmlInput,
+  UploadCheck,
+  UploadCheckFile,
   ReceptionOutcome,
 } from './sii/upload'
 export { queryUploadStatus, waitForUploadStatus, queryDocumentStatus, folioReceived } from './sii/status'

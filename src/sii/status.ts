@@ -11,6 +11,7 @@ import {
   type DocumentStatusClass,
   type UploadStatusClass,
 } from '../catalogs/upload-status'
+import { isExportAmount } from '../document/content-rules'
 import { DteError, isDteError } from '../errors'
 import { splitSiiRut, toSiiRut, type SiiRut } from '../model/rut'
 import { chileDate, toIsoDate } from '../time/chile'
@@ -192,7 +193,7 @@ export type QueryDocumentStatusInput = {
   readonly folio: number
   /** EN: Issue date `YYYY-MM-DD`. ES: `FechaEmisionDte` / `fechaEmision` — Fecha de emisión `AAAA-MM-DD`. */
   readonly issueDate: string
-  /** EN: Total amount, rounded to a whole number. ES: `MontoDte` / `monto` — Monto total, redondeado a entero. */
+  /** EN: Total amount: rounded to a whole number, except on an export document (110, 111, 112), whose total goes as the document writes its `MntTotal`, in its currency and with its decimals (four at most). ES: `MontoDte` / `monto` — Monto total: redondeado a entero, salvo en un documento de exportación (110, 111, 112), cuyo total va como el documento escribe su `MntTotal`, en su moneda y con sus decimales (cuatro a lo más). */
   readonly totalAmount: number
   /** EN: `soap` (default for invoices) or `rest` (default for receipts). ES: `soap` (por defecto en facturas) o `rest` (por defecto en boletas). */
   readonly channel?: TokenChannel
@@ -581,7 +582,7 @@ type DocumentQuery = {
   readonly type: DocumentType
   readonly folio: number
   readonly issueDate: string
-  readonly amount: number
+  readonly amount: string
 }
 
 const dateParts = (isoDate: string): { readonly day: string; readonly month: string; readonly year: string } => {
@@ -589,18 +590,28 @@ const dateParts = (isoDate: string): { readonly day: string; readonly month: str
   return { day, month, year }
 }
 
+// The amount as the query sends it. `MontoDte` is a numeric string in the SII's manual of `QueryEstDte`, and by field
+// behaviour the SII compares it with the total the document declares: an export document's is in its own currency and
+// has decimals, so it goes as the document writes its `MntTotal`, which is the number's own text. Any other type sends
+// its total rounded to a whole number, as it always has.
+const queryAmount = (type: DocumentType, totalAmount: number): string => {
+  if (isExport(type)) {
+    if (!isExportAmount(totalAmount)) throw new DteError('INVALID_AMOUNT', { field: 'totalAmount' })
+    return String(totalAmount)
+  }
+  const amount = Math.round(totalAmount)
+  if (!Number.isSafeInteger(amount) || amount < 0) throw new DteError('INVALID_AMOUNT', { field: 'totalAmount' })
+  return String(amount)
+}
+
 const buildDocumentQuery = (sii: SiiClient, input: QueryDocumentStatusInput): DocumentQuery => {
-  // The query carries the total as a whole number, and an export document's is in a foreign currency with decimals:
-  // what the SII takes there has not been seen, so it is not asked with a rounded one.
-  if (!isDocumentType(input.type) || isExport(input.type))
-    throw new DteError('INVALID_DOCUMENT_TYPE', { field: 'type' })
+  if (!isDocumentType(input.type)) throw new DteError('INVALID_DOCUMENT_TYPE', { field: 'type' })
   const companyRut = resolveCompanyRut(sii, input.companyRut)
   const receiverRut = toSiiRut(input.receiverRut, 'receiverRut')
   const issueDate = toIsoDate(input.issueDate, 'issueDate')
   // Folio and type end up in a URL path, so they must be plain integers, not strings that merely look like one.
   if (!Number.isSafeInteger(input.folio) || input.folio <= 0) throw new DteError('INVALID_FOLIO', { field: 'folio' })
-  const amount = Math.round(input.totalAmount)
-  if (!Number.isSafeInteger(amount) || amount < 0) throw new DteError('INVALID_AMOUNT', { field: 'totalAmount' })
+  const amount = queryAmount(input.type, input.totalAmount)
   const consultantRut =
     input.consultantRut === undefined ? sii.senderRut : toSiiRut(input.consultantRut, 'consultantRut')
   return { consultantRut, companyRut, receiverRut, type: input.type, folio: input.folio, issueDate, amount }
@@ -633,7 +644,7 @@ const soapDocumentStatus = async (
       { name: 'TipoDte', value: String(query.type) },
       { name: 'FolioDte', value: String(query.folio) },
       { name: 'FechaEmisionDte', value: `${day}${month}${year}` },
-      { name: 'MontoDte', value: String(query.amount) },
+      { name: 'MontoDte', value: query.amount },
       { name: 'Token', value: token },
     ],
     attempt,
@@ -667,7 +678,7 @@ const restDocumentStatus = async (
     queryString([
       ['rut_receptor', receiver.body],
       ['dv_receptor', receiver.verifier],
-      ['monto', String(query.amount)],
+      ['monto', query.amount],
       ['fechaEmision', `${day}-${month}-${year}`],
     ])
   const { json, text } = await restJson(sii, 'queryDocumentStatus', url, token, attempt, overrides)
@@ -685,13 +696,27 @@ const restDocumentStatus = async (
 /**
  * EN: Status of one document: `QueryEstDte` (SOAP, the default for every type except receipts) or the receipts REST
  * per-document endpoint (the default for 39 and 41; the REST API answers about ten minutes after the upload). Same
- * retry and token renewal rules as `queryUploadStatus`. The amount is rounded to a whole number and the date is sent
- * as `DDMMYYYY` (SOAP) or `DD-MM-YYYY` (REST).
+ * retry and token renewal rules as `queryUploadStatus`. The date is sent as `DDMMYYYY` (SOAP) or `DD-MM-YYYY` (REST).
+ * The amount of every type but an export is rounded to a whole number. The SII's manual of `QueryEstDte` gives
+ * `MontoDte` as a numeric string ("String numérico 1-15", `xsd:string` in its WSDL), the total of the document; by
+ * field behaviour the SII compares it with the total the document itself declares, in the document's own currency and
+ * with its decimals, and answers that the data do not match an accepted export document asked with its total rounded,
+ * truncated or in pesos. So an export document (110, 111, 112) is asked with its total as the document writes its
+ * `MntTotal`: the number's own text (`1234.5`, `120`), the one `Exportaciones` takes, from zero with four decimals at
+ * most. The SII's advanced query of a document's status (`QueryEstDteAv`) also asks for the document's signature;
+ * dte-sdk does not have it.
  * ES: Estado de un documento: `QueryEstDte` (SOAP, por defecto en todos los tipos salvo boletas) o el endpoint REST
  * por documento de boletas (por defecto en 39 y 41; la API REST responde unos diez minutos después del envío). Mismas
- * reglas de reintento y renovación de token que `queryUploadStatus`. El monto se redondea a entero y la fecha se envía
- * como `DDMMAAAA` (SOAP) o `DD-MM-AAAA` (REST).
- * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE`, `INVALID_RUT`, `INVALID_FOLIO`, `INVALID_AMOUNT`, `INVALID_DATE`, `INVALID_OPTION { field: 'channel' }`, `MISSING_FIELD`, then the codes of `queryUploadStatus`. ES: los mismos códigos.
+ * reglas de reintento y renovación de token que `queryUploadStatus`. La fecha se envía como `DDMMAAAA` (SOAP) o
+ * `DD-MM-AAAA` (REST). El monto de todo tipo salvo una exportación se redondea a entero. El manual del SII de
+ * `QueryEstDte` da `MontoDte` como un string numérico ("String numérico 1-15", `xsd:string` en su WSDL), el total del
+ * documento; por comportamiento de campo el SII lo compara con el total que declara el propio documento, en su moneda
+ * y con sus decimales, y responde que los datos no coinciden para un documento de exportación aceptado consultado con
+ * su total redondeado, truncado o en pesos. Así que un documento de exportación (110, 111, 112) se consulta con su
+ * total como el documento escribe su `MntTotal`: el texto del propio número (`1234.5`, `120`), el que acepta
+ * `Exportaciones`, desde cero con cuatro decimales a lo más. La consulta avanzada del estado de un documento del SII
+ * (`QueryEstDteAv`) pide además la firma del documento; dte-sdk no la tiene.
+ * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE`, `INVALID_RUT`, `INVALID_FOLIO`, `INVALID_AMOUNT` (an export total that `Exportaciones` does not take among them), `INVALID_DATE`, `INVALID_OPTION { field: 'channel' }`, `MISSING_FIELD`, then the codes of `queryUploadStatus`. ES: los mismos códigos.
  */
 export const queryDocumentStatus = async (
   sii: SiiClient,

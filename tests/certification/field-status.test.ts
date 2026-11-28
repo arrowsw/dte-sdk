@@ -22,9 +22,12 @@ describe('classifyFieldUploadState', () => {
     },
   )
 
-  test.each(['RPT', 'RFR', 'VOF', 'RCT', 'RCH', 'RLV', 'RSC', 'LNC', 'LRH'])('%s is a rejection', (code) => {
-    expect(classifyFieldUploadState(code)).toEqual({ successful: false, intermediate: false, rejected: true })
-  })
+  test.each(['RPT', 'RFR', 'VOF', 'RCT', 'RCH', 'RLV', 'RSC', 'LNC', 'LRH', 'LRS', 'LRC', 'LRF'])(
+    '%s is a rejection',
+    (code) => {
+      expect(classifyFieldUploadState(code)).toEqual({ successful: false, intermediate: false, rejected: true })
+    },
+  )
 
   test.each(['RCO', 'XYZ', '-15', '-0', '001'])('%s is none of the three', (code) => {
     expect(classifyFieldUploadState(code)).toEqual({ successful: false, intermediate: false, rejected: false })
@@ -116,6 +119,7 @@ describe('queryFieldUploadState', () => {
 describe('fieldDiagnosis', () => {
   test.each([
     ['LNC', 'rejected'],
+    ['LRS', 'rejected'],
     ['EPR', 'accepted'],
     ['REC', 'pending'],
     ['XYZ', 'unknown'],
