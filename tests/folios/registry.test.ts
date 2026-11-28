@@ -427,14 +427,26 @@ describe('createDirectoryFolioRegistry', () => {
         }))
       await expect(failing('open').reserve(scope)).rejects.toThrow('open refused')
       writeFileSync(lockOf(dir), 'held')
-      await expect(failing('stat').reserve(scope)).rejects.toThrow('stat refused')
+      const lookRefused = createDirectoryFolioRegistry({ dir }, async () => ({
+        ...modules,
+        fs: {
+          ...modules.fs,
+          open: async (file: string, flags: string, ...rest: [number]) => {
+            if (flags === 'r') throw Object.assign(new Error('look refused'), { code: 'EACCES' })
+            return modules.fs.open(file, flags, ...rest)
+          },
+        } as typeof modules.fs,
+      }))
+      await expect(lookRefused.reserve(scope)).rejects.toThrow('look refused')
       utimesSync(lockOf(dir), anHourAgo(), anHourAgo())
+      await expect(failing('stat').reserve(scope)).rejects.toThrow('stat refused')
+      expect(readdirSync(dir)).toEqual(['folios.json.lock'])
       const guardRefused = createDirectoryFolioRegistry({ dir }, async () => ({
         ...modules,
         fs: {
           ...modules.fs,
           open: async (file: string, ...rest: [string, number]) => {
-            if (file.endsWith('.takeover')) throw Object.assign(new Error('takeover refused'), { code: 'EACCES' })
+            if (file.includes('.takeover.')) throw Object.assign(new Error('takeover refused'), { code: 'EACCES' })
             return modules.fs.open(file, ...rest)
           },
         } as typeof modules.fs,
@@ -653,9 +665,15 @@ describe('createDirectoryFolioRegistry', () => {
         ...modules,
         fs: {
           ...modules.fs,
-          readFile: async (file: string, ...rest: [BufferEncoding]) => {
-            if (file.endsWith('.lock')) throw Object.assign(new Error('read refused'), { code: 'EACCES' })
-            return modules.fs.readFile(file, ...rest)
+          open: async (...args: Parameters<typeof modules.fs.open>) => {
+            const handle = await modules.fs.open(...args)
+            if (args[0] !== lockOf(dir)) return handle
+            return Object.assign(Object.create(handle), {
+              readFile: async () => {
+                throw Object.assign(new Error('read refused'), { code: 'EIO' })
+              },
+              close: () => handle.close(),
+            })
           },
         } as typeof modules.fs,
       }))
@@ -712,6 +730,153 @@ describe('createDirectoryFolioRegistry', () => {
       expect(touched).toEqual([])
       expect(Date.now() - statSync(lockOf(dir)).mtimeMs).toBeGreaterThan(3_000_000)
       expect(readFileSync(lockOf(dir), 'utf8')).toBe('taker')
+    })
+
+    test('a lock and a takeover file of this code are complete from the instant they exist', async () => {
+      const dir = tempDir()
+      writeFileSync(lockOf(dir), 'held')
+      utimesSync(lockOf(dir), anHourAgo(), anHourAgo())
+      const modules = await loadNodeFs()
+      const seen: unknown[] = []
+      const exclusive: string[] = []
+      const registry = createDirectoryFolioRegistry({ dir }, async () => ({
+        ...modules,
+        fs: {
+          ...modules.fs,
+          open: async (file: string, flags: string, ...rest: [number]) => {
+            if (flags === 'wx' && !file.endsWith('.tmp')) exclusive.push(relative(dir, file))
+            return modules.fs.open(file, flags, ...rest)
+          },
+          link: async (from: string, to: string) => {
+            await modules.fs.link(from, to)
+            // The instant the name exists, whoever reads it reads its holder whole.
+            seen.push(JSON.parse(readFileSync(to, 'utf8')))
+          },
+        } as typeof modules.fs,
+      }))
+      await expect(registry.reserve(scope)).resolves.toBe(1)
+      expect(exclusive).toEqual([])
+      const holder = { token: expect.any(String), pid: process.pid, host: hostname(), boot: expect.any(Number) }
+      // The takeover file, then the lock.
+      expect(seen).toEqual([expect.objectContaining(holder), expect.objectContaining(holder)])
+      expect(readdirSync(dir)).toEqual(['folios.json'])
+    })
+
+    test.each(['ENOTSUP', 'EOPNOTSUPP', 'EPERM', 'ENOSYS'])(
+      'where the file system refuses a hard link (%s), the lock is created in place',
+      async (code) => {
+        const dir = tempDir()
+        const modules = await loadNodeFs()
+        const withoutLinks = (lockWaitMs?: number) =>
+          createDirectoryFolioRegistry({ dir, ...(lockWaitMs ? { lockWaitMs } : {}) }, async () => ({
+            ...modules,
+            fs: {
+              ...modules.fs,
+              link: async () => {
+                throw Object.assign(new Error(code), { code })
+              },
+            } as typeof modules.fs,
+          }))
+        const registry = withoutLinks()
+        await expect(registry.reserve(scope)).resolves.toBe(1)
+        writeFileSync(lockOf(dir), 'held')
+        expect((await failure(withoutLinks(40).reserve(scope))).code).toBe('FOLIO_LEDGER_LOCKED')
+        rmSync(lockOf(dir))
+        await expect(registry.reserve(scope)).resolves.toBe(2)
+        expect(readdirSync(dir)).toEqual(['folios.json'])
+      },
+    )
+
+    test('without hard links, a lock that cannot be created or written in place is thrown and leaves nothing', async () => {
+      const dir = tempDir()
+      const modules = await loadNodeFs()
+      const inPlace = (failing: 'open' | 'writeFile') =>
+        createDirectoryFolioRegistry({ dir }, async () => ({
+          ...modules,
+          fs: {
+            ...modules.fs,
+            link: async () => {
+              throw Object.assign(new Error('ENOTSUP'), { code: 'ENOTSUP' })
+            },
+            open: async (...args: Parameters<typeof modules.fs.open>) => {
+              if (args[0] !== lockOf(dir)) return modules.fs.open(...args)
+              if (failing === 'open') throw Object.assign(new Error('open refused'), { code: 'EACCES' })
+              const handle = await modules.fs.open(...args)
+              return Object.assign(Object.create(handle), {
+                writeFile: async () => {
+                  throw new Error('ENOSPC: no space left on device')
+                },
+                close: () => handle.close(),
+              })
+            },
+          } as typeof modules.fs,
+        }))
+      await expect(inPlace('open').reserve(scope)).rejects.toThrow('open refused')
+      await expect(inPlace('writeFile').reserve(scope)).rejects.toThrow('ENOSPC')
+      expect(readdirSync(dir)).toEqual([])
+    })
+
+    test('a link that fails otherwise is thrown, and leaves no file of its own behind', async () => {
+      const dir = tempDir()
+      const modules = await loadNodeFs()
+      const failing = (step: 'link' | 'writeFile') =>
+        createDirectoryFolioRegistry({ dir }, async () => ({
+          ...modules,
+          fs: {
+            ...modules.fs,
+            open: async (...args: Parameters<typeof modules.fs.open>) => {
+              const handle = await modules.fs.open(...args)
+              if (step !== 'writeFile' || !String(args[0]).includes('.lock.')) return handle
+              return Object.assign(Object.create(handle), {
+                writeFile: async () => {
+                  throw new Error('ENOSPC: no space left on device')
+                },
+                close: () => handle.close(),
+              })
+            },
+            link: async (...args: Parameters<typeof modules.fs.link>) => {
+              if (step === 'link') throw Object.assign(new Error('EIO'), { code: 'EIO' })
+              return modules.fs.link(...args)
+            },
+          } as typeof modules.fs,
+        }))
+      await expect(failing('link').reserve(scope)).rejects.toThrow('EIO')
+      await expect(failing('writeFile').reserve(scope)).rejects.toThrow('ENOSPC')
+      expect(readdirSync(dir)).toEqual([])
+    })
+
+    test('a lock replaced while it is looked at is judged as one file, and the new one is never removed', async () => {
+      const dir = tempDir()
+      writeFileSync(lockOf(dir), 'held')
+      utimesSync(lockOf(dir), anHourAgo(), anHourAgo())
+      const modules = await loadNodeFs()
+      const once = { done: false }
+      // Once the takeover file is held, the stale lock goes and a fresh one takes its name, still empty as a lock
+      // created in place is for an instant, between the two looks at it: the one at its age and the one at its content.
+      const replace = (): void => {
+        if (once.done || !existsSync(guardOf(dir))) return
+        once.done = true
+        rmSync(lockOf(dir))
+        writeFileSync(lockOf(dir), '')
+      }
+      const registry = createDirectoryFolioRegistry({ dir, lockWaitMs: 60 }, async () => ({
+        ...modules,
+        fs: {
+          ...modules.fs,
+          open: async (...args: Parameters<typeof modules.fs.open>) => {
+            const handle = await modules.fs.open(...args)
+            if (args[0] === lockOf(dir) && args[1] === 'r') replace()
+            return handle
+          },
+          readFile: async (...args: Parameters<typeof modules.fs.readFile>) => {
+            if (args[0] === lockOf(dir)) replace()
+            return modules.fs.readFile(...args)
+          },
+        } as typeof modules.fs,
+      }))
+      expect((await failure(registry.reserve(scope))).details).toMatchObject({ kind: 'wait' })
+      expect(once.done).toBe(true)
+      expect(readFileSync(lockOf(dir), 'utf8')).toBe('')
     })
 
     test('the process test: a process that exists, one refused for lack of permission, one that is gone', () => {

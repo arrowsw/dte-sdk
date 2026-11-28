@@ -42,9 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   registries on one directory in one process 25 out of 50; a folio given twice ends in two documents with the same
   folio, and the SII rejects the second. Every change (`reserve`, `markSent`, `markAnnulled`, `release`) now reads,
   changes and writes the ledger holding `folios.json.lock`, a file created exclusively in the directory, readable by
-  its owner only, that names its holder (a token, the process id, the host name and when the machine started), and is
-  removed when the change ends, a failed one included. Whoever finds it held waits, with a growing pause and some
-  jitter, up to `lockWaitMs` (15 000 ms by default), and then fails with `FOLIO_LEDGER_LOCKED`.
+  its owner only, that names its holder (a token, the process id, the host name and when the machine started) from the
+  instant it exists, and is removed when the change ends, a failed one included. It is written whole to a file of its
+  own and then hard-linked to its name, which fails if the name exists, so it is never read empty or half written; on a
+  file system without hard links it is created in place and written after, and only there reads as unknown for an
+  instant. Whoever finds it held waits, with a growing pause and some jitter, up to `lockWaitMs` (15 000 ms by
+  default), and then fails with `FOLIO_LEDGER_LOCKED`. A lock is judged by its age and its content read through one
+  handle, and removed only while its name is still that file.
   - A lock whose holder is a process of this host that still exists is never taken over, whatever its age, so a holder
     that is stopped or blocked keeps its lock and nobody writes under it. A lock is taken over once older than
     `lockStaleMs` (10 000 ms by default, from 1 000 to about 74 days) when its process is gone or it was written before

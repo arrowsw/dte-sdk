@@ -403,11 +403,15 @@ console.log(JSON.stringify(folios))`
     }
   })
 
-  // A holder stopped past the stale limit is alive: the other process must wait, never write under it.
-  const withStop = process.platform === 'win32' ? test.skip : test
-  withStop(
-    'a holder stopped past the stale limit keeps its lock, and nobody writes under it',
-    async () => {
+  // A holder stopped past the stale limit is alive: the other process must wait, never write under it. It is stopped
+  // the instant its lock exists (after the link that names it), or inside its change (after it wrote the new ledger).
+  const withStop = (process.platform === 'win32' ? test.skip : test).each
+  withStop([
+    ['the instant its lock exists', 'link'],
+    ['inside its change', 'writeFile'],
+  ])(
+    'a holder stopped %s, past the stale limit, keeps its lock, and nobody writes under it',
+    async (_, step) => {
       const dir = mkdtempSync(join(tmpdir(), 'dte-sdk-folio-stopped-'))
       const registryOf = (options: string, load = '') => `
 const { createDirectoryFolioRegistry } = await import(${JSON.stringify(href(entryFile('node')))})
@@ -420,12 +424,17 @@ const registry = createDirectoryFolioRegistry({ dir: ${JSON.stringify(dir)}, ${o
           'lockStaleMs: 1000',
           `, async () => {
   const fs = await import('node:fs/promises')
-  const writeFile = async (...args) => {
-    console.log('holding')
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    return fs.writeFile(...args)
+  const once = { done: false }
+  const step = async (...args) => {
+    const result = await fs[${JSON.stringify(step)}](...args)
+    if (!once.done && !String(args[1]).endsWith('.takeover')) {
+      once.done = true
+      console.log('holding')
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+    return result
   }
-  return { fs: { ...fs, writeFile }, path: await import('node:path') }
+  return { fs: { ...fs, [${JSON.stringify(step)}]: step }, path: await import('node:path') }
 }`,
         )}
 console.log(JSON.stringify(await registry.reserve(scope)))`,

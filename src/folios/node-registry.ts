@@ -46,6 +46,9 @@ const BOOT_TOLERANCE_MS = 300_000
 const FIRST_RETRY_MS = 2
 const LAST_RETRY_MS = 100
 
+// What `link` answers on a file system that has no hard links (FAT, exFAT, some network shares).
+const NO_HARD_LINKS: ReadonlySet<unknown> = new Set(['ENOTSUP', 'EOPNOTSUPP', 'EPERM', 'ENOSYS'])
+
 const errorCodeOf = (error: unknown): unknown => (error as { code?: unknown } | null)?.code
 const isMissingFile = (error: unknown): boolean => errorCodeOf(error) === 'ENOENT'
 const nothing = (): null => null
@@ -126,12 +129,14 @@ type DirectoryLock = {
 }
 
 /**
- * Exclusive across the processes of one host through a file created exclusively (`wx`) next to the ledger, naming its
- * holder: a token, the process id, the host name and when this machine started. A lock is taken over only when it is
+ * Exclusive across the processes of one host through a file next to the ledger that names its holder from the instant
+ * it exists (a token, the process id, the host name and when this machine started): written whole to a file of its
+ * own and linked to the name, which fails if the name exists. A lock is taken over only when it is
  * older than the stale limit and its holder is known not to exist (a process of this host that is gone, or a lock
  * written before this machine started), or cannot be known (another host, content that does not read): a holder that
  * is stopped or blocked keeps its lock. A lock is removed under a second file, also created exclusively and naming its
- * taker the same way, after looking at the lock again, so two takers remove it once. Where age alone decides, a second
+ * taker the same way, after looking at the lock again, its age and its content through one handle, and only while the
+ * name is still that file, so two takers remove it once. Where age alone decides, a second
  * line: the holder renews its own file through the handle it created it with, and compares the file at the path with
  * that handle's file in one call before its write lands and before it removes the lock.
  */
@@ -152,31 +157,76 @@ const directoryLock = (
       throw error
     }
   }
-  // Whether the file at `file` may be removed, and the process that holds it when that is known.
-  const abandoned = async (fs: Fs, file: string): Promise<{ readonly removable: boolean; readonly pid?: number }> => {
-    const stats = await identityAt(fs, file)
-    if (stats === null) return { removable: false }
-    const text = await fs.readFile(file, 'utf8').catch(nothing)
-    if (text === null) return { removable: false }
-    const holder = holderOf(text)
+  type Seen = { readonly removable: boolean; readonly pid?: number; readonly identity?: Identity }
+  // Whether the file at `file` may be removed, the process that holds it when that is known, and which file was judged:
+  // its age and its content are read through one handle, so they are always those of one file.
+  const abandoned = async (fs: Fs, file: string): Promise<Seen> => {
+    const handle = await fs.open(file, 'r').catch((error: unknown) => {
+      if (isMissingFile(error)) return null
+      throw error
+    })
+    if (handle === null) return { removable: false }
+    const read = await Promise.all([handle.stat({ bigint: true }), handle.readFile('utf8')])
+      .catch(nothing)
+      .finally(() => handle.close())
+    // A file that cannot be read now is left alone: what it is cannot be told.
+    if (read === null) return { removable: false }
+    const [stats, text] = read
     const old = Date.now() - Number(stats.mtimeMs) > staleMs
-    if (holder === null) return { removable: old }
+    const holder = holderOf(text)
+    if (holder === null) return { removable: old, identity: stats }
     const here = await system()
     // Another host's process cannot be asked after: there, only the age decides.
-    if (holder.host !== here.host) return { removable: old }
+    if (holder.host !== here.host) return { removable: old, identity: stats }
     const gone = holder.boot < here.boot - BOOT_TOLERANCE_MS || !here.exists(holder.pid)
-    return { removable: old && gone, pid: holder.pid }
+    return { removable: old && gone, pid: holder.pid, identity: stats }
   }
+  // Removes the file at `file` only while it is still the one that was judged.
+  const removeJudged = async (fs: Fs, file: string, seen: Seen): Promise<void> => {
+    if (seen.removable && sameFile(await identityAt(fs, file), seen.identity!)) await fs.rm(file, { force: true })
+  }
+  const holderText = async (): Promise<string> => {
+    const here = await system()
+    const holder = { token: crypto.randomUUID(), pid: process.pid, host: here.host, boot: Math.round(here.boot) }
+    return JSON.stringify({ ...holder, acquiredAt: new Date().toISOString() })
+  }
+  // Creates `file` exclusively, already naming its holder: the content goes to a file of its own, linked to the name,
+  // which fails if the name exists, so nobody ever reads it empty or half written. Without hard links, it is created
+  // in place and written after, and reads as unknown for that instant. The handle is kept to renew it and to tell it.
   const create = async (fs: Fs, file: string): Promise<Handle | null> => {
+    const content = await holderText()
+    const temp = `${file}.${crypto.randomUUID()}.tmp`
+    const handle = await fs.open(temp, 'wx', FILE_MODE)
+    const outcome = await (async () => {
+      try {
+        await handle.writeFile(content, 'utf8')
+        return await fs.link(temp, file).then(
+          () => 'linked' as const,
+          (error: unknown) => {
+            if (errorCodeOf(error) === 'EEXIST') return 'taken' as const
+            if (NO_HARD_LINKS.has(errorCodeOf(error))) return 'no links' as const
+            throw error
+          },
+        )
+      } finally {
+        await fs.rm(temp, { force: true })
+      }
+    })().catch(async (error: unknown) => {
+      await handle.close()
+      throw error
+    })
+    if (outcome === 'linked') return handle
+    await handle.close()
+    return outcome === 'taken' ? null : createInPlace(fs, file, content)
+  }
+  const createInPlace = async (fs: Fs, file: string, content: string): Promise<Handle | null> => {
     const handle = await fs.open(file, 'wx', FILE_MODE).catch((error: unknown) => {
       if (errorCodeOf(error) === 'EEXIST') return null
       throw error
     })
     if (handle === null) return null
     try {
-      const here = await system()
-      const holder = { token: crypto.randomUUID(), pid: process.pid, host: here.host, boot: Math.round(here.boot) }
-      await handle.writeFile(JSON.stringify({ ...holder, acquiredAt: new Date().toISOString() }), 'utf8')
+      await handle.writeFile(content, 'utf8')
       return handle
     } catch (error) {
       await fs.rm(file, { force: true })
@@ -188,11 +238,11 @@ const directoryLock = (
     const seen = await abandoned(fs, lock)
     if (!seen.removable) return seen.pid
     const guard = `${lock}.takeover`
-    if ((await abandoned(fs, guard)).removable) await fs.rm(guard, { force: true })
+    await removeJudged(fs, guard, await abandoned(fs, guard))
     const taking = await create(fs, guard)
     if (taking === null) return seen.pid
     try {
-      if ((await abandoned(fs, lock)).removable) await fs.rm(lock, { force: true })
+      await removeJudged(fs, lock, await abandoned(fs, lock))
     } finally {
       await fs.rm(guard, { force: true })
       await taking.close()
@@ -202,7 +252,7 @@ const directoryLock = (
   const release = async (fs: Fs, lock: string, own: Identity): Promise<void> => {
     if (sameFile(await identityAt(fs, lock), own)) await fs.rm(lock, { force: true })
     const guard = `${lock}.takeover`
-    if ((await abandoned(fs, guard)).removable) await fs.rm(guard, { force: true })
+    await removeJudged(fs, guard, await abandoned(fs, guard))
   }
   const assertHeld = async (fs: Fs, lock: string): Promise<void> => {
     if (!sameFile(await identityAt(fs, lock), holding.identity))
@@ -254,7 +304,10 @@ const directoryLock = (
  * permissions of `dir` decide). Several processes of one host, and several registries, can share `dir`: each change
  * (`reserve`, `markSent`, `markAnnulled`, `release`) reads, changes and writes the ledger holding `folios.json.lock`,
  * a file created exclusively in `dir`, owner-only too, that names its holder (a token, the process id, the host name
- * and when this machine started) and is removed when the change ends, a failed one included. Whoever finds it held
+ * and when this machine started) from the instant it exists, since it is written whole to a file of its own and then
+ * linked to its name, and is removed when the change ends, a failed one included. On a file system without hard links
+ * (`link` answers `ENOTSUP`, `EOPNOTSUPP`, `EPERM` or `ENOSYS`) it is created in place and written after, and there,
+ * and only there, a lock just created reads as unknown for an instant. Whoever finds it held
  * waits, with a growing pause and some jitter, up to `lockWaitMs`, and then fails with `FOLIO_LEDGER_LOCKED`, whose
  * `holderPid` is the holder's process id when it is known.
  *
@@ -285,20 +338,23 @@ const directoryLock = (
  * archivos no tienen ese modo, deciden los permisos de `dir`). Varios procesos de un mismo equipo, y varios registros,
  * pueden compartir `dir`: cada cambio (`reserve`, `markSent`, `markAnnulled`, `release`) lee, cambia y escribe el libro
  * con `folios.json.lock`, un archivo creado en exclusiva en `dir`, también solo para el dueño, que nombra a su dueño
- * (un token, el id del proceso, el nombre del equipo y cuándo arrancó este equipo) y se borra al terminar el cambio,
- * también si falla. Quien lo encuentra tomado espera, con pausas crecientes y algo de azar, hasta `lockWaitMs`, y luego
+ * (un token, el id del proceso, el nombre del equipo y cuándo arrancó este equipo) desde el instante en que existe,
+ * porque se escribe entero en un archivo propio y luego se enlaza a su nombre, y se borra al terminar el cambio,
+ * también si falla. En un sistema de archivos sin enlaces duros (`link` responde `ENOTSUP`, `EOPNOTSUPP`, `EPERM` o
+ * `ENOSYS`) se crea en su lugar y se escribe después, y ahí, y solo ahí, un lock recién creado se lee como desconocido
+ * por un instante. Quien lo encuentra tomado espera, con pausas crecientes y algo de azar, hasta `lockWaitMs`, y luego
  * falla con `FOLIO_LEDGER_LOCKED`, cuyo `holderPid` es el id del proceso dueño cuando se conoce.
  *
  * Un lock cuyo dueño es un proceso de este equipo que todavía existe nunca se toma, sea cual sea su edad: un dueño
- * detenido o bloqueado conserva su lock, y nadie escribe bajo él. Un lock se toma cuando es más viejo que
- * `lockStaleMs` y se sabe que su dueño no existe (su proceso terminó, o el lock se escribió antes del último arranque de
- * este equipo), o cuando no se puede saber quién es: el nombre de otro equipo, o un contenido que no se lee. En ese
- * último caso decide solo la edad, y ese es el caso que este lock no deja seguro: es para los procesos de un mismo equipo sobre un sistema
- * de archivos local, y un directorio compartido entre equipos vuelve a la edad, con los límites de relojes que difieren
- * y de horas de modificación gruesas. Ahí queda una segunda línea: el dueño renueva su propio lock cada tercio de
- * `lockStaleMs`, y justo antes de escribir compara el archivo de la ruta con el suyo; si difieren no escribe y lanza
- * `FOLIO_LEDGER_LOCKED { kind: 'lost' }`. Lo que queda ahí es un dueño detenido por más de `lockStaleMs` entre esa sola
- * comparación y el renombre, o entre la comparación y el borrado de su lock al salir.
+ * detenido o bloqueado conserva su lock, y nadie escribe bajo él. Un lock se toma cuando es más viejo que `lockStaleMs`
+ * y se sabe que su dueño no existe (su proceso terminó, o el lock se escribió antes del último arranque de este
+ * equipo), o cuando no se puede saber quién es: el nombre de otro equipo, o un contenido que no se lee. En ese último
+ * caso decide solo la edad, y ese es el caso que este lock no deja seguro: es para los procesos de un mismo equipo
+ * sobre un sistema de archivos local, y un directorio compartido entre equipos vuelve a la edad, con los límites de
+ * relojes que difieren y de horas de modificación gruesas. Ahí queda una segunda línea: el dueño renueva su propio lock
+ * cada tercio de `lockStaleMs`, y justo antes de escribir compara el archivo de la ruta con el suyo; si difieren no
+ * escribe y lanza `FOLIO_LEDGER_LOCKED { kind: 'lost' }`. Lo que queda ahí es un dueño detenido por más de
+ * `lockStaleMs` entre esa sola comparación y el renombre, o entre la comparación y el borrado de su lock al salir.
  *
  * El precio de confiar en el id de un proceso: un dueño muerto dentro de un cambio deja su lock, y si otro proceso de
  * larga vida de este equipo recibe después el mismo id, el lock no se toma hasta que ese proceso termine, y todo cambio
@@ -308,8 +364,8 @@ const directoryLock = (
  * no existe. Quien toma un lock y muere en ese paso deja `folios.json.lock.takeover`, que se libera con las mismas
  * reglas, así que recuperarse puede tomar dos períodos. `remaining` y `stats` no toman lock ni esperan por sí mismas
  * a otro proceso o registro: el libro se reemplaza entero, así lo leen como estaba antes o después de un cambio. Dentro
- * de un registro, las llamadas siguen corriendo en el orden en que se hicieron: una lectura espera su turno detrás de los
- * cambios ya pedidos y los ve, así que puede esperar tanto como uno de ellos espera por el lock. `load` y `system`
+ * de un registro, las llamadas siguen corriendo en el orden en que se hicieron: una lectura espera su turno detrás de
+ * los cambios ya pedidos y los ve, así que puede esperar tanto como uno de ellos espera por el lock. `load` y `system`
  * existen solo para tests.
  * @param options EN: the directory, the clock and the limits of the lock. ES: el directorio, el reloj y los límites del lock.
  * @throws {DteError} EN: `INVALID_OPTION { field }` for a `lockWaitMs` that is not a positive finite number or a `lockStaleMs` out of its range, when called; `TRANSPORT_UNAVAILABLE` when `node:fs` cannot be loaded; `FOLIO_LEDGER_LOCKED` from a change, `{ kind: 'wait', lockWaitMs, attempts, holderPid? }` when it waited `lockWaitMs` for the lock, `{ kind: 'lost' }` when its lock was taken over before its write landed, which then did not. ES: `INVALID_OPTION { field }` por un `lockWaitMs` que no es un número positivo y finito o un `lockStaleMs` fuera de su rango, al llamarla; `TRANSPORT_UNAVAILABLE` si `node:fs` no se puede cargar; `FOLIO_LEDGER_LOCKED` desde un cambio, `{ kind: 'wait', lockWaitMs, attempts, holderPid? }` cuando esperó `lockWaitMs` por el lock, `{ kind: 'lost' }` cuando su lock se tomó antes de que su escritura llegara, que entonces no llegó.
