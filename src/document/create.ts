@@ -227,8 +227,9 @@ export type CreateDocumentWaivers = {
 let textProblems: TextProblem[] = []
 
 // Sanitizes a text field, enforces its schema limit and returns undefined for empty optionals. A text it refuses is
-// noted and kept as it came, so the build goes on to the next text.
-const text = (value: string | undefined, field: LimitedField): string | undefined => {
+// noted with the path of the input and kept as it came, so the build goes on to the next text. The only `DteError`
+// those two checks throw is a text problem; what else a text throws (a `toString` of the caller's) is thrown as before.
+const text = (value: string | undefined, field: LimitedField, path: string): string | undefined => {
   if (value === undefined) return undefined
   try {
     const clean = sanitizeText(value, field)
@@ -236,14 +237,14 @@ const text = (value: string | undefined, field: LimitedField): string | undefine
     assertMaxLength(clean, FIELD_LIMITS[field], field)
     return clean
   } catch (error) {
-    const { code, details } = error as DteError
-    textProblems.push({ code, details })
+    if (!(error instanceof DteError)) throw error
+    textProblems.push({ code: error.code as TextProblem['code'], path, details: error.details })
     return value
   }
 }
 
 const requiredText = (value: string | undefined, field: LimitedField, path: string): string => {
-  const clean = text(value, field)
+  const clean = text(value, field, path)
   if (clean === undefined) throw new DteError('MISSING_FIELD', { field: path })
   return clean
 }
@@ -496,14 +497,14 @@ const normalizeIssuer = (input: IssuerInput, receipt: boolean): Issuer => {
     activityCode: activityCode(input.activityCode, receipt),
     phone: input.phone,
     email: input.email,
-    branch: text(input.branch, 'Sucursal'),
+    branch: text(input.branch, 'Sucursal', 'issuer.branch'),
     siiBranchCode: siiBranchCode(input.siiBranchCode),
     address: requiredText(input.address, 'DirOrigen', 'issuer.address'),
     commune,
-    city: text(input.city, 'CiudadOrigen') ?? commune,
-    salespersonCode: text(input.salespersonCode, 'CdgVendedor'),
-    additionalBranchCode: text(input.additionalBranchCode, 'CodAdicSucur'),
-    additionalId: text(input.additionalId, 'IdAdicEmisor'),
+    city: text(input.city, 'CiudadOrigen', 'issuer.city') ?? commune,
+    salespersonCode: text(input.salespersonCode, 'CdgVendedor', 'issuer.salespersonCode'),
+    additionalBranchCode: text(input.additionalBranchCode, 'CodAdicSucur', 'issuer.additionalBranchCode'),
+    additionalId: text(input.additionalId, 'IdAdicEmisor', 'issuer.additionalId'),
   })
 }
 
@@ -518,9 +519,9 @@ const FINAL_CONSUMER: Receiver = {
 const normalizeForeign = (input: ReceiverInput['foreign']): Receiver['foreign'] => {
   if (input === undefined) return undefined
   const foreign = compact({
-    id: text(input.id, 'NumId'),
-    nationality: text(input.nationality, 'Nacionalidad'),
-    additionalId: text(input.additionalId, 'IdAdicRecep'),
+    id: text(input.id, 'NumId', 'receiver.foreign.id'),
+    nationality: text(input.nationality, 'Nacionalidad', 'receiver.foreign.nationality'),
+    additionalId: text(input.additionalId, 'IdAdicRecep', 'receiver.foreign.additionalId'),
   })
   return Object.keys(foreign).length > 0 ? foreign : undefined
 }
@@ -535,9 +536,9 @@ const normalizeReceiver = (input: ReceiverInput | undefined, type: DocumentType)
   const rut = toSiiRut(input.rut, 'receiver.rut')
   // Formato DTE 2.5, field 50: the receiver of an export document is 55.555.555-5.
   if (exported && rut !== FOREIGN_RECEIVER_RUT) refuse('receiver.rut')
-  const address = text(input.address, 'DirRecep')
-  const commune = text(input.commune, 'CmnaRecep')
-  const city = text(input.city, 'CiudadRecep')
+  const address = text(input.address, 'DirRecep', 'receiver.address')
+  const commune = text(input.commune, 'CmnaRecep', 'receiver.commune')
+  const city = text(input.city, 'CiudadRecep', 'receiver.city')
   if (!receipt && address === undefined) throw new DteError('MISSING_FIELD', { field: 'receiver.address' })
   // The receiver of an export document is abroad: no commune is asked of it (Formato DTE 2.5, field 61), and an export
   // invoice asks for its city (field 62).
@@ -545,22 +546,22 @@ const normalizeReceiver = (input: ReceiverInput | undefined, type: DocumentType)
   if (type === 110 && city === undefined) throw new DteError('MISSING_FIELD', { field: 'receiver.city' })
   return compact({
     rut,
-    internalCode: text(input.internalCode, 'CdgIntRecep'),
+    internalCode: text(input.internalCode, 'CdgIntRecep', 'receiver.internalCode'),
     businessName: requiredText(input.businessName, 'RznSocRecep', 'receiver.businessName'),
     foreign: normalizeForeign(input.foreign),
     // `Liquidacion` asks the receiver for `GiroRecep`; `Documento` leaves it optional.
     businessActivity:
       type === 43
         ? requiredText(input.businessActivity, 'GiroRecep', 'receiver.businessActivity')
-        : text(input.businessActivity, 'GiroRecep'),
-    contact: text(input.contact, 'Contacto'),
+        : text(input.businessActivity, 'GiroRecep', 'receiver.businessActivity'),
+    contact: text(input.contact, 'Contacto', 'receiver.contact'),
     email: input.email,
     address,
     commune,
     city,
-    postalAddress: text(input.postalAddress, 'DirPostal'),
-    postalCommune: text(input.postalCommune, 'CmnaPostal'),
-    postalCity: text(input.postalCity, 'CiudadPostal'),
+    postalAddress: text(input.postalAddress, 'DirPostal', 'receiver.postalAddress'),
+    postalCommune: text(input.postalCommune, 'CmnaPostal', 'receiver.postalCommune'),
+    postalCity: text(input.postalCity, 'CiudadPostal', 'receiver.postalCity'),
   })
 }
 
@@ -812,7 +813,7 @@ const normalizeItem = (input: LineItemInput, index: number, type: DocumentType, 
   const quantity =
     positive(input.quantity, 'quantity', `${path}.quantity`) ?? (unitPrice !== undefined || type === 52 ? 1 : undefined)
   if (counted && quantity === undefined) throw new DteError('MISSING_FIELD', { field: `${path}.quantity` })
-  const countedUnit = counted ? text(input.unit, 'UnmdItem') : undefined
+  const countedUnit = counted ? text(input.unit, 'UnmdItem', `${path}.unit`) : undefined
   if (counted && countedUnit === undefined) throw new DteError('MISSING_FIELD', { field: `${path}.unit` })
   const receipt = isReceipt(type)
   const discountPercent = linePercent(input.discountPercent, `${path}.discountPercent`, receipt)
@@ -834,7 +835,7 @@ const normalizeItem = (input: LineItemInput, index: number, type: DocumentType, 
   const zero = context.zero || ZERO_LINE_INDICATORS.includes(input.exemptIndicator)
   const computed = lineAmounts(input, path, type, parts, zero, context.zeroAdmitted)
   if ((input.additionalTaxCodes ?? []).length > MAX_LINE_TAX_CODES) refuse(`${path}.additionalTaxCodes`)
-  const settledDocumentType = text(input.settledDocumentType, 'TpoDocLiq')
+  const settledDocumentType = text(input.settledDocumentType, 'TpoDocLiq', `${path}.settledDocumentType`)
   // `TpoDocLiq` is a line of `Liquidacion`: required there, and declared nowhere else.
   if (type === 43 && settledDocumentType === undefined)
     throw new DteError('MISSING_FIELD', { field: `${path}.settledDocumentType` })
@@ -847,12 +848,12 @@ const normalizeItem = (input: LineItemInput, index: number, type: DocumentType, 
     exemptIndicator,
     withholdingAgent: withholdingAgentOf(input.withholdingAgent, path),
     name: requiredText(input.name, 'NmbItem', `${path}.name`),
-    description: text(input.description, 'DscItem'),
+    description: text(input.description, 'DscItem', `${path}.description`),
     referenceQuantity: positive(input.referenceQuantity, 'quantity', `${path}.referenceQuantity`),
-    referenceUnit: text(input.referenceUnit, 'UnmdRef'),
+    referenceUnit: text(input.referenceUnit, 'UnmdRef', `${path}.referenceUnit`),
     referencePrice: positive(input.referencePrice, 'quantity', `${path}.referencePrice`),
     quantity,
-    unit: counted ? countedUnit : text(input.unit, 'UnmdItem'),
+    unit: counted ? countedUnit : text(input.unit, 'UnmdItem', `${path}.unit`),
     unitPrice,
     unitPriceDecimals: unitPrice === undefined ? undefined : decimals,
     discountPercent,
@@ -893,22 +894,27 @@ const normalizeReference = (input: ReferenceInput, index: number): Reference =>
     global: input.global ? (true as const) : undefined,
     folio: String(input.folio),
     otherRut: input.otherRut === undefined ? undefined : toSiiRut(input.otherRut, `references[${index}].otherRut`),
-    otherAdditionalId: text(input.otherAdditionalId, 'IdAdicOtr'),
+    otherAdditionalId: text(input.otherAdditionalId, 'IdAdicOtr', `references[${index}].otherAdditionalId`),
     date: toIsoDate(input.date, `references[${index}].date`),
     code: input.code,
-    reason: text(input.reason, 'RazonRef'),
+    reason: text(input.reason, 'RazonRef', `references[${index}].reason`),
   })
 
 // The receipts schema gives `Referencia` its own shape: a type and a folio that are optional texts, a free-text code
 // and the reason; no date.
-const normalizeReceiptReference = (input: ReceiptReferenceInput, index: number): ReceiptReference =>
-  compact({
+const normalizeReceiptReference = (input: ReceiptReferenceInput, index: number): ReceiptReference => {
+  const path = `receiptReferences[${index}]`
+  return compact({
     lineNumber: index + 1,
-    documentType: input.documentType === undefined ? undefined : text(String(input.documentType), 'TpoDocRef'),
-    folio: input.folio === undefined ? undefined : text(String(input.folio), 'FolioRef'),
-    code: text(input.code, 'CodRef'),
-    reason: text(input.reason, 'RazonRef'),
+    documentType:
+      input.documentType === undefined
+        ? undefined
+        : text(String(input.documentType), 'TpoDocRef', `${path}.documentType`),
+    folio: input.folio === undefined ? undefined : text(String(input.folio), 'FolioRef', `${path}.folio`),
+    code: text(input.code, 'CodRef', `${path}.code`),
+    reason: text(input.reason, 'RazonRef', `${path}.reason`),
   })
+}
 
 // `ValorDR` is a `Dec16_2Type` in `DTE_v10.xsd` and a `Dec1Type` in `EnvioBOLETA_v11.xsd`, both from 0.01 up: a value
 // below it, or one its two decimals bring to zero, fails the schema, and a negative one would turn a discount into a
@@ -922,7 +928,7 @@ const normalizeAdjustment = (input: GlobalAdjustmentInput, index: number): Globa
     kind: input.kind,
     valueType: input.valueType,
     value,
-    description: text(input.description, 'GlosaDR'),
+    description: text(input.description, 'GlosaDR', `globalAdjustments[${index}].description`),
     exemptIndicator: input.exemptIndicator,
   })
 }
@@ -951,7 +957,7 @@ const normalizeSubtotal = (input: SubtotalInfo, index: number, receipt: boolean)
   compact({
     ...input,
     description: receipt
-      ? text(input.description, 'GlosaSTI')
+      ? text(input.description, 'GlosaSTI', `subtotals[${index}].description`)
       : requiredText(input.description, 'GlosaSTI', `subtotals[${index}].description`),
   })
 
@@ -960,10 +966,10 @@ const normalizePackage = (input: PackageType, index: number): PackageType => {
   return compact({
     code: whole(input.code, 3, `${path}.code`),
     count: whole(input.count, 10, `${path}.count`),
-    marks: text(input.marks, 'Marcas'),
-    containerId: text(input.containerId, 'IdContainer'),
-    seal: text(input.seal, 'Sello'),
-    sealIssuer: text(input.sealIssuer, 'EmisorSello'),
+    marks: text(input.marks, 'Marcas', `${path}.marks`),
+    containerId: text(input.containerId, 'IdContainer', `${path}.containerId`),
+    seal: text(input.seal, 'Sello', `${path}.seal`),
+    sealIssuer: text(input.sealIssuer, 'EmisorSello', `${path}.sealIssuer`),
   })
 }
 
@@ -978,16 +984,20 @@ const normalizeCustoms = (input: CustomsInput | undefined): Customs | undefined 
     saleClause: whole(input.saleClause, 2, `${path}.saleClause`),
     saleClauseTotal: positive(input.saleClauseTotal, 'value', `${path}.saleClauseTotal`),
     transportRoute: whole(input.transportRoute, 2, `${path}.transportRoute`),
-    transportName: text(input.transportName, 'NombreTransp'),
+    transportName: text(input.transportName, 'NombreTransp', `${path}.transportName`),
     carrierRut: input.carrierRut === undefined ? undefined : toSiiRut(input.carrierRut, `${path}.carrierRut`),
-    carrierName: text(input.carrierName, 'NomCiaTransp'),
-    carrierAdditionalId: text(input.carrierAdditionalId, 'IdAdicTransp'),
-    booking: text(input.booking, 'Booking'),
-    operator: text(input.operator, 'Operador'),
+    carrierName: text(input.carrierName, 'NomCiaTransp', `${path}.carrierName`),
+    carrierAdditionalId: text(input.carrierAdditionalId, 'IdAdicTransp', `${path}.carrierAdditionalId`),
+    booking: text(input.booking, 'Booking', `${path}.booking`),
+    operator: text(input.operator, 'Operador', `${path}.operator`),
     loadingPort: whole(input.loadingPort, 4, `${path}.loadingPort`),
-    loadingPortAdditionalId: text(input.loadingPortAdditionalId, 'IdAdicPtoEmb'),
+    loadingPortAdditionalId: text(input.loadingPortAdditionalId, 'IdAdicPtoEmb', `${path}.loadingPortAdditionalId`),
     unloadingPort: whole(input.unloadingPort, 4, `${path}.unloadingPort`),
-    unloadingPortAdditionalId: text(input.unloadingPortAdditionalId, 'IdAdicPtoDesemb'),
+    unloadingPortAdditionalId: text(
+      input.unloadingPortAdditionalId,
+      'IdAdicPtoDesemb',
+      `${path}.unloadingPortAdditionalId`,
+    ),
     tare: whole(input.tare, 7, `${path}.tare`),
     tareUnit: whole(input.tareUnit, 2, `${path}.tareUnit`),
     grossWeight: decimal(input.grossWeight, 'weight', `${path}.grossWeight`),
@@ -1035,8 +1045,8 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
   input === undefined
     ? undefined
     : compact({
-        licensePlate: text(input.licensePlate, 'Patente'),
-        trailerLicensePlate: text(input.trailerLicensePlate, 'PatenteCarro'),
+        licensePlate: text(input.licensePlate, 'Patente', 'transport.licensePlate'),
+        trailerLicensePlate: text(input.trailerLicensePlate, 'PatenteCarro', 'transport.trailerLicensePlate'),
         carrierRut: input.carrierRut === undefined ? undefined : toSiiRut(input.carrierRut, 'transport.carrierRut'),
         driver:
           input.driver === undefined
@@ -1045,9 +1055,9 @@ const normalizeTransport = (input: TransportInput | undefined): Transport | unde
                 rut: toSiiRut(input.driver.rut, 'transport.driver.rut'),
                 name: requiredText(input.driver.name, 'NombreChofer', 'transport.driver.name'),
               },
-        destinationAddress: text(input.destinationAddress, 'DirDest'),
-        destinationCommune: text(input.destinationCommune, 'CmnaDest'),
-        destinationCity: text(input.destinationCity, 'CiudadDest'),
+        destinationAddress: text(input.destinationAddress, 'DirDest', 'transport.destinationAddress'),
+        destinationCommune: text(input.destinationCommune, 'CmnaDest', 'transport.destinationCommune'),
+        destinationCity: text(input.destinationCity, 'CiudadDest', 'transport.destinationCity'),
         departureDate: transportDate(input.departureDate, 'transport.departureDate'),
         departureTime: transportTime(input.departureTime, 'transport.departureTime'),
         arrivalDate: transportDate(input.arrivalDate, 'transport.arrivalDate'),
@@ -1217,10 +1227,23 @@ const buildDocument = (
  * ES: Un texto que `createDocument` rechaza: el código y los detalles con que se rechaza.
  */
 export type TextProblem = {
-  /** EN: `FIELD_TOO_LONG` or `ENCODING_UNSUPPORTED_CHAR`. ES: `FIELD_TOO_LONG` o `ENCODING_UNSUPPORTED_CHAR`. */
-  readonly code: DteErrorCode
+  /** EN: A text longer than its field holds, or with a character that has no form in ISO-8859-1. ES: Un texto más largo de lo que admite su campo, o con un carácter sin forma en ISO-8859-1. */
+  readonly code: 'FIELD_TOO_LONG' | 'ENCODING_UNSUPPORTED_CHAR'
+  /** EN: The path of the text in the input, such as `issuer.businessName` or `items[2].name`. ES: La ruta del texto en la entrada, como `issuer.businessName` o `items[2].name`. */
+  readonly path: string
   /** EN: The details of the error the text alone is refused with. ES: Los detalles del error con que se rechaza el texto solo. */
   readonly details: DteErrorDetails
+}
+
+/**
+ * EN: What `findTextProblems` found in the texts of a document.
+ * ES: Lo que `findTextProblems` encontró en los textos de un documento.
+ */
+export type TextProblems = {
+  /** EN: Each text refused, in the order it was read. ES: Cada texto rechazado, en el orden en que se leyó. */
+  readonly problems: readonly TextProblem[]
+  /** EN: `null` when every text was read; otherwise the code and details of the refusal of another kind that ended the reading, the texts past it unread. ES: `null` si se leyeron todos los textos; si no, el código y los detalles del rechazo de otra clase que terminó la lectura, sin leer los textos que siguen. */
+  readonly stoppedBy: { readonly code: DteErrorCode; readonly details: DteErrorDetails } | null
 }
 
 // The build, with the text problems it met before it ended or stopped, and what stopped it.
@@ -1246,7 +1269,10 @@ export const createDocumentWith = (
   waivers: CreateDocumentWaivers,
 ): Document => {
   const [document, problems, failure] = reading(() => buildDocument(input, options, waivers))
-  if (problems.length > 0) throw new DteError(problems[0].code, { ...problems[0].details, problems })
+  if (problems.length > 0) {
+    const [{ code, details }] = problems
+    throw new DteError(code, { ...details, problems })
+  }
   if (document === undefined) throw failure
   return document
 }
@@ -1314,7 +1340,7 @@ export const createDocumentWith = (
  * instructions for the dispatch-guide test set), and an export document without `exchangeRate`, which carries no
  * totals in pesos (`OtraMoneda`, optional in the format; field behaviour). The texts are all read before one is
  * refused: the error thrown is the first text problem, with its own code and details, and `details.problems` lists
- * every one, as `findTextProblems` gives them. Every other check (amounts, options, missing fields) stops at the first
+ * every one with the path of its text in the input, as `findTextProblems` gives them. Every other check (amounts, options, missing fields) stops at the first
  * fault it finds, and so ends the reading of the texts past it. Pure: same input, same output.
  * ES: Construye un `Document` normalizado desde la entrada: valida tipo, folio y fechas, normaliza RUT con rut.ts,
  * sanitiza textos y exige los largos del esquema (falla temprano en vez de dejar que el SII rechace el sobre entero),
@@ -1381,7 +1407,7 @@ export const createDocumentWith = (
  * (instrucciones del SII para el set de guías de despacho), y un documento de exportación sin `exchangeRate`, que no
  * lleva sus totales en pesos (`OtraMoneda`, opcional en el formato; comportamiento visto en la práctica). Los textos se
  * leen todos antes de rechazar uno: el error lanzado es el primer problema de texto, con su código y sus detalles, y
- * `details.problems` trae cada uno, como los entrega `findTextProblems`. Toda otra revisión (montos, opciones, campos
+ * `details.problems` trae cada uno con la ruta de su texto en la entrada, como los entrega `findTextProblems`. Toda otra revisión (montos, opciones, campos
  * faltantes) se detiene en la primera falla que encuentra, y con ello termina la lectura de los textos que siguen.
  * Pura: misma entrada, misma salida.
  * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE`, `INVALID_FOLIO`, `INVALID_DATE`, `INVALID_RUT`, `MISSING_FIELD` (also a commission line with neither a net nor an exempt value, a settlement invoice whose receiver has no `businessActivity`, an `issuer.activityCode` or a `subtotals[i].description` missing on a type that is not a receipt, the `totals.vatAmount` of a 33 or the `totals.exemptAmount` of a 34, the `currency` of an export document and, on a 110, the receiver's `city`, a line's `quantity` and `unit`, the fields of `transport.customs` Formato DTE 2.5 asks for, the marks of each package that is not a container, and `options.settlementDate` when it is paid in advance (`exportPaymentTerms` 32), the `options.transferType` of a dispatch guide, and the `references` of a credit or a debit note (56, 61, 111, 112), which a `SET` reference alone does not give), `FIELD_TOO_LONG`, `INVALID_AMOUNT` (also a quantity, a price, a percentage, an adjustment value or a commission rate with more digits than its schema type holds, a `globalAdjustments[i].value` that is not above zero once rounded to its two decimals, an `items[i].amount` that is not a whole number, is negative outside a 43 or has more digits than a number holds, an `items[i].quantity`, `items[i].referenceQuantity` or `items[i].referencePrice` at or below zero, an `items[i].unitPrice` below zero, or any of them above zero and brought to zero by its six decimals, a total its schema type or validation 57 does not admit, a `totals.vatNotWithheld` that is not a whole number above zero, a line discount or surcharge in percent that is negative or whose amount rounds to zero, or above 100 on a receipt, or on a line written at zero, and on an export document an amount below zero or of 100 000 000 000 000 or more, a total given with more than four decimals (a line's amount, the exchange rate, the freight and the insurance are rounded to four), and an exchange rate, freight, insurance or clause total that is not above zero); `TOTAL_MISMATCH` for a `totals.totalAmount` or a `totals.periodAmount` that does not add up, and for an `items[i].amount` on a line with a price that is not the price by the quantity less the discount plus the surcharge (Formato DTE 2.5, field 38 of the detail) nor, on a dispatch guide whose `transferType` is not 1, a zero on a line with no percent, and for one other than zero on a line that is not a sale (`IndExe` 4 or 5) or of a credit note (61, 112) with a reference of `code` 2, with `expected` and `actual`; `INVALID_TIME` for a `transport.departureTime` that is not `HH:MM:SS` or `HH:MM`; `INVALID_OPTION` for `references` on a receipt, `receiptReferences` on any other type, an `items[i].unitPriceDecimals` fewer than the decimals of the price, a `references[i]` beside another document reference on a credit note (61, 112) with a reference of `code` 1 or 2 or on a debit note (56, 111) with one of `code` 1 (a `SET` reference is no document), a `globalAdjustments[0]` or a `commissions[0]` on a credit note that corrects a text, an `items[i].exemptIndicator` outside 1 to 6 (`null` included), or of 3 on a 43 or an export document, a `totals.depositGuarantee` other than zero (a value that is not a number included) on a type other than 33, 34, 56 and 61, a `totals.vatNotWithheld` other than zero on a type other than 46, 56 and 61, an `options.transferType` outside 1 to 9, more than 20 `commissions`, more than 20 `globalAdjustments`, more than 30 `options.payments`, more `items` than the type admits, more than 40 `references` or `receiptReferences`, an `issuer.activityCode` that is not a positive integer of at most six digits, a `settledDocumentType` on a type other than 43, on a 43 whatever `Liquidacion` does not declare, on a receipt whatever its schema does not declare, an `options.netAmountsIndicator` or a `softwareProviderRut` on a type that is not a receipt, on an export document whatever `Exportaciones` does not declare, a service indicator outside 3 to 6, an `exportPaymentTerms` that is not a code of one or two digits, a `currency` outside `CURRENCIES`, a receiver RUT other than 55555555-5, a global adjustment without `exemptIndicator` 1 and a customs code past its digits, and on any other type the fields only an export document carries and the service indicators 5 and 6, with the field in `details.field`. For the additional taxes and withholdings, what `calculateTotals` throws over the codes of the lines; `INVALID_OPTION` for more than 2 `items[i].additionalTaxCodes`, more than 20 `totals.withholdings` and `additionalTaxes` beside explicit `totals`; and `MISSING_FIELD` on `totals.withholdings`, with the code in `details.taxCode`, for explicit totals that leave out the code of a line with an amount. ES: los mismos códigos; `INVALID_AMOUNT` también por una cantidad, un precio, un porcentaje, el valor de un ajuste o la tasa de una comisión con más dígitos de los que admite su tipo del esquema, por un `globalAdjustments[i].value` que no es mayor que cero una vez redondeado a sus dos decimales, por un `items[i].amount` que no es entero, es negativo fuera de un 43 o tiene más dígitos de los que guarda un número, por un `items[i].quantity`, `items[i].referenceQuantity` o `items[i].referencePrice` de cero o menos, por un `items[i].unitPrice` menor que cero, o por cualquiera de ellos mayor que cero y llevado a cero por sus seis decimales, por un total que su tipo del esquema o la validación 57 no admite, por un `totals.vatNotWithheld` que no es un entero mayor que cero, por un descuento o recargo de línea en porcentaje negativo o cuyo monto redondea a cero, o mayor que 100 en una boleta, o en una línea que se escribe en cero, y en un documento de exportación por un monto negativo o de 100 000 000 000 000 o más, por un total dado con más de cuatro decimales (el monto de una línea, el tipo de cambio, el flete y el seguro se redondean a cuatro), y por un tipo de cambio, flete, seguro o total de cláusula que no es mayor que cero; `MISSING_FIELD` también por una línea de comisión sin valor neto ni exento, por una liquidación factura cuyo receptor no trae `businessActivity`, por un `issuer.activityCode` o un `subtotals[i].description` ausente en un tipo que no es boleta, por el `totals.vatAmount` de un 33 o el `totals.exemptAmount` de un 34, por la `currency` de un documento de exportación y, en un 110, por la `city` del receptor, la `quantity` y la `unit` de una línea, los campos de `transport.customs` que pide el Formato DTE 2.5, las marcas de cada bulto que no es un contenedor, y `options.settlementDate` cuando se paga por anticipado (`exportPaymentTerms` 32), por el `options.transferType` de una guía de despacho, y por las `references` de una nota de crédito o de débito (56, 61, 111, 112), que una referencia `SET` sola no da; `TOTAL_MISMATCH` por un `totals.totalAmount` o un `totals.periodAmount` que no cuadra, y por un `items[i].amount` en una línea con precio que no es el precio por la cantidad menos el descuento más el recargo (Formato DTE 2.5, campo 38 del detalle) ni, en una guía de despacho cuyo `transferType` no es 1, un cero en una línea sin porcentaje, y por uno distinto de cero en una línea que no es venta (`IndExe` 4 o 5) o de una nota de crédito (61, 112) con una referencia de `code` 2, con `expected` y `actual`; `INVALID_TIME` por un `transport.departureTime` que no es `HH:MM:SS` ni `HH:MM`; `INVALID_OPTION` por `references` en una boleta, `receiptReferences` en cualquier otro tipo, un `items[i].unitPriceDecimals` menor que los decimales del precio, una `references[i]` junto a otro documento de referencia en una nota de crédito (61, 112) con una referencia de `code` 1 o 2 o en una nota de débito (56, 111) con una de `code` 1 (una referencia `SET` no es un documento), un `globalAdjustments[0]` o un `commissions[0]` en una nota de crédito que corrige un texto, un `items[i].exemptIndicator` fuera de 1 a 6 (`null` incluido), o 3 en un 43 o un documento de exportación, un `totals.depositGuarantee` distinto de cero (también un valor que no es número) en un tipo distinto de 33, 34, 56 y 61, un `totals.vatNotWithheld` distinto de cero en un tipo distinto de 46, 56 y 61, un `options.transferType` fuera de 1 a 9, más de 20 `commissions`, más de 20 `globalAdjustments`, más de 30 `options.payments`, más `items` de los que admite el tipo, más de 40 `references` o `receiptReferences`, un `issuer.activityCode` que no es un entero positivo de hasta seis dígitos, un `settledDocumentType` en un tipo distinto del 43, en un 43 lo que `Liquidacion` no declara, en una boleta lo que su esquema no declara, un `options.netAmountsIndicator` o un `softwareProviderRut` en un tipo que no es boleta, en un documento de exportación lo que `Exportaciones` no declara, un indicador de servicio fuera de 3 a 6, un `exportPaymentTerms` que no es un código de uno o dos dígitos, una `currency` fuera de `CURRENCIES`, un RUT de receptor distinto de 55555555-5, un ajuste global sin `exemptIndicator` 1 y un código aduanero con más dígitos de los que admite, y en cualquier otro tipo los campos que solo lleva un documento de exportación y los indicadores de servicio 5 y 6, con el campo en `details.field`. Por los impuestos adicionales y retenciones, lo que lanza `calculateTotals` sobre los códigos de las líneas; `INVALID_OPTION` por más de 2 `items[i].additionalTaxCodes`, más de 20 `totals.withholdings` y `additionalTaxes` junto a `totals` explícitos; y `MISSING_FIELD` en `totals.withholdings`, con el código en `details.taxCode`, por totales explícitos que dejan fuera el código de una línea con monto.
@@ -1390,18 +1416,28 @@ export const createDocument = (input: DocumentInput, options: CreateDocumentOpti
   createDocumentWith(input, options, {})
 
 /**
- * EN: The problems of a document's texts, without throwing: what `createDocument` would throw for each text it
- * refuses, a text longer than its field holds (`FIELD_TOO_LONG`) or with a character that has no form in ISO-8859-1
- * (`ENCODING_UNSUPPORTED_CHAR`), in the order it reads them: the issuer, the receiver, the lines, the references, the
- * subtotals, the global adjustments, the commissions and the transport. Empty when the texts are fine. A refusal of
- * another kind ends the reading: the texts past it are not read, and the refusal is `createDocument`'s to tell. Pure.
- * ES: Los problemas de los textos de un documento, sin lanzar: lo que `createDocument` lanzaría por cada texto que
- * rechaza, un texto más largo de lo que admite su campo (`FIELD_TOO_LONG`) o con un carácter sin forma en ISO-8859-1
- * (`ENCODING_UNSUPPORTED_CHAR`), en el orden en que los lee: el emisor, el receptor, las líneas, las referencias, los
- * subtotales, los ajustes globales, las comisiones y el transporte. Vacía si los textos están bien. Un rechazo de otra
- * clase termina la lectura: los textos que siguen no se leen, y el rechazo lo informa `createDocument`. Pura.
+ * EN: The problems of a document's texts, without throwing a refusal: what `createDocument` would throw for each text
+ * it refuses, a text longer than its field holds (`FIELD_TOO_LONG`) or with a character that has no form in
+ * ISO-8859-1 (`ENCODING_UNSUPPORTED_CHAR`), each with the path of the text in the input, in the order it reads them:
+ * the issuer, the receiver, the lines, the references, the subtotals, the global adjustments, the commissions and the
+ * transport. A refusal of another kind (an amount, an option, a missing field) ends the reading, and the texts past it
+ * are not read: `stoppedBy` gives its code and details, and is `null` only when every text was read. The texts are
+ * fine only when both `problems` is empty and `stoppedBy` is `null`. What the input itself throws (a `toString` of the
+ * caller's, or an input that is no object) is thrown as `createDocument` throws it. Pure.
+ * ES: Los problemas de los textos de un documento, sin lanzar un rechazo: lo que `createDocument` lanzaría por cada
+ * texto que rechaza, un texto más largo de lo que admite su campo (`FIELD_TOO_LONG`) o con un carácter sin forma en
+ * ISO-8859-1 (`ENCODING_UNSUPPORTED_CHAR`), cada uno con la ruta del texto en la entrada, en el orden en que los lee: el
+ * emisor, el receptor, las líneas, las referencias, los subtotales, los ajustes globales, las comisiones y el
+ * transporte. Un rechazo de otra clase (un monto, una opción, un campo faltante) termina la lectura, y los textos que
+ * siguen no se leen: `stoppedBy` trae su código y sus detalles, y es `null` solo si se leyeron todos los textos. Los
+ * textos están bien solo si `problems` está vacía y `stoppedBy` es `null`. Lo que lanza la entrada misma (un
+ * `toString` del llamador, o una entrada que no es objeto) se lanza como lo lanza `createDocument`. Pura.
  * @param input EN: the document as the caller gives it. ES: el documento tal como lo entrega el llamador.
- * @returns EN: each problem with its code and details. ES: cada problema con su código y sus detalles.
+ * @returns EN: the problems, and what ended the reading. ES: los problemas, y lo que terminó la lectura.
  */
-export const findTextProblems = (input: DocumentInput): readonly TextProblem[] =>
-  reading(() => buildDocument(input, {}, {}))[1]
+export const findTextProblems = (input: DocumentInput): TextProblems => {
+  const [document, problems, failure] = reading(() => buildDocument(input, {}, {}))
+  if (document !== undefined) return { problems, stoppedBy: null }
+  if (!(failure instanceof DteError)) throw failure
+  return { problems, stoppedBy: { code: failure.code, details: failure.details } }
+}

@@ -54,24 +54,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **What to change:** nothing in a call whose lines carry no code. One whose lines carry codes gets their taxes in
     its totals, or one of the refusals listed under Changed. `Withholding.rate` is now optional, absent only on a
     specific tax: code that reads it handles `undefined`.
-- **Every text problem of a document at once** (`createDocument`, new `findTextProblems` and `TextProblem`). Each text
+- **Every text problem of a document at once** (`createDocument`, new `findTextProblems`, `TextProblem` and
+  `TextProblems`). Each text
   is checked against the `xs:maxLength` of its element in the SII's schemas and against ISO-8859-1, the encoding the
   SII reads a DTE in, and the first text refused stopped the build: a document whose issuer's name held a character
   with no form in ISO-8859-1, whose receiver's name had 101 characters and whose first line's name held another such
   character was refused for the receiver's name alone, and the caller met the other two one try at a time. Now every
   text is read before one is refused. The error thrown is still the first problem, with the same code and details, and
-  its `details.problems` lists every one, each as `{ code, details }` with the details it would have had alone, in
-  the order `createDocument` reads them: the issuer, the receiver, the lines, the references, the subtotals, the global
-  adjustments, the commissions and the transport. `findTextProblems(input)` gives the same list without throwing,
-  empty when the texts are fine, for a form that shows them before a document is issued. Every other refusal (amounts,
-  options, missing fields) still stops at the first fault, and the texts past it are not read.
+  its `details.problems` lists every one, each as `{ code, path, details }`: the path of the text in the input
+  (`issuer.businessName`, `items[2].name`, `references[1].reason`) and the details it would have had alone, in the
+  order `createDocument` reads them: the issuer, the receiver, the lines, the references, the subtotals, the global
+  adjustments, the commissions and the transport. Every other refusal (amounts, options, missing fields) still stops at
+  the first fault, and the texts past it are not read. `findTextProblems(input)` gives `{ problems, stoppedBy }`
+  without throwing a refusal, for a form that shows them before a document is issued: the same list, and `null` when
+  every text was read or else the code and details of the refusal that ended the reading. The texts are fine only when
+  the list is empty and `stoppedBy` is `null`. What a text throws of its own (a caller's `toString`) is thrown as
+  before.
   - **What to change:** nothing. Code that compares the whole `details` of a `FIELD_TOO_LONG` or an
     `ENCODING_UNSUPPORTED_CHAR` thrown by `createDocument` finds the new `problems` key in them.
-- **`issueDocument` can check what it has just issued** (option `verify`, off by default). With it, the document just
-  signed is verified before it is returned: its XML signature with the certificate it carries (`verifyDocumentSignature`)
-  and its stamp, the `FRMT` over the `DD` with the public key of the CAF (`verifyTed`). A failure throws
-  `SIGNATURE_INVALID` with `details.field` `DTE` for the signature or `TED` for the stamp, before the document reaches
-  an envelope. It takes about twice the time: 100 invoices took about 100 ms without it and 210 ms with it.
+- **`issueDocument` can check what it has just issued** (option `verify`, off by default). With it, the signed XML
+  is read before it is returned as `verifyReceivedDocuments` reads a received document: its XML signature with the
+  certificate it carries, the `FRMT` of its stamp with the `RSAPK` of the CAF the stamp carries, and the `DD` against
+  the header. A failure throws `SIGNATURE_INVALID` with `details.field` `DTE` for the signature or `TED` for the stamp,
+  with the fields that disagree in `details.mismatches`, before the document reaches an envelope. Not checked: the
+  SII's signature over the CAF (`FRMA`), the CAF against the document, nor who the certificate belongs to. It takes a
+  little over twice the time: 100 invoices took about 100 ms without it and 240 ms with it.
   - **What to change:** nothing; pass `verify: true` to use it.
 
 ### Changed

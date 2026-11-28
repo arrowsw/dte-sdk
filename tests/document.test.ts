@@ -4,6 +4,7 @@ import { breakLongLines, buildDocumentXml, documentElementName } from '../src/do
 import { createDocument } from '../src/document/create'
 import { issueDocument } from '../src/document/issue'
 import { signDocument, verifyDocumentSignature } from '../src/document/sign'
+import { verifyReceivedDocuments } from '../src/document/verify-received'
 import { stampDocument, verifyTed } from '../src/ted/build'
 import { encodeLatin1 } from '../src/text/latin1'
 import { fixtureText, FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from './support/fixtures'
@@ -294,10 +295,22 @@ describe('issueDocument with verify', () => {
     expect(verifyDocumentSignature(unchecked.xml).valid).toBe(false)
   })
 
-  // A CAF whose public key is not the one of its private key stamps a `FRMT` its own `RSAPK` does not verify.
-  test('a stamp that does not verify with the key of the CAF is refused', () => {
-    expect(() => issue({ caf: { ...caf33, publicKey: caf39.publicKey } })).toThrow(
-      expect.objectContaining({ code: 'SIGNATURE_INVALID', details: { field: 'TED' } }),
+  // The stamp is checked as a receiver checks it: from the signed XML, with the `RSAPK` of the CAF the stamp carries.
+  // A CAF put together by hand with the `<CAF>` block of another stamps a `FRMT` that block's key does not verify.
+  test('a stamp that does not verify with the key of the CAF it carries is refused', () => {
+    const foreignBlock = { ...caf33, xml: caf39.xml }
+    expect(() => issue({ caf: foreignBlock })).toThrow(
+      expect.objectContaining({ code: 'SIGNATURE_INVALID', details: { field: 'TED', mismatches: [] } }),
     )
+    // Without the option the document is returned, and a receiver finds its stamp invalid.
+    const unchecked = issueDocument({ document: invoiceInput, caf: foreignBlock, certificate, now: FIXED_NOW })
+    expect(verifyReceivedDocuments(unchecked.xml).documents[0].ted.valid).toBe(false)
+  })
+
+  // `Caf.publicKey` is not what a receiver checks the stamp with: the block the stamp carries holds the key that signed
+  // it, so the stamp verifies, as a receiver finds.
+  test('a stamp the key of the CAF it carries verifies is returned, whatever publicKey the caller gives', () => {
+    const signed = issue({ caf: { ...caf33, publicKey: caf39.publicKey } })
+    expect(verifyReceivedDocuments(signed.xml).documents[0].ted.valid).toBe(true)
   })
 })
