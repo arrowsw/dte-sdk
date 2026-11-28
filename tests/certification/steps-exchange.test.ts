@@ -10,6 +10,7 @@ import {
   exchangeRoutes,
   exchangeSetXml,
   gwtMethodOf,
+  mixedExchangeSetXml,
   NOT_IN_EXCHANGE,
   REFUSED_UPLOAD,
   USER_TYPE,
@@ -75,6 +76,17 @@ describe('runExchange', () => {
     ])
     expect(harness.urls().filter((url) => url.endsWith('nocache.js'))).toHaveLength(0)
     expect(harness.urls().some((url) => url.includes('downloadFile'))).toBe(false)
+  })
+
+  test('the receipts kept and uploaded cover the documents addressed to the company; receiptsForEveryDocument covers every one', async () => {
+    const recibos = async (harness: Awaited<ReturnType<typeof certificationHarness>>) =>
+      ((await harness.store.readArtefact('intercambio/envio-recibos.xml')) ?? '').match(/<Recibo /g) ?? []
+    const own = await certificationHarness(exchangeRoutes())
+    await runExchange(own.deps, atExchange(), { setXml: mixedExchangeSetXml() })
+    expect(await recibos(own)).toHaveLength(1)
+    const every = await certificationHarness(exchangeRoutes())
+    await runExchange(every.deps, atExchange(), { setXml: mixedExchangeSetXml(), receiptsForEveryDocument: true })
+    expect(await recibos(every)).toHaveLength(2)
   })
 
   test('the download is a stage of its own, and the validation, the uploads and the confirmations are one more: two warm-ups but one check of the saved session', async () => {

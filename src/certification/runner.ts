@@ -46,6 +46,10 @@ export type RunCertificationOptions = {
   readonly resendUnanswered?: boolean
   /** EN: The fewest documents the envelope of the simulation holds: a pass over the plan that holds fewer is repeated whole until it does, never past 100 (`issueSimulation`, `minimumDocuments`); 20 by default, what the "Declarar avance" form takes as field behaviour, and 0 issues one pass. ES: La menor cantidad de documentos que trae el sobre de la simulación: una pasada por el plan que trae menos se repite entera hasta alcanzarla, nunca más de 100 (`issueSimulation`, `minimumDocuments`); 20 por defecto, lo que toma el formulario "Declarar avance" como comportamiento de campo, y 0 emite una pasada. */
   readonly simulationMinimum?: number
+  /** EN: Send the books of the test set as regular ones, as the run did before: the sales and purchase books `MENSUAL` with no notification folio, the guide book with folio 3 (`runBooks`). By default each book is `ESPECIAL` with the attention number of its own set as its notification folio, as the SII's review takes them. ES: `TipoLibro`, `FolioNotificacion` — Enviar los libros del set de pruebas como regulares, como lo hacía la corrida antes: los de ventas y de compras `MENSUAL` sin folio de notificación, el de guías con folio 3 (`runBooks`). Por defecto cada libro es `ESPECIAL` con el número de atención de su propio set como folio de notificación, como los toma la revisión del SII. */
+  readonly monthlyBooks?: boolean
+  /** EN: Answer the exchange set with a receipt of goods for every document, the ones addressed to another RUT included, as the run did before; by default only the documents addressed to the company get one, as field behaviour passes the stage. ES: `Recibo` — Responder el set de intercambio con un recibo de mercaderías por cada documento, también los dirigidos a otro RUT, como lo hacía la corrida antes; por defecto solo los documentos dirigidos a la empresa llevan uno, como el comportamiento de campo supera la etapa. */
+  readonly receiptsForEveryDocument?: boolean
 }
 
 /**
@@ -215,7 +219,11 @@ export const runCertification = async (
     }
     if (reachedUntil()) return stop('until')
     if (state.stage === 'books') {
-      const books = await runBooks(deps, state)
+      const books = await runBooks(
+        deps,
+        state,
+        options.monthlyBooks === undefined ? {} : { monthlyBooks: options.monthlyBooks },
+      )
       state = books.state
       // With the three mandatory books sent the next stage is asked for, approved or not: the portal decides.
       if (books.outcome === 'incomplete') return stop('incomplete', books.detail)
@@ -250,11 +258,12 @@ export const runCertification = async (
     }
     if (reachedUntil()) return stop('until')
     if (state.stage === 'exchange') {
-      const exchange = await runExchange(
-        deps,
-        state,
-        options.exchangeSetXml === undefined ? {} : { setXml: options.exchangeSetXml },
-      )
+      const exchange = await runExchange(deps, state, {
+        ...(options.exchangeSetXml === undefined ? {} : { setXml: options.exchangeSetXml }),
+        ...(options.receiptsForEveryDocument === undefined
+          ? {}
+          : { receiptsForEveryDocument: options.receiptsForEveryDocument }),
+      })
       state = exchange.state
       if (exchange.outcome === 'setUnavailable' || exchange.outcome === 'notInExchange')
         return stop('exchange', exchange.detail)

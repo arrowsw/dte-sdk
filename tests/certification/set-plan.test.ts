@@ -1,6 +1,12 @@
 import { planCertificationSets } from '../../src/certification/set-plan'
 import { parseTestSetText } from '../../src/certification/set-text'
-import { ATTENTION, FULL_SET_TEXT, purchaseSetText } from '../support/test-set-samples'
+import {
+  ATTENTION,
+  FULL_SET_TEXT,
+  GUIDE_BOOK_ATTENTION,
+  purchaseSetText,
+  SALES_BOOK_ATTENTION,
+} from '../support/test-set-samples'
 
 const plan = planCertificationSets(parseTestSetText(FULL_SET_TEXT))
 const id = (n: number) => `${ATTENTION}-${n}`
@@ -198,15 +204,19 @@ test('the purchase-book sets carry their documents and factor, and a missing fac
   })
 })
 
-test('sales-book and unknown sets have no plan entry, and the last set of a kind wins', () => {
+test('the sales-book and guide-book sets keep only their attention number, unknown sets have no plan entry, and the last set of a kind wins', () => {
   expect(Object.keys(plan).sort()).toEqual([
     'basic',
     'exempt',
     'exemptPurchaseBook',
     'guide',
+    'guideBook',
     'purchase',
     'purchaseBook',
+    'salesBook',
   ])
+  expect(plan.salesBook).toEqual({ kind: 'salesBook', attentionNumber: SALES_BOOK_ATTENTION })
+  expect(plan.guideBook).toEqual({ kind: 'guideBook', attentionNumber: GUIDE_BOOK_ATTENTION })
   const twice = planCertificationSets(
     parseTestSetText(
       `SET BASICO - NUMERO DE ATENCION: 1\nCASO 1-1\nDOCUMENTO FACTURA\n\nSET BASICO - NUMERO DE ATENCION: 2\nCASO 2-1\nDOCUMENTO FACTURA\n`,

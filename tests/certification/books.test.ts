@@ -82,6 +82,20 @@ describe('the sales book', () => {
     expect(book.entries[7]).toMatchObject({ type: 56, netAmount: 3100 })
   })
 
+  test('with a notification folio it is a special book that names it on the cover, and validates', async () => {
+    const book = createCertificationSalesBook(basic, { ...bookInput, receiver: bookReceiver, notificationFolio: 4100 })
+    expect(book.cover).toMatchObject({
+      operation: 'sale',
+      kind: 'special',
+      notificationFolio: 4100,
+      submission: 'total',
+    })
+    expect(book.xml).toContain('<TipoLibro>ESPECIAL</TipoLibro>')
+    expect(book.xml).toContain('<FolioNotificacion>4100</FolioNotificacion>')
+    expect(book.periodTotals).not.toBeNull()
+    expect(await validateAgainstXsd(book.xml, 'LibroCV')).toEqual([])
+  })
+
   test('refuses a set that is not the basic one', async () => {
     const guide = await issueTestSet(plan.guide!, issueOptions())
     expect(() => createCertificationSalesBook(guide, { ...bookInput, receiver: bookReceiver })).toThrow(
@@ -401,6 +415,13 @@ describe('the purchase books', () => {
       taxRate: 0,
       nonRecoverableVat: [{ code: 1, amount: 0 }],
     })
+  })
+
+  test('with a notification folio the purchase book is a special book that names it on the cover', () => {
+    const book = createCertificationPurchaseBook(plan.purchaseBook!, { ...bookInput, notificationFolio: 4101 })
+    expect(book.cover).toMatchObject({ operation: 'purchase', kind: 'special', notificationFolio: 4101 })
+    expect(book.xml).toContain('<TipoLibro>ESPECIAL</TipoLibro>')
+    expect(book.xml).toContain('<FolioNotificacion>4101</FolioNotificacion>')
   })
 
   test('a document the detector does not know is rejected by phase 3', () => {

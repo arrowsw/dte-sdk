@@ -31,6 +31,8 @@ export type CertificationBookInput = {
   readonly submission?: 'total' | 'adjustment'
   /** EN: Period totals of the earlier submissions, carried forward on an adjustment of the sales or purchase book; the guide book ignores them. ES: Totales del período de los envíos anteriores, arrastrados en un ajuste del libro de ventas o de compras; el libro de guías los ignora. */
   readonly previousTotals?: readonly BookTotals[]
+  /** EN: Folio of the SII notification that asks for the book: with it the sales and purchase books are `ESPECIAL` and name it on the cover, without it they are `MENSUAL`; the guide book, always `ESPECIAL`, takes 3 without it. ES: `FolioNotificacion` — Folio de la notificación del SII que pide el libro: con él los libros de ventas y de compras son `ESPECIAL` y lo nombran en la carátula, sin él son `MENSUAL`; el libro de guías, siempre `ESPECIAL`, toma 3 sin él. */
+  readonly notificationFolio?: number
 }
 
 /**
@@ -122,8 +124,6 @@ export type GuideBookCaseFlag = 'normal' | 'modified' | 'voided'
 export type CertificationGuideBookInput = CertificationBookInput & {
   /** EN: The customer written on every guide line. ES: El cliente que se escribe en cada línea de guía (`RUTDoc`, `RznSoc`). */
   readonly receiver: BookReceiver
-  /** EN: `FolioNotificacion`; 3 by default. ES: `FolioNotificacion`; 3 por defecto. */
-  readonly notificationFolio?: number
   /** EN: One flag per guide, by position; by default the second is `modified` and the third `voided`. ES: Un indicador por guía, por posición; por defecto la segunda es `modified` y la tercera `voided`. */
   readonly caseFlags?: readonly GuideBookCaseFlag[]
 }
@@ -134,6 +134,15 @@ const PAPER_EXEMPT_INVOICE = 32
 const NOTE_TYPES: readonly number[] = [55, 56, 60, 61]
 const DEFAULT_NOTIFICATION_FOLIO = 3
 
+// A book the SII asks for through a notification is `ESPECIAL` and names the notification's folio on the cover (the
+// format of the purchase and sales books, section 1.1, point 3 b); any other is the regular monthly book.
+const kindOf = (
+  input: CertificationBookInput,
+): { readonly kind: 'monthly' } | { readonly kind: 'special'; readonly notificationFolio: number } =>
+  input.notificationFolio === undefined
+    ? { kind: 'monthly' }
+    : { kind: 'special', notificationFolio: input.notificationFolio }
+
 const vatOf = (affected: number): number => Math.round((affected * VAT_RATE) / 100)
 const documentDate = (period: string): string => `${period}-15`
 
@@ -143,10 +152,10 @@ const compact = <T extends object>(value: T): T =>
 /**
  * EN: The sales book of the certification: only the basic set's invoices and notes, dated the 15th of the period,
  * with the customer as counterparty, every amount present (0 when absent) and the VAT rate on every line, as the
- * field sends it. Book `MENSUAL`, submission `TOTAL`.
+ * field sends it. Book `MENSUAL`, or `ESPECIAL` with the notification folio given, submission `TOTAL`.
  * ES: El libro de ventas de la certificación: solo las facturas y notas del set básico, con fecha 15 del período, el
  * cliente como contraparte, todo monto presente (0 si falta) y la tasa de IVA en cada línea, como lo envía el campo.
- * Libro `MENSUAL`, envío `TOTAL`.
+ * Libro `MENSUAL`, o `ESPECIAL` con el folio de notificación dado, envío `TOTAL`.
  * @throws {DteError} EN: `INVALID_OPTION` (field `set`) when the set is not the basic one; the phase 3 codes. ES: `INVALID_OPTION` (campo `set`) si el set no es el básico; los códigos de la fase 3.
  */
 export const createCertificationSalesBook = (
@@ -179,7 +188,7 @@ export const createCertificationSalesBook = (
       resolutionDate: input.resolution.date,
       resolutionNumber: input.resolution.number,
       operation: 'sale',
-      kind: 'monthly',
+      ...kindOf(input),
       submission: input.submission ?? 'total',
     },
     entries,
@@ -341,15 +350,15 @@ const fieldSummary = (
  * deliveries, the whole VAT a purchase invoice withholds as another tax with code 15 and off its total, the referenced
  * folio of a note from its observation, and, for the
  * exempt taxpayers' book, non-recoverable VAT on every affected line, the paper exempt invoice as type 32 and notes
- * inheriting the amounts of the document they reference. Totals follow the field formula. Book `MENSUAL`, submission
- * `TOTAL`, the proportionality factor of the set.
+ * inheriting the amounts of the document they reference. Totals follow the field formula. Book `MENSUAL`, or
+ * `ESPECIAL` with the notification folio given, submission `TOTAL`, the proportionality factor of the set.
  * ES: Un libro de compras de la certificación desde un set de libro de compras: una línea por documento de proveedor
  * con la contraparte de relleno del SII, el IVA al 19 % del afecto, IVA de uso común, IVA no recuperable en entregas
  * gratuitas, el IVA completo que retiene una factura de compra como otro impuesto con el código 15 y fuera de su total,
  * el folio referido de una nota tomado de su observación y, en el
  * libro para exentos, IVA no recuperable en toda línea afecta, la factura exenta en papel como tipo 32 y notas que
- * heredan los montos del documento que refieren. Los totales siguen la fórmula del campo. Libro `MENSUAL`, envío `TOTAL`,
- * el factor de proporcionalidad del set.
+ * heredan los montos del documento que refieren. Los totales siguen la fórmula del campo. Libro `MENSUAL`, o
+ * `ESPECIAL` con el folio de notificación dado, envío `TOTAL`, el factor de proporcionalidad del set.
  * @throws {DteError} EN: the phase 3 codes (`INVALID_DOCUMENT_TYPE` for a document the detector does not know). ES: los códigos de la fase 3 (`INVALID_DOCUMENT_TYPE` para un documento que el detector no conoce).
  */
 export const createCertificationPurchaseBook = (
@@ -367,7 +376,7 @@ export const createCertificationPurchaseBook = (
       resolutionDate: input.resolution.date,
       resolutionNumber: input.resolution.number,
       operation: 'purchase',
-      kind: 'monthly',
+      ...kindOf(input),
       submission: input.submission ?? 'total',
     },
     entries,
