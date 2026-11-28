@@ -2188,6 +2188,8 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
       references: [{ documentType: 110, folio: 1, date: '2026-11-10', code: 3 }],
       ...overrides,
     })
+  // Without an exchange rate an export document carries no totals in pesos, and is told so.
+  const withoutPesos = { rule: 'exportWithoutPesos', field: 'exchangeRate' } as const
 
   // Formato DTE 2.5, page 10: the zone "Información Referencia" is code 1 on the notes of export too.
   test.each([111, 112] as const)('a %p with no reference is refused, and an export invoice needs none', (type) => {
@@ -2205,7 +2207,7 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
     expect(doc.header.receiver).toEqual(foreign)
     expect(doc.header.transport).toEqual({ customs })
     expect(doc.header.otherCurrency).toBeUndefined()
-    expect(doc.warnings).toBeUndefined()
+    expect(doc.warnings).toEqual([withoutPesos])
   })
 
   test('with an exchange rate it carries its totals in pesos, each rounded half away from zero to a whole peso', () => {
@@ -2259,7 +2261,7 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
     expect(xml).toContain('<PrcItem>94</PrcItem><RecargoPct>10</RecargoPct><MontoItem>103.4</MontoItem>')
     expect(xml).not.toContain('RecargoMonto')
     // The format asks a percent for its amount (field 34): the caller is told it went without one.
-    expect(doc.warnings).toEqual([{ formatField: 34, field: 'items[0].surchargePercent' }])
+    expect(doc.warnings).toEqual([{ formatField: 34, field: 'items[0].surchargePercent' }, withoutPesos])
   })
 
   // `DescuentoMonto` and `RecargoMonto` hold whole numbers only. A line may ask for the share of its percent as one,
@@ -2269,7 +2271,7 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
     const goods = { name: 'Ciruelas', quantity: 1036, unit: 'KN', unitPrice: 194, discountPercent: 5 }
     const whole = exportOf({ items: [{ ...goods, wholeShares: true }] })
     expect(whole.items[0]).toMatchObject({ discountPercent: 5, discountAmount: 10049, amount: 190935 })
-    expect(whole).not.toHaveProperty('warnings')
+    expect(whole.warnings).toEqual([withoutPesos])
     expect(buildDocumentXml(whole)).toContain(
       '<DescuentoPct>5</DescuentoPct><DescuentoMonto>10049</DescuentoMonto><MontoItem>190935</MontoItem>',
     )
@@ -2312,9 +2314,10 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
     expect(doc.warnings).toEqual([
       { formatField: 34, field: 'items[0].surchargePercent' },
       { formatField: 30, field: 'items[1].discountPercent' },
+      withoutPesos,
     ])
     const whole = exportOf({ items: [{ name: 'Queso', quantity: 2, unit: 'KN', unitPrice: 50, discountPercent: 10 }] })
-    expect(whole.warnings).toBeUndefined()
+    expect(whole.warnings).toEqual([withoutPesos])
   })
 
   test.each<[string, LineItemInput]>([
@@ -2847,5 +2850,106 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
   test('it admits 60 lines', () => {
     expect(exportOf({ items: Array.from({ length: 60 }, () => line) }).items).toHaveLength(60)
     expectError(() => exportOf({ items: Array.from({ length: 61 }, () => line) }), 'INVALID_OPTION', { field: 'items' })
+  })
+
+  // Formato DTE 2.5 leaves `OtraMoneda` optional on the three export documents; in the field, the SII has rejected one
+  // that came without it.
+  test.each([110, 111, 112] as const)(
+    'a %p without an exchange rate is built as before and listed in the warnings',
+    (type) => {
+      const doc = type === 110 ? exportOf() : note(type)
+      expect(doc.header.otherCurrency).toBeUndefined()
+      expect(doc.warnings).toEqual([withoutPesos])
+      const inPesos = type === 110 ? exportOf({ exchangeRate: 950 }) : note(type, { exchangeRate: 950 })
+      expect(inPesos.warnings).toBeUndefined()
+    },
+  )
+})
+
+// `DTE_v10.xsd` declares `Referencia` from none to 40 under `Documento`, `Liquidacion` and `Exportaciones`, and
+// `EnvioBOLETA_v11.xsd` the same 40 under a receipt's own `Documento`.
+describe('the references a document admits', () => {
+  const invoice = (overrides: Partial<DocumentInput> = {}) =>
+    createDocument({ type: 33, folio: 1, issueDate: '2026-11-15', issuer, receiver, items, ...overrides })
+  const cited = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({ documentType: 52, folio: index + 1, date: '2026-11-01' }))
+
+  test('an invoice admits 40 references and refuses a 41st', () => {
+    expect(invoice({ references: cited(40) }).references).toHaveLength(40)
+    expectError(() => invoice({ references: cited(41) }), 'INVALID_OPTION', { field: 'references' })
+  })
+
+  test('a settlement invoice and an export document hold to the same 40', () => {
+    const settlement: Partial<DocumentInput> = {
+      type: 43,
+      items: [{ name: 'Venta liquidada', unitPrice: 10000, settledDocumentType: '33' }],
+    }
+    expect(invoice({ ...settlement, references: cited(40) }).references).toHaveLength(40)
+    expectError(() => invoice({ ...settlement, references: cited(41) }), 'INVALID_OPTION', { field: 'references' })
+    const exported: Partial<DocumentInput> = {
+      type: 111,
+      receiver: { rut: FOREIGN_RECEIVER_RUT, businessName: 'Andes Trading LLC', address: '1200 Harbor Blvd' },
+      currency: 'DOLAR USA',
+      items: [{ name: 'Diferencia', amount: 10.5 }],
+      exchangeRate: 950,
+    }
+    expect(invoice({ ...exported, references: cited(40) }).references).toHaveLength(40)
+    expectError(() => invoice({ ...exported, references: cited(41) }), 'INVALID_OPTION', { field: 'references' })
+  })
+
+  test('a receipt admits 40 references of its own and refuses a 41st', () => {
+    const own = (count: number) => Array.from({ length: count }, (_, index) => ({ code: 'CAJA', reason: `R${index}` }))
+    const receipt = (count: number) =>
+      createDocument({
+        type: 39,
+        folio: 1,
+        issueDate: '2026-11-15',
+        issuer,
+        items: [{ name: 'Café', unitPrice: 1500 }],
+        pricesIncludeVat: true,
+        receiptReferences: own(count),
+      })
+    expect(receipt(40).receiptReferences).toHaveLength(40)
+    expectError(() => receipt(41), 'INVALID_OPTION', { field: 'receiptReferences' })
+  })
+
+  // Formato DTE 2.5, page 46, field 4 of the references (`FolioRef`): "Debe ser cero sólo si el documento tiene
+  // encendido el Indicador de referencia global".
+  test('a global reference with a folio other than zero is built and listed in the warnings', () => {
+    const global = (folio: number | string) =>
+      invoice({ references: [{ documentType: 52, folio, date: '2026-11-01', global: true }] })
+    const doc = global(5)
+    expect(doc.references[0]).toMatchObject({ global: true, folio: '5' })
+    expect(doc.warnings).toEqual([{ rule: 'globalReferenceFolio', field: 'references[0].folio' }])
+    expect(global(0).warnings).toBeUndefined()
+    expect(global('0').warnings).toBeUndefined()
+    expect(invoice({ references: cited(2) }).warnings).toBeUndefined()
+  })
+})
+
+// The SII's instructions for the dispatch-guide test set: "cuando una Guía de Despacho Electrónica señala un Traslado
+// Interno, los datos del receptor deben coincidir con los del emisor".
+describe('the receiver of an internal transfer', () => {
+  const guide = (transferType: 1 | 5, rut: string) =>
+    createDocument({
+      type: 52,
+      folio: 1,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver: { ...receiver, rut },
+      items: [{ name: 'Pallet', quantity: 2, unit: 'UN', unitPrice: 1000 }],
+      options: { transferType },
+    })
+
+  test('an internal transfer to another RUT is built and listed in the warnings', () => {
+    const doc = guide(5, RECEIVER_RUT)
+    expect(doc.header.receiver.rut).toBe(RECEIVER_RUT)
+    expect(doc.warnings).toEqual([{ rule: 'internalTransferReceiver', field: 'receiver.rut' }])
+  })
+
+  test("one to the issuer's own RUT, in any shape, and a transfer of another kind carry no warning", () => {
+    expect(guide(5, ISSUER_RUT).warnings).toBeUndefined()
+    expect(guide(5, '76.543.210-3').warnings).toBeUndefined()
+    expect(guide(1, RECEIVER_RUT).warnings).toBeUndefined()
   })
 })

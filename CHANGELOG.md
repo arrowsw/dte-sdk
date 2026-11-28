@@ -7,7 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Three more warnings at issue time** (`DocumentWarning` with `rule` and `field`). `createDocument` builds each of
+  these documents as before and now lists it in `Document.warnings`, naming the field to change:
+  - `globalReferenceFolio`, `references[i].folio`: a global reference (`global: true`, `IndGlobal`) whose folio is
+    not zero. Formato DTE 2.5, field 4 of the references (page 46), says of `FolioRef`: "Debe ser cero sólo si el
+    documento tiene encendido el Indicador de referencia global". The format rejects a document only for what its
+    header lacks, so this is not refused.
+  - `internalTransferReceiver`, `receiver.rut`: a dispatch guide (52) of an internal transfer (`transferType` 5) whose
+    receiver's RUT is not the issuer's. The SII's instructions for the dispatch-guide test set say that "cuando una
+    Guía de Despacho Electrónica señala un Traslado Interno, los datos del receptor deben coincidir con los del
+    emisor"; Formato DTE 2.5 says nothing of it at `IndTraslado` (field 7). The certification run already names the
+    issuer there, and its documents carry no warning.
+  - `exportWithoutPesos`, `exchangeRate`: an export document (110, 111, 112) issued without `exchangeRate`, which
+    leaves out its totals in pesos (`OtraMoneda`). The format marks that section optional on every type; as field
+    behaviour, the SII has rejected an export document that came without it.
+  - **What to change:** nothing in a call. Code that expects `warnings` to be absent on an export document issued
+    without `exchangeRate` will find the new warning there; code that reads the warnings by their keys gets a third
+    shape, `{ rule, field }`.
+
 ### Changed
+
+- **More than 40 references are refused** (`INVALID_OPTION`, `details.field` `references` or `receiptReferences`).
+  `DTE_v10.xsd` declares `Referencia` with `maxOccurs="40"` under `Documento`, `Liquidacion` and `Exportaciones`, and
+  `EnvioBOLETA_v11.xsd` the same 40 under a receipt's `Documento`. `createDocument` wrote a 41st, and the document did
+  not validate. It now refuses it before a folio is stamped, as it refuses more than 60 lines.
+  - **What to change:** cite at most 40 documents. Formato DTE 2.5 gives `IndGlobal` to a document that refers to more
+    than 20 of one type: one global reference (`global: true`, folio 0) stands for them.
 
 - **A credit note's line in the folio consumption report.** `createFolioConsumption` reports credit notes (61) since
   0.17.0, but `folioConsumptionEntryFromDocument`, which derives a line of the report from an issued document, took a
