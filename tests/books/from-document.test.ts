@@ -5,11 +5,13 @@ import {
   guideEntryFromDocument,
 } from '../../src/books/from-document'
 import { createGuideBook } from '../../src/books/guide'
-import { createPurchaseSalesBook } from '../../src/books/purchase-sales'
+import { createPurchaseSalesBook, signPurchaseSalesBook } from '../../src/books/purchase-sales'
+import { FOREIGN_RECEIVER_RUT } from '../../src/catalogs/codes'
 import { createDocument } from '../../src/document/create'
-import type { DocumentInput, Withholding } from '../../src/model/document'
-import { guideCover, reportCover, saleCover, purchaseCover, SUPPLIER_RUT } from '../support/book-fixtures'
-import { ISSUER_RUT, RECEIVER_RUT } from '../support/fixtures'
+import type { Document, DocumentInput, Withholding } from '../../src/model/document'
+import { certificate, guideCover, reportCover, saleCover, purchaseCover, SUPPLIER_RUT } from '../support/book-fixtures'
+import { FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from '../support/fixtures'
+import { validateAgainstXsd } from '../support/xsd'
 
 const issuer = {
   rut: ISSUER_RUT,
@@ -366,6 +368,237 @@ describe('bookEntryFromDocument', () => {
   test('rejects an invalid book RUT', () => {
     expectCodeOf(() => bookEntryFromDocument(createDocument(base), { ...sale, bookRut: '1-1' }), 'INVALID_RUT')
   })
+})
+
+// "Formato de Información de Compras y Ventas", version 2.2, section 1.4: every amount of a book is in pesos. An export
+// document (110, 111, 112) carries its amounts in a foreign currency, and in pesos only in `OtraMoneda`.
+describe('bookEntryFromDocument with an export document', () => {
+  const foreign = {
+    rut: FOREIGN_RECEIVER_RUT,
+    businessName: 'Pacific Orchard Imports Inc',
+    address: '480 Bayview Ave',
+    city: 'Seattle',
+  }
+  const customs = { saleModality: 1, saleClause: 2, saleClauseTotal: 980, transportRoute: 1, receiverCountry: 225 }
+  const exportOf = (overrides: Partial<DocumentInput> = {}): Document =>
+    createDocument({
+      type: 110,
+      folio: 7,
+      issueDate: '2026-10-20',
+      issuer,
+      receiver: foreign,
+      currency: 'DOLAR USA',
+      items: [{ name: 'Nueces con cáscara', quantity: 40, unit: 'KN', unitPrice: 24.5 }],
+      transport: { customs },
+      ...overrides,
+    })
+  const withPesos = (document: Document, otherCurrency: Document['header']['otherCurrency']): Document => ({
+    ...document,
+    header: { ...document.header, otherCurrency },
+  })
+  const expectError = (run: () => unknown, code: string, details: Record<string, unknown>): void => {
+    expect(run).toThrow(expect.objectContaining({ code, details: expect.objectContaining(details) }))
+  }
+
+  test('one issued with an exchange rate enters the book with the totals it carries in pesos', () => {
+    // 980 × 912.37 = 894122.6.
+    const document = exportOf({ exchangeRate: 912.37 })
+    expect(document.header.otherCurrency).toMatchObject({ exemptAmount: 894123, totalAmount: 894123 })
+    expect(bookEntryFromDocument(document, sale)).toEqual({
+      type: 110,
+      folio: 7,
+      date: '2026-10-20',
+      counterpartyRut: FOREIGN_RECEIVER_RUT,
+      counterpartyName: 'Pacific Orchard Imports Inc',
+      exemptAmount: 894123,
+      totalAmount: 894123,
+    })
+  })
+
+  test('one with no totals in pesos is refused, with the exchange rate it needs in the details', () => {
+    expectError(() => bookEntryFromDocument(exportOf(), sale), 'MISSING_FIELD', { field: 'exchangeRate', type: 110 })
+  })
+
+  test('given an exchange rate, each amount is converted once, half away from zero, and the line adds up', () => {
+    // 980 × 912.37 = 894122.6, and 10.5 × 1 = 10.5: both round away from zero.
+    expect(bookEntryFromDocument(exportOf(), { ...sale, exchangeRate: 912.37 })).toMatchObject({
+      exemptAmount: 894123,
+      totalAmount: 894123,
+    })
+    const note = exportOf({
+      type: 112,
+      items: [{ name: 'Diferencia de precio', amount: 10.5 }],
+      transport: undefined,
+      references: [{ documentType: 110, folio: 7, date: '2026-10-20', code: 3 }],
+    })
+    const entry = bookEntryFromDocument(note, { ...sale, exchangeRate: 1 })
+    expect(entry).toMatchObject({ type: 112, exemptAmount: 11, totalAmount: 11 })
+    expect(createPurchaseSalesBook({ cover: saleCover, entries: [entry] }).totalMismatches).toEqual([])
+  })
+
+  test('the conversion is exact: 0.145 at 100 is 14.5, which books as 15', () => {
+    // In floating point 0.145 × 100 is 14.499999999999998, which rounds to 14.
+    const document = exportOf({ totals: { exemptAmount: 0.145, totalAmount: 0.145 } })
+    expect(bookEntryFromDocument(document, { ...sale, exchangeRate: 100 })).toMatchObject({
+      exemptAmount: 15,
+      totalAmount: 15,
+    })
+  })
+
+  test('the rate is checked as the document checks it, and compared with the carried one after rounding', () => {
+    expectError(() => bookEntryFromDocument(exportOf(), { ...sale, exchangeRate: 999999.99995 }), 'INVALID_AMOUNT', {
+      field: 'exchangeRate',
+    })
+    expect(() => exportOf({ exchangeRate: 999999.99995 })).toThrow(
+      expect.objectContaining({ code: 'INVALID_AMOUNT', details: expect.objectContaining({ field: 'exchangeRate' }) }),
+    )
+    // The document writes 912.37005 as 912.3701, and the book takes the rate as the document would have written it.
+    const document = exportOf({ exchangeRate: 912.3701 })
+    expect(bookEntryFromDocument(document, { ...sale, exchangeRate: 912.37005 })).toMatchObject({ totalAmount: 894123 })
+    expectError(() => bookEntryFromDocument(document, { ...sale, exchangeRate: 912.37004 }), 'INVALID_OPTION', {
+      field: 'exchangeRate',
+    })
+  })
+
+  test('a converted amount the book cannot hold is refused here, naming it', () => {
+    const huge = exportOf({ totals: { exemptAmount: 99999999999.9999, totalAmount: 99999999999.9999 } })
+    expectError(() => bookEntryFromDocument(huge, { ...sale, exchangeRate: 999999.9999 }), 'INVALID_AMOUNT', {
+      field: 'exemptAmount',
+      kind: 'converted',
+    })
+    const total = withPesos(huge, undefined)
+    const totalOnly = { ...total, header: { ...total.header, totals: { totalAmount: 99999999999.9999 } } }
+    expectError(() => bookEntryFromDocument(totalOnly, { ...sale, exchangeRate: 999999.9999 }), 'INVALID_AMOUNT', {
+      field: 'totalAmount',
+      kind: 'converted',
+    })
+  })
+
+  test('the book RUT is checked first', () => {
+    expectError(() => bookEntryFromDocument(exportOf(), { ...sale, bookRut: '1-1' }), 'INVALID_RUT', {
+      field: 'bookRut',
+    })
+    expectError(
+      () => bookEntryFromDocument(createDocument(base), { ...sale, bookRut: '1-1', exchangeRate: 1 }),
+      'INVALID_RUT',
+      { field: 'bookRut' },
+    )
+  })
+
+  test('a negative sign negates an export credit note (112) as a credit note (61)', () => {
+    const note = exportOf({
+      type: 112,
+      items: [{ name: 'Diferencia de precio', amount: 10.5 }],
+      transport: undefined,
+      references: [{ documentType: 110, folio: 7, date: '2026-10-20', code: 3 }],
+    })
+    const entry = bookEntryFromDocument(note, { ...sale, exchangeRate: 1, creditNoteSign: 'negative' })
+    expect(entry).toMatchObject({ type: 112, exemptAmount: -11, totalAmount: -11 })
+    expect(bookEntryFromDocument(note, { ...sale, exchangeRate: 1 })).toMatchObject({ totalAmount: 11 })
+  })
+
+  // Not solved here: an export without payment carries an exempt amount and a total of zero, in its currency and in
+  // pesos, and its book line does not add up by the formula.
+  test('an export without payment books its exempt amount in pesos and a total of zero, which the book reports', () => {
+    const unpaid = exportOf({ options: { exportPaymentTerms: '21' }, exchangeRate: 912.37 })
+    expect(unpaid.header.totals).toEqual({ exemptAmount: 980, totalAmount: 0 })
+    expect(unpaid.header.otherCurrency).toMatchObject({ exemptAmount: 894123, totalAmount: 0 })
+    const entry = bookEntryFromDocument(unpaid, sale)
+    expect(entry).toMatchObject({ exemptAmount: 894123, totalAmount: 0 })
+    // Converted with the option, the exempt amount and the total are each converted on their own.
+    const converted = bookEntryFromDocument(exportOf({ options: { exportPaymentTerms: '21' } }), {
+      ...sale,
+      exchangeRate: 912.37,
+    })
+    expect(converted).toMatchObject({ exemptAmount: 894123, totalAmount: 0 })
+    expect(createPurchaseSalesBook({ cover: saleCover, entries: [entry] }).totalMismatches).toEqual([
+      { index: 0, type: 110, folio: 7, expected: 894123, actual: 0 },
+    ])
+    expect(() => createPurchaseSalesBook({ cover: saleCover, entries: [entry], strictTotals: true })).toThrow(
+      expect.objectContaining({ code: 'BOOK_TOTAL_MISMATCH' }),
+    )
+  })
+
+  test.each([0, -1, 0.00004, 1_000_000, Number.NaN, Number.POSITIVE_INFINITY])(
+    'an exchange rate of %p is refused, as the document refuses it',
+    (exchangeRate) => {
+      expectError(() => bookEntryFromDocument(exportOf(), { ...sale, exchangeRate }), 'INVALID_AMOUNT', {
+        field: 'exchangeRate',
+      })
+    },
+  )
+
+  test('an exchange rate the document does not carry is refused, and the one it carries is taken', () => {
+    const document = exportOf({ exchangeRate: 912.37 })
+    expect(bookEntryFromDocument(document, { ...sale, exchangeRate: 912.37 })).toMatchObject({ totalAmount: 894123 })
+    expectError(() => bookEntryFromDocument(document, { ...sale, exchangeRate: 912.38 }), 'INVALID_OPTION', {
+      field: 'exchangeRate',
+    })
+    const noRate = withPesos(document, { currency: 'PESO CL', exemptAmount: 894123, totalAmount: 894123 })
+    expect(bookEntryFromDocument(noRate, sale)).toMatchObject({ exemptAmount: 894123, totalAmount: 894123 })
+    expectError(() => bookEntryFromDocument(noRate, { ...sale, exchangeRate: 912.37 }), 'INVALID_OPTION', {
+      field: 'exchangeRate',
+    })
+  })
+
+  test('a document that is not an export one refuses an exchange rate', () => {
+    expectError(() => bookEntryFromDocument(createDocument(base), { ...sale, exchangeRate: 1 }), 'INVALID_OPTION', {
+      field: 'exchangeRate',
+    })
+  })
+
+  test('one issued in pesos takes its own totals, and refuses an exchange rate', () => {
+    const document = exportOf({
+      currency: 'PESO CL',
+      items: [{ name: 'Nueces con cáscara', quantity: 40, unit: 'KN', unitPrice: 2450 }],
+    })
+    expect(bookEntryFromDocument(document, sale)).toMatchObject({ exemptAmount: 98000, totalAmount: 98000 })
+    expectError(() => bookEntryFromDocument(document, { ...sale, exchangeRate: 1 }), 'INVALID_OPTION', {
+      field: 'exchangeRate',
+    })
+  })
+
+  test('totals in another currency, or without the exempt amount, are not totals in pesos', () => {
+    const euros = withPesos(exportOf(), { currency: 'EURO', exemptAmount: 850, totalAmount: 850 })
+    expectError(() => bookEntryFromDocument(euros, sale), 'MISSING_FIELD', { field: 'exchangeRate' })
+    const noExempt = withPesos(exportOf(), { currency: 'PESO CL', totalAmount: 894123 })
+    expectError(() => bookEntryFromDocument(noExempt, sale), 'MISSING_FIELD', { field: 'exchangeRate' })
+    expect(bookEntryFromDocument(noExempt, { ...sale, exchangeRate: 912.37 })).toMatchObject({
+      exemptAmount: 894123,
+      totalAmount: 894123,
+    })
+  })
+
+  test('totals in pesos with decimals are refused, naming the amount', () => {
+    const own = exportOf({
+      currency: 'PESO CL',
+      items: [{ name: 'Nueces con cáscara', quantity: 1, unit: 'KN', unitPrice: 2450.5 }],
+    })
+    expectError(() => bookEntryFromDocument(own, sale), 'INVALID_AMOUNT', { field: 'totals.exemptAmount' })
+    const ownTotal = { ...own, header: { ...own.header, totals: { totalAmount: 2450.5 } } }
+    expectError(() => bookEntryFromDocument(ownTotal, sale), 'INVALID_AMOUNT', { field: 'totals.totalAmount' })
+    const cents = withPesos(exportOf(), { currency: 'PESO CL', exemptAmount: 894122.6, totalAmount: 894123 })
+    expectError(() => bookEntryFromDocument(cents, sale), 'INVALID_AMOUNT', { field: 'otherCurrency.exemptAmount' })
+    const total = withPesos(exportOf(), { currency: 'PESO CL', exemptAmount: 894123, totalAmount: 894122.6 })
+    expectError(() => bookEntryFromDocument(total, sale), 'INVALID_AMOUNT', { field: 'otherCurrency.totalAmount' })
+  })
+
+  test('a sales book with an export invoice validates against the official schema', async () => {
+    const book = createPurchaseSalesBook({
+      cover: saleCover,
+      entries: [
+        bookEntryFromDocument(createDocument(base), sale),
+        bookEntryFromDocument(exportOf({ exchangeRate: 912.37 }), sale),
+      ],
+      now: FIXED_NOW,
+    })
+    expect(book.totalMismatches).toEqual([])
+    expect(book.periodTotals?.find((totals) => totals.type === 110)).toMatchObject({
+      exemptAmount: 894123,
+      totalAmount: 894123,
+    })
+    expect(await validateAgainstXsd(signPurchaseSalesBook(book, certificate).xml, 'LibroCV')).toEqual([])
+  }, 30_000)
 })
 
 describe('guideEntryFromDocument', () => {

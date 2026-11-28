@@ -54,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **What to change:** nothing in a call whose lines carry no code. One whose lines carry codes gets their taxes in
     its totals, or one of the refusals listed under Changed. `Withholding.rate` is now optional, absent only on a
     specific tax: code that reads it handles `undefined`.
+
 - **Every text problem of a document at once** (`createDocument`, new `findTextProblems`, `TextProblem` and
   `TextProblems`). Each text
   is checked against the `xs:maxLength` of its element in the SII's schemas and against ISO-8859-1, the encoding the
@@ -72,6 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before.
   - **What to change:** nothing. Code that compares the whole `details` of a `FIELD_TOO_LONG` or an
     `ENCODING_UNSUPPORTED_CHAR` thrown by `createDocument` finds the new `problems` key in them.
+
 - **`issueDocument` can check what it has just issued** (option `verify`, off by default). With it, the signed XML
   is read before it is returned as `verifyReceivedDocuments` reads a received document: its XML signature with the
   certificate it carries, the `FRMT` of its stamp with the `RSAPK` of the CAF the stamp carries, and the `DD` against
@@ -82,6 +84,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **What to change:** nothing; pass `verify: true` to use it.
 
 ### Changed
+
+- **An export document enters a book in pesos.** "Formato de Información de Compras y Ventas", version 2.2, section
+  1.4, says of every book: "Todos los valores de montos deben venir en pesos". `bookEntryFromDocument` copied the
+  totals of an export document (110, 111, 112) as the document has them, in its own currency: an export invoice for
+  1000 US dollars entered the book as 1000 pesos, and one whose total had decimals was refused later, by the book,
+  with `INVALID_AMOUNT` and nothing saying why. Its line now takes the exempt amount and the total in pesos: the
+  document's own when its currency is the peso, those it carries in `OtraMoneda` (written when it was issued with
+  `exchangeRate`), or, when it carries none, its own converted with the new `exchangeRate` option, each rounded once,
+  half away from zero, to a whole peso, as `convertToPesos` does. Formato DTE 2.5 asks that conversion of every export
+  document (its changes of 2017-05-31: "es obligatorio informar la conversión a pesos chilenos"), and the rate is the
+  one of its field 130: that of the issue date, published by the Banco Central de Chile. The option is checked as
+  `createDocument` checks its `exchangeRate`, rounded to four decimals and refused unless it is above zero and,
+  rounded, below 10^6, and it is compared with the rate a document carries after that rounding. Without either it is
+  refused with `MISSING_FIELD` and `exchangeRate` in `details.field`: a rate the document does not carry is not
+  guessed. A rate that differs from the one the document carries, or one given with a document that is not an export
+  one, is refused with `INVALID_OPTION`; an amount in pesos that is not a whole number, whichever way it was reached,
+  with `INVALID_AMOUNT` naming the amount (and `converted` in `details.kind` when the option converted it). A
+  document issued elsewhere whose `OtraMoneda` carries pesos with decimals, which the schema admits, stays refused,
+  and is booked with a line written by hand. The book RUT is still checked before anything else. `creditNoteSign:
+  'negative'` now negates an export credit note (112) as it negates a credit note (61). Not solved here: an export
+  without payment (`FmaPagExp` 21) enters with its exempt amount in pesos and a total of zero, which the book reports
+  in `totalMismatches` and refuses under `strictTotals`. The line of any other document is as before.
+  - **What to change:** pass `exchangeRate` to `bookEntryFromDocument` for an export document issued without one.
+    Code that booked export documents took their amounts as pesos, and the books it sent need a look. Code that
+    books credit notes with `creditNoteSign: 'negative'` now gets an export credit note negative too.
+
+- **A credit note's line in the folio consumption report.** `createFolioConsumption` reports credit notes (61) since
+  0.17.0, but `folioConsumptionEntryFromDocument`, which derives a line of the report from an issued document, took a
+  receipt alone and refused a 61 (`INVALID_DOCUMENT_TYPE`), so the line of a credit note was built by hand. It now
+  derives it, with the net, the VAT and the exempt amount of the note, and still refuses every other type. Which
+  credit notes go in a report stays the caller's to say: the function does not look at the document a note changes.
+  It refuses a note whose total is not the sum of its net, its VAT and its exempt amount (`BOOK_TOTAL_MISMATCH`,
+  `totalAmount`), which is how field 6 of the report's format defines the total of a summary: a note with withheld
+  VAT, another tax or a deposit guarantee, none of which a receipt carries. `ConsumoFolio_v10.xsd` admits the credit
+  note in a summary; the format of the report, of 2020, names the two receipts alone.
+  - **What to change:** nothing. Code that relied on the refusal of a 61 now gets its line.
 
 - **Codes of additional tax or withholding the totals cannot carry are refused** before a folio is stamped, each with
   the code in `details.taxCode`. Each of these documents was issued before, with the code on the line and the totals
@@ -141,17 +179,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not validate. It now refuses it before a folio is stamped, as it refuses more than 60 lines.
   - **What to change:** cite at most 40 documents. Formato DTE 2.5 gives `IndGlobal` to a document that refers to more
     than 20 of one type: one global reference (`global: true`, folio 0) stands for them.
-
-- **A credit note's line in the folio consumption report.** `createFolioConsumption` reports credit notes (61) since
-  0.17.0, but `folioConsumptionEntryFromDocument`, which derives a line of the report from an issued document, took a
-  receipt alone and refused a 61 (`INVALID_DOCUMENT_TYPE`), so the line of a credit note was built by hand. It now
-  derives it, with the net, the VAT and the exempt amount of the note, and still refuses every other type. Which
-  credit notes go in a report stays the caller's to say: the function does not look at the document a note changes.
-  It refuses a note whose total is not the sum of its net, its VAT and its exempt amount (`BOOK_TOTAL_MISMATCH`,
-  `totalAmount`), which is how field 6 of the report's format defines the total of a summary: a note with withheld
-  VAT, another tax or a deposit guarantee, none of which a receipt carries. `ConsumoFolio_v10.xsd` admits the credit
-  note in a summary; the format of the report, of 2020, names the two receipts alone.
-  - **What to change:** nothing. Code that relied on the refusal of a 61 now gets its line.
 
 ### Fixed
 
