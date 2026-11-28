@@ -682,7 +682,7 @@ export type FolioConsumptionSummary = {
   readonly netAmount: number
   /** EN: VAT. ES: `MntIva` — IVA. */
   readonly vatAmount: number
-  /** EN: VAT rate; type 39 only. ES: `TasaIVA` — Tasa de IVA; solo tipo 39. */
+  /** EN: VAT rate; types 39 and 61 only. ES: `TasaIVA` — Tasa de IVA; solo tipos 39 y 61. */
   readonly vatRate?: number
   /** EN: Exempt amount. ES: `MntExento` — Monto exento. */
   readonly exemptAmount: number
