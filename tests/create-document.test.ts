@@ -1,5 +1,5 @@
 import { buildDocumentXml } from '../src/document/build-xml'
-import { createDocument, FIELD_LIMITS } from '../src/document/create'
+import { createDocument, FIELD_LIMITS, findTextProblems } from '../src/document/create'
 import { fromSiiDocument, toSiiDocument } from '../src/model/codec'
 import { DteError } from '../src/errors'
 import { calculateLineAmount } from '../src/totals/calculate'
@@ -3087,6 +3087,9 @@ describe('the references a document admits', () => {
     expect(doc.warnings).toEqual([{ rule: 'globalReferenceFolio', field: 'references[0].folio' }])
     expect(global(0).warnings).toBeUndefined()
     expect(global('0').warnings).toBeUndefined()
+    // A folio of zeros alone is zero however many it holds; one with another digit among them is not.
+    expect(global('000').warnings).toBeUndefined()
+    expect(global('010').warnings).toEqual([{ rule: 'globalReferenceFolio', field: 'references[0].folio' }])
     expect(invoice({ references: cited(2) }).warnings).toBeUndefined()
   })
 })
@@ -3115,5 +3118,160 @@ describe('the receiver of an internal transfer', () => {
     expect(guide(5, ISSUER_RUT).warnings).toBeUndefined()
     expect(guide(5, '76.543.210-3').warnings).toBeUndefined()
     expect(guide(1, RECEIVER_RUT).warnings).toBeUndefined()
+  })
+})
+
+// Every text of a document is checked before any is refused: a caller fixing a form sees all of them at once.
+describe('every text problem of a document at once', () => {
+  const OMEGA = 'Ω'.codePointAt(0)
+  const unsupported = (field: string, index: number) => ({
+    code: 'ENCODING_UNSUPPORTED_CHAR',
+    details: { field, index, codePoint: OMEGA },
+  })
+  const tooLong = (field: string, maxLength: number) => {
+    const value = 'x'.repeat(maxLength + 1)
+    return [value, { code: 'FIELD_TOO_LONG', details: { field, maxLength, length: maxLength + 1, value } }] as const
+  }
+  // What `createDocument` throws: the first problem, with its own details, and the whole list.
+  const thrown = (input: DocumentInput): DteError => {
+    try {
+      createDocument(input)
+    } catch (error) {
+      return error as DteError
+    }
+    throw new Error('expected DteError')
+  }
+  const expectAll = (input: DocumentInput, problems: readonly { code: string; details: object }[]) => {
+    const error = thrown(input)
+    expect(error).toBeInstanceOf(DteError)
+    expect(error.code).toBe(problems[0].code)
+    expect(error.details).toEqual({ ...problems[0].details, problems })
+    expect(findTextProblems(input)).toEqual(problems)
+  }
+  const invoiceOf = (): DocumentInput => ({ type: 33, folio: 1, issueDate: '2026-11-15', issuer, receiver, items })
+
+  test('an invoice: the issuer, the receiver, a line, a reference, a global adjustment and the transport', () => {
+    const [receiverName, receiverProblem] = tooLong('RznSocRecep', 100)
+    const [reason, reasonProblem] = tooLong('RazonRef', 90)
+    const [glosa, glosaProblem] = tooLong('GlosaDR', 45)
+    const [plate, plateProblem] = tooLong('Patente', 8)
+    expectAll(
+      {
+        type: 33,
+        folio: 1,
+        issueDate: '2026-11-15',
+        issuer: { ...issuer, businessName: 'Comercial Ω SpA' },
+        receiver: { ...receiver, businessName: receiverName },
+        items: [items[0], { ...items[1], name: 'Horas Ω' }],
+        references: [{ documentType: 801, folio: '45', date: '2026-11-01', reason }],
+        globalAdjustments: [{ kind: 'discount', valueType: 'percent', value: 5, description: glosa }],
+        transport: { licensePlate: plate },
+      },
+      [
+        unsupported('RznSoc', 10),
+        receiverProblem,
+        unsupported('NmbItem', 6),
+        reasonProblem,
+        glosaProblem,
+        plateProblem,
+      ],
+    )
+  })
+
+  test('a settlement invoice: the receiver, a line and a commission', () => {
+    const [activity, activityProblem] = tooLong('GiroRecep', 40)
+    const [glosa, glosaProblem] = tooLong('Glosa', 60)
+    expectAll(
+      {
+        type: 43,
+        folio: 1,
+        issueDate: '2026-11-15',
+        issuer,
+        receiver: { ...receiver, businessActivity: activity },
+        items: [{ ...items[0], description: 'Ωmega', settledDocumentType: '33' }],
+        commissions: [{ kind: 'commission', description: glosa, rate: 10, netValue: 1000 }],
+      },
+      [activityProblem, unsupported('DscItem', 0), glosaProblem],
+    )
+  })
+
+  test('an export invoice: the foreign receiver, a line and the customs, each text once', () => {
+    const [carrier, carrierProblem] = tooLong('NomCiaTransp', 40)
+    // An export invoice of goods asks each line for its unit, which is read once for that and once to be written.
+    const [unit, unitProblem] = tooLong('UnmdItem', 4)
+    expectAll(
+      {
+        type: 110,
+        folio: 1,
+        issueDate: '2026-11-15',
+        issuer,
+        receiver: {
+          rut: FOREIGN_RECEIVER_RUT,
+          businessName: 'Andes Trading LLC',
+          address: '1200 Harbor Blvd',
+          city: 'Miami',
+          foreign: { nationality: 'Ω' },
+        },
+        currency: 'DOLAR USA',
+        items: [{ name: 'Uva Ω', quantity: 100, unit, unitPrice: 12.5 }],
+        transport: {
+          customs: {
+            saleModality: 1,
+            saleClause: 2,
+            saleClauseTotal: 1250,
+            transportRoute: 1,
+            receiverCountry: 225,
+            carrierName: carrier,
+          },
+        },
+      },
+      [unsupported('Nacionalidad', 0), unitProblem, unsupported('NmbItem', 4), carrierProblem],
+    )
+  })
+
+  test('a receipt: the issuer, a line, a reference and a subtotal', () => {
+    const [address, addressProblem] = tooLong('DirOrigen', 70)
+    const [reason, reasonProblem] = tooLong('RazonRef', 90)
+    const [glosa, glosaProblem] = tooLong('GlosaSTI', 40)
+    expectAll(
+      {
+        type: 39,
+        folio: 1,
+        issueDate: '2026-11-15',
+        issuer: { ...issuer, address },
+        items: [{ name: 'Café Ω', unitPrice: 1500 }],
+        pricesIncludeVat: true,
+        receiptReferences: [{ code: 'CAJA', reason }],
+        subtotals: [{ number: 1, description: glosa, totalAmount: 1500 }],
+      },
+      [addressProblem, unsupported('NmbItem', 5), reasonProblem, glosaProblem],
+    )
+  })
+
+  test('one problem throws what it threw alone, with a list of one', () => {
+    const [name, problem] = tooLong('RznSoc', 100)
+    const error = thrown({ ...invoiceOf(), issuer: { ...issuer, businessName: name } })
+    expect(error.code).toBe('FIELD_TOO_LONG')
+    expect(error.details).toEqual({ ...problem.details, problems: [problem] })
+  })
+
+  test('texts that are fine give no problem, and any other refusal still stops at the first fault', () => {
+    expect(findTextProblems(invoiceOf())).toEqual([])
+    // A refusal met before any text problem is thrown as before, and no text is read.
+    const unnumbered = { ...invoiceOf(), folio: 0, issuer: { ...issuer, businessName: 'Ω' } }
+    expectError(() => createDocument(unnumbered), 'INVALID_FOLIO', { folio: 0 })
+    expect(findTextProblems(unnumbered)).toEqual([])
+    // One met after a text problem stops the reading there: the texts past it are not read.
+    expectAll(
+      {
+        ...invoiceOf(),
+        issuer: { ...issuer, businessName: 'Ω' },
+        items: [
+          { ...items[0], quantity: -1 },
+          { ...items[1], name: 'Ω' },
+        ],
+      },
+      [unsupported('RznSoc', 0)],
+    )
   })
 })

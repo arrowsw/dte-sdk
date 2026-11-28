@@ -118,6 +118,7 @@ const ROOT_EXPORTS = [
   'escapeXmlAttribute',
   'escapeXmlText',
   'extractTagContent',
+  'findTextProblems',
   'foldToAscii',
   'folioConsumptionEntryFromDocument',
   'folioReceived',

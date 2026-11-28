@@ -269,3 +269,35 @@ describe('signDocument / issueDocument', () => {
     ).toBe(false)
   })
 })
+
+describe('issueDocument with verify', () => {
+  const issue = (overrides: Partial<Parameters<typeof issueDocument>[0]> = {}) =>
+    issueDocument({ document: invoiceInput, caf: caf33, certificate, now: FIXED_NOW, verify: true, ...overrides })
+
+  test('a document whose signature and stamp verify is returned as without it', () => {
+    expect(issue().xml).toBe(issueDocument({ document: invoiceInput, caf: caf33, certificate, now: FIXED_NOW }).xml)
+  })
+
+  // A certificate is loaded only with its own key; one put together by hand from another certificate's parts signs
+  // with one key and carries the other's certificate, and the signature does not verify with what it carries.
+  test('a signature that does not verify with the certificate it carries is refused', () => {
+    const other = loadCertificateFromPem({
+      privateKeyPem: fixtureText('tls-localhost.key.pem'),
+      certificatePem: fixtureText('tls-localhost.pem'),
+    })
+    const mismatched = { ...certificate, certificateBase64: other.certificateBase64 }
+    expect(() => issue({ certificate: mismatched })).toThrow(
+      expect.objectContaining({ code: 'SIGNATURE_INVALID', details: { field: 'DTE' } }),
+    )
+    // Without the option the document is returned, and its signature does not verify.
+    const unchecked = issueDocument({ document: invoiceInput, caf: caf33, certificate: mismatched, now: FIXED_NOW })
+    expect(verifyDocumentSignature(unchecked.xml).valid).toBe(false)
+  })
+
+  // A CAF whose public key is not the one of its private key stamps a `FRMT` its own `RSAPK` does not verify.
+  test('a stamp that does not verify with the key of the CAF is refused', () => {
+    expect(() => issue({ caf: { ...caf33, publicKey: caf39.publicKey } })).toThrow(
+      expect.objectContaining({ code: 'SIGNATURE_INVALID', details: { field: 'TED' } }),
+    )
+  })
+})
