@@ -52,6 +52,15 @@ export const DTE_ERROR_CODES = {
   SII_PORTAL_UNEXPECTED_PAGE: 'SII_PORTAL_UNEXPECTED_PAGE',
   DEPENDENCY_UNAVAILABLE: 'DEPENDENCY_UNAVAILABLE',
   PDF_RENDER_FAILED: 'PDF_RENDER_FAILED',
+  /**
+   * EN: A file is not what its upload takes, or its schema of the SII speaks against it. Its details can quote the
+   * file (a value, a line of it): a caller that logs or stores them should treat them as it treats the file itself.
+   * The message never carries them.
+   * ES: Un archivo no es lo que toma su subida, o su esquema del SII habla contra él. Sus detalles pueden citar el
+   * archivo (un valor, una línea de él): quien los registre o los guarde debe tratarlos como trata al propio archivo.
+   * El mensaje nunca los trae.
+   */
+  SCHEMA_INVALID: 'SCHEMA_INVALID',
 } as const
 
 /**
@@ -116,6 +125,7 @@ const MESSAGES: Readonly<Record<DteErrorCode, string>> = {
   SII_PORTAL_UNEXPECTED_PAGE: 'SII portal answered a page that could not be interpreted',
   DEPENDENCY_UNAVAILABLE: 'A library this function needs could not be loaded',
   PDF_RENDER_FAILED: 'The PDF library failed while drawing the printed sample',
+  SCHEMA_INVALID: 'XML does not validate against the SII schema',
 }
 
 // Only these detail keys are safe to show: field names, codes and numbers, never user text, URLs or bodies.

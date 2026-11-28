@@ -1,4 +1,5 @@
 import { DteError, errorMessage } from '../errors'
+import type { UploadCheckFile } from '../sii/upload'
 import { decodeLatin1 } from '../text/latin1'
 import { SCHEMA_SOURCES } from './sources'
 
@@ -150,16 +151,68 @@ const textOf = (xml: string | Uint8Array): string => {
 const asUtf8 = (text: string): string =>
   text.replace(DECLARATION, (declaration) => declaration.replace(DECLARED_ENCODING, 'encoding="UTF-8"'))
 
-const ROOT_ELEMENT = /<(?:[A-Za-z_][\w.-]*:)?([A-Za-z_][\w.-]*)[\s/>]/
 const RECEIPT_TYPE = /<TipoDTE>\s*(?:39|41)\s*<\/TipoDTE>/
+
+const BLANK = /[\s\ufeff]*/y
+const DOCTYPE = /<!DOCTYPE/iy
+// What may stand before the document element, each with what closes it: the declaration and any other processing
+// instruction, a comment and a document type.
+const PROLOGUE: readonly (readonly [RegExp, string])[] = [
+  [/<\?/y, '?>'],
+  [/<!--/y, '-->'],
+  [DOCTYPE, '>'],
+]
+
+const ROOT_AT = /<(?:[A-Za-z_][\w.-]*:)?([A-Za-z_][\w.-]*)[\s/>]/y
+
+// The local name of the document element and the text from it on, or null when there is none. What may come before
+// it is skipped in the order it comes, one piece after another from the start, so a comment that holds `<?` or an
+// element hides nothing. Anything else that is not the start of an element (text, a closing tag) is passed over to
+// the next `<`, as the first element after it was always read, and the schema then says the file is wrong. A piece
+// left open is passed over from its opening the same way. Every step moves forward, and a closer once missing is
+// missing from any later point too, so it is not looked for again: the text is read once.
+const rootOf = (text: string): { readonly name: string; readonly rest: string } | null => {
+  let at = 0
+  const missing = new Set<string>()
+  for (;;) {
+    BLANK.lastIndex = at
+    BLANK.exec(text)
+    at = BLANK.lastIndex
+    const piece = PROLOGUE.find(([opening]) => {
+      opening.lastIndex = at
+      return opening.test(text)
+    })
+    if (piece !== undefined) {
+      const [opening, closer] = piece
+      const end = missing.has(closer) ? -1 : text.indexOf(closer, opening.lastIndex)
+      if (end >= 0) {
+        at = end + closer.length
+        continue
+      }
+      missing.add(closer)
+    }
+    ROOT_AT.lastIndex = at
+    const name = ROOT_AT.exec(text)?.[1]
+    if (name !== undefined) return { name, rest: text.slice(at) }
+    at = text.indexOf('<', at + 1)
+    if (at < 0) return null
+  }
+}
 
 /**
  * EN: The schema of a document, by the name of its document element, or null when dte-sdk carries none for it. It reads
- * the first element after the declaration, the comments and the processing instructions; it validates nothing. A
+ * the first element after what may come before it (white space, a byte order mark, the declaration and other
+ * processing instructions, comments, a document type), skipped in the order it comes, so a comment that holds `<?` or
+ * an element hides nothing; text, a comment or a processing instruction left open, or anything else that does not
+ * start an element is passed over to the first element after it, whose schema then says the file is wrong. It validates nothing. A
  * receipt (39, 41) on its own has none: `DTE_v10.xsd` does not declare its `DTE`, which only `EnvioBOLETA_v11.xsd`
  * does, so a receipt is validated inside its `EnvioBOLETA`.
  * ES: El esquema de un documento, según el nombre de su elemento raíz, o null si dte-sdk no trae ninguno para él. Lee
- * el primer elemento después de la declaración, los comentarios y las instrucciones de procesamiento; no valida nada.
+ * el primer elemento después de lo que puede venir antes de él (espacios, una marca de orden de bytes, la declaración
+ * y otras instrucciones de procesamiento, comentarios, un tipo de documento), saltado en el orden en que viene, así un
+ * comentario que trae `<?` o un elemento no oculta nada; el texto, un comentario o una instrucción de procesamiento
+ * sin cerrar, u otra cosa que no abre un elemento se pasa hasta el primer elemento después de él, cuyo esquema dice
+ * entonces que el archivo está mal. No valida nada.
  * Una boleta (39, 41) sola no tiene ninguno: `DTE_v10.xsd` no declara su `DTE`, que solo declara
  * `EnvioBOLETA_v11.xsd`, así que una boleta se valida dentro de su `EnvioBOLETA`.
  * @param xml EN: the document, as text or as the bytes of its file. ES: el documento, como texto o como los bytes de su archivo.
@@ -167,14 +220,11 @@ const RECEIPT_TYPE = /<TipoDTE>\s*(?:39|41)\s*<\/TipoDTE>/
  * @throws {DteError} EN: `INVALID_OPTION` with `field: 'encoding'` for bytes whose declaration names a charset other than ISO-8859-1 or UTF-8. ES: `INVALID_OPTION` con `field: 'encoding'` ante bytes cuya declaración nombra un charset que no es ISO-8859-1 ni UTF-8.
  */
 export const schemaOf = (xml: string | Uint8Array): SiiSchemaName | null => {
-  const body = textOf(xml)
-    .replace(/<\?[\s\S]*?\?>/g, '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<!DOCTYPE[^>]*>/gi, '')
-  const root = ROOT_ELEMENT.exec(body)?.[1]
-  if (root === SII_SCHEMAS.DTE.root && RECEIPT_TYPE.test(body)) return null
+  const root = rootOf(textOf(xml))
+  if (root === null) return null
+  if (root.name === SII_SCHEMAS.DTE.root && RECEIPT_TYPE.test(root.rest)) return null
   const names = Object.keys(SII_SCHEMAS) as SiiSchemaName[]
-  return names.find((name) => SII_SCHEMAS[name].root === root) ?? null
+  return names.find((name) => SII_SCHEMAS[name].root === root.name) ?? null
 }
 
 /**
@@ -226,3 +276,61 @@ export const validateAgainstSchema = async (
   })
   return result.errors.map((error) => ({ message: error.message, line: error.loc?.lineNumber ?? null }))
 }
+
+/**
+ * EN: Options of `validateBeforeUpload`.
+ * ES: Opciones de `validateBeforeUpload`.
+ */
+export type ValidateBeforeUploadOptions = {
+  /** EN: Loader of the validator library, for tests. ES: Cargador de la librería de validación, para tests. */
+  readonly load?: () => Promise<SchemaValidatorModule>
+}
+
+// The document element each kind of upload takes: the plain uploads' own kinds, and the kinds of the files the
+// certification run uploads (its test sets and its simulation are envelopes of documents).
+const UPLOAD_ROOTS: Readonly<Record<string, readonly string[]>> = {
+  dte: ['EnvioDTE'],
+  receipt: ['EnvioBOLETA'],
+  book: ['LibroCompraVenta', 'LibroGuia'],
+  folioConsumption: ['ConsumoFolios'],
+  assignment: ['AEC'],
+  testSet: ['EnvioDTE'],
+  simulation: ['EnvioDTE'],
+}
+
+/**
+ * EN: A ready-made `beforeUpload`, an `UploadCheck`: it holds the document element of each file to what its kind of
+ * upload takes (an `EnvioDTE` for `dte` and for the run's `testSet` and `simulation`, an `EnvioBOLETA` for `receipt`, a
+ * `LibroCompraVenta` or a `LibroGuia` for `book`, a `ConsumoFolios` for `folioConsumption`, an `AEC` for
+ * `assignment`), then validates the file against its schema of the SII with `validateAgainstSchema`, and throws when
+ * either says anything against it, so the file is not sent. It can be given to `uploadEnvelope`, `uploadBook` and
+ * `uploadFolioConsumption` and to the certification run (`CertificationDependencies.beforeUpload`). Its validator is
+ * the optional peer `xmllint-wasm`, loaded on first use, and only once the element is the right one. The details of
+ * its `SCHEMA_INVALID` can quote the file: the `issues` are the validator's messages, which may repeat a value of the
+ * file or a line of it, so a caller that logs or stores them should treat them as it treats the file itself.
+ * ES: Un `beforeUpload` listo para usar, una `UploadCheck`: atiene el elemento raíz de cada archivo a lo que toma su
+ * tipo de subida (un `EnvioDTE` en `dte` y en los `testSet` y `simulation` de la corrida, un `EnvioBOLETA` en
+ * `receipt`, un `LibroCompraVenta` o un `LibroGuia` en `book`, un `ConsumoFolios` en `folioConsumption`, un `AEC` en
+ * `assignment`), luego valida el archivo contra su esquema del SII con `validateAgainstSchema`, y lanza cuando
+ * cualquiera de los dos dice algo contra él, así el archivo no se envía. Se puede dar a `uploadEnvelope`, `uploadBook`
+ * y `uploadFolioConsumption` y a la corrida de certificación (`CertificationDependencies.beforeUpload`). Su validador
+ * es el peer opcional `xmllint-wasm`, que se carga en el primer uso, y solo cuando el elemento es el correcto. Los
+ * detalles de su `SCHEMA_INVALID` pueden citar el archivo: los `issues` son los mensajes del validador, que pueden
+ * repetir un valor del archivo o una línea de él, así que quien los registre o los guarde debe tratarlos como trata al
+ * propio archivo.
+ * @param options EN: the loader of the validator, for tests. ES: el cargador del validador, para tests.
+ * @returns EN: the check. ES: la revisión.
+ * @throws {DteError} EN: the check throws `SCHEMA_INVALID` with the `kind` and the `name` of the file and either the `element` found (null when there is none) and the ones `expected`, or the `issues` the schema reports, which can quote the file and live in `details` alone, never in the message; `INVALID_OPTION { field: 'kind' }` for a kind no upload has; and what `validateAgainstSchema` throws. ES: la revisión lanza `SCHEMA_INVALID` con el `kind` y el `name` del archivo y, o bien el `element` encontrado (null si no hay ninguno) y los `expected`, o bien los `issues` que informa el esquema, que pueden citar el archivo y viven solo en `details`, nunca en el mensaje; `INVALID_OPTION { field: 'kind' }` ante un tipo que ninguna subida tiene; y lo que lance `validateAgainstSchema`.
+ */
+export const validateBeforeUpload =
+  (options: ValidateBeforeUploadOptions = {}): ((file: UploadCheckFile) => Promise<void>) =>
+  async (file) => {
+    if (!Object.prototype.hasOwnProperty.call(UPLOAD_ROOTS, file.kind))
+      throw new DteError('INVALID_OPTION', { field: 'kind', kind: file.kind })
+    const expected = UPLOAD_ROOTS[file.kind]
+    const element = rootOf(file.xml)?.name ?? null
+    if (element === null || !expected.includes(element))
+      throw new DteError('SCHEMA_INVALID', { kind: file.kind, name: file.name, element, expected })
+    const issues = await validateAgainstSchema(file.xml, { load: options.load })
+    if (issues.length > 0) throw new DteError('SCHEMA_INVALID', { kind: file.kind, name: file.name, issues })
+  }

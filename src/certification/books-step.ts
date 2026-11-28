@@ -6,6 +6,7 @@ import {
   TEST_SET_PORTAL_NAMES,
   type BookKey,
 } from '../catalogs/certification'
+import { uploadStatusChecks } from '../catalogs/upload-status'
 import { DteError, errorMessage, isDteError } from '../errors'
 import type { BookTotals } from '../model/book'
 import { listBookHistory, queryCertificationSets, type DeclarationEntries } from '../portal/certification'
@@ -57,6 +58,13 @@ const ADJUSTABLE: readonly BookKey[] = ['purchaseBook', 'salesBook']
 // The order the books are declared and first awaited in, which is not the order they are sent in.
 const DECLARED_ORDER: readonly BookKey[] = ['salesBook', 'purchaseBook', 'guideBook', 'exemptPurchaseBook']
 const BOOK_NAMES = TEST_SET_PORTAL_NAMES as Readonly<Record<BookKey, string>>
+// By field behaviour the SII refuses a book with `LRS` when it does not validate against its schema, with `LRF` when its
+// signature does not verify and with `LRC` when its cover is refused. A book sent again changes only its period and its
+// kind of submission: the file, and on the cover the kind of book and the notification folio, go as they went, so the
+// SII would refuse them the same way. A book refused so is not sent again, takes no period, and leaves the results at
+// once, so no later declaration names the track id the SII refused.
+const FINAL_REFUSALS: ReadonlySet<string> = new Set(['LRS', 'LRF', 'LRC'])
+const REFUSED = 'certification book refused, not sent again'
 
 /**
  * EN: How the books phase ended: every wanted book approved; a mandatory book never sent; a declaration the portal did
@@ -290,7 +298,17 @@ const sendBook = async (
   }
   await rt.store.writeArtefact(BOOK_ARTEFACT_NAMES[key], built.xml)
   try {
-    await rt.beforeUpload?.({ kind: 'book', name: key, xml: built.xml })
+    // A book that fails is reported by its message alone, so what the check said against it, its code and its details,
+    // goes to the portal client's logger before the book is given up.
+    await (async () => rt.beforeUpload?.({ kind: 'book', name: key, xml: built.xml }))().catch((error: unknown) => {
+      if (isDteError(error))
+        rt.portal.logger.warn('certification book refused before upload', {
+          book: key,
+          code: error.code,
+          details: error.details,
+        })
+      throw error
+    })
     const trackId = await uploadForTrackId(
       (overrides) => uploadBook(rt.sii, { xml: built.xml, fileName: BOOK_FILE_NAMES[key] }, overrides),
       'uploadBook',
@@ -319,6 +337,47 @@ const sendBook = async (
   }
 }
 
+// Keeps the state the SII answered for a book as its diagnosis. A book refused for its file or its cover is noted and
+// leaves the results, and what to look at for that state is said once in the portal client's logger.
+const diagnose = async (
+  rt: Runtime,
+  state: CertificationState,
+  key: BookKey,
+  trackId: string,
+  status: FieldUploadState,
+  refused: Set<BookKey>,
+): Promise<CertificationState> => {
+  const diagnosis = { ...state.diagnosis, [trackId]: fieldDiagnosis(status) }
+  // Only an answered state is diagnosed, so the code is there.
+  const code = status.code!
+  if (!FINAL_REFUSALS.has(code)) return saveState(rt, state, { diagnosis })
+  refused.add(key)
+  rt.portal.logger.warn(REFUSED, { book: key, trackId, code, checks: uploadStatusChecks(code) })
+  // A diagnosed book is one sent, so it is in the results.
+  const accumulated = withoutRefusedTotals(state.books.accumulated, key, state.books.results[key]!)
+  return saveState(rt, state, {
+    diagnosis,
+    ...withBooks(state, { results: without(state.books.results, key), accumulated }),
+  })
+}
+
+// The totals a refused book's total submission kept for an adjustment are those of a book the SII never took, so they
+// leave with it, and a period left with none leaves too. A refused adjustment leaves the totals of the total
+// submission it adjusted, which the SII took. A total submission of the sales or the purchase book always kept its
+// totals when it was sent.
+const withoutRefusedTotals = (accumulated: AccumulatedTotals, key: BookKey, sent: SentBook): AccumulatedTotals => {
+  if (!ADJUSTABLE.includes(key) || sent.submission !== 'total') return accumulated
+  const { period } = sent
+  const operation = operationOf(key)
+  const { [period]: entry, ...others } = accumulated
+  const { [operation]: dropped, notificationFolio, ...rest } = entry!
+  void dropped
+  const { [operation]: droppedFolio, ...folios } = notificationFolio ?? {}
+  void droppedFolio
+  const left = { ...rest, ...(Object.keys(folios).length === 0 ? {} : { notificationFolio: folios }) }
+  return Object.keys(left).length === 0 ? others : { ...others, [period]: left }
+}
+
 type StatePoll = {
   readonly state: CertificationState
   /** The books whose envelope reached a state that is not an intermediate one. */
@@ -334,6 +393,7 @@ const pollBookStates = async (
   keys: readonly BookKey[],
   rounds: number,
   maxErrors: number,
+  refused: Set<BookKey>,
 ): Promise<StatePoll> => {
   let current = state
   const terminal = new Map<BookKey, FieldUploadState>()
@@ -359,17 +419,15 @@ const pollBookStates = async (
       if (status.intermediate) continue
       pending.delete(key)
       terminal.set(key, status)
-      current = await saveState(rt, current, {
-        diagnosis: { ...current.diagnosis, [trackId]: fieldDiagnosis(status) },
-      })
+      current = await diagnose(rt, current, key, trackId, status, refused)
     }
     if (pending.size > 0) await rt.sleep(SOAP_WAIT_MS)
   }
   return { state: current, terminal }
 }
 
-// Sends books again in a period, then reads their SOAP status: a rejection marks the period occupied and takes the
-// book out of the results, so the next declaration leaves it out.
+// Sends books again in a period, then reads their SOAP status: a rejection takes the book out of the results, so the
+// next declaration leaves it out, and marks the period occupied unless the SII refused the file or the cover.
 const resendBooks = async (
   rt: Runtime,
   state: CertificationState,
@@ -377,17 +435,18 @@ const resendBooks = async (
   period: string,
   submission: 'total' | 'adjustment',
   occupied: Set<string>,
+  refused: Set<BookKey>,
   run: BookRun,
 ): Promise<CertificationState> => {
   let current = state
   for (const key of keys) current = await sendBook(rt, current, key, period, submission, false, run)
   const resent = keys.filter((key) => trackIdOf(current, key) !== null)
   if (resent.length === 0) return current
-  const poll = await pollBookStates(rt, current, resent, SOAP_RESEND_POLLS, SOAP_RESEND_ERRORS)
+  const poll = await pollBookStates(rt, current, resent, SOAP_RESEND_POLLS, SOAP_RESEND_ERRORS, refused)
   current = poll.state
   for (const [key, status] of poll.terminal) {
     if (!status.rejected) continue
-    occupied.add(period)
+    if (!refused.has(key)) occupied.add(period)
     current = await saveState(
       rt,
       current,
@@ -493,6 +552,7 @@ const waitForBooksApproval = async (
   rt: Runtime,
   state: CertificationState,
   verify: readonly BookKey[],
+  refused: Set<BookKey>,
 ): Promise<Wait> => {
   let current = state
   let table: Table = new Map()
@@ -511,9 +571,7 @@ const waitForBooksApproval = async (
       if (isApproved(read, key) || trackId === null) continue
       const status = await queryFieldUploadState(rt.sii, trackId).catch(() => null)
       if (status === null || !status.answered || !status.rejected) continue
-      current = await saveState(rt, current, {
-        diagnosis: { ...current.diagnosis, [trackId]: fieldDiagnosis(status) },
-      })
+      current = await diagnose(rt, current, key, trackId, status, refused)
       return { state: current, ok: false, table, timedOut: false }
     }
   }
@@ -546,7 +604,11 @@ const utcMonth = (at: Date): string => at.toISOString().slice(0, 7)
  * total submission in the next free period. A declaration that stands is followed by the approval wait (40 polls 15 s
  * apart, the SOAP status every second poll) for the books neither rejected by the SOAP status nor named with content
  * errors by the declaration; those, and the books the wait leaves rejected, closed or declared and never reviewed, go
- * again the same way and are declared and awaited again, at most 24 times. No portal read of this phase stops the run.
+ * again the same way and are declared and awaited again, at most 24 times. A book the SII refuses with `LRS`, `LRF` or
+ * `LRC` (its schema, its signature, its cover), wherever its status is read, is never sent again, takes no period and
+ * leaves the results at once, so no later declaration names its track id; its diagnosis is kept, the portal client's
+ * logger says once what to look at (`uploadStatusChecks`), and with no other book left to send the search for a
+ * period stops. No portal read of this phase stops the run.
  * The outcome says how the books stand; the run asks for the next stage with the three mandatory books sent, whatever
  * the outcome.
  * ES: La fase de libros. El historial de libros que tiene el SII (año a año, hasta dos años vacíos) marca los períodos
@@ -562,6 +624,10 @@ const utcMonth = (at: Date): string => at.toISOString().slice(0, 7)
  * sigue la espera de aprobación (40 consultas cada 15 s, el estado SOAP cada dos) de los libros que ni el estado SOAP
  * rechazó ni la declaración nombró con errores de contenido; esos, y los que la espera deja rechazados, cerrados o
  * declarados y nunca revisados, van de nuevo del mismo modo y se declaran y se esperan otra vez, a lo más 24 veces.
+ * Un libro que el SII rechaza con `LRS`, `LRF` o `LRC` (su esquema, su firma, su carátula), donde sea que se lea su
+ * estado, no vuelve a enviarse, no ocupa período y sale de los resultados de inmediato, así ninguna declaración
+ * posterior nombra su track id; se guarda su diagnóstico, el logger del cliente del portal dice una vez qué revisar
+ * (`uploadStatusChecks`), y sin otro libro que enviar la búsqueda de período se detiene.
  * Ninguna lectura del portal de esta fase detiene la corrida. El resultado dice cómo quedaron los libros; la corrida
  * pide la etapa siguiente con los tres libros obligatorios enviados, sea cual sea el resultado.
  * @throws {DteError} EN: `MISSING_FIELD { field: 'plan' }` without a plan; the session and transport codes of the declaration. ES: `MISSING_FIELD { field: 'plan' }` sin plan; los códigos de sesión y de transporte de la declaración.
@@ -578,6 +644,8 @@ export const runBooks = async (
   rt.emit({ step: 'BOOKS_START' })
   const wanted = wantedBooks(state)
   const occupied = new Set<string>()
+  // The books the SII refused for their file or their cover: none of them is sent again.
+  const refused = new Set<BookKey>()
   const thisYear = Number(chileDate(rt.now()).slice(0, 4))
   let emptyYears = 0
   for (let year = thisYear; year >= HISTORY_FIRST_YEAR && emptyYears < HISTORY_EMPTY_YEARS; year -= 1) {
@@ -628,6 +696,7 @@ export const runBooks = async (
     BOOK_KEYS.filter((key) => trackIdOf(current, key) !== null),
     SOAP_PRECHECK_POLLS,
     SOAP_PRECHECK_ERRORS,
+    refused,
   )
   current = before.state
   rt.emit({ step: 'BOOKS_DECLARING' })
@@ -652,20 +721,25 @@ export const runBooks = async (
         current,
         withBooks(current, { adjustmentTried: [...new Set([...current.books.adjustmentTried, period])] }),
       )
-      current = await resendBooks(rt, current, keys, period, 'adjustment', occupied, run)
+      current = await resendBooks(rt, current, keys, period, 'adjustment', occupied, refused, run)
       return
     }
     occupied.add(period)
     period = nextFreePeriod(previousPeriod(period), occupied)
     rt.emit({ step: 'BOOK_PERIOD_RETRY', period, attempt })
     current = await saveState(rt, current, withBooks(current, { period, occupiedPeriods: [...occupied] }))
-    current = await resendBooks(rt, current, keys, period, 'total', occupied, run)
+    current = await resendBooks(rt, current, keys, period, 'total', occupied, refused, run)
   }
+  const sendable = (keys: readonly BookKey[]): readonly BookKey[] => keys.filter((key) => !refused.has(key))
   let declaration = await declare()
   const triedEmpty = new Set<string>()
   for (let retry = 1; retry <= MAX_PERIOD_RETRIES && declaration.allRejected; retry += 1) {
-    const totals = ADJUSTABLE.some((key) => keptTotals(current, period, key, run) !== undefined)
-    await resend(outstanding, totals, triedEmpty, retry)
+    // With no book left to send, another period would only be taken and declared for nothing.
+    const keys = sendable(outstanding)
+    if (keys.length === 0) break
+    // An adjustment is decided from the books that go, never from the totals of one that does not.
+    const totals = keys.some((key) => keptTotals(current, period, key, run) !== undefined)
+    await resend(keys, totals, triedEmpty, retry)
     declaration = await declare()
   }
   let wait: Wait | null = null
@@ -675,12 +749,13 @@ export const runBooks = async (
     const awaited = DECLARED_ORDER.filter((key) => outstanding.includes(key) && !excluded.has(key))
     wait =
       awaited.length > 0
-        ? await waitForBooksApproval(rt, current, awaited)
+        ? await waitForBooksApproval(rt, current, awaited, refused)
         : { state: current, ok: false, table: new Map(), timedOut: false }
     current = wait.state
     // The books left out of the wait stand as closed ones: the SOAP status rejected them, or the declaration named
     // them, and the portal would show them declared forever.
     const closed = new Map(wait.table)
+    // A book refused for its file or its cover stands closed too, but the books sent again leave it out.
     for (const key of refusedBySoap) closed.set(BOOK_NAMES[key], CLOSED_BOOK)
     // In the order the declaration names them, which is the order a book the page does not list is awaited in.
     for (const key of declaration.contentErrors.flatMap((named) => BOOK_KEYS.filter((book) => book === named)))
@@ -690,7 +765,7 @@ export const runBooks = async (
     for (let retry = 1; !wait.ok && retry <= MAX_PERIOD_RETRIES; retry += 1) {
       // Every failed book of the page keeps the search going and is awaited, in the order of the page; only the ones
       // this run sends go again, in the order they are sent.
-      const failed = failedBooks(wait.table)
+      const failed = sendable(failedBooks(wait.table))
       if (failed.length === 0) break
       const carried = failed.some((key) => keptTotals(current, period, key, run) !== undefined)
       await resend(
@@ -706,7 +781,7 @@ export const runBooks = async (
         if (declaration.allRejected || triedFailed.size > 0 || declaration.detail === NO_BOOKS) continue
         break
       }
-      wait = await waitForBooksApproval(rt, current, failed)
+      wait = await waitForBooksApproval(rt, current, failed, refused)
       current = wait.state
     }
   }

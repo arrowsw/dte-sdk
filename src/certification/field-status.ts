@@ -30,7 +30,23 @@ export type FieldUploadState = {
 
 const SUCCESSFUL: ReadonlySet<string> = new Set(['EPR', 'RPR', 'LOK'])
 const INTERMEDIATE: ReadonlySet<string> = new Set(['REC', 'SOK', 'FOK', 'PRD', 'CRT', 'DNK', 'PDR', 'LSO', '0'])
-const REJECTED: ReadonlySet<string> = new Set(['RPT', 'RFR', 'VOF', 'RCT', 'RCH', 'RLV', 'RSC', 'LNC', 'LRH'])
+// `LRS`, `LRC` and `LRF` are rejections of a book by field behaviour, as `classifyUploadStatus` reads them. A state
+// that is none of the three is not a rejection, so a book the SII refused with one of them would be declared and
+// awaited, and its approval wait would run its course unless the portal showed the book refused.
+const REJECTED: ReadonlySet<string> = new Set([
+  'RPT',
+  'RFR',
+  'VOF',
+  'RCT',
+  'RCH',
+  'RLV',
+  'RSC',
+  'LNC',
+  'LRH',
+  'LRS',
+  'LRC',
+  'LRF',
+])
 // The errors of the query service itself, `-1` to `-14`: the envelope may be fine, so they read as "ask again".
 const QUERY_SERVICE_ERROR = /^-(?:[1-9]|1[0-4])$/
 // What stands for "the SII did not answer with a state": an HTTP error, a fault, a page without a state.

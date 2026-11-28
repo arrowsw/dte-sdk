@@ -9,6 +9,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An envelope verified as it will travel** (`verifyTransmittedEnvelope`). It takes an `EnvioDTE` or `EnvioBOLETA`
+  exactly as it will be sent and reports, for each `<DTE>…</DTE>` cut from the text, whether its signature verifies on
+  that fragment alone and whether the `FRMT` of its stamp verifies, with the key of the CAF the stamp carries; whether
+  the envelope's own signature verifies; and one verdict. A failed check is a result, not an error. Pure: no clock, no
+  network. `verifyReceivedDocuments` reads each document from the parsed tree and can see neither of the two faults
+  this finds.
+  - The signature: field behaviour is that the SII checks each `<DTE>` on its own, cut from the text of the file, and
+    rejects ("Firma DTE Incorrecta") one that verifies inside the parsed envelope only because it inherits the
+    envelope's namespace, when the text gives it no `xmlns` of its own.
+  - The stamp: the SII's "Instructivo Emisión DTE" (A.2.4, pages 19 to 21) says the stamp is signed and verified over
+    the string left once "los caracteres de fin de línea y los blancos y/o tab entre TAGS, así como la referencia a
+    NameSpaces" are removed, "sin modificar la información que va entre el tag de inicio y el tag de fin de los
+    elementos terminales", and "de lo contrario la verificación del timbre electrónico resultará incorrecta". The
+    `FRMT` must verify over the `DD` as written or over that string. A stamp whose content was written again after it
+    was signed (an empty element `<RSR/>` where `<RSR></RSR>` was signed) changes that string, and fails.
+  - The cut: a text with a comment, a CDATA section or a processing instruction past its XML declaration is refused
+    (`XML_PARSE_FAILED`, `field` naming which), since each could hold text that spells a `DTE`; a closing tag may
+    carry blanks before its `>`; and each cut must hold the `ID`, the type and the folio of the element it stands for.
+
+- **Whether a certificate is self-signed** (`Certificate.selfSigned`, `ParsedCertificate.selfSigned`): true when the
+  certificate's issuer name is its subject name, compared as the two are encoded. It says nothing of which key signed
+  the certificate. Nothing refuses one. Field behaviour is that the SII takes no seed signed with a certificate no
+  authority it knows issued, so `runCertification` says so once, when it starts, in the portal client's logger.
+  - **What to change:** code that builds a `Certificate` of its own, as a test double does, must give it `selfSigned`.
+
+- **What to look at for a state** (`uploadStatusChecks`, `UploadStatusCheck`). For `RFR`, `EPR`, `RSC`, `RCT` and the
+  book states `LRF`, `LRS`, `LRC`, `LRH`, `LNC`, a few short checks in Spanish, each with its basis: a document of the
+  SII, named, or field behaviour. `EPR` rests on the SII's manual of `QueryEstUp`, whose test steps (chapter 5) give
+  the counts "(Solo si Estado es EPR)" and whose example of an `EPR` (3.4.1) has none accepted; the dispatch guide that
+  has no place in a purchase or sales book of `LRS` on the `DoctoType` that `LibroCV_v10.xsd` declares for the `TpoDoc` of a line, which lists no 52; the
+  special book and the rectification of `LRC` on the SII's format of the books ("Un archivo
+  especial se distingue de los libros regulares, en que indica el folio de la notificación en la carátula";
+  `RECTIFICA` is a `TipoLibro`, not a `TipoEnvio`). `RSC` and `LRS` point to `validateBeforeUpload`, which stops the upload.
+  Any other state has none.
+
+- **A check before a plain upload** (`beforeUpload` of `uploadEnvelope`, `uploadBook` and `uploadFolioConsumption`,
+  `UploadCheck`, `UploadCheckFile`). It is handed the kind of the file, its multipart name and the exact text about to
+  be sent, and awaited; when it throws, the upload stops with nothing sent, not even a token asked for, and throws
+  what it threw; a call whose `signal` is already aborted does not run it (`REQUEST_ABORTED`). A check written against
+  `UploadCheckFile` (an `UploadCheck`) serves both these uploads and the certification run, whose `CertificationUpload`
+  is an `UploadCheckFile` with a narrower `kind`; a check written against `CertificationUpload` serves the run alone.
+
+- **A ready-made check against the SII's schema** (`validateBeforeUpload`, `dte-sdk/schemas`). It holds the document
+  element of each file to what its kind of upload takes (an `EnvioDTE` for `dte` and for the run's test sets and
+  simulation, an `EnvioBOLETA` for `receipt`, a `LibroCompraVenta` or a `LibroGuia` for `book`, a `ConsumoFolios` for
+  `folioConsumption`, an `AEC` for `assignment`), then validates it with `validateAgainstSchema`, and throws the new
+  code `SCHEMA_INVALID` with the file's `kind` and `name` and either the `element` found and the ones `expected` or the
+  `issues` the schema reports. Those details can quote the file: a caller that logs or stores them should treat them
+  as it treats the file. The message never carries them. A kind no upload has is `INVALID_OPTION { field: 'kind' }`.
+  Its validator is the optional peer `xmllint-wasm`, which no other entry loads.
+  - When the certification run's `beforeUpload` throws for a book, the run reports the book by its message, as it
+    did, and now also gives the error's code and details to the portal client's logger (`certification book refused
+    before upload`).
+
 - **The lines of the test set the reader did not use** (`TestCase.unread`, `CertificationPlan.unread`,
   `checkTestSetText`, `unreadLines` of `runCertification`, `UnreadLinesPolicy`; `dte-sdk/portal`). `parseTestSetText`
   never throws, and a line of a case its grammar did not know vanished: nothing said that a case was issued without
@@ -78,32 +132,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     issue anew with new folios, as before, passes `resendUnanswered: false`. A registry of its own sends no kept
     envelope again until it implements `hold`.
 
-- **An envelope verified as it will travel** (`verifyTransmittedEnvelope`). It takes an `EnvioDTE` or `EnvioBOLETA`
-  exactly as it will be sent and reports, for each `<DTE>…</DTE>` cut from the text, whether its signature verifies on
-  that fragment alone and whether the `FRMT` of its stamp verifies, with the key of the CAF the stamp carries; whether
-  the envelope's own signature verifies; and one verdict. A failed check is a result, not an error. Pure: no clock, no
-  network. `verifyReceivedDocuments` reads each document from the parsed tree and can see neither of the two faults
-  this finds.
-  - The signature: field behaviour is that the SII checks each `<DTE>` on its own, cut from the text of the file, and
-    rejects ("Firma DTE Incorrecta") one that verifies inside the parsed envelope only because it inherits the
-    envelope's namespace, when the text gives it no `xmlns` of its own.
-  - The stamp: the SII's "Instructivo Emisión DTE" (A.2.4, pages 19 to 21) says the stamp is signed and verified over
-    the string left once "los caracteres de fin de línea y los blancos y/o tab entre TAGS, así como la referencia a
-    NameSpaces" are removed, "sin modificar la información que va entre el tag de inicio y el tag de fin de los
-    elementos terminales", and "de lo contrario la verificación del timbre electrónico resultará incorrecta". The
-    `FRMT` must verify over the `DD` as written or over that string. A stamp whose content was written again after it
-    was signed (an empty element `<RSR/>` where `<RSR></RSR>` was signed) changes that string, and fails.
-  - The cut: a text with a comment, a CDATA section or a processing instruction past its XML declaration is refused
-    (`XML_PARSE_FAILED`, `field` naming which), since each could hold text that spells a `DTE`; a closing tag may
-    carry blanks before its `>`; and each cut must hold the `ID`, the type and the folio of the element it stands for.
-
-- **Whether a certificate is self-signed** (`Certificate.selfSigned`, `ParsedCertificate.selfSigned`): true when the
-  certificate's issuer name is its subject name, compared as the two are encoded. It says nothing of which key signed
-  the certificate. Nothing refuses one. Field behaviour is that the SII takes no seed signed with a certificate no
-  authority it knows issued, so `runCertification` says so once, when it starts, in the portal client's logger.
-  - **What to change:** code that builds a `Certificate` of its own, as a test double does, must give it `selfSigned`.
-
 ### Changed
+
+- **Three states of a book are rejections** (`classifyUploadStatus`, `uploadStatusMessage`, `queryUploadStatus`,
+  `waitForUploadStatus`, the certification run). No document of the SII that was found lists the states of a book.
+  Field behaviour is that the SII answers the upload of a book `LRS` when it does not validate against its schema,
+  `LRC` when its cover is refused and `LRF` when its signature does not verify, each a rejection. They were `unknown`
+  with the gloss "Estado desconocido: …": `waitForUploadStatus` already returned on them, but the certification run
+  read them as no rejection, so a book refused with one was declared and its approval wait ran its course. They are
+  now `rejected`, glossed "Libro rechazado por error en schema", "… en carátula" and "… en firma", and the run keeps
+  them as a rejected diagnosis. The comment of the catalog says which glosses rest on the SII's table (the eight of 3.3
+  of "Consulta de Estado de Upload Dte") and which on field behaviour (these three, and `LOK`, `LSO`, `LRH`, `LNC`).
+  - In the books phase, a book refused with `LRS`, `LRF` or `LRC` is not sent again: a book sent again changes only
+    its period and its kind of submission, and its file, its kind of book and its notification folio would be refused
+    the same way. Wherever its status is read (the first status check, the cross-check of the approval wait, after a
+    resend), the run takes no other period for it, marks none occupied, and takes it out of the results at once, so no
+    later declaration names the track id the SII refused. It stops with its diagnosis, and the portal client's logger
+    says once what to look at (`certification book refused, not sent again`, with `uploadStatusChecks`). When no book
+    is left to send, the search for a free period stops, and an adjustment is decided from the totals of the books
+    that go, not of a refused one. The totals a refused total submission of the sales or the purchase book kept for
+    an adjustment leave the state with it; a refused adjustment leaves the totals of the total submission it
+    adjusted, which the SII took.
+  - **What to change:** code that branches on `unknown`, or compares the gloss, for `LRS`, `LRC` or `LRF`.
+
+- **The status of an export document** (`queryDocumentStatus`, types 110, 111 and 112). It refused them with
+  `INVALID_DOCUMENT_TYPE` and sent nothing; it now sends the query. The SII's manual of `QueryEstDte` gives `MontoDte`
+  as "String numérico 1-15" (`xsd:string` in its WSDL); field behaviour is that the SII compares it with the total the
+  document declares, in its own currency and with its decimals, and answers that the data do not match an accepted
+  export document asked with its total rounded, truncated or in pesos. An export document is now asked with its total
+  as the document writes its `MntTotal`; a total `Exportaciones` does not take (below zero, more than four decimals) is
+  `INVALID_AMOUNT`. Every other type is asked as before. The SII's advanced query (`QueryEstDteAv`) is not in dte-sdk.
+  - **What to change:** code that relied on the refusal of an export type as a guard; code that passes an export
+    total rounded or in pesos, which must now pass the total the document declares.
+
+- **The certification run verifies every envelope of documents before it uploads it** (`dte-sdk/portal`), with
+  `verifyTransmittedEnvelope`. One that does not verify throws `SIGNATURE_INVALID`, whose details name the document
+  (`index`, `type`, `folio`) and the check (`signature`, `stamp`) or the envelope (`check: 'envelope'`), and nothing is
+  sent. It cannot be turned off.
+  - The test sets and the simulation are checked before `beforeUpload` is called, and the step ends as when a
+    `beforeUpload` throws: the envelope kept as an artefact, its folios counted as used.
+  - `sendReceiptsSet` checks the receipts envelope before it uploads anything, and throws.
+
+- **The glosses of the states of an upload follow the SII's table.** The SII's "Manual de Desarrollador Externo -
+  Consulta de Estado de Upload Dte" (OI2004_CEUPDTE_MDE 1.10, `estado_envio.pdf`), 3.3 "Estados de Salida", glosses
+  `SOK` "Schema Validado", `CRT` "Carátula OK", `FOK` "Firma de Envió Validada" and `PDR` "Envió en Proceso";
+  `uploadStatusMessage` glossed them "Schema validado, validando firma", "Carátula validada, finalizando proceso",
+  "Firma validada, procesando envío" and "Envío en proceso, validando". It now gives the SII's wording, in sentence
+  case and with its accents. The classes do not change.
+  - **What to change:** code that compares the text of these glosses.
+
+- **A credit note's line in the folio consumption report.** `createFolioConsumption` reports credit notes (61) since
+  0.17.0, but `folioConsumptionEntryFromDocument`, which derives a line of the report from an issued document, took a
+  receipt alone and refused a 61 (`INVALID_DOCUMENT_TYPE`), so the line of a credit note was built by hand. It now
+  derives it, with the net, the VAT and the exempt amount of the note, and still refuses every other type. Which
+  credit notes go in a report stays the caller's to say: the function does not look at the document a note changes.
+  It refuses a note whose total is not the sum of its net, its VAT and its exempt amount (`BOOK_TOTAL_MISMATCH`,
+  `totalAmount`), which is how field 6 of the report's format defines the total of a summary: a note with withheld
+  VAT, another tax or a deposit guarantee, none of which a receipt carries. `ConsumoFolio_v10.xsd` admits the credit
+  note in a summary; the format of the report, of 2020, names the two receipts alone.
+  - **What to change:** nothing. Code that relied on the refusal of a 61 now gets its line.
 
 - **The simulation repeats its pass over the plan until it holds 20 documents** (`IssueSimulationOptions`, `minimumDocuments` of
   `issueSimulation`, `simulationMinimum` of `runCertification` and `sendSimulation`, `IssuedSimulation.passes`,
@@ -128,14 +215,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on any unread line, `'warn'` only logs them all.
   - **What to change:** a run that stops this way should read the lines it names; when none is an item,
     `unreadLines: 'warn'` lets it go on.
-
-- **The certification run verifies every envelope of documents before it uploads it** (`dte-sdk/portal`), with
-  `verifyTransmittedEnvelope`. One that does not verify throws `SIGNATURE_INVALID`, whose details name the document
-  (`index`, `type`, `folio`) and the check (`signature`, `stamp`) or the envelope (`check: 'envelope'`), and nothing is
-  sent. It cannot be turned off.
-  - The test sets and the simulation are checked before `beforeUpload` is called, and the step ends as when a
-    `beforeUpload` throws: the envelope kept as an artefact, its folios counted as used.
-  - `sendReceiptsSet` checks the receipts envelope before it uploads anything, and throws.
 
 - **The certification run sends the books of the test set as special books** (`runBooks`, `monthlyBooks` of
   `runCertification`, `RunBooksOptions`, `CertificationBookInput.notificationFolio`, `CertificationPlan.salesBook` and
@@ -171,25 +250,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not change.
   - **What to change:** `receiptsForEveryDocument: true` keeps a receipt for every document.
 
-- **The glosses of the states of an upload follow the SII's table.** The SII's "Manual de Desarrollador Externo -
-  Consulta de Estado de Upload Dte" (OI2004_CEUPDTE_MDE 1.10, `estado_envio.pdf`), 3.3 "Estados de Salida", glosses
-  `SOK` "Schema Validado", `CRT` "Carátula OK", `FOK` "Firma de Envió Validada" and `PDR` "Envió en Proceso";
-  `uploadStatusMessage` glossed them "Schema validado, validando firma", "Carátula validada, finalizando proceso",
-  "Firma validada, procesando envío" and "Envío en proceso, validando". It now gives the SII's wording, in sentence
-  case and with its accents. The classes do not change.
-  - **What to change:** code that compares the text of these glosses.
-
-- **A credit note's line in the folio consumption report.** `createFolioConsumption` reports credit notes (61) since
-  0.17.0, but `folioConsumptionEntryFromDocument`, which derives a line of the report from an issued document, took a
-  receipt alone and refused a 61 (`INVALID_DOCUMENT_TYPE`), so the line of a credit note was built by hand. It now
-  derives it, with the net, the VAT and the exempt amount of the note, and still refuses every other type. Which
-  credit notes go in a report stays the caller's to say: the function does not look at the document a note changes.
-  It refuses a note whose total is not the sum of its net, its VAT and its exempt amount (`BOOK_TOTAL_MISMATCH`,
-  `totalAmount`), which is how field 6 of the report's format defines the total of a summary: a note with withheld
-  VAT, another tax or a deposit guarantee, none of which a receipt carries. `ConsumoFolio_v10.xsd` admits the credit
-  note in a summary; the format of the report, of 2020, names the two receipts alone.
-  - **What to change:** nothing. Code that relied on the refusal of a 61 now gets its line.
-
 ### Fixed
 
 - **A line of prose in a case is no longer an item** (`parseTestSetText`). A line of a case of the basic, exempt,
@@ -205,6 +265,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CANTIDAD` or `UNITARIO` was dropped as a header even when it held numbers; it is a header now only when it holds
   none, and otherwise goes to `unread`. In an export case, `RECARGO EN LA LINEA` with no percent counted as read and
   kept nothing; it goes to `unread`.
+
+- **The document element of a file with a comment before it** (`schemaOf`, `validateAgainstSchema`). The element was
+  found after removing every processing instruction, then every comment, wherever it stood, so a comment that held
+  `<?` before the root, with a processing instruction later in the file, hid the root, and a file the schema takes
+  was refused with `INVALID_OPTION { field: 'schema' }`. What may come before the root (white space, a byte order
+  mark, processing instructions, comments, a document type) is now skipped in the order it comes, in one pass. Text
+  before the root, and a comment or a processing instruction left open there, are passed over to the first element
+  after them, as before, and that element's schema says what is wrong with the file.
+  - **What to change:** nothing.
 
 ## [0.17.0] - 2026-11-26
 

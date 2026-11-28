@@ -1,5 +1,6 @@
 import { nextFreePeriod, previousPeriod, runBooks } from '../../src/certification/books-step'
 import type { CertificationState, SentCase } from '../../src/certification/state'
+import { uploadStatusChecks } from '../../src/catalogs/upload-status'
 import { DteError } from '../../src/errors'
 import { fullPlan } from '../support/certification-fixtures'
 import {
@@ -439,14 +440,17 @@ test('beforeUpload is handed every book before it is sent, and a book it refuses
     entry,
     avance2([rowsPage(), booksForm(), KEPT, ALL_APPROVED]),
     post('pe_avance3', DECLARATION_ANSWERS.success),
-    uploads(reception('101'), reception('103'), reception('104')),
+    uploads(reception('101'), reception('103')),
     estUpAlways('LSO'),
   ])
   const seen: string[] = []
   const beforeUpload = (upload: { kind: string; name: string; xml: string }): void => {
     seen.push(`${upload.kind} ${upload.name} ${/<(LibroCompraVenta|LibroGuia)[ >]/.exec(upload.xml)?.[1]}`)
-    if (upload.name === 'salesBook') throw new DteError('INVALID_OPTION', { field: 'schema' })
+    if (upload.name === 'salesBook')
+      throw new DteError('SCHEMA_INVALID', { kind: upload.kind, name: upload.name, issues })
+    if (upload.name === 'exemptPurchaseBook') throw new Error('not a check of the library')
   }
+  const issues = [{ message: 'Element TotMntTotal: not valid', line: 9 }]
   const result = await runBooks({ ...harness.deps, beforeUpload }, booksState())
   expect(seen).toEqual([
     'book purchaseBook LibroCompraVenta',
@@ -454,11 +458,22 @@ test('beforeUpload is handed every book before it is sent, and a book it refuses
     'book guideBook LibroGuia',
     'book exemptPurchaseBook LibroCompraVenta',
   ])
-  // The sales book never left: three uploads, its error among the events, and no result kept for it.
-  expect(harness.urls().filter((url) => url === UPLOAD)).toHaveLength(3)
+  // The sales and the exempt purchase books never left: two uploads, their errors among the events, and no result
+  // kept for them.
+  expect(harness.urls().filter((url) => url === UPLOAD)).toHaveLength(2)
   expect(harness.events).toContainEqual({ step: 'BOOK_ERROR', book: 'salesBook', error: expect.any(String) })
-  expect(Object.keys(result.state.books.results).sort()).toEqual(['exemptPurchaseBook', 'guideBook', 'purchaseBook'])
+  expect(harness.events).toContainEqual({
+    step: 'BOOK_ERROR',
+    book: 'exemptPurchaseBook',
+    error: 'not a check of the library',
+  })
+  expect(Object.keys(result.state.books.results).sort()).toEqual(['guideBook', 'purchaseBook'])
   expect(await harness.store.listArtefacts()).toContain('libro-ventas.xml')
+  // What the check said against the book reaches the caller, details and all, through the portal client's logger; an
+  // error that is not the library's has no details to give.
+  expect(harness.warnedWith('certification book refused before upload')).toEqual([
+    { book: 'salesBook', code: 'SCHEMA_INVALID', details: { kind: 'book', name: 'salesBook', issues } },
+  ])
 })
 
 test('a book the portal shows approved is skipped; without an exempt plan there are three books; with every book approved nothing is sent', async () => {
@@ -931,6 +946,7 @@ test('a declaration the portal does not take ends the phase as rejected, with th
 })
 
 test('books the SOAP status rejected or the declaration named with content errors are not awaited: they go again', async () => {
+  const code = 'LNC'
   const waitPage = rowsPage({ purchaseBook: 'EN REVISION', salesBook: 'REVISADO CONFORME', guideBook: 'S21' })
   const harness = await certificationHarness([
     ...EMPTY_HISTORY,
@@ -947,7 +963,7 @@ test('books the SOAP status rejected or the declaration named with content error
     ]),
     post('pe_avance3', DECLARATION_ANSWERS.contentErrors, ...repeat(DECLARATION_ANSWERS.success, 2)),
     uploads(...[101, 102, 103, 104, 203, 204].map((id) => reception(String(id)))),
-    estUpBy({ '103': 'LNC' }),
+    estUpBy({ '103': code }),
   ])
   const result = await runBooks(harness.deps, booksState())
   // Only the sales book is awaited. The guide book stands as closed whatever the page says and goes to a free
@@ -969,8 +985,196 @@ test('books the SOAP status rejected or the declaration named with content error
   expect(uploadedXml(sent[5])).toContain('<PeriodoTributario>2026-09')
   expect(result).toMatchObject({ outcome: 'rejected', detail: 'purchaseBook, exemptPurchaseBook' })
   expect(result.state.books.results.guideBook).toMatchObject({ trackId: '204', period: '2026-09', approved: true })
-  expect(result.state.diagnosis?.['103']).toMatchObject({ code: 'LNC', status: 'rejected' })
+  expect(result.state.diagnosis?.['103']).toMatchObject({ code, status: 'rejected' })
   expect(polls(harness)).toBe(3 + 1 + 1)
+})
+
+// `LRS` (the schema), `LRF` (the signature) and `LRC` (the cover) refuse what a book sent again would carry unchanged:
+// its file, and on its cover the kind of book and the notification folio. Such a book is not sent again.
+const REFUSED = 'certification book refused, not sent again'
+const REFUSALS = ['LRS', 'LRF', 'LRC'] as const
+
+test.each(REFUSALS)(
+  'a special book the first status check finds refused (%s) is not sent again nor declared: it stops with its diagnosis and what to look at',
+  async (code) => {
+    const waitPage = rowsPage({ purchaseBook: 'EN REVISION', salesBook: 'REVISADO CONFORME', guideBook: 'S21' })
+    const harness = await certificationHarness([
+      ...EMPTY_HISTORY,
+      entry,
+      avance2([rowsPage(), booksForm(), KEPT, waitPage]),
+      post('pe_avance3', DECLARATION_ANSWERS.contentErrors),
+      uploads(...[101, 102, 103, 104].map((id) => reception(String(id)))),
+      estUpBy({ '103': code }),
+    ])
+    const result = await runBooks(harness.deps, booksState())
+    // The refused book went as a special book, and nothing a book sent again changes would change what was refused.
+    expect(coversSent(harness)[2]).toEqual(['ESPECIAL', GUIDE_BOOK_ATTENTION])
+    expect(retries(harness)).toEqual([])
+    expect(sentBooks(harness)).toHaveLength(4)
+    expect(result.state.books.occupiedPeriods).toEqual([])
+    expect(result.state.diagnosis?.['103']).toMatchObject({ code, status: 'rejected' })
+    expect(harness.warnedWith(REFUSED)).toEqual([
+      { book: 'guideBook', trackId: '103', code, checks: uploadStatusChecks(code) },
+    ])
+    // It leaves the results at once, so no declaration names the track id the SII refused.
+    expect(result.state.books.results.guideBook).toBeUndefined()
+    expect(harness.posted('pe_avance3')[0]).toMatchObject({ NUM_ENV1: '101', NUM_ENV2: '102', NUM_ENV4: '104' })
+    expect(harness.posted('pe_avance3')[0].NUM_ENV3).toBe('')
+    expect(result).toMatchObject({ outcome: 'rejected', detail: 'purchaseBook, guideBook, exemptPurchaseBook' })
+  },
+)
+
+test.each(REFUSALS)(
+  'a special book the cross-check of the wait finds refused (%s) ends the wait and is not sent again',
+  async (code) => {
+    const declared = rowsPage({
+      purchaseBook: 'S21',
+      salesBook: 'REVISADO CONFORME',
+      guideBook: 'REVISADO CONFORME',
+      exemptPurchaseBook: 'REVISADO CONFORME',
+    })
+    const seen: Record<string, number> = {}
+    const soap: FakeRoute = {
+      url: EST_UP_URL,
+      method: 'POST',
+      reply: (request: RecordedRequest) => {
+        const id = /<TrackId>(\d+)/.exec(request.text)![1]
+        seen[id] = (seen[id] ?? 0) + 1
+        return estUp(id !== '101' ? 'EPR' : seen[id] > 3 ? code : 'LSO', id)
+      },
+    }
+    const harness = await certificationHarness([
+      ...EMPTY_HISTORY,
+      entry,
+      avance2([rowsPage(), booksForm(), KEPT, declared, declared]),
+      post('pe_avance3', DECLARATION_ANSWERS.success),
+      uploads(...[101, 102, 103, 104].map((id) => reception(String(id)))),
+      soap,
+    ])
+    const result = await runBooks(harness.deps, booksState())
+    expect(coversSent(harness)[0]).toEqual(['ESPECIAL', ATTENTION])
+    expect(result).toMatchObject({ outcome: 'rejected', detail: 'purchaseBook' })
+    expect(result.state.diagnosis?.['101']).toMatchObject({ code, status: 'rejected' })
+    expect(result.state.books.results.purchaseBook).toBeUndefined()
+    expect(result.state.books.occupiedPeriods).toEqual([])
+    expect(retries(harness)).toEqual([])
+    expect(sentBooks(harness)).toHaveLength(4)
+    expect(harness.warnedWith(REFUSED)).toEqual([
+      { book: 'purchaseBook', trackId: '101', code, checks: uploadStatusChecks(code) },
+    ])
+    expect(polls(harness)).toBe(1 + 2)
+    // The totals of the refused purchase book leave with it; the sales book, which the SII took, keeps its own.
+    const accumulated = result.state.books.accumulated['2026-11']
+    expect(accumulated).not.toHaveProperty('purchase')
+    expect(accumulated.sale).toBeDefined()
+    expect(accumulated.notificationFolio).toEqual({ sale: Number(SALES_BOOK_ATTENTION) })
+  },
+)
+
+test.each(REFUSALS)(
+  'a special book refused (%s) after a resend leaves the results, its period is not taken, and it goes no further',
+  async (code) => {
+    const after = booksForm({ purchaseBook: '111', salesBook: '112', exemptPurchaseBook: '114' })
+    const harness = await certificationHarness([
+      ...EMPTY_HISTORY,
+      entry,
+      avance2([rowsPage(), booksForm(), booksForm(), booksForm(), after]),
+      post('pe_avance3', ...repeat(DECLARATION_ANSWERS.success, 2)),
+      uploads(...[101, 102, 103, 104, 111, 112, 113, 114].map((id) => reception(String(id)))),
+      estUpBy({ '113': code }),
+    ])
+    const result = await runBooks(harness.deps, booksState())
+    // The adjustment of the guide book is a special book too, with the same notification folio.
+    expect(coversSent(harness)[6]).toEqual(['ESPECIAL', GUIDE_BOOK_ATTENTION])
+    expect(uploadedXml(sentBooks(harness)[6])).toContain('<TipoEnvio>AJUSTE')
+    expect(retries(harness)).toEqual([{ step: 'BOOK_PERIOD_RETRY', period: '2026-11', attempt: 1 }])
+    expect(result.state.books.occupiedPeriods).toEqual([])
+    expect(result.state.diagnosis?.['113']).toMatchObject({ code, status: 'rejected' })
+    expect(harness.posted('pe_avance3')[1].NUM_ENV3).toBe('')
+    expect(harness.warnedWith(REFUSED)).toEqual([
+      { book: 'guideBook', trackId: '113', code, checks: uploadStatusChecks(code) },
+    ])
+  },
+)
+
+test.each(REFUSALS)(
+  'with every book refused (%s) and every row empty, the run stops: no period is tried, none is taken',
+  async (code) => {
+    // The refused books leave the declaration; the basic set still has its row, and it comes back empty every time.
+    const setRowEmpty = declarationFormPage([
+      { label: 'SET BASICO', index: 1, value: '' },
+      { label: 'SET GUIA DE DESPACHO', state: 'REVISADO CONFORME' },
+      ...(Object.keys(BOOK_LABELS) as BookLabel[]).map(
+        (key, index): DeclarationRowSpec => ({ label: BOOK_LABELS[key], index: index + 2, value: '' }),
+      ),
+    ])
+    const harness = await certificationHarness([
+      ...EMPTY_HISTORY,
+      entry,
+      avance2([rowsPage()], () => setRowEmpty),
+      post('pe_avance3', ...repeat(DECLARATION_ANSWERS.success, 30)),
+      fourReceipts(),
+      estUpAlways(code),
+    ])
+    const result = await runBooks(harness.deps, booksState())
+    expect(retries(harness)).toEqual([])
+    expect(harness.posted('pe_avance3')).toHaveLength(1)
+    expect(result.state.lastDeclaration).toMatchObject({ outcome: 'allRejected' })
+    expect(result.state.books).toMatchObject({ period: '2026-11', occupiedPeriods: [], results: {} })
+    expect(sentBooks(harness)).toHaveLength(4)
+    expect(harness.warnedWith(REFUSED)).toHaveLength(4)
+    expect(result.outcome).toBe('rejected')
+  },
+)
+
+test('a refused adjustment of the sales book leaves the totals of its total submission, which the SII took', async () => {
+  const after = booksForm({ purchaseBook: '111', guideBook: '113', exemptPurchaseBook: '114' })
+  const harness = await certificationHarness([
+    ...EMPTY_HISTORY,
+    entry,
+    avance2([rowsPage(), booksForm(), booksForm(), booksForm(), after]),
+    post('pe_avance3', ...repeat(DECLARATION_ANSWERS.success, 2)),
+    uploads(...[101, 102, 103, 104, 111, 112, 113, 114].map((id) => reception(String(id)))),
+    estUpBy({ '112': 'LRS' }),
+  ])
+  const result = await runBooks(harness.deps, booksState())
+  expect(uploadedXml(sentBooks(harness)[5])).toContain('<TipoEnvio>AJUSTE')
+  expect(result.state.diagnosis?.['112']).toMatchObject({ code: 'LRS', status: 'rejected' })
+  expect(result.state.books.accumulated['2026-11']).toMatchObject({
+    notificationFolio: { purchase: Number(ATTENTION), sale: Number(SALES_BOOK_ATTENTION) },
+  })
+  expect(result.state.books.accumulated['2026-11'].sale).toBeDefined()
+})
+
+test('every row empty decides on an adjustment from the books it sends: a refused monthly sales book carries none', async () => {
+  const { salesBook, ...older } = plan
+  void salesBook
+  const resent = booksForm({ purchaseBook: '111', guideBook: '113', exemptPurchaseBook: '114' })
+  const harness = await certificationHarness([
+    ...EMPTY_HISTORY,
+    entry,
+    avance2([rowsPage(), booksForm(), booksForm(), booksForm(), resent]),
+    post('pe_avance3', ...repeat(DECLARATION_ANSWERS.success, 2)),
+    uploads(CVC_REFUSAL, ...[101, 102, 103, 104, 111, 113, 114].map((id) => reception(String(id)))),
+    estUpBy({ '102': 'LRS' }),
+  ])
+  const result = await runBooks(harness.deps, booksState({ plan: older }))
+  // A book with no attention number goes as a regular one, and is refused all the same.
+  expect(coversSent(harness)[2]).toEqual(['MENSUAL', undefined])
+  expect(result.state.diagnosis?.['102']).toMatchObject({ code: 'LRS', status: 'rejected' })
+  expect(harness.warnedWith(REFUSED)).toHaveLength(1)
+  // The sales book's totals are kept, but it is not sent again; the purchase book went as an adjustment and keeps
+  // none, so the books sent again go as totals in the next free period.
+  expect(retries(harness)).toEqual([{ step: 'BOOK_PERIOD_RETRY', period: '2026-10', attempt: 1 }])
+  const sent = sentBooks(harness)
+  expect(sent).toHaveLength(8)
+  for (const request of sent.slice(5)) {
+    expect(uploadedXml(request)).toContain('<TipoEnvio>TOTAL')
+    expect(uploadedXml(request)).toContain('<PeriodoTributario>2026-10')
+  }
+  expect(result.state.books.occupiedPeriods).toEqual(['2026-11'])
+  // The refused sales book was the only one whose totals 2026-11 kept: the period keeps none.
+  expect(result.state.books.accumulated).not.toHaveProperty('2026-11')
 })
 
 test('a declaration that never stands is diagnosed: the envelope it names first, then the others as they are declared', async () => {

@@ -1044,6 +1044,32 @@ describe('queryDocumentStatus', () => {
     expect(params(fake.requests[0].text)).toContainEqual(['MontoDte', sent])
   })
 
+  // `MontoDte` is "String numérico 1-15" in the SII's manual of `QueryEstDte` (`xsd:string` in its WSDL); by field
+  // behaviour the SII compares it with the total the document declares, in its currency and with its decimals.
+  test.each([
+    [110, 1234.5678, '1234.5678'],
+    [111, 0.5, '0.5'],
+    [112, 120, '120'],
+    [110, 0, '0'],
+  ] as const)(
+    'an export document %p asks with its total %p written as the document writes it',
+    async (type, totalAmount, sent) => {
+      const { sii, fake } = cachedSii(route(EST_DTE, fx('soap-estdte-dok.xml')))
+      expect((await queryDocumentStatus(sii, { ...document, type, totalAmount })).code).toBe('DOK')
+      expect(params(fake.requests[0].text)).toContainEqual(['TipoDte', String(type)])
+      expect(params(fake.requests[0].text)).toContainEqual(['MontoDte', sent])
+    },
+  )
+
+  test('an export document asked on the REST channel carries the same amount', async () => {
+    const { sii, fake } = cachedSii(route('*', json('rest-document-status.json')))
+    await queryDocumentStatus(sii, { ...document, type: 110, totalAmount: 99.6, channel: 'rest' })
+    expect(fake.requests[0].url).toBe(
+      'https://apicert.sii.cl/recursos/v1/boleta.electronica/10000004-0-110-45/estado' +
+        '?rut_receptor=12345678&dv_receptor=5&monto=99.6&fechaEmision=15-11-2026',
+    )
+  })
+
   test('the issue date may come as DD-MM-YYYY and a receiver verifier K is kept', async () => {
     const { sii, fake } = cachedSii(route(EST_DTE, fx('soap-estdte-dok.xml')))
     await queryDocumentStatus(sii, { ...document, issueDate: '05-01-2027', receiverRut: '14625621-k' })
@@ -1163,9 +1189,11 @@ describe('queryDocumentStatus', () => {
     await expectCode(queryDocumentStatus(sii, { ...document, type: 99 as unknown as 33 }), 'INVALID_DOCUMENT_TYPE', {
       field: 'type',
     })
-    // The query carries the total as a whole number, and an export document's has decimals: it is not asked for.
-    for (const type of [110, 111, 112] as const)
-      await expectCode(queryDocumentStatus(sii, { ...document, type }), 'INVALID_DOCUMENT_TYPE', { field: 'type' })
+    // An export document's total is a decimal from zero with four decimals at most, as `Exportaciones` declares it.
+    for (const totalAmount of [-0.5, 1.23456, 1e14, Number.NaN])
+      await expectCode(queryDocumentStatus(sii, { ...document, type: 110, totalAmount }), 'INVALID_AMOUNT', {
+        field: 'totalAmount',
+      })
     await expectCode(
       queryDocumentStatus(sii, { ...document, type: '39/../x' as unknown as 39 }),
       'INVALID_DOCUMENT_TYPE',

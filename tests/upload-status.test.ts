@@ -6,6 +6,7 @@ import {
   documentStatusMessage,
   isRetryableStatus,
   isTokenErrorStatus,
+  uploadStatusChecks,
 } from '../src/catalogs/upload-status'
 
 describe('the verdict of an upload', () => {
@@ -52,6 +53,9 @@ describe('upload status (QueryEstUp / REST)', () => {
     ['RLV', 'rejected'],
     ['LNC', 'rejected'],
     ['LRH', 'rejected'],
+    ['LRS', 'rejected'],
+    ['LRC', 'rejected'],
+    ['LRF', 'rejected'],
     ['-1', 'queryError'],
     ['-14', 'queryError'],
     ['ZZZ', 'unknown'],
@@ -106,6 +110,17 @@ describe('upload status (QueryEstUp / REST)', () => {
       expect([classifyUploadStatus(code, 'rest'), classifyUploadStatus(code, 'soap')]).toEqual(['rejected', 'rejected'])
   })
 
+  // No document of the SII lists the states of a book: these glosses rest on field behaviour.
+  test.each([
+    ['LRS', 'Libro rechazado por error en schema'],
+    ['LRC', 'Libro rechazado por error en carátula'],
+    ['LRF', 'Libro rechazado por error en firma'],
+  ])('the book state %s is a rejection glossed as %s, on both channels', (code, gloss) => {
+    expect(uploadStatusMessage(code)).toBe(gloss)
+    expect(uploadStatusMessage(code, 'rest')).toBe(gloss)
+    expect(classifyUploadStatus(code, 'rest')).toBe('rejected')
+  })
+
   test('negative codes are retryable, everything else is not', () => {
     expect(isRetryableStatus('-3')).toBe(true)
     expect(isRetryableStatus('EPR')).toBe(false)
@@ -152,5 +167,90 @@ describe('token error statuses', () => {
 
   test('FAN has a gloss', () => {
     expect(documentStatusMessage('FAN')).toBe('Folio anulado')
+  })
+})
+
+describe('what to look at for a state', () => {
+  const ESTADO_ENVIO = 'Consulta de Estado de Upload Dte (OI2004_CEUPDTE_MDE 1.10), 3.3'
+  const FORMATO_IECV = 'Formato de Información de Compras y Ventas 2.2'
+  // The counts come "(Solo si Estado es EPR)" in the test steps of chapter 5; the example of 3.4.1 has none accepted.
+  const ESTADO_ENVIO_EPR = 'Consulta de Estado de Upload Dte (OI2004_CEUPDTE_MDE 1.10), 3.4.1 y capítulo 5'
+  // `DoctoType` of the purchase and sales book, the type of its `TpoDoc`, lists no 52: a dispatch guide has no place in a purchase or sales book.
+  const BOOK_TYPES = 'LibroCV_v10.xsd, DoctoType (TpoDoc)'
+  const VALIDATE =
+    'Validar el archivo contra su esquema del SII antes de enviarlo: validateBeforeUpload de dte-sdk/schemas detiene ' +
+    'la subida (validateAgainstSchema solo valida).'
+
+  test('a refused signature is often the permission of the RUT that signs, which each environment keeps apart', () => {
+    for (const code of ['RFR', 'LRF']) {
+      const checks = uploadStatusChecks(code)
+      expect(checks.map((check) => check.basis)).toEqual(['fieldBehaviour', 'fieldBehaviour'])
+      expect(checks[0].check).toMatch(/permiso para enviar documentos en ese ambiente/)
+      expect(checks[0].check).toMatch(/certificación y producción/)
+      expect(checks[1].check).toMatch(/^Después, la firma/)
+      expect(checks.every((check) => check.source === null)).toBe(true)
+    }
+  })
+
+  test('a processed envelope is not an accepted one: its counts say what became of each document', () => {
+    expect(uploadStatusChecks('EPR')).toEqual([
+      {
+        check: 'Procesado no es aceptado: leer las cantidades de documentos aceptados, con reparos y rechazados.',
+        basis: 'siiDocument',
+        source: ESTADO_ENVIO_EPR,
+      },
+    ])
+  })
+
+  test('a schema refusal asks for the file to be validated first; a book also for the types it holds', () => {
+    expect(uploadStatusChecks('RSC')).toEqual([{ check: VALIDATE, basis: 'siiDocument', source: ESTADO_ENVIO }])
+    const book = uploadStatusChecks('LRS')
+    expect(book.map(({ basis, source }) => [basis, source])).toEqual([
+      ['fieldBehaviour', null],
+      ['siiDocument', BOOK_TYPES],
+    ])
+    expect(book[0].check).toBe(VALIDATE)
+    expect(book[1].check).toMatch(/una guía de despacho va en el libro de guías/)
+  })
+
+  test('a refused cover: the resolution of the environment, and for a book its type and its notification folio', () => {
+    expect(uploadStatusChecks('RCT').map(({ basis, source }) => [basis, source])).toEqual([
+      ['siiDocument', ESTADO_ENVIO],
+      ['fieldBehaviour', null],
+    ])
+    expect(uploadStatusChecks('RCT')[1].check).toMatch(/número y la fecha de resolución/)
+    const book = uploadStatusChecks('LRC')
+    expect(book.map(({ basis, source }) => [basis, source])).toEqual([
+      ['fieldBehaviour', null],
+      ['siiDocument', FORMATO_IECV],
+      ['siiDocument', FORMATO_IECV],
+    ])
+    expect(book[1].check).toMatch(/ESPECIAL.*FolioNotificacion/)
+    expect(book[2].check).toMatch(/RECTIFICA.*no un tipo de envío/)
+  })
+
+  test('a book refused with history, and a sending that does not belong, rest on what the field has seen', () => {
+    expect(uploadStatusChecks('LRH').map((check) => check.basis)).toEqual([
+      'fieldBehaviour',
+      'fieldBehaviour',
+      'fieldBehaviour',
+    ])
+    // Each check stands alone: neither of the last two reads as an example of the first.
+    expect(uploadStatusChecks('LRH').map((check) => check.check)).toEqual([
+      'Visto en un libro cuyos totales no cuadran con sus líneas.',
+      'Visto en un libro de ventas que trae un campo propio del libro de compras.',
+      'Visto en un libro que deja fuera de la línea de una liquidación factura sus comisiones.',
+    ])
+    expect(uploadStatusChecks('LNC')).toEqual([
+      {
+        check: 'Visto al enviar de nuevo un período que ya tiene un libro aceptado.',
+        basis: 'fieldBehaviour',
+        source: null,
+      },
+    ])
+  })
+
+  test.each(['SOK', 'LOK', 'ZZZ', '-1', 'toString', '__proto__'])('%s has nothing listed', (code) => {
+    expect(uploadStatusChecks(code)).toEqual([])
   })
 })

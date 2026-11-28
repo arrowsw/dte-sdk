@@ -1223,3 +1223,70 @@ describe('parseReceptionResponse', () => {
     })
   })
 })
+
+describe('a check before the upload', () => {
+  const guideXml = '<?xml version="1.0" encoding="ISO-8859-1"?>\n<LibroGuia></LibroGuia>'
+
+  test('each upload hands the check the exact text it sends, what kind of file it is and its name, and awaits it', async () => {
+    const { sii, fake } = cachedSii(cgi(reception('reception-ok.xml')))
+    const seen: unknown[] = []
+    const beforeUpload = async (file: { readonly kind: string; readonly name: string; readonly xml: string }) => {
+      await Promise.resolve()
+      seen.push({ ...file, sent: fake.requests.length })
+    }
+    await uploadEnvelope(sii, { ...dte, beforeUpload })
+    await uploadEnvelope(sii, { ...receipt, beforeUpload })
+    await uploadBook(sii, { xml: `\n  ${guideXml}`, beforeUpload })
+    await uploadFolioConsumption(sii, { xml: consumoXml, fileName: 'RCOF.xml', beforeUpload })
+    expect(seen).toEqual([
+      { kind: 'dte', name: 'EnvioDTE.xml', xml: dteXml, sent: 0 },
+      { kind: 'receipt', name: 'EnvioBOLETA.xml', xml: receiptXml, sent: 1 },
+      { kind: 'book', name: 'LibroGuia.xml', xml: guideXml, sent: 2 },
+      { kind: 'folioConsumption', name: 'RCOF.xml', xml: consumoXml, sent: 3 },
+    ])
+    expect(fake.requests.map((request) => request.parts[4].value)).toEqual([dteXml, receiptXml, guideXml, consumoXml])
+  })
+
+  test('a check that throws stops the upload with nothing sent, not even a token asked for', async () => {
+    const { sii, fake } = testSii([...authRoutes(), ...cgi(reception('reception-ok.xml'))])
+    const refused = new DteError('INVALID_OPTION', { field: 'xml' })
+    const beforeUpload = async (): Promise<void> => {
+      throw refused
+    }
+    await expect(uploadEnvelope(sii, { ...dte, beforeUpload })).rejects.toBe(refused)
+    await expect(uploadBook(sii, { xml: libroXml, beforeUpload })).rejects.toBe(refused)
+    await expect(
+      uploadFolioConsumption(sii, {
+        xml: consumoXml,
+        beforeUpload: () => {
+          throw refused
+        },
+      }),
+    ).rejects.toBe(refused)
+    expect(fake.requests).toHaveLength(0)
+  })
+
+  test('a call already aborted does not run the check: it stops as an aborted call, with nothing sent', async () => {
+    const { sii, fake } = cachedSii(cgi(reception('reception-ok.xml')))
+    const beforeUpload = jest.fn()
+    const controller = new AbortController()
+    controller.abort()
+    await expectCode(
+      uploadBook(sii, { xml: libroXml, beforeUpload }, { signal: controller.signal }),
+      'REQUEST_ABORTED',
+      {
+        operation: 'uploadBook',
+      },
+    )
+    expect(beforeUpload).not.toHaveBeenCalled()
+    expect(fake.requests).toHaveLength(0)
+  })
+
+  test('a check that is not a function is refused before anything is sent', async () => {
+    const { sii, fake } = cachedSii(cgi(reception('reception-ok.xml')))
+    const beforeUpload = 'validate' as unknown as () => void
+    await expectCode(uploadEnvelope(sii, { ...dte, beforeUpload }), 'INVALID_OPTION', { field: 'beforeUpload' })
+    await expectCode(uploadBook(sii, { xml: libroXml, beforeUpload }), 'INVALID_OPTION', { field: 'beforeUpload' })
+    expect(fake.requests).toHaveLength(0)
+  })
+})
