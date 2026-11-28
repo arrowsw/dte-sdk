@@ -262,8 +262,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   none, and otherwise goes to `unread`. In an export case, `RECARGO EN LA LINEA` with no percent counted as read and
   kept nothing; it goes to `unread`.
 
-### Fixed
-
 - **The document element of a file with a comment before it** (`schemaOf`, `validateAgainstSchema`). The element was
   found after removing every processing instruction, then every comment, wherever it stood, so a comment that held
   `<?` before the root, with a processing instruction later in the file, hid the root, and a file the schema takes
