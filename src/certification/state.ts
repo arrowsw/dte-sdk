@@ -150,7 +150,15 @@ export type SentBook = {
  * ES: Los totales de período acumulados por período y operación, para los envíos de ajuste.
  */
 export type AccumulatedTotals = Readonly<
-  Record<string, { readonly purchase?: readonly BookTotals[]; readonly sale?: readonly BookTotals[] }>
+  Record<
+    string,
+    {
+      readonly purchase?: readonly BookTotals[]
+      readonly sale?: readonly BookTotals[]
+      /** EN: The notification folio of the special book each operation's totals were sent with; an operation absent here sent a monthly book, as every book of a state stored before books went special did. ES: `FolioNotificacion` — El folio de notificación del libro especial con que se enviaron los totales de cada operación; una operación ausente aquí envió un libro mensual, como todo libro de un estado guardado antes de que los libros fueran especiales. */
+      readonly notificationFolio?: { readonly purchase?: number; readonly sale?: number }
+    }
+  >
 >
 
 /**

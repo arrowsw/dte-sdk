@@ -236,9 +236,31 @@ const happyRoutes = (): FakeRoute[] => [
   estUpAlways('LSO'),
 ]
 
+// History with 2026-10 held, then every row empty twice: a round of adjustments in 2026-11, then totals in 2026-09.
+const everyRowEmptyRoutes = (): FakeRoute[] => [
+  ...history(
+    bookHistoryPage([['2026-10', 'COMPRA', 'Recibido', 'LIBRO', 'MENSUAL', 'a']]),
+    bookHistoryPage([]),
+    bookHistoryPage([]),
+  ),
+  entry,
+  avance2([
+    rowsPage(),
+    booksForm(),
+    booksForm(),
+    booksForm(),
+    booksForm(),
+    booksForm(),
+    booksForm({ purchaseBook: '201', salesBook: '202', guideBook: '203', exemptPurchaseBook: '204' }),
+  ]),
+  post('pe_avance3', ...repeat(DECLARATION_ANSWERS.success, 3)),
+  uploads(...[101, 102, 103, 104, 111, 112, 113, 114, 201, 202, 203, 204].map((id) => reception(String(id)))),
+  estUpAlways('EPR'),
+]
+
 test('each book of the test set goes as a special book whose notification folio is the attention number of its own set', async () => {
   const harness = await certificationHarness(happyRoutes())
-  await runBooks(harness.deps, booksState())
+  const result = await runBooks(harness.deps, booksState())
   // Sent in the order purchase, sales, guide, exempt purchase.
   expect(coversSent(harness)).toEqual([
     ['ESPECIAL', ATTENTION],
@@ -247,11 +269,17 @@ test('each book of the test set goes as a special book whose notification folio 
     ['ESPECIAL', ATTENTION],
   ])
   expect(harness.warnings()).toEqual([])
+  // The totals kept for an adjustment name the notification of the book they were sent with.
+  expect(result.state.books.accumulated['2026-11'].notificationFolio).toEqual({
+    purchase: Number(ATTENTION),
+    sale: Number(SALES_BOOK_ATTENTION),
+  })
 })
 
 test('monthlyBooks sends the books as before: the sales and purchase books monthly, the guide book with folio 3', async () => {
   const harness = await certificationHarness(happyRoutes())
-  await runBooks(harness.deps, booksState(), { monthlyBooks: true })
+  const result = await runBooks(harness.deps, booksState(), { monthlyBooks: true })
+  expect(result.state.books.accumulated['2026-11']).not.toHaveProperty('notificationFolio')
   expect(coversSent(harness)).toEqual([
     ['MENSUAL', undefined],
     ['MENSUAL', undefined],
@@ -284,6 +312,125 @@ test('a plan stored without the sales-book and guide-book sets reads them again 
     { book: 'salesBook' },
     { book: 'guideBook' },
   ])
+})
+
+test('an attention number the cover cannot carry sends the book as before, and the run says it was read and cannot be written; leading zeros are dropped', async () => {
+  for (const unwritable of ['0', '12345678901', '99999999999999999999']) {
+    const harness = await certificationHarness(happyRoutes())
+    const odd = {
+      ...plan,
+      salesBook: { kind: 'salesBook' as const, attentionNumber: unwritable },
+      guideBook: { kind: 'guideBook' as const, attentionNumber: unwritable },
+    }
+    const result = await runBooks(harness.deps, booksState({ plan: odd }))
+    expect(result.outcome).toBe('approved')
+    expect(coversSent(harness)).toEqual([
+      ['ESPECIAL', ATTENTION],
+      ['MENSUAL', undefined],
+      ['ESPECIAL', '3'],
+      ['ESPECIAL', ATTENTION],
+    ])
+    expect(
+      harness.warnedWith('certification book attention number read but not writable as its notification folio'),
+    ).toEqual([{ book: 'salesBook' }, { book: 'guideBook' }])
+  }
+  const padded = await certificationHarness(happyRoutes())
+  await runBooks(
+    padded.deps,
+    booksState({ plan: { ...plan, salesBook: { kind: 'salesBook', attentionNumber: '0002410012' } } }),
+  )
+  expect(coversSent(padded)[1]).toEqual(['ESPECIAL', '2410012'])
+  expect(padded.warnings()).toEqual([])
+})
+
+test('a book with no number is said once in a run, however many times it is sent', async () => {
+  const { salesBook, guideBook, ...older } = plan
+  void salesBook
+  void guideBook
+  const harness = await certificationHarness(everyRowEmptyRoutes())
+  await runBooks(harness.deps, booksState({ plan: older }))
+  expect(sentBooks(harness)).toHaveLength(12)
+  expect(harness.warnedWith('certification book sent without the attention number of its set')).toEqual([
+    { book: 'salesBook' },
+    { book: 'guideBook' },
+  ])
+})
+
+test('monthlyBooks holds on every book the run sends again: as an adjustment, in the next free period, and the held purchase book', async () => {
+  const retried = await certificationHarness(everyRowEmptyRoutes())
+  await runBooks(retried.deps, booksState(), { monthlyBooks: true })
+  const monthly = [
+    ['MENSUAL', undefined],
+    ['MENSUAL', undefined],
+    ['ESPECIAL', '3'],
+    ['MENSUAL', undefined],
+  ]
+  // The round of adjustments in 2026-11 and the totals in 2026-09.
+  expect(coversSent(retried)).toEqual([...monthly, ...monthly, ...monthly])
+  const held = await certificationHarness([
+    ...EMPTY_HISTORY,
+    entry,
+    avance2([rowsPage(), booksForm(), KEPT]),
+    post('pe_avance3', DECLARATION_ANSWERS.success),
+    uploads(CVC_REFUSAL, ...[101, 102, 103, 104].map((id) => reception(String(id)))),
+    estUpAlways('EPR'),
+  ])
+  await runBooks(held.deps, booksState(), { monthlyBooks: true })
+  expect(uploadedXml(sentBooks(held)[1])).toContain('<TipoEnvio>AJUSTE')
+  expect(coversSent(held)).toEqual([['MENSUAL', undefined], ...monthly])
+})
+
+test('totals kept for a book of another kind are not carried: a special book held by the SII adjusts without the totals of a monthly one', async () => {
+  // A state stored before books went special: every sales and purchase book was monthly, so its totals name no folio.
+  const stale = (patch: Partial<CertificationState> = {}) =>
+    booksState({
+      books: {
+        occupiedPeriods: [],
+        adjustmentTried: [],
+        results: {},
+        accumulated: {
+          '2026-11': {
+            purchase: [
+              { type: 45, documentCount: 7, exemptAmount: 0, netAmount: 1000, vatAmount: 190, totalAmount: 1190 },
+            ],
+          },
+        },
+      },
+      ...patch,
+    })
+  const routes = () => [
+    ...EMPTY_HISTORY,
+    entry,
+    avance2([rowsPage(), booksForm(), KEPT]),
+    post('pe_avance3', DECLARATION_ANSWERS.success),
+    uploads(CVC_REFUSAL, ...[101, 102, 103, 104].map((id) => reception(String(id)))),
+    estUpAlways('EPR'),
+  ]
+  const special = await certificationHarness(routes())
+  await runBooks(special.deps, stale())
+  const adjustment = uploadedXml(sentBooks(special)[1])
+  expect(adjustment).toContain('<TipoEnvio>AJUSTE')
+  expect(adjustment).toContain('<TipoLibro>ESPECIAL')
+  expect(adjustment).not.toContain('<TpoDoc>45</TpoDoc>')
+  // A monthly book still carries the totals of the monthly one before it.
+  const monthly = await certificationHarness(routes())
+  await runBooks(monthly.deps, stale(), { monthlyBooks: true })
+  expect(uploadedXml(sentBooks(monthly)[1])).toContain('<TpoDoc>45</TpoDoc>')
+  // Totals kept for a special book of the same notification carry into its adjustment.
+  const same = await certificationHarness(routes())
+  const earlier = stale()
+  await runBooks(
+    same.deps,
+    stale({
+      books: {
+        ...earlier.books,
+        accumulated: {
+          '2026-11': { ...earlier.books.accumulated['2026-11'], notificationFolio: { purchase: Number(ATTENTION) } },
+        },
+      },
+    }),
+  )
+  expect(uploadedXml(sentBooks(same)[1])).toContain('<TpoDoc>45</TpoDoc>')
 })
 
 test('beforeUpload is handed every book before it is sent, and a book it refuses is left as a failed one', async () => {

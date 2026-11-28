@@ -22,7 +22,7 @@ import { fieldDiagnosis, queryFieldUploadState, type FieldUploadState } from './
 import { uploadForTrackId } from './field-upload'
 import { planCertificationSets } from './set-plan'
 import { parseTestSetText } from './set-text'
-import { SENT_SET_KEYS, type BooksState, type CertificationState, type SentBook } from './state'
+import { SENT_SET_KEYS, type AccumulatedTotals, type BooksState, type CertificationState, type SentBook } from './state'
 import {
   declareWithRetries,
   entryOf,
@@ -130,9 +130,6 @@ const trackIdOf = (state: CertificationState, key: BookKey): string | null => st
 
 const operationOf = (key: BookKey): 'purchase' | 'sale' => (key === 'salesBook' ? 'sale' : 'purchase')
 
-const keptTotals = (state: CertificationState, period: string, key: BookKey): readonly BookTotals[] | undefined =>
-  ADJUSTABLE.includes(key) ? state.books.accumulated[period]?.[operationOf(key)] : undefined
-
 /**
  * EN: Options of `runBooks`.
  * ES: Opciones de `runBooks`.
@@ -142,20 +139,58 @@ export type RunBooksOptions = {
   readonly monthlyBooks?: boolean
 }
 
+// What one run of the books phase settles once: the notification folio each book goes with, undefined for a regular one.
+type BookRun = { readonly folioOf: (key: BookKey) => number | undefined }
+
 const NO_ATTENTION = 'certification book sent without the attention number of its set'
+const UNWRITABLE_ATTENTION = 'certification book attention number read but not writable as its notification folio'
+// `FolioNotificacion` of the purchase and sales books is a positive integer of at most 10 digits (`LibroCV_v10.xsd`).
+const MAX_NOTIFICATION_FOLIO = 9_999_999_999
 
 // The SII asks for each book of the test set in a set of its own, with a number of attention: the book answers that
 // notification, so it is a special book that names the number as its notification folio (the format of the purchase
 // and sales books, section 1.1, point 3 b). A plan stored before plans carried the sales-book and guide-book sets is
-// read again from the text the state keeps; a book whose set is found nowhere goes as a regular one, and the run says so.
+// read again from the text the state keeps. A book whose number is found nowhere, or is one the cover cannot carry,
+// goes as a regular one, and the run says so once.
 const notificationFolioOf = (rt: Runtime, state: CertificationState, key: BookKey): number | undefined => {
   const kept = state.plan?.[key]?.attentionNumber
   const attention =
     kept === undefined && state.setText !== undefined
       ? planCertificationSets(parseTestSetText(state.setText))[key]?.attentionNumber
       : kept
-  if (attention === undefined) rt.portal.logger.warn(NO_ATTENTION, { book: key })
-  return attention === undefined ? undefined : Number(attention)
+  if (attention === undefined) {
+    rt.portal.logger.warn(NO_ATTENTION, { book: key })
+    return undefined
+  }
+  const folio = Number(attention)
+  if (Number.isSafeInteger(folio) && folio > 0 && folio <= MAX_NOTIFICATION_FOLIO) return folio
+  rt.portal.logger.warn(UNWRITABLE_ATTENTION, { book: key })
+  return undefined
+}
+
+const bookRun = (rt: Runtime, state: CertificationState, options: RunBooksOptions): BookRun => {
+  const settled = new Map<BookKey, number | undefined>()
+  return {
+    folioOf: (key) => {
+      if (options.monthlyBooks === true) return undefined
+      if (!settled.has(key)) settled.set(key, notificationFolioOf(rt, state, key))
+      return settled.get(key)
+    },
+  }
+}
+
+// The totals the sales or purchase book sent in a total submission of the period, only when they were sent with a book
+// of the kind this one goes as: a monthly book's totals do not carry into a special book, nor one notification's into
+// another's.
+const keptTotals = (
+  state: CertificationState,
+  period: string,
+  key: BookKey,
+  run: BookRun,
+): readonly BookTotals[] | undefined => {
+  if (!ADJUSTABLE.includes(key)) return undefined
+  const kept = state.books.accumulated[period]
+  return kept?.notificationFolio?.[operationOf(key)] === run.folioOf(key) ? kept?.[operationOf(key)] : undefined
 }
 
 const buildBook = (
@@ -164,11 +199,11 @@ const buildBook = (
   key: BookKey,
   period: string,
   submission: 'total' | 'adjustment',
-  options: RunBooksOptions,
+  run: BookRun,
 ): { readonly xml: string; readonly periodTotals: readonly BookTotals[] | null } => {
   // Only the sales and the purchase book carry the totals of their earlier total submission into an adjustment.
-  const previous = keptTotals(state, period, key)
-  const notificationFolio = options.monthlyBooks === true ? undefined : notificationFolioOf(rt, state, key)
+  const previous = keptTotals(state, period, key, run)
+  const notificationFolio = run.folioOf(key)
   const input: CertificationBookInput = {
     period,
     issuerRut: rt.issuer.rut,
@@ -212,6 +247,24 @@ const heldAlready = (error: unknown): boolean =>
   error.details.status === 7 &&
   (error.details.duplicate === true || DUPLICATE.test(String((error.details.errors as readonly string[])[0])))
 
+// The totals of a total submission, with the notification folio of the book they went with, or none for a monthly one.
+const kept = (
+  earlier: AccumulatedTotals[string] | undefined,
+  operation: 'purchase' | 'sale',
+  totals: readonly BookTotals[],
+  folio: number | undefined,
+): AccumulatedTotals[string] => {
+  const { notificationFolio: earlierFolios, ...rest } = earlier ?? {}
+  const { [operation]: dropped, ...folios } = earlierFolios ?? {}
+  void dropped
+  const notificationFolio = folio === undefined ? folios : { ...folios, [operation]: folio }
+  return {
+    ...rest,
+    [operation]: totals,
+    ...(Object.keys(notificationFolio).length === 0 ? {} : { notificationFolio }),
+  }
+}
+
 // Builds, keeps, uploads and records one book. A book that cannot be built or that the SII does not take is reported
 // and leaves the results, so it is not declared. With `retryHeld`, a purchase book the SII already holds for the
 // period goes again as an adjustment.
@@ -222,7 +275,7 @@ const sendBook = async (
   period: string,
   submission: 'total' | 'adjustment',
   retryHeld: boolean,
-  options: RunBooksOptions,
+  run: BookRun,
 ): Promise<CertificationState> => {
   rt.emit({ step: 'BOOK_SENDING', book: key })
   const failed = (error: unknown): Promise<CertificationState> => {
@@ -231,7 +284,7 @@ const sendBook = async (
   }
   let built: ReturnType<typeof buildBook>
   try {
-    built = buildBook(rt, state, key, period, submission, options)
+    built = buildBook(rt, state, key, period, submission, run)
   } catch (error) {
     return failed(error)
   }
@@ -249,7 +302,7 @@ const sendBook = async (
       submission === 'total' && ADJUSTABLE.includes(key)
         ? {
             ...state.books.accumulated,
-            [period]: { ...state.books.accumulated[period], [operationOf(key)]: built.periodTotals! },
+            [period]: kept(state.books.accumulated[period], operationOf(key), built.periodTotals!, run.folioOf(key)),
           }
         : state.books.accumulated
     const next = await saveState(
@@ -261,7 +314,7 @@ const sendBook = async (
     return next
   } catch (error) {
     if (retryHeld && submission === 'total' && heldAlready(error))
-      return sendBook(rt, state, key, period, 'adjustment', false, options)
+      return sendBook(rt, state, key, period, 'adjustment', false, run)
     return failed(error)
   }
 }
@@ -324,10 +377,10 @@ const resendBooks = async (
   period: string,
   submission: 'total' | 'adjustment',
   occupied: Set<string>,
-  options: RunBooksOptions,
+  run: BookRun,
 ): Promise<CertificationState> => {
   let current = state
-  for (const key of keys) current = await sendBook(rt, current, key, period, submission, false, options)
+  for (const key of keys) current = await sendBook(rt, current, key, period, submission, false, run)
   const resent = keys.filter((key) => trackIdOf(current, key) !== null)
   if (resent.length === 0) return current
   const poll = await pollBookStates(rt, current, resent, SOAP_RESEND_POLLS, SOAP_RESEND_ERRORS)
@@ -521,6 +574,7 @@ export const runBooks = async (
   const rt = runtime(deps)
   const plan = state.plan
   if (plan === undefined) throw new DteError('MISSING_FIELD', { field: 'plan' })
+  const run = bookRun(rt, state, options)
   rt.emit({ step: 'BOOKS_START' })
   const wanted = wantedBooks(state)
   const occupied = new Set<string>()
@@ -552,7 +606,7 @@ export const runBooks = async (
   const outstanding = wanted.filter((key) => !conforming(key))
   for (const key of wanted) {
     if (!conforming(key)) {
-      current = await sendBook(rt, current, key, period, 'total', key === 'purchaseBook', options)
+      current = await sendBook(rt, current, key, period, 'total', key === 'purchaseBook', run)
       continue
     }
     rt.emit({ step: 'BOOK_SKIPPED', book: key })
@@ -598,20 +652,20 @@ export const runBooks = async (
         current,
         withBooks(current, { adjustmentTried: [...new Set([...current.books.adjustmentTried, period])] }),
       )
-      current = await resendBooks(rt, current, keys, period, 'adjustment', occupied, options)
+      current = await resendBooks(rt, current, keys, period, 'adjustment', occupied, run)
       return
     }
     occupied.add(period)
     period = nextFreePeriod(previousPeriod(period), occupied)
     rt.emit({ step: 'BOOK_PERIOD_RETRY', period, attempt })
     current = await saveState(rt, current, withBooks(current, { period, occupiedPeriods: [...occupied] }))
-    current = await resendBooks(rt, current, keys, period, 'total', occupied, options)
+    current = await resendBooks(rt, current, keys, period, 'total', occupied, run)
   }
   let declaration = await declare()
   const triedEmpty = new Set<string>()
   for (let retry = 1; retry <= MAX_PERIOD_RETRIES && declaration.allRejected; retry += 1) {
-    const totals = current.books.accumulated[period]
-    await resend(outstanding, totals?.purchase !== undefined || totals?.sale !== undefined, triedEmpty, retry)
+    const totals = ADJUSTABLE.some((key) => keptTotals(current, period, key, run) !== undefined)
+    await resend(outstanding, totals, triedEmpty, retry)
     declaration = await declare()
   }
   let wait: Wait | null = null
@@ -638,10 +692,10 @@ export const runBooks = async (
       // this run sends go again, in the order they are sent.
       const failed = failedBooks(wait.table)
       if (failed.length === 0) break
-      const kept = failed.some((key) => keptTotals(current, period, key) !== undefined)
+      const carried = failed.some((key) => keptTotals(current, period, key, run) !== undefined)
       await resend(
         BOOK_KEYS.filter((key) => failed.includes(key) && outstanding.includes(key)),
-        kept,
+        carried,
         triedFailed,
         retry,
       )

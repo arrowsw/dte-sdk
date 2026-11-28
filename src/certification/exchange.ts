@@ -48,7 +48,7 @@ export type CreateExchangeAnswersInput = {
   readonly contact?: ExchangeContact
   /** EN: The clock; now by default. ES: El reloj; por defecto ahora. */
   readonly now?: Date
-  /** EN: Write a receipt of goods for every document of the set, the ones addressed to another RUT included; by default only the documents addressed to the company get one. ES: `Recibo` — Escribir un recibo de mercaderías por cada documento del set, también los dirigidos a otro RUT; por defecto solo los documentos dirigidos a la empresa llevan uno. */
+  /** EN: Write a receipt of goods for every document of the set, the ones addressed to another RUT included; by default only the documents addressed to the company get one. A set with no document addressed to the company gets a receipt for every document either way, since the schema of `EnvioRecibos` asks for at least one, and `noDocumentForCompany` says so. ES: `Recibo` — Escribir un recibo de mercaderías por cada documento del set, también los dirigidos a otro RUT; por defecto solo los documentos dirigidos a la empresa llevan uno. Un set sin documentos dirigidos a la empresa lleva un recibo por cada documento de todos modos, porque el esquema de `EnvioRecibos` pide al menos uno, y `noDocumentForCompany` lo dice. */
   readonly receiptsForEveryDocument?: boolean
 }
 
@@ -76,6 +76,8 @@ export type ExchangeAnswers = {
   readonly approval: ExchangeAnswer
   /** EN: The set as parsed. ES: El set tal como se leyó. */
   readonly set: ExchangeSet
+  /** EN: No document of the set is addressed to the company: the receipts then cover every document, since they cannot be empty. ES: Ningún documento del set va dirigido a la empresa: los recibos cubren entonces todos los documentos, porque no pueden ir vacíos. */
+  readonly noDocumentForCompany: boolean
 }
 
 type Node = Readonly<Record<string, unknown>>
@@ -220,7 +222,8 @@ export const createExchangeAnswers = (setXml: string, input: CreateExchangeAnswe
   // Field behaviour: the exchange stage has been passed with a receipt of goods only for the documents addressed to the
   // company, the ones the reception takes. The schema of `EnvioRecibos` asks for at least one receipt, so a set with no
   // document addressed to the company gets one for every document, as `receiptsForEveryDocument` does.
-  const everyDocument = input.receiptsForEveryDocument === true || !set.documents.some(isCompany)
+  const noDocumentForCompany = !set.documents.some(isCompany)
+  const everyDocument = input.receiptsForEveryDocument === true || noDocumentForCompany
   const receipts = goodsReceiptsOf(set, {
     ...answer,
     contact: input.contact,
@@ -231,5 +234,6 @@ export const createExchangeAnswers = (setXml: string, input: CreateExchangeAnswe
     receipts: { fileName: EXCHANGE_ANSWER_FILES.receipts, xml: receipts },
     approval: { fileName: EXCHANGE_ANSWER_FILES.approval, xml: approval },
     set,
+    noDocumentForCompany,
   }
 }

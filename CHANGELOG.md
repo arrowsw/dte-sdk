@@ -139,10 +139,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as a monthly one has had its cover refused. The sales, purchase, exempt purchase and guide books now go `ESPECIAL`,
   each with the number of attention of its own set as `FolioNotificacion`; before, the sales and purchase books went
   `MENSUAL` with no folio and the guide book with folio 3. The plan keeps the number of attention of the sales-book and
-  guide-book sets, and a plan stored before this change is read again from the set text the state keeps; a book whose
-  set is found nowhere goes as before, and the run says so in the portal client's logger. The period and the kind of
-  submission are chosen as before. `createCertificationSalesBook` and `createCertificationPurchaseBook` take a
-  `notificationFolio` that makes the book special, and stay `MENSUAL` without it.
+  guide-book sets, and a plan stored before this change is read again from the set text the state keeps. A book whose
+  number is found nowhere, or is one `FolioNotificacion` cannot carry (not a positive integer of at most 10 digits;
+  leading zeros are dropped), goes as before, and the run says so once in the portal client's logger. The period and
+  the kind of submission are chosen as before. The totals kept for an adjustment now name the notification folio of the
+  book they went with (`AccumulatedTotals.notificationFolio`), and an adjustment carries only the totals of a book of
+  its own kind: totals stored before this change belong to a monthly book, and do not carry into a special one.
+  `createCertificationSalesBook` and `createCertificationPurchaseBook` take a `notificationFolio` that makes the book
+  special, and stay `MENSUAL` without it. None of this has been run against the SII yet: the format identifies a special
+  book by its notification folio and says its period is the first one it covers, so what the SII answers when the run
+  sends a special book again on an earlier period (a second total sending under the same folio) is not known.
   - **What to change:** `monthlyBooks: true` sends the books as before. Code that compares a whole plan of
     `planCertificationSets` finds two more keys when the text has those sets.
 
@@ -152,8 +158,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   company; the receipts (`EnvioRecibos`) acknowledged every document of the set, also the one the reception marks as
   not received for its receiver and the result rejects. They now hold a receipt for each document addressed to the
   company, the ones the reception takes. The schema of `EnvioRecibos` asks for at least one `Recibo`, so a set with no
-  document addressed to the company still gets a receipt for every document. The reception and the result do not
-  change.
+  document addressed to the company still gets a receipt for every document; `ExchangeAnswers.noDocumentForCompany`
+  says so, and `runExchange` says it in the portal client's logger and in its `detail`. The reception and the result do
+  not change.
   - **What to change:** `receiptsForEveryDocument: true` keeps a receipt for every document.
 
 - **The glosses of the states of an upload follow the SII's table.** The SII's "Manual de Desarrollador Externo -
