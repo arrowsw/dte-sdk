@@ -28,6 +28,7 @@ import {
   resignedDocument,
   resignedFile,
   resignedReceipt,
+  SECOND_FINANCIER_RUT,
   secondFinancier,
 } from '../support/assignment-fixtures'
 import { FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from '../support/fixtures'
@@ -869,6 +870,86 @@ describe('unstable_createReassignment', () => {
       code: 'INVALID_OPTION',
       details: { field: 'SeqCesion' },
     })
+  })
+
+  // The assignments of a file with what one of them says changed, every assignment and the file signed again: every
+  // signature of it verifies, so only what the assignments say of the document and of each other tells it apart.
+  const withTag = (file: string, at: number, tag: string, value: string): string =>
+    resignedFile(file, (cesion, index) => {
+      const pattern = new RegExp(`<${tag}>[^<]*</${tag}>`)
+      if (!pattern.test(cesion)) throw new Error(`the assignment has no ${tag}`)
+      return index === at ? cesion.replace(pattern, `<${tag}>${value}</${tag}>`) : cesion
+    })
+  const withAssignor = (file: string, at: number, rut: string): string =>
+    resignedFile(file, (cesion, index) => {
+      const pattern = /<Cedente><RUT>[^<]*<\/RUT>/
+      if (!pattern.test(cesion)) throw new Error('the assignment has no assignor')
+      return index === at ? cesion.replace(pattern, `<Cedente><RUT>${rut}</RUT>`) : cesion
+    })
+
+  test.each([
+    ['its type', 'TipoDTE', '34'],
+    ['its issuer', 'RUTEmisor', RECEIVER_RUT],
+    ['its receiver', 'RUTReceptor', ISSUER_RUT],
+    ['its folio', 'Folio', '8'],
+    ['its issue date', 'FchEmis', '2020-01-01'],
+    ['its total', 'MntTotal', '1'],
+  ])('refuses an earlier assignment that names another document, by %s', (_name, tag, value) => {
+    const other = withTag(first, 0, tag, value)
+    expect(unstable_verifyAssignment(other).valid).toBe(true)
+    expect(caught(() => unstable_createReassignment(laterAssignment(other, financier, secondFinancier)))).toMatchObject(
+      {
+        code: 'INVALID_OPTION',
+        details: {
+          field: 'IdDTE',
+          reason: 'an earlier assignment names another document than the one the file carries',
+        },
+      },
+    )
+  })
+
+  test('refuses a first assignment the creditor of the document did not make', () => {
+    const other = withAssignor(first, 0, SECOND_FINANCIER_RUT)
+    expect(unstable_verifyAssignment(other).valid).toBe(true)
+    expect(caught(() => unstable_createReassignment(laterAssignment(other, financier, secondFinancier)))).toMatchObject(
+      {
+        code: 'INVALID_OPTION',
+        details: { field: 'Cedente', reason: 'the first assignment is not made by the creditor of the document' },
+      },
+    )
+  })
+
+  test('refuses an earlier assignment the assignee of the one before it did not make', () => {
+    const other = withAssignor(second, 1, ISSUER_RUT)
+    expect(unstable_verifyAssignment(other).valid).toBe(true)
+    expect(caught(() => unstable_createReassignment(laterAssignment(other, secondFinancier, financier)))).toMatchObject(
+      {
+        code: 'INVALID_OPTION',
+        details: { field: 'Cedente', reason: 'an earlier assignment is not made by the assignee of the one before it' },
+      },
+    )
+  })
+
+  test('refuses an earlier assignment whose assignor is no RUT, though the assignee before it reads the same', () => {
+    const other = resignedFile(second, (cesion, index) =>
+      index === 0
+        ? cesion.replace(/<Cesionario><RUT>[^<]*<\/RUT>/, '<Cesionario><RUT>sin-rut</RUT>')
+        : cesion.replace(/<Cedente><RUT>[^<]*<\/RUT>/, '<Cedente><RUT>sin-rut</RUT>'),
+    )
+    expect(tagText(other, 'RUT').filter((rut) => rut === 'sin-rut')).toHaveLength(2)
+    expect(unstable_verifyAssignment(other).valid).toBe(true)
+    expect(caught(() => unstable_createReassignment(laterAssignment(other, secondFinancier, financier)))).toMatchObject(
+      {
+        code: 'INVALID_OPTION',
+        details: { field: 'Cedente', reason: 'an earlier assignment is not made by the assignee of the one before it' },
+      },
+    )
+  })
+
+  test('a third assignment goes on a file whose two assignments follow each other', () => {
+    const third = unstable_createReassignment(laterAssignment(second, secondFinancier, financier))
+    expect(tagText(third, 'SeqCesion')).toEqual(['1', '2', '3'])
+    expect(unstable_verifyAssignment(third).valid).toBe(true)
   })
 
   test('refuses an assignor that is not the previous assignee', () => {

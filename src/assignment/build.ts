@@ -403,6 +403,16 @@ const signedFile = (
   return signEnveloped({ xml, elementTag: 'DocumentoAEC', rootTag: 'AEC', certificate: terms.certificate }).xml
 }
 
+// Whether an assignment names, in its `IdDTE`, the document the file carries: type, issuer, receiver, folio, date and
+// total, as `signedAssignment` writes them.
+const namesDocument = (assignment: Element | undefined, document: AssignedDocument): boolean =>
+  textAt(assignment, 'IdDTE', 'TipoDTE') === String(document.type) &&
+  siiRutOrNull(textAt(assignment, 'IdDTE', 'RUTEmisor')) === document.issuerRut &&
+  siiRutOrNull(textAt(assignment, 'IdDTE', 'RUTReceptor')) === document.receiverRut &&
+  textAt(assignment, 'IdDTE', 'Folio') === String(document.folio) &&
+  textAt(assignment, 'IdDTE', 'FchEmis') === document.issueDate &&
+  textAt(assignment, 'IdDTE', 'MntTotal') === String(document.total)
+
 const failedZone = (verification: ReturnType<typeof unstable_verifyAssignment>): string | null => {
   const checks: readonly (readonly [string, SignatureVerification])[] = [
     ['DTE', verification.document],
@@ -510,9 +520,10 @@ export const unstable_createAssignment = (input: AssignmentInput): string => {
  * Every signature of the previous file must verify first. The new assignment and the whole file are signed as in
  * `unstable_createAssignment`, and the same rules hold, with the sworn statement naming the new parties unless the
  * previous file carries electronic receipts; the zone of the assigned document is the previous file's and is not
- * signed again. A file holds up to 40 assignments. That the
- * previous file verifies says nobody changed it after it was signed, not who signed it: beyond their numbering and the
- * last assignee, the earlier assignments are not compared with the document nor with each other.
+ * signed again. A file holds up to 40 assignments. The earlier assignments are held to the document and to each other:
+ * each must name the document the file carries, by its type, issuer, receiver, folio, date and total, the first be made
+ * by the creditor of the document and each later one by the assignee of the one before it. That the previous file
+ * verifies says nobody changed it after it was signed, not who signed it.
  * ES: **Inestable**: ningún archivo que haya armado se ha registrado aún en el SII, así que su forma puede cambiar en
  * cualquier versión, incluso un patch.
  * Arma y firma el archivo de una cesión posterior: el documento cedido y las cesiones del archivo anterior tal como
@@ -520,12 +531,13 @@ export const unstable_createAssignment = (input: AssignmentInput): string => {
  * debe verificar cada firma del archivo anterior. La nueva cesión y todo el archivo se firman como en
  * `unstable_createAssignment`, y rigen las mismas reglas, con la declaración jurada nombrando a las nuevas partes salvo
  * que el archivo anterior lleve recibos electrónicos; el área del documento cedido es la del archivo anterior y no se
- * vuelve a firmar. Un archivo lleva hasta 40 cesiones. Que el
- * archivo anterior verifique dice que nadie lo cambió después de firmado, no quién lo firmó: fuera de su numeración y
- * del último cesionario, las cesiones anteriores no se comparan con el documento ni entre sí.
+ * vuelve a firmar. Un archivo lleva hasta 40 cesiones. Las cesiones anteriores se comparan con el documento y entre
+ * sí: cada una debe nombrar el documento que lleva el archivo, por su tipo, emisor, receptor, folio, fecha y total, la
+ * primera debe hacerla el acreedor del documento y cada una de las siguientes el cesionario de la anterior. Que el
+ * archivo anterior verifique dice que nadie lo cambió después de firmado, no quién lo firmó.
  * @param input EN: the previous file, the parties, the amount, the last due date and the certificates. ES: el archivo anterior, las partes, el monto, el último vencimiento y los certificados.
  * @returns EN: the signed `AEC`. ES: el `AEC` firmado.
- * @throws {DteError} EN: `XML_PARSE_FAILED` for a previous file that is not an `AEC` (see `readAssignmentFile`), `SIGNATURE_NOT_FOUND` for a zone of it without a signature; `SIGNATURE_INVALID` with the zone in `details.field` when one of its signatures does not verify; `INVALID_OPTION` (`SeqCesion` when the previous file is out of sequence or already holds 40, `assignor.rut` when the assignor is not the previous assignee) and the codes of `unstable_createAssignment`. ES: los mismos códigos.
+ * @throws {DteError} EN: `XML_PARSE_FAILED` for a previous file that is not an `AEC` (see `readAssignmentFile`), `SIGNATURE_NOT_FOUND` for a zone of it without a signature; `SIGNATURE_INVALID` with the zone in `details.field` when one of its signatures does not verify; `INVALID_OPTION` (`SeqCesion` when the previous file is out of sequence or already holds 40, `IdDTE` when an earlier assignment names another document, `Cedente` when an earlier assignment is not made by the creditor of the document or by the assignee of the one before it, `assignor.rut` when the assignor is not the previous assignee) and the codes of `unstable_createAssignment`. ES: los mismos códigos.
  */
 export const unstable_createReassignment = (input: ReassignmentInput): string => {
   const previous = String(input.previous)
@@ -538,8 +550,24 @@ export const unstable_createReassignment = (input: ReassignmentInput): string =>
     refuse('SeqCesion', 'the previous assignments are not numbered 1, 2, 3…')
   const sequence = sequences.length + 1
   if (sequence > MAX_ASSIGNMENTS) refuse('SeqCesion', `a file holds up to ${MAX_ASSIGNMENTS} assignments`)
-  const last = child(file.assignments[file.assignments.length - 1].element, 'DocumentoCesion')
-  if (siiRutOrNull(textAt(last, 'Cesionario', 'RUT')) !== toSiiRut(input.assignor.rut, 'assignor.rut'))
+  // Every signature verifying says nobody changed a zone after it was signed, not that the zones belong together:
+  // each earlier assignment must name the document the file carries, the first be made by its creditor and each
+  // later one by the assignee of the one before it.
+  const lastAssignee = file.assignments.reduce<SiiRut | null>((expected, { element }, index) => {
+    const assignment = child(element, 'DocumentoCesion')
+    if (!namesDocument(assignment, document))
+      refuse('IdDTE', 'an earlier assignment names another document than the one the file carries')
+    const assignor = siiRutOrNull(textAt(assignment, 'Cedente', 'RUT'))
+    if (assignor === null || assignor !== expected)
+      refuse(
+        'Cedente',
+        index === 0
+          ? 'the first assignment is not made by the creditor of the document'
+          : 'an earlier assignment is not made by the assignee of the one before it',
+      )
+    return siiRutOrNull(textAt(assignment, 'Cesionario', 'RUT'))
+  }, document.creditorRut)
+  if (lastAssignee !== toSiiRut(input.assignor.rut, 'assignor.rut'))
     refuse('assignor.rut', 'a later assignment is made by the assignee of the previous one')
   const stamp = chileTimestamp(input.now)
   // The zone of the assigned document is the previous file's: with electronic receipts in it, no sworn statement.

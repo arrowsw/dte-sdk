@@ -52,7 +52,7 @@ export const SOAP_ENDPOINTS: Readonly<Record<Environment, SoapEndpoints>> = {
 export type AssignmentEndpoints = {
   /** EN: `RTCAnotEnvio.cgi`, multipart upload of an AEC. ES: Subida multipart de un AEC. */
   readonly upload: string
-  /** EN: `wsRPETCConsulta`, state of an AEC upload by TrackID. ES: Estado de un envío de AEC por TrackID. */
+  /** EN: `wsRPETCConsulta`, the registry's query service: the state of an AEC upload by TrackID and of a document's assignment. ES: El servicio de consulta del registro: el estado de un envío de AEC por TrackID y el de la cesión de un documento. */
   readonly uploadStatus: string
 }
 
