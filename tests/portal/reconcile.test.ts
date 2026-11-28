@@ -59,8 +59,8 @@ describe('reconcilePeriodDocuments', () => {
 
   test('a K verifier matches in either case', () => {
     const result = reconcilePeriodDocuments(
-      [registered({ counterpartyRut: '10000013-K' })],
-      [record({ counterpartyRut: '10.000.013-k' })],
+      [registered({ counterpartyRut: '14625621-K' })],
+      [record({ counterpartyRut: '14.625.621-k' })],
     )
     expect(result.matching).toHaveLength(1)
     expect(result.balanced).toBe(true)
@@ -148,7 +148,7 @@ describe('reconcilePeriodDocuments', () => {
       registered({ type: null }),
       registered({ folio: null }),
       registered({ counterpartyRut: null }),
-      registered({ counterpartyRut: '12345678-0' }),
+      registered({ counterpartyRut: '12345678-9' }),
     ]
     const result = reconcilePeriodDocuments(documents, [])
     expect(result.unreadable).toEqual(documents)
@@ -166,7 +166,7 @@ describe('reconcilePeriodDocuments', () => {
     ['type', { type: 33.5 }, 'INVALID_DOCUMENT_TYPE'],
     ['folio', { folio: 0 }, 'INVALID_FOLIO'],
     ['folio', { folio: 1.5 }, 'INVALID_FOLIO'],
-    ['counterpartyRut', { counterpartyRut: '12345678-0' }, 'INVALID_RUT'],
+    ['counterpartyRut', { counterpartyRut: '12345678-9' }, 'INVALID_RUT'],
     ['issueDate', { issueDate: '2026-02-30' }, 'INVALID_DATE'],
     ['netAmount', { netAmount: 10.5 }, 'INVALID_AMOUNT'],
     ['totalAmount', { totalAmount: Number.NaN }, 'INVALID_AMOUNT'],
