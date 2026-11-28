@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { execFile, spawn, spawnSync } from 'node:child_process'
 import {
   existsSync,
   mkdirSync,
@@ -13,7 +13,10 @@ import {
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { promisify } from 'node:util'
 import { preProcessFile } from 'typescript'
+import { createDirectoryFolioRegistry } from '../src/folios/node-registry'
+import { loadNodeFs } from '../src/sii/node-fs'
 
 /**
  * Smoke test for the built `dist/` artefacts and their `package.json` wiring. Jest cannot `require()` an ES module, so
@@ -24,6 +27,7 @@ const packageRoot = join(__dirname, '..')
 const distRoot = join(packageRoot, 'dist')
 const entryFile = (name: string): string => join(distRoot, `${name}.min.js`)
 const href = (file: string): string => pathToFileURL(file).href
+const execFileAsync = promisify(execFile)
 
 const EXPECTED_FUNCTIONS: Record<string, readonly string[]> = {
   index: [
@@ -379,6 +383,158 @@ guarded('dist smoke (ES modules)', () => {
   console.log(Buffer.from(sample.subarray(0, 5)).toString() + ' ' + (sample.length > 10000))`)
     expect(result).toEqual({ ok: true, output: '%PDF- true\n' })
   })
+
+  test('processes reserving from one folio registry directory at the same time never get the same folio', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dte-sdk-folio-processes-'))
+    try {
+      const script = `
+const { createDirectoryFolioRegistry } = await import(${JSON.stringify(href(entryFile('node')))})
+const registry = createDirectoryFolioRegistry({ dir: ${JSON.stringify(dir)} })
+const scope = { companyRut: '76543210-3', type: 33, range: { from: 1, to: 60 }, environment: 'certification' }
+const folios = []
+for (let i = 0; i < 5; i += 1) folios.push(await registry.reserve(scope))
+console.log(JSON.stringify(folios))`
+      const outputs = await Promise.all(
+        Array.from({ length: 4 }, () => execFileAsync(process.execPath, ['--input-type=module', '-e', script])),
+      )
+      const folios = outputs.flatMap(({ stdout }) => JSON.parse(stdout) as number[]).sort((a, b) => a - b)
+      expect(folios).toEqual(Array.from({ length: 20 }, (_, index) => index + 1))
+      expect(readdirSync(dir)).toEqual(['folios.json'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('a process waits on a lock this one could not remove, and goes on when a change here takes it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dte-sdk-folio-left-'))
+    const scope = {
+      companyRut: '76543210-3',
+      type: 33,
+      range: { from: 1, to: 60 },
+      environment: 'certification' as const,
+    }
+    try {
+      const modules = await loadNodeFs()
+      const once = { done: false }
+      const leaving = createDirectoryFolioRegistry({ dir }, async () => ({
+        ...modules,
+        fs: {
+          ...modules.fs,
+          rm: async (file: string, options: Parameters<typeof modules.fs.rm>[1]) => {
+            if (file.endsWith('.lock') && !once.done) {
+              once.done = true
+              throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' })
+            }
+            return modules.fs.rm(file, options)
+          },
+        } as typeof modules.fs,
+      }))
+      await expect(leaving.reserve(scope)).resolves.toBe(1)
+      const other = (lockWaitMs: number) =>
+        execFileAsync(process.execPath, [
+          '--input-type=module',
+          '-e',
+          `const { createDirectoryFolioRegistry } = await import(${JSON.stringify(href(entryFile('node')))})
+const registry = createDirectoryFolioRegistry({ dir: ${JSON.stringify(dir)}, lockWaitMs: ${lockWaitMs} })
+try {
+  console.log(await registry.reserve(${JSON.stringify(scope)}))
+} catch (error) {
+  console.log(JSON.stringify([error.details.kind, error.details.holderPid]))
+}`,
+        ])
+      // The other process cannot tell an ended change of a living process from one under way: it waits.
+      expect(JSON.parse((await other(300)).stdout)).toEqual(['wait', process.pid])
+      // A change here takes the leftover lock at once, as its token is held by none of this process's changes. Once it
+      // is gone the two processes take their turns in either order: each gets a folio of its own.
+      const waiting = other(10_000)
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      const here = await createDirectoryFolioRegistry({ dir }).reserve(scope)
+      const there = Number((await waiting).stdout)
+      expect([here, there].sort()).toEqual([2, 3])
+      expect(readdirSync(dir)).toEqual(['folios.json'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 20_000)
+
+  // A holder stopped past the stale limit is alive: the other process must wait, never write under it. It is stopped
+  // the instant its lock exists (after the link that names it), or inside its change (after it wrote the new ledger).
+  const withStop = (process.platform === 'win32' ? test.skip : test).each
+  withStop([
+    ['the instant its lock exists', 'link'],
+    ['inside its change', 'writeFile'],
+  ])(
+    'a holder stopped %s, past the stale limit, keeps its lock, and nobody writes under it',
+    async (_, step) => {
+      const dir = mkdtempSync(join(tmpdir(), 'dte-sdk-folio-stopped-'))
+      const registryOf = (options: string, load = '') => `
+const { createDirectoryFolioRegistry } = await import(${JSON.stringify(href(entryFile('node')))})
+const scope = { companyRut: '76543210-3', type: 33, range: { from: 1, to: 60 }, environment: 'certification' }
+const registry = createDirectoryFolioRegistry({ dir: ${JSON.stringify(dir)}, ${options} }${load})`
+      const holder = spawn(process.execPath, [
+        '--input-type=module',
+        '-e',
+        `${registryOf(
+          'lockStaleMs: 1000',
+          `, async () => {
+  const fs = await import('node:fs/promises')
+  const once = { done: false }
+  const step = async (...args) => {
+    const result = await fs[${JSON.stringify(step)}](...args)
+    if (!once.done && !String(args[1]).endsWith('.takeover')) {
+      once.done = true
+      console.log('holding')
+      await new Promise((resolve) => process.stdin.once('data', resolve))
+      process.stdin.pause()
+    }
+    return result
+  }
+  return { fs: { ...fs, [${JSON.stringify(step)}]: step }, path: await import('node:path') }
+}`,
+        )}
+console.log(JSON.stringify(await registry.reserve(scope)))`,
+      ])
+      try {
+        const output = { text: '' }
+        const exited = new Promise((resolve) => holder.on('exit', resolve))
+        await new Promise<void>((resolve) =>
+          holder.stdout.on('data', (chunk: Buffer) => {
+            output.text += chunk.toString()
+            if (output.text.includes('holding')) resolve()
+          }),
+        )
+        holder.kill('SIGSTOP')
+        await new Promise((resolve) => setTimeout(resolve, 1300))
+        const waiter = await execFileAsync(process.execPath, [
+          '--input-type=module',
+          '-e',
+          `${registryOf('lockStaleMs: 1000, lockWaitMs: 700')}
+try {
+  console.log(await registry.reserve(scope))
+} catch (error) {
+  console.log(JSON.stringify([error.code, error.details.kind, error.details.holderPid]))
+}`,
+        ])
+        expect(JSON.parse(waiter.stdout)).toEqual(['FOLIO_LEDGER_LOCKED', 'wait', holder.pid])
+        holder.kill('SIGCONT')
+        holder.stdin.end('go\n')
+        await exited
+        expect(output.text).toBe('holding\n1\n')
+        const next = await execFileAsync(process.execPath, [
+          '--input-type=module',
+          '-e',
+          `${registryOf('')}
+console.log(await registry.reserve(scope))`,
+        ])
+        expect(next.stdout).toBe('2\n')
+        expect(readdirSync(dir)).toEqual(['folios.json'])
+      } finally {
+        holder.kill('SIGKILL')
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+    20_000,
+  )
 })
 
 // An `any` would let each assignment compile, and the unused `@ts-expect-error` would then be the error.
