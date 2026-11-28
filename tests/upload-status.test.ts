@@ -75,6 +75,21 @@ describe('upload status (QueryEstUp / REST)', () => {
     expect(uploadStatusMessage('ZZZ')).toBe('Estado desconocido: ZZZ')
   })
 
+  // The SII's "Manual de Desarrollador Externo — Consulta de Estado de Upload Dte" (OI2004_CEUPDTE_MDE 1.10), 3.3
+  // "Estados de Salida", lists eight states with their gloss, spelled here with their accents as the catalog is.
+  test.each([
+    ['RSC', 'Rechazado por error en schema'],
+    ['SOK', 'Schema validado'],
+    ['CRT', 'Carátula OK'],
+    ['RFR', 'Rechazado por error en firma'],
+    ['FOK', 'Firma de envío validada'],
+    ['PDR', 'Envío en proceso'],
+    ['RCT', 'Rechazado por error en carátula'],
+    ['EPR', 'Envío procesado'],
+  ])('%s is glossed as the SII’s table of QueryEstUp glosses it', (code, gloss) => {
+    expect(uploadStatusMessage(code)).toBe(gloss)
+  })
+
   // The SII's OpenAPI of its receipts API ("API SII - V1", 1.0.5) lists the states of an upload with their meaning:
   // "RCH - Rechazado por errores en informacion", "RCO - Rechazado por consistencia", "VOF - No se encontro el archivo
   // .xml", "RPT - Envio Repetido Rechazado". It describes the REST channel, which answers a state with no gloss.

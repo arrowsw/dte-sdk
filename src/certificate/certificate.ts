@@ -28,6 +28,8 @@ export type Certificate = {
   readonly notBefore: Date
   /** EN: Validity end. ES: Fin de vigencia. */
   readonly notAfter: Date
+  /** EN: The certificate names itself as its issuer (its issuer is its subject): no authority issued it. It is not refused, but field behaviour is that the SII takes no seed signed with a certificate no authority it knows issued. ES: El certificado se nombra a sí mismo como emisor (su emisor es su sujeto): ninguna entidad certificadora lo emitió. No se rechaza, pero el comportamiento de campo es que el SII no acepta una semilla firmada con un certificado que no emitió una entidad que conoce. */
+  readonly selfSigned: boolean
 }
 
 /**

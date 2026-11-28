@@ -1,23 +1,8 @@
-import { rsaSha1VerifyBase64 } from '../crypto/rsa'
+import { DD_PATTERN, stampVerifiesAsWritten as verifies } from '../ted/as-written'
 import { child, signedForms } from '../xml/elements'
 import { parseXmlDom } from '../xml/parse'
 
-const DD_PATTERN = /<DD>[\s\S]*<\/DD>/
 const BETWEEN_TAGS = />\s+</g
-
-const textOf = (ted: string, tag: string): string =>
-  new RegExp(`<${tag}(?:\\s[^>]*)?>([^<]*)</${tag}>`).exec(ted)?.[1] ?? ''
-
-// True when the signature of the stamp (`FRMT`) covers its `DD` as this text writes it. The key is the one of the CAF
-// the stamp itself carries, so nothing else is needed; anything missing, malformed or out of bounds is false. A stamp
-// is input from anyone, and `rsaSha1VerifyBase64` refuses a key larger than any CAF key before trying its signature.
-const verifies = (ted: string): boolean =>
-  rsaSha1VerifyBase64(
-    { modulus: textOf(ted, 'M'), exponent: textOf(ted, 'E') },
-    DD_PATTERN.exec(ted)?.[0] ?? '',
-    'latin1',
-    textOf(ted, 'FRMT'),
-  )
 
 // The stamp with its `DD` written from its element, in the forms a signature may cover (`signedForms`): what recovers
 // a file some tool wrote again with other escapes. None for a stamp that cannot be read or has no `DD`.

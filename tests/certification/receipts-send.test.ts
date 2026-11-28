@@ -127,6 +127,16 @@ describe('sendReceiptsSet', () => {
     await expect(validateAgainstXsd(report, 'ConsumoFolio')).resolves.toEqual([])
   })
 
+  test('an envelope that does not verify as the SII reads it is not uploaded', async () => {
+    const harness = await certificationHarness([uploadRoute(reception('111'))])
+    const xml = issued.envelope.xml.replace(/<NroResol>\d+<\/NroResol>/, '<NroResol>99</NroResol>')
+    expect(xml).not.toBe(issued.envelope.xml)
+    const error = await failure(sendReceiptsSet(harness.deps.sii, { envelope: { ...issued.envelope, xml } }))
+    expect(error.code).toBe('SIGNATURE_INVALID')
+    expect(error.details).toEqual({ field: 'EnvioBOLETA', check: 'envelope' })
+    expect(harness.fake.requests.filter((request) => request.url.endsWith('DTEUpload'))).toEqual([])
+  })
+
   test('a STATUS 7 envelope with a track id is a sent one: it waits, reads its status and goes on', async () => {
     const { result, sleeps, steps } = await run(
       [SEVEN_WITH_TRACK, reception('222')],

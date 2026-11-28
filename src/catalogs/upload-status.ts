@@ -26,17 +26,22 @@ type StatusEntry = { readonly cls: UploadStatusClass; readonly message: string }
 
 const QUERY_ERROR_MESSAGE = 'Error de consulta del SII, reintentar más tarde'
 
+// The states that the SII's "Manual de Desarrollador Externo - Consulta de Estado de Upload Dte" (OI2004_CEUPDTE_MDE
+// 1.10, estado_envio.pdf of factura_mercado on sii.cl), 3.3 "Estados de Salida", lists are glossed as it glosses them:
+// "RSC Rechazado por Error en Schema", "SOK Schema Validado", "CRT Carátula OK", "RFR Rechazado por Error en Firma",
+// "FOK Firma de Envió Validada", "PDR Envió en Proceso", "RCT Rechazado por Error en Carátula" and "EPR Envió
+// Procesado", spelled in sentence case and with their accents. The other states are not in that table.
 const UPLOAD_STATUS: Readonly<Record<string, StatusEntry>> = {
   EPR: { cls: 'accepted', message: 'Envío procesado' },
   LOK: { cls: 'accepted', message: 'Envío de libro aceptado' },
   RPR: { cls: 'acceptedWithObjections', message: 'Aceptado con reparos' },
   REC: { cls: 'pending', message: 'Envío recibido, esperando validación' },
-  SOK: { cls: 'pending', message: 'Schema validado, validando firma' },
-  FOK: { cls: 'pending', message: 'Firma validada, procesando envío' },
+  SOK: { cls: 'pending', message: 'Schema validado' },
+  FOK: { cls: 'pending', message: 'Firma de envío validada' },
   PRD: { cls: 'pending', message: 'Envío en proceso, validando carátula' },
-  CRT: { cls: 'pending', message: 'Carátula validada, finalizando proceso' },
+  CRT: { cls: 'pending', message: 'Carátula OK' },
   DNK: { cls: 'pending', message: 'En proceso de revisión' },
-  PDR: { cls: 'pending', message: 'Envío en proceso, validando' },
+  PDR: { cls: 'pending', message: 'Envío en proceso' },
   LSO: { cls: 'pending', message: 'Schema de libro correcto, procesando contenido' },
   '0': { cls: 'pending', message: 'Enviado al SII, pendiente de validación' },
   RPT: { cls: 'rejected', message: 'Rechazado por schema' },

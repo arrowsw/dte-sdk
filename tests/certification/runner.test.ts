@@ -493,6 +493,19 @@ test('a resolution left out is dated once for the whole run, whatever day its la
   expect(guide).toContain('<FchResol>2026-11-15</FchResol>')
 })
 
+test('a run signing with a self-signed certificate says so once when it starts, and one an authority issued says nothing', async () => {
+  const SELF_SIGNED = 'certification certificate is self-signed: the SII takes no seed it signs'
+  // The fixture certificate names itself as its issuer.
+  const own = await seeded([], stateWith({ stage: 'done' }))
+  expect(own.deps.certificate.selfSigned).toBe(true)
+  await expect(runCertification(own.deps)).resolves.toMatchObject({ stopped: 'done' })
+  expect(own.warnings().filter((warning) => warning === SELF_SIGNED)).toHaveLength(1)
+  const issued = await seeded([], stateWith({ stage: 'done' }))
+  const certificate = { ...issued.deps.certificate, selfSigned: false }
+  await expect(runCertification({ ...issued.deps, certificate })).resolves.toMatchObject({ stopped: 'done' })
+  expect(issued.warnings()).not.toContain(SELF_SIGNED)
+})
+
 test('a refusal without a sentence stops with the outcome itself; a run already done or at compliance', async () => {
   const sentState = stateWith({ plan, sets: allSets, cafs: certificationCafXmls() })
   const empty = await seeded(

@@ -24,7 +24,7 @@ import {
   type HeldCaf,
 } from './folios-step'
 import { fieldDiagnosis, queryFieldUploadState } from './field-status'
-import { uploadForTrackId } from './field-upload'
+import { assertTransmittable, uploadForTrackId } from './field-upload'
 import { issueTestSet, prepareExportSet, type IssuableSetPlan, type IssuedCase } from './issue-set'
 import { issueSimulation } from './simulation'
 import { planCertificationSets } from './set-plan'
@@ -169,12 +169,14 @@ export const markSent = async (
 
 /**
  * EN: Sends one test set: issues it with the folios of the state's CAFs through the registry, keeps the envelope and
- * every document as artefacts (phase 5a reads them), hands the envelope to `beforeUpload` when there is one, uploads
- * it, marks the folios sent whatever happened, and records the track id and the Chile date of the send.
+ * every document as artefacts (phase 5a reads them), checks the envelope as the SII reads it (`assertTransmittable`),
+ * hands it to `beforeUpload` when there is one, uploads it, marks the folios sent whatever happened, and records the
+ * track id and the Chile date of the send.
  * ES: Envía un set de pruebas: lo emite con los folios de los CAF del estado a través del registro, guarda el sobre y
- * cada documento como artefactos (la fase 5a los lee), entrega el sobre a `beforeUpload` si hay uno, lo sube, marca
- * los folios enviados pase lo que pase, y registra el track id y la fecha de Chile del envío.
- * @throws {DteError} EN: `MISSING_FIELD { field: 'plan', kind }` without the set's plan; the 5b-1, folio and upload codes. ES: `MISSING_FIELD { field: 'plan', kind }` sin el plan del set; los códigos de 5b-1, de folios y de envío.
+ * cada documento como artefactos (la fase 5a los lee), chequea el sobre como lo lee el SII (`assertTransmittable`),
+ * lo entrega a `beforeUpload` si hay uno, lo sube, marca los folios enviados pase lo que pase, y registra el track id
+ * y la fecha de Chile del envío.
+ * @throws {DteError} EN: `MISSING_FIELD { field: 'plan', kind }` without the set's plan; the 5b-1, folio and upload codes; `SIGNATURE_INVALID` for an envelope that does not verify as the SII reads it (`assertTransmittable`). ES: `MISSING_FIELD { field: 'plan', kind }` sin el plan del set; los códigos de 5b-1, de folios y de envío; `SIGNATURE_INVALID` por un sobre que no verifica como lo lee el SII (`assertTransmittable`).
  */
 export const sendTestSet = async (
   deps: CertificationDependencies,
@@ -205,6 +207,7 @@ export const sendTestSet = async (
   const sentAt = rt.now().toISOString()
   const usedFolios = [...state.usedFolios, ...issued.cases.map((c) => ({ type: c.type, folio: c.folio }))]
   try {
+    assertTransmittable(issued.envelope.xml)
     await rt.beforeUpload?.({ kind: 'testSet', name: options.kind, xml: issued.envelope.xml })
     const trackId = await uploadForTrackId(
       (overrides) => uploadEnvelope(rt.sii, { envelope: issued.envelope }, overrides),
@@ -565,7 +568,7 @@ const atLeast = (stage: CertificationStage, floor: CertificationStage): boolean 
  * sin usar son lo que hace racionar al SII. Una vez intentado el envío quedan gastados, como en el comportamiento de
  * campo, y un intento nuevo pide otros. Un sobre fuera de los 20 a 100 documentos que toma la declaración
  * (`outsideDeclarableSize`) se envía igual, y el logger del cliente del portal lo dice.
- * @throws {DteError} EN: `MISSING_FIELD { field: 'plan' }` without a plan; the folio, 5b-1 and upload codes. ES: `MISSING_FIELD { field: 'plan' }` sin plan; los códigos de folios, de 5b-1 y de envío.
+ * @throws {DteError} EN: `MISSING_FIELD { field: 'plan' }` without a plan; the folio, 5b-1 and upload codes; `SIGNATURE_INVALID` for an envelope that does not verify as the SII reads it (`assertTransmittable`). ES: `MISSING_FIELD { field: 'plan' }` sin plan; los códigos de folios, de 5b-1 y de envío; `SIGNATURE_INVALID` por un sobre que no verifica como lo lee el SII (`assertTransmittable`).
  */
 export const sendSimulation = async (
   deps: CertificationDependencies,
@@ -607,6 +610,7 @@ export const sendSimulation = async (
   const sentAt = rt.now().toISOString()
   const usedFolios = [...prepared.state.usedFolios, ...issued.cases.map((c) => ({ type: c.type, folio: c.folio }))]
   try {
+    assertTransmittable(issued.envelope.xml)
     await rt.beforeUpload?.({ kind: 'simulation', name: 'simulation', xml: issued.envelope.xml })
     const trackId = await uploadForTrackId(
       (overrides) => uploadEnvelope(rt.sii, { envelope: issued.envelope }, overrides),

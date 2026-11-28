@@ -6,7 +6,7 @@ import type { SiiClient } from '../sii/client'
 import { uploadEnvelope, uploadFolioConsumption } from '../sii/upload'
 import { parseXmlWithoutNamespaces } from '../xml/parse'
 import { queryFieldUploadState, type FieldUploadState } from './field-status'
-import { requireTrackId, uploadAsField } from './field-upload'
+import { assertTransmittable, requireTrackId, uploadAsField } from './field-upload'
 
 const ENVELOPE_WAIT_MS = 20000
 const CONSUMPTION_WAIT_MS = 30000
@@ -284,7 +284,7 @@ const sendConsumption = async (
  * @param sii EN: the phase 2 client on the certification environment. ES: el cliente de la fase 2 en el ambiente de certificación.
  * @param issued EN: the set of `issueReceiptsSet`, or anything with its signed envelope. ES: el set de `issueReceiptsSet`, o cualquier cosa con su sobre firmado.
  * @param options EN: the first sequence number, the wait function, the progress events. ES: la primera secuencia, la función de espera, los eventos de progreso.
- * @throws {DteError} EN: the phase 2 codes of the envelope upload; `ENVELOPE_EMPTY` for an envelope without receipts; `MISSING_FIELD` for a cover without its issuer, sender or resolution. ES: los códigos de la fase 2 de la subida del sobre; `ENVELOPE_EMPTY` por un sobre sin boletas; `MISSING_FIELD` por una carátula sin emisor, enviador o resolución.
+ * @throws {DteError} EN: `SIGNATURE_INVALID` for an envelope that does not verify as the SII reads it (`assertTransmittable`), before anything is uploaded; the phase 2 codes of the envelope upload; `ENVELOPE_EMPTY` for an envelope without receipts; `MISSING_FIELD` for a cover without its issuer, sender or resolution. ES: `SIGNATURE_INVALID` por un sobre que no verifica como lo lee el SII (`assertTransmittable`), antes de subir nada; los códigos de la fase 2 de la subida del sobre; `ENVELOPE_EMPTY` por un sobre sin boletas; `MISSING_FIELD` por una carátula sin emisor, enviador o resolución.
  */
 export const sendReceiptsSet = async (
   sii: SiiClient,
@@ -293,6 +293,7 @@ export const sendReceiptsSet = async (
 ): Promise<ReceiptsSendResult> => {
   const sleep = options.sleep ?? ((ms: number) => sii.sleep(ms))
   const envelope = readReceiptsEnvelope(issued.envelope.xml)
+  assertTransmittable(issued.envelope.xml)
   const upload = await uploadAsField(
     (overrides) => uploadEnvelope(sii, { envelope: issued.envelope, channel: 'soap' }, overrides),
     'uploadEnvelope',

@@ -298,6 +298,8 @@ export type { Envelope, EnvelopeKind, CreateEnvelopeInput } from './envelope/cre
 export { buildEnvelopeXml, envelopeRootName } from './envelope/build-xml'
 export { signEnvelope, verifyEnvelopeSignature } from './envelope/sign'
 export type { SignedEnvelope } from './envelope/sign'
+export { verifyTransmittedEnvelope } from './envelope/verify-transmitted'
+export type { TransmittedDocumentCheck, TransmittedEnvelopeVerification } from './envelope/verify-transmitted'
 
 export {
   BOOK_OPERATIONS,
