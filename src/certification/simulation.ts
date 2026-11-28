@@ -35,7 +35,7 @@ export type IssuedSimulation = {
   readonly types: readonly DocumentType[]
   /** EN: True with fewer than the ten documents the SII asks for. ES: True con menos de los diez documentos que pide el SII. */
   readonly fewerThanRecommended: boolean
-  /** EN: True when the envelope holds fewer than 20 or more than 100 documents (`outsideDeclarableSize`): the run still sends it, and says so in the portal client's logger. ES: True cuando el sobre trae menos de 20 o más de 100 documentos (`outsideDeclarableSize`): la corrida lo envía igual, y lo dice en el logger del cliente del portal. */
+  /** EN: True when the envelope holds fewer than 20 or more than 100 documents (`outsideDeclarableSize`): the run still sends it, and says so in the portal client's logger before it asks for the folios of the simulation. ES: True cuando el sobre trae menos de 20 o más de 100 documentos (`outsideDeclarableSize`): la corrida lo envía igual, y lo dice en el logger del cliente del portal antes de pedir los folios de la simulación. */
   readonly outsideDeclarableSize: boolean
 }
 

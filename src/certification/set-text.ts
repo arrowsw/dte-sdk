@@ -133,13 +133,15 @@ const ITEM_SPLIT = /\t+|\s{2,}/
 // stands apart, as a cell of the table does (after a tab or a run of spaces), so a line of prose that ends in a number
 // is never an item.
 const ITEM_FALLBACK = /^(ITEM\s+\d+|[A-Z][^0-9]+?)(?:\s*\t\s*|\s{2,})(\d+)$/i
+// The shape of a row of items whose cells are not apart: words, a space, and a whole number at the end.
+const ROW_SHAPE = /^\p{L}.*\s\d+$/u
 // A separator inside a case: a run of dashes, equals signs, underscores or stars, none of it text of the case.
 const SEPARATOR_LINE = /^[-=_*]+$/
 // The prose of a case the grammar knows it may leave unread: the sentence that asks a note for the unit prices of the
-// document it refers to, which the notes take when issued ("LOS PRECIOS UNITARIOS ... DEBEN SER LOS MISMOS DE LA
-// FACTURA", "EL PRECIO UNITARIO DEL ITEM DEBE SER EL MISMO ...").
+// document it refers to, which the notes take when issued ("EL PRECIO UNITARIO DEL ITEM DEBE SER EL MISMO DE LA
+// FACTURA", in the singular or the plural), the whole line and nothing after it.
 const KNOWN_PROSE: readonly RegExp[] = [
-  /^(?:EL|LOS)\s+PRECIOS?\s+UNITARIOS?\b.*\bDEBEN?\s+SER\s+(?:EL|LOS)\s+MISMOS?\b/i,
+  /^(?:EL|LOS)\s+PRECIOS?\s+UNITARIOS?(?:\s+DE(?:L|\s+LOS)\s+ITEMS?)?\s+DEBEN?\s+SER\s+(?:EL|LOS)\s+MISMOS?\s+DE\s+LA\s+FACTURA\.?$/i,
 ]
 const BOOK_DOCUMENT_LINE = /^(FACTURA DE COMPRA ELECTRONICA|FACTURA ELECTRONICA|FACTURA|NOTA DE CREDITO)\s+(\d+)\s*$/i
 const BOOK_OBSERVATION_LINE =
@@ -340,7 +342,7 @@ const cells = (line: string): readonly string[] =>
     .map((part) => part.trim())
     .filter((part) => part !== '')
 
-// An item, `header` for a row whose first cell is a header word, or null.
+// An item, `header` for a row whose first cell is a header word and that holds no number, or null.
 const parseItemRow = (line: string, reasonText: string): TestCaseItem | 'header' | null => {
   const parts = line
     .split(ITEM_SPLIT)
@@ -350,7 +352,8 @@ const parseItemRow = (line: string, reasonText: string): TestCaseItem | 'header'
   // capitals only, so "Razones varias" is an item and a lower-case "modifica monto" leaves the value a quantity.
   if (parts.length >= 2 && !line.includes(':') && !/^(DOCUMENTO|REFERENCIA|RAZON)/.test(line)) {
     const first = parts[0]
-    if (first === 'ITEM' || first.includes('CANTIDAD') || first.includes('UNITARIO')) return 'header'
+    if (first === 'ITEM' || first.includes('CANTIDAD') || first.includes('UNITARIO'))
+      return parts.some((part) => /\d/.test(part)) ? null : 'header'
     {
       if (parts.length === 4) {
         if (/^[A-Za-z]+$/.test(parts[2]))
@@ -649,6 +652,11 @@ const parseCaseField = (current: MutableCase, line: string): boolean => {
     current.currency = currency[1].trim()
     return true
   }
+  return false
+}
+
+// The labelled lines of an export case that every other set reads as rows: true when the line was one of them.
+const parseExportLabel = (current: MutableCase, line: string): boolean => {
   for (const { label, pattern } of EXPORT_LINES) {
     const match = pattern.exec(line)
     if (match !== null) {
@@ -658,6 +666,16 @@ const parseCaseField = (current: MutableCase, line: string): boolean => {
   }
   return false
 }
+
+/**
+ * EN: True when an unread line has the shape of a row of items whose cells are not apart (words, a space, and a whole
+ * number at the end): the reader cannot tell it from a sentence, so the run asks before it issues without it. Internal.
+ * ES: True cuando una línea sin leer tiene forma de fila de ítems con las celdas juntas (palabras, un espacio y un
+ * número entero al final): el lector no la distingue de una frase, así que la corrida pregunta antes de emitir sin ella.
+ * Interno.
+ * @param line EN: a line of `TestCase.unread`. ES: una línea de `TestCase.unread`.
+ */
+export const looksLikeItemRow = (line: string): boolean => ROW_SHAPE.test(line)
 
 // A line of a case the grammar may leave out of `unread`: blank, a separator, or prose it knows.
 const skippable = (line: string): boolean =>
@@ -809,9 +827,10 @@ const parseExportField = (current: MutableCase, line: string): boolean => {
     current.customsReferences = [...current.customsReferences!, value.trim()]
     return true
   }
-  if (LINE_SURCHARGE.test(line)) {
-    const percent = LINE_SURCHARGE_PERCENT.exec(line)
-    if (percent !== null) current.exportFields[LINE_SURCHARGE_LABEL] = (percent[1] ?? percent[2]).replace(',', '.')
+  // A surcharge on the line with no percent says nothing the case can carry: it is left unread.
+  const percent = LINE_SURCHARGE.test(line) ? LINE_SURCHARGE_PERCENT.exec(line) : null
+  if (percent !== null) {
+    current.exportFields[LINE_SURCHARGE_LABEL] = (percent[1] ?? percent[2]).replace(',', '.')
     return true
   }
   // The discount of a line by its number, kept under the label and that number: `DESCUENTO LINEA 1`.
@@ -827,7 +846,7 @@ const parseExportField = (current: MutableCase, line: string): boolean => {
       return true
     }
   }
-  return parseCaseField(current, line)
+  return parseCaseField(current, line) || parseExportLabel(current, line)
 }
 
 // An export case: its labelled lines, then its item rows, read by the columns of the last `ITEM` header. Returns the

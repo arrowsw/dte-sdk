@@ -26,9 +26,9 @@ import {
 import { fieldDiagnosis, queryFieldUploadState } from './field-status'
 import { assertTransmittable, uploadForTrackId } from './field-upload'
 import { issueTestSet, prepareExportSet, type IssuableSetPlan, type IssuedCase } from './issue-set'
-import { issueSimulation } from './simulation'
-import { planCertificationSets } from './set-plan'
-import { parseTestSetText } from './set-text'
+import { issueSimulation, outsideDeclarableSize } from './simulation'
+import { planCertificationSets, type UnreadCaseLines } from './set-plan'
+import { looksLikeItemRow, parseTestSetText } from './set-text'
 import {
   runtime,
   saveState,
@@ -258,34 +258,58 @@ export const checkExportSets = async (deps: CertificationDependencies, state: Ce
 const NOT_READ = 'certification test set line not read'
 
 /**
+ * EN: What the run does with the lines of the test set the reader did not use: `stop` stops on any of them;
+ * `stopOnRows` stops on a line shaped like a row of items (`looksLikeItemRow`), which the reader cannot tell from a
+ * sentence, and only logs the rest; `warn` only logs them.
+ * ES: Qué hace la corrida con las líneas del set de pruebas que el lector no usó: `stop` se detiene ante cualquiera;
+ * `stopOnRows` se detiene ante una línea con forma de fila de ítems (`looksLikeItemRow`), que el lector no distingue de
+ * una frase, y solo registra las demás; `warn` solo las registra.
+ */
+export type UnreadLinesPolicy = 'stop' | 'stopOnRows' | 'warn'
+
+const unreadOf = (state: CertificationState): readonly UnreadCaseLines[] => {
+  if (state.plan === undefined) return []
+  // A plan stored before plans carried their unread lines is read again from the text the state keeps.
+  if (state.plan.unread === undefined && state.setText !== undefined)
+    return planCertificationSets(parseTestSetText(state.setText)).unread ?? []
+  return state.plan.unread ?? []
+}
+
+/**
  * EN: Shows, before any folio of the sets is asked for, the lines of the test set the reader did not use: each line a
- * case of a set not yet sent left unread (the plan's `unread`) goes to the portal client's logger, with its set and its
- * case. With `strict` the run stops here, where nothing has been asked of the SII, on the first such case. A plan read
- * in full, or no plan, logs nothing.
+ * case of a set not yet sent left unread goes to the portal client's logger, with its set and its case. The lines are
+ * the plan's `unread`, or, for a plan stored without them, those of the text the state keeps, read again. Then, by
+ * `unreadLines` (`stopOnRows` by default), the run stops here, where nothing has been asked of the SII, on the first
+ * case with a line that stops it. A plan read in full, or no plan, logs nothing.
  * ES: Muestra, antes de pedir cualquier folio de los sets, las líneas del set de pruebas que el lector no usó: cada
- * línea que un caso de un set aún no enviado dejó sin leer (el `unread` del plan) va al logger del cliente del portal,
- * con su set y su caso. Con `strict` la corrida se detiene aquí, donde nada se ha pedido al SII, en el primer caso así.
- * Un plan leído completo, o sin plan, no registra nada.
- * @throws {DteError} EN: `SII_PORTAL_UNEXPECTED_PAGE { operation: 'checkTestSetText', step: 'set-text', set, caseId, lines }` with `strict` and a line unread. ES: `SII_PORTAL_UNEXPECTED_PAGE { operation: 'checkTestSetText', step: 'set-text', set, caseId, lines }` con `strict` y una línea sin leer.
+ * línea que un caso de un set aún no enviado dejó sin leer va al logger del cliente del portal, con su set y su caso.
+ * Las líneas son el `unread` del plan, o, para un plan guardado sin ellas, las del texto que guarda el estado, leído de
+ * nuevo. Luego, según `unreadLines` (`stopOnRows` por defecto), la corrida se detiene aquí, donde nada se ha pedido al
+ * SII, en el primer caso con una línea que la detiene. Un plan leído completo, o sin plan, no registra nada.
+ * @throws {DteError} EN: `SII_PORTAL_UNEXPECTED_PAGE { operation: 'checkTestSetText', step: 'set-text', set, caseId, lines }`, `lines` being those of the case that stop the run. ES: `SII_PORTAL_UNEXPECTED_PAGE { operation: 'checkTestSetText', step: 'set-text', set, caseId, lines }`, con `lines` las líneas del caso que detienen la corrida.
  */
 export const checkTestSetText = async (
   deps: CertificationDependencies,
   state: CertificationState,
-  options: { readonly strict?: boolean } = {},
+  options: { readonly unreadLines?: UnreadLinesPolicy } = {},
 ): Promise<void> => {
   const rt = runtime(deps)
-  const pending = (state.plan?.unread ?? []).filter((entry) => state.sets[entry.set] === undefined)
+  const policy = options.unreadLines ?? 'stopOnRows'
+  const pending = unreadOf(state).filter((entry) => state.sets[entry.set] === undefined)
   for (const entry of pending)
     for (const line of entry.lines) rt.portal.logger.warn(NOT_READ, { set: entry.set, caseId: entry.caseId, line })
-  const first = pending[0]
-  if (options.strict === true && first !== undefined)
-    throw new DteError('SII_PORTAL_UNEXPECTED_PAGE', {
-      operation: 'checkTestSetText',
-      step: 'set-text',
-      set: first.set,
-      caseId: first.caseId,
-      lines: first.lines,
-    })
+  if (policy === 'warn') return
+  for (const entry of pending) {
+    const lines = policy === 'stop' ? entry.lines : entry.lines.filter(looksLikeItemRow)
+    if (lines.length > 0)
+      throw new DteError('SII_PORTAL_UNEXPECTED_PAGE', {
+        operation: 'checkTestSetText',
+        step: 'set-text',
+        set: entry.set,
+        caseId: entry.caseId,
+        lines,
+      })
+  }
 }
 
 /**
@@ -560,14 +584,16 @@ const atLeast = (stage: CertificationStage, floor: CertificationStage): boolean 
  * the CAFs it obtained in the state (`simulationCafs`), and the next one issues with them and asks only for what is
  * missing: unused folios are what makes the SII ration. Once the upload was tried they are spent, as field behaviour
  * has it, and a new attempt asks for new ones. An envelope outside the 20 to 100 documents the declaration takes
- * (`outsideDeclarableSize`) is sent all the same, and the portal client's logger says so.
+ * (`outsideDeclarableSize`) is sent all the same, and the portal client's logger says so before any folio of the
+ * simulation is asked for.
  * ES: Envía la simulación: CAF propios para un folio por caso (nunca los CAF de los sets), cada caso de los cuatro sets
  * reemitido en un sobre, el sobre y los documentos guardados como artefactos, el envío, los folios marcados enviados
  * pase lo que pase, y el track id con la fecha de Chile del envío. Un intento que se detiene antes del envío deja en
  * el estado los CAF que obtuvo (`simulationCafs`), y el siguiente emite con ellos y pide solo lo que falta: los folios
  * sin usar son lo que hace racionar al SII. Una vez intentado el envío quedan gastados, como en el comportamiento de
  * campo, y un intento nuevo pide otros. Un sobre fuera de los 20 a 100 documentos que toma la declaración
- * (`outsideDeclarableSize`) se envía igual, y el logger del cliente del portal lo dice.
+ * (`outsideDeclarableSize`) se envía igual, y el logger del cliente del portal lo dice antes de pedir cualquier folio de
+ * la simulación.
  * @throws {DteError} EN: `MISSING_FIELD { field: 'plan' }` without a plan; the folio, 5b-1 and upload codes; `SIGNATURE_INVALID` for an envelope that does not verify as the SII reads it (`assertTransmittable`). ES: `MISSING_FIELD { field: 'plan' }` sin plan; los códigos de folios, de 5b-1 y de envío; `SIGNATURE_INVALID` por un sobre que no verifica como lo lee el SII (`assertTransmittable`).
  */
 export const sendSimulation = async (
@@ -584,7 +610,13 @@ export const sendSimulation = async (
     if (plan !== undefined)
       await prepareExportSet(plan, { issuer: rt.issuer, exportSets: rt.exportSets }, chileDate(rt.now()))
   }
-  const prepared = await prepareFolios(deps, state, { needs: simulationFolioNeeds(state.plan), fresh: true })
+  // Field behaviour: the declaration of the simulation takes 20 to 100 documents. The plan fixes how many it holds, one
+  // per folio, so the run says it before any folio is asked for, and sends the envelope all the same.
+  const needs = simulationFolioNeeds(state.plan)
+  const documents = Object.values(needs).reduce((sum, count) => sum + count, 0)
+  if (outsideDeclarableSize(documents))
+    rt.portal.logger.warn('certification simulation size outside 20 to 100 documents', { documents })
+  const prepared = await prepareFolios(deps, state, { needs, fresh: true })
   const held = heldCafs(prepared.cafs, rt.now())
   const issued = await issueSimulation(state.plan, {
     issuer: rt.issuer,
@@ -595,11 +627,6 @@ export const sendSimulation = async (
     exportSets: rt.exportSets,
     now: rt.now,
   })
-  // Field behaviour: the declaration of the simulation takes 20 to 100 documents. The run sends it all the same.
-  if (issued.outsideDeclarableSize)
-    rt.portal.logger.warn('certification simulation size outside 20 to 100 documents', {
-      documents: issued.cases.length,
-    })
   await rt.store.writeArtefact(SIMULATION_ARTEFACT, issued.envelope.xml)
   for (const document of issued.cases)
     await rt.store.writeArtefact(

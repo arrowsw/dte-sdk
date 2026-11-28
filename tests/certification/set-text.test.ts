@@ -610,7 +610,13 @@ describe('the lines the reader did not use', () => {
     )
     const [testCase] = parseTestSetText(text)[0].cases
     expect(testCase.items).toEqual([{ name: 'Tornillo largo', quantity: 8, unitPrice: 120 }])
-    expect(testCase.unread).toEqual(['Despachar antes del dia 4', 'NOTA: entregar en la bodega norte', 'a  b  c  d  e'])
+    expect(testCase.unread).toEqual([
+      'Despachar antes del dia 4',
+      'NOTA: entregar en la bodega norte',
+      'a  b  c  d  e',
+      'ITEM  5',
+      'CANTIDAD TOTAL  5',
+    ])
   })
 
   test('a case the grammar reads in full has none, and the sample sets read in full', () => {
@@ -630,12 +636,60 @@ describe('the lines the reader did not use', () => {
     const text = basic(
       [
         'DOCUMENTO\tNOTA DE CREDITO ELECTRONICA',
-        'Los precios unitarios de los items deben ser los mismos de la factura',
+        'Los precios unitarios deben ser los mismos de la factura',
         'EL PRECIO UNITARIO DEL ITEM DEBE SER EL MISMO DE LA FACTURA',
         'EL PRECIO UNITARIO DEBE SUBIR',
       ].join('\n'),
     )
     expect(unreadOf(text)).toEqual([['EL PRECIO UNITARIO DEBE SUBIR']])
+  })
+
+  test('the known sentence is only the sentence: a line that goes on after it is unread', () => {
+    const goesOn = 'Los precios unitarios deben ser los mismos de la factura, salvo el segundo que sube a 70'
+    const changes = 'Los precios unitarios deben ser los mismos, salvo el segundo que sube a 70'
+    expect(unreadOf(basic(`DOCUMENTO\tNOTA DE CREDITO ELECTRONICA\n${goesOn}\n${changes}`))).toEqual([
+      [goesOn, changes],
+    ])
+  })
+
+  test('in a case of any other set the export labels are no labels: such a row is an item, a labelled line unread', () => {
+    const [testCase] = parseTestSetText(
+      basic(
+        [
+          'DOCUMENTO\tFACTURA ELECTRONICA',
+          'ITEM\t\tCANTIDAD\tPRECIO UNITARIO',
+          'SEGURO DE CARGA\t\t2\t\t500',
+          'FLETE MARITIMO\t\t1\t\t900',
+          'FLETE: 100',
+        ].join('\n'),
+      ),
+    )[0].cases
+    expect(testCase.items).toEqual([
+      { name: 'SEGURO DE CARGA', quantity: 2, unitPrice: 500 },
+      { name: 'FLETE MARITIMO', quantity: 1, unitPrice: 900 },
+    ])
+    expect(testCase.exportFields).toEqual({})
+    expect(testCase.unread).toEqual(['FLETE: 100'])
+  })
+
+  test('a row that starts with a header word and holds a number is no header: it is unread, never dropped', () => {
+    const [testCase] = parseTestSetText(
+      basic(
+        [
+          'DOCUMENTO\tFACTURA ELECTRONICA',
+          'CANTIDAD\tPRECIO',
+          'PRECIO UNITARIO ESPECIAL\t2\t500',
+          'CANTIDAD MINIMA DE COMPRA\t10\t300',
+          'ITEM  5',
+        ].join('\n'),
+      ),
+    )[0].cases
+    expect(testCase.items).toEqual([])
+    expect(testCase.unread).toEqual([
+      'PRECIO UNITARIO ESPECIAL\t2\t500',
+      'CANTIDAD MINIMA DE COMPRA\t10\t300',
+      'ITEM  5',
+    ])
   })
 
   test('a settlement case and an export case report theirs too', () => {
@@ -647,7 +701,7 @@ describe('the lines the reader did not use', () => {
       'NETO FACTURAS\t\t2\t\t9000',
       'Revisar con el mandante 2',
       'COMISIONES Y OTROS CARGOS\tTOTAL LINEA',
-      'NETO COMISION FIJA\t\t300',
+      'NETO COMISION DE COBRANZA\t\t300',
       'OBSERVACION: sin cargos extra',
     ].join('\n')
     expect(unreadOf(settlement)).toEqual([['Revisar con el mandante 2', 'OBSERVACION: sin cargos extra']])
@@ -660,10 +714,16 @@ describe('the lines the reader did not use', () => {
       'LANA PEINADA        x\t\t40',
       'EMBALAR POR SEPARADO',
       'MONEDA DE LA OPERACION:     DOLAR USA',
+      'RECARGO EN LA LINEA DE ITEM POR GASTOS',
     ].join('\n')
     const [testCase] = parseTestSetText(exportCase)[0].cases
     expect(testCase.items).toEqual([{ name: 'LANA CRUDA', quantity: 12, unitPrice: 40 }])
-    expect(testCase.unread).toEqual(['LANA PEINADA        x\t\t40', 'EMBALAR POR SEPARADO'])
+    expect(testCase.exportFields).toEqual({})
+    expect(testCase.unread).toEqual([
+      'LANA PEINADA        x\t\t40',
+      'EMBALAR POR SEPARADO',
+      'RECARGO EN LA LINEA DE ITEM POR GASTOS',
+    ])
   })
 })
 

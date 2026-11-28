@@ -10,20 +10,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **The lines of the test set the reader did not use** (`TestCase.unread`, `CertificationPlan.unread`,
-  `checkTestSetText`, `strictTestSet` of `runCertification`; `dte-sdk/portal`). `parseTestSetText` never throws, and a
-  line of a case its grammar did not know vanished: nothing said that a case was issued without it. Each case now
-  keeps those lines in `unread`, in order and as the set writes them, leaving out blank lines, separator lines and the
-  sentence that asks a note for the unit prices of its document, which the notes already take when issued. The plan
-  carries them by set and case, and the run, before it asks for any folio, logs each line of a set not yet sent
-  through the portal client's logger. With `strictTestSet: true` it stops there instead, with
-  `SII_PORTAL_UNEXPECTED_PAGE` naming the set and the case, as it stops on an export set it cannot issue.
-  - **What to change:** code that builds a `TestCase` of its own must give it `unread`.
+  `checkTestSetText`, `unreadLines` of `runCertification`, `UnreadLinesPolicy`; `dte-sdk/portal`). `parseTestSetText`
+  never throws, and a line of a case its grammar did not know vanished: nothing said that a case was issued without
+  it. Each case now keeps those lines in `unread`, in order and as the set writes them, leaving out blank lines,
+  separator lines and the sentence that asks a note for the unit prices of its document ("EL PRECIO UNITARIO DEL ITEM
+  DEBE SER EL MISMO DE LA FACTURA", singular or plural, and nothing after it), which the notes already take when
+  issued. The plan carries them by set and case, and the run, before it asks for any folio, logs each line of a set
+  not yet sent through the portal client's logger; `unreadLines` says whether it then stops (see Changed). A plan
+  stored without `unread`, made before this change, is checked against the set text the state keeps, read again.
+  - **What to change:** code that builds a `TestCase` of its own must give it `unread`. A caller who keeps a plan of
+    its own, made before this change, should plan again from the text (`planCertificationSets(parseTestSetText(text))`):
+    that plan may hold a line of prose read as an item, which the run issues as it is.
 
 - **The size of the simulation envelope** (`IssuedSimulation.outsideDeclarableSize`). The SII's certification manual
   ("Manual para empresas usuarias, ambiente de certificación factura electrónica", page 27) gives the simulation a
   maximum of 100 documents, and field behaviour shows the "Declarar avance" form asking of the simulation envelope for
   20 to 100. `issueSimulation` now says when its envelope is outside 20 to 100 documents, and the run logs it through
-  the portal client's logger; it still sends the envelope, and issues no document more. `fewerThanRecommended` is
+  the portal client's logger, from the plan, before it asks for any folio of the simulation; it still sends the
+  envelope, and issues no document more. `fewerThanRecommended` is
   unchanged.
   - **What to change:** code that builds an `IssuedSimulation` of its own must give it `outsideDeclarableSize`.
 
@@ -46,6 +50,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The certification run stops on a line of the test set shaped like a row of items it did not read**
+  (`unreadLines`, `dte-sdk/portal`). A line of a case left unread that is words, a space and a whole number at the
+  end (`Caja chica 5` in a set whose cells are written apart by single spaces) may be an item the reader did not
+  take, and issuing without it spends folios on a document short of a line. By default (`unreadLines: 'stopOnRows'`)
+  the run now stops there, before any folio is asked for, with `SII_PORTAL_UNEXPECTED_PAGE` naming the set, the case
+  and those lines, as it stops on an export set it cannot issue; any other unread line is only logged. `'stop'` stops
+  on any unread line, `'warn'` only logs them all.
+  - **What to change:** a run that stops this way should read the lines it names; when none is an item,
+    `unreadLines: 'warn'` lets it go on.
+
 - **The certification run verifies every envelope of documents before it uploads it** (`dte-sdk/portal`). The test
   sets, the simulation and the receipts set (`sendReceiptsSet`) are checked with `verifyTransmittedEnvelope` before
   `beforeUpload` is called and before anything is sent; one that does not verify stops the step with
@@ -64,10 +78,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **A line of prose in a case is no longer an item** (`parseTestSetText`). A line of a case of the basic, exempt,
-  guide or purchase set that started with a capital and ended in a number became an item: a sentence such as
+  guide or purchase set that started with a letter and ended in a number became an item: a sentence such as
   "Despachar antes del dia 4" was issued as an item of quantity 4. A row now becomes an item only when its cells stand
-  apart, after a tab or a run of spaces, as the rows of the item table do; such a line now goes to `unread`. A
-  row whose cells stand apart is read as before.
+  apart, after a tab or a run of spaces, as the rows of the item table do; such a line now goes to `unread`. A row
+  whose cells stand apart is read as before.
+- **Lines of a case that vanished now become what they are, or `unread`** (`parseTestSetText`). In a case of the
+  basic, exempt, guide or purchase set, the labels of the export cases were tried first, so a row such as
+  `SEGURO DE CARGA` or `FLETE MARITIMO` with its quantity and price became an export field those sets ignore; the
+  export labels are now read in export cases only, and such a row is an item. A row whose first cell holds
+  `CANTIDAD` or `UNITARIO` was dropped as a header even when it held numbers; it is a header now only when it holds
+  none, and otherwise goes to `unread`. In an export case, `RECARGO EN LA LINEA` with no percent counted as read and
+  kept nothing; it goes to `unread`.
 
 ## [0.17.0] - 2026-11-26
 

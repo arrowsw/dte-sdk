@@ -21,6 +21,7 @@ import {
   sendTestSet,
   waitForSimulationApproval,
   waitForTestSetsApproval,
+  type UnreadLinesPolicy,
 } from './steps'
 
 /**
@@ -38,8 +39,8 @@ export type RunCertificationOptions = {
   readonly exchangeSetXml?: string
   /** EN: The printed samples to upload, or a function that reads them (`readPrintedSamples`); without them the runner stops at `printedSamples`. ES: Las muestras impresas a subir, o una función que las lee (`readPrintedSamples`); sin ellas el ejecutor se detiene en `printedSamples`. */
   readonly samples?: readonly PrintedSampleFile[] | (() => Promise<readonly PrintedSampleFile[]>)
-  /** EN: Stop before any folio is asked for when a case of a set not yet sent holds a line the reader of the test set did not use (`checkTestSetText`). Off by default: the run logs each such line and goes on. ES: Detenerse antes de pedir cualquier folio cuando un caso de un set aún no enviado trae una línea que el lector del set de pruebas no usó (`checkTestSetText`). Apagado por defecto: la corrida registra cada línea así y sigue. */
-  readonly strictTestSet?: boolean
+  /** EN: What the run does, before any folio is asked for, with a line of a case of a set not yet sent that the reader of the test set did not use (`checkTestSetText`, `UnreadLinesPolicy`): every such line is logged, and the run stops on any of them (`stop`), on one shaped like a row of items (`stopOnRows`, the default), or never (`warn`). ES: Qué hace la corrida, antes de pedir cualquier folio, con una línea de un caso de un set aún no enviado que el lector del set de pruebas no usó (`checkTestSetText`, `UnreadLinesPolicy`): cada línea así se registra, y la corrida se detiene ante cualquiera (`stop`), ante una con forma de fila de ítems (`stopOnRows`, por defecto), o nunca (`warn`). */
+  readonly unreadLines?: UnreadLinesPolicy
 }
 
 /**
@@ -120,7 +121,7 @@ const resolutionOf = async (
 
 /**
  * EN: The HTML side of the certification, in the field's order, resumed from the saved state: the test set (downloaded
- * once), the lines of the set the reader did not use, logged or, with `strictTestSet`, a stop (`checkTestSetText`), the
+ * once), the lines of the set the reader did not use, logged or, by `unreadLines`, a stop (`checkTestSetText`), the
  * check of the export sets the text holds (`checkExportSets`), the folios, each set not yet sent (the
  * settlement and the two export sets last, each export set in an envelope of its own), their declaration and approval;
  * the books; the advance; the simulation
@@ -133,7 +134,7 @@ const resolutionOf = async (
  * (`verifyTransmittedEnvelope`) before it is handed to `beforeUpload` and sent. A self-signed signing certificate is
  * said once, when the run starts, in the portal client's logger.
  * ES: El lado HTML de la certificación, en el orden del campo, retomado desde el estado guardado: el set de pruebas
- * (descargado una vez), las líneas del set que el lector no usó, registradas o, con `strictTestSet`, una detención
+ * (descargado una vez), las líneas del set que el lector no usó, registradas o, según `unreadLines`, una detención
  * (`checkTestSetText`), la revisión de los sets de exportación que trae el texto (`checkExportSets`), los folios, cada
  * set aún no enviado (el de liquidación y los dos de exportación al final, cada set de exportación en su propio sobre),
  * su declaración y aprobación; los libros; el avance; la
@@ -182,8 +183,8 @@ export const runCertification = async (
             options.optionalSets === undefined ? {} : { optionalSets: options.optionalSets },
           )
         ).state
-      // A line of the set the reader did not use is shown, and with `strictTestSet` stops the run, before any folio.
-      await checkTestSetText(deps, state, { strict: options.strictTestSet === true })
+      // A line of the set the reader did not use is shown, and by `unreadLines` stops the run, before any folio.
+      await checkTestSetText(deps, state, options.unreadLines === undefined ? {} : { unreadLines: options.unreadLines })
       // An export set that cannot be issued stops the run before its folios are asked for.
       await checkExportSets(deps, state)
       state = (await prepareFolios(deps, state)).state
