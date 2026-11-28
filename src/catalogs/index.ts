@@ -25,3 +25,5 @@ export {
   customsName,
 } from './customs'
 export type { CustomsEntry } from './customs'
+export { unknownCustomsCodes } from './unknown-customs-codes'
+export type { CustomsTableName, UnknownCustomsCode } from './unknown-customs-codes'
