@@ -286,6 +286,8 @@ describe('the guide set', () => {
     expect(internal.items[0]).toMatchObject({ name: 'Relleno de pollo', quantity: 40, unit: 'UN', amount: 0 })
     expect(internal.items[0].unitPrice).toBeUndefined()
     expect(internal.header.totals).toEqual({ vatRate: 19, totalAmount: 0 })
+    // The receiver is the issuer, as the SII's instructions for the set ask: nothing to warn of.
+    expect(internal.warnings).toBeUndefined()
   })
 
   test('an internal transfer with priced lines still totals 0, as the field does', async () => {

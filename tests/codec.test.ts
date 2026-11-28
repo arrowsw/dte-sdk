@@ -335,14 +335,16 @@ describe('fromSiiDocument', () => {
         issuer,
         receiver,
         items: [{ name: 'D', unitPrice: 100 }],
-        references: [{ documentType: 33, folio: 1, date: '2026-11-01', code: 1, reason: 'Anula', global: true }],
+        // A global reference has folio 0 (Formato DTE 2.5, field 4 of the references).
+        references: [{ documentType: 33, folio: 0, date: '2026-11-01', code: 1, reason: 'Anula', global: true }],
       }),
       createDocument({
         type: 52,
         folio: 4,
         issueDate: '2026-11-15',
         issuer,
-        receiver,
+        // An internal transfer names the issuer as its receiver.
+        receiver: { ...receiver, rut: issuer.rut },
         items: [{ name: 'E', quantity: 1, unit: 'UN', amount: 0 }],
         options: { transferType: 5 },
         transport: { licensePlate: 'XX1234', driver: { rut: RECEIVER_RUT, name: 'Ana' } },

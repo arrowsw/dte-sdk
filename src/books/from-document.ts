@@ -27,7 +27,7 @@ export type BookEntryFromDocumentOptions = {
   readonly bookRut: string
   /** EN: Book side. ES: Lado del libro. */
   readonly operation: BookOperation
-  /** EN: `negative` negates exempt, net, VAT and total of a credit note, national (61) or of export (112), and refuses one with a deposit guarantee (`GrntDep`), since the book's `DepEnvase` holds no amount below zero. `positive` by default, as the format has it. ES: `negative` niega exento, neto, IVA y total de una nota de crédito, nacional (61) o de exportación (112), y rechaza una con garantía por depósito de envases (`GrntDep`), porque el `DepEnvase` del libro no admite montos bajo cero. `positive` por defecto, como dice el formato. */
+  /** EN: `negative` negates exempt, net, VAT, the other taxes and total of a credit note, national (61) or of export (112), and refuses one with a deposit guarantee (`GrntDep`) or with a VAT withholding booked in its own field of a sale line, since the book's `DepEnvase`, `IVARetTotal` and `IVARetParcial` hold no amount below zero. `positive` by default, as the format has it. ES: `negative` niega exento, neto, IVA, los otros impuestos y total de una nota de crédito, nacional (61) o de exportación (112), y rechaza una con garantía por depósito de envases (`GrntDep`) o con una retención de IVA que va en su propio campo de una línea de venta, porque `DepEnvase`, `IVARetTotal` e `IVARetParcial` del libro no admiten montos bajo cero. `positive` por defecto, como dice el formato. */
   readonly creditNoteSign?: 'positive' | 'negative'
   /** EN: For an export document (110, 111, 112) that does not carry its totals in pesos (`OtraMoneda`), the rate its `TpoCambio` would have held: by Formato DTE 2.5, field 130, the exchange rate of the issue date of the document published by the Banco Central de Chile, in pesos per unit of its currency. It is checked as `createDocument` checks its `exchangeRate`: rounded half away from zero to four decimals, and refused unless it is above zero and, rounded, below 10^6. The exempt amount and the total are each converted with it and rounded once, half away from zero, to a whole peso, as `convertToPesos` does. On a document that carries its totals in pesos it is refused unless, rounded, it is the rate the document carries. ES: `TpoCambio` — Para un documento de exportación (110, 111, 112) que no lleva sus totales en pesos (`OtraMoneda`), el tipo de cambio que habría llevado su `TpoCambio`: según el Formato DTE 2.5, campo 130, el tipo de cambio de la fecha de emisión del documento publicado por el Banco Central de Chile, en pesos por unidad de su moneda. Se revisa como `createDocument` revisa su `exchangeRate`: redondeado, la mitad lejos de cero, a cuatro decimales, y rechazado salvo que esté sobre cero y, redondeado, bajo 10^6. El monto exento y el total se convierten cada uno con él y se redondean una vez, la mitad lejos de cero, a un peso entero, como hace `convertToPesos`. En un documento que lleva sus totales en pesos se rechaza salvo que, redondeado, sea el tipo de cambio que el documento lleva. */
   readonly exchangeRate?: number
@@ -94,14 +94,16 @@ const totalsInPesos = (document: Document, exchangeRate: number | undefined): To
  * The other taxes of the document travel in `otherTaxes` on both sides, and its deposit guarantee for containers
  * (`GrntDep`), which its total includes, in `containerDeposit` (`DepEnvase`). The name is truncated to 50 because the
  * document admits 100 and the book field is optional on electronic documents. `Emisor`, `IndFactCompra` and the
- * voided-document reference are not inferred: spread them into the result when the case needs them. Every amount of
- * a book is in pesos ("Formato de Información de Compras y Ventas" 2.2, section 1.4), so an export document (110, 111,
- * 112) enters it with its exempt amount and its total in pesos: its own when its currency is the peso, those it carries
- * in `OtraMoneda` (written when it was issued with `exchangeRate`), or, when it carries none, its own converted with the
- * `exchangeRate` option. An amount in pesos that is not whole is refused: a document issued elsewhere whose
- * `OtraMoneda` brings decimals is booked with a line written by hand. An export without payment (`FmaPagExp` 21)
- * enters with its exempt amount and a total of zero, which the book reports as a total that does not match its
- * formula (and refuses under `strictTotals`). Its foreign receiver (`Extranjero`) is not inferred either.
+ * voided-document reference are not inferred: spread them into the result when the case needs them. A tax without a
+ * rate, as a specific tax may come (Formato DTE 2.5, field 116), travels without one (`TasaImp` is optional in
+ * `OtrosImp`). Every amount of a book is in pesos ("Formato de Información de Compras y Ventas" 2.2, section 1.4),
+ * so an export document (110, 111, 112) enters it with its exempt amount and its total in pesos: its own when its
+ * currency is the peso, those it carries in `OtraMoneda` (written when it was issued with `exchangeRate`), or, when
+ * it carries none, its own converted with the `exchangeRate` option. An amount in pesos that is not whole is
+ * refused: a document issued elsewhere whose `OtraMoneda` brings decimals is booked with a line written by hand. An
+ * export without payment (`FmaPagExp` 21) enters with its exempt amount and a total of zero, which the book reports
+ * as a total that does not match its formula (and refuses under `strictTotals`). Its foreign receiver (`Extranjero`)
+ * is not inferred either.
  * ES: Deriva una línea del libro desde un documento de la fase 1. La contraparte es el receptor si el dueño del libro
  * emitió el documento y el emisor en caso contrario, lo que cubre ventas, compras recibidas y facturas de compra (46) en
  * cualquier lado. El IVA que retiene una factura de compra va donde lo lleva cada lado. Una línea de venta tiene dos
@@ -111,14 +113,16 @@ const totalsInPesos = (document: Document, exchangeRate: number | undefined): To
  * depósito de envases (`GrntDep`), que su total incluye, en `containerDeposit` (`DepEnvase`). El nombre se trunca a
  * 50 porque el documento admite 100 y el campo del libro es opcional en documentos electrónicos. `Emisor`,
  * `IndFactCompra` y la referencia al documento anulado no se infieren: se agregan al resultado si el caso los necesita.
- * Todos los montos de un libro van en pesos ("Formato de Información de Compras y Ventas" 2.2, sección 1.4), así que un
- * documento de exportación (110, 111, 112) entra con su monto exento y su total en pesos: los suyos si su moneda es el
- * peso, los que lleva en `OtraMoneda` (escritos si se emitió con `exchangeRate`) o, si no lleva, los suyos convertidos
- * con la opción `exchangeRate`. Un monto en pesos que no es entero se rechaza: un documento emitido en otra parte cuyo
- * `OtraMoneda` trae decimales se lleva al libro con una línea escrita a mano. Una exportación sin pago (`FmaPagExp` 21)
- * entra con su monto exento y un total de cero, que el libro informa como un total que no calza con su fórmula (y
- * rechaza con `strictTotals`). Su receptor extranjero (`Extranjero`) tampoco se infiere.
- * @throws {DteError} EN: `INVALID_RUT`; `INVALID_OPTION` with `creditNoteSign` in `details.field` for a `negative` sign on a credit note with a deposit guarantee, which `DepEnvase` (`MontoType`) cannot carry negated; `MISSING_FIELD` with `exchangeRate` in `details.field` and the type in `details.type` for an export document without its totals in pesos and without the option; `INVALID_AMOUNT` with `exchangeRate` in `details.field` for a rate `createDocument` would refuse, and, for an amount in pesos that is not a whole safe integer, with the amount in `details.field`: `totals.exemptAmount` or `totals.totalAmount` for a document in pesos, `otherCurrency.exemptAmount` or `otherCurrency.totalAmount` for its `OtraMoneda`, and `exemptAmount` or `totalAmount` with `converted` in `details.kind` for one converted with the option; `INVALID_OPTION` with `exchangeRate` in `details.field` for a rate on a document that is not an export one, or that, rounded, differs from the one an export document carries. The book RUT is checked first. ES: `INVALID_RUT`; `INVALID_OPTION` con `creditNoteSign` en `details.field` ante un signo `negative` en una nota de crédito con garantía por depósito de envases, que `DepEnvase` (`MontoType`) no admite negada; `MISSING_FIELD` con `exchangeRate` en `details.field` y el tipo en `details.type` ante un documento de exportación sin sus totales en pesos y sin la opción; `INVALID_AMOUNT` con `exchangeRate` en `details.field` ante un tipo de cambio que `createDocument` rechazaría, y, ante un monto en pesos que no es un entero seguro, con el monto en `details.field`: `totals.exemptAmount` o `totals.totalAmount` en un documento en pesos, `otherCurrency.exemptAmount` u `otherCurrency.totalAmount` en su `OtraMoneda`, y `exemptAmount` o `totalAmount` con `converted` en `details.kind` en uno convertido con la opción; `INVALID_OPTION` con `exchangeRate` en `details.field` ante un tipo de cambio en un documento que no es de exportación, o que, redondeado, difiere del que lleva un documento de exportación. El RUT del libro se revisa primero.
+ * Un impuesto sin tasa, como puede venir un impuesto específico (Formato DTE 2.5, campo 116), viaja sin ella
+ * (`TasaImp` es opcional en `OtrosImp`). Todos los montos de un libro van en pesos ("Formato de Información de
+ * Compras y Ventas" 2.2, sección 1.4), así que un documento de exportación (110, 111, 112) entra con su monto exento
+ * y su total en pesos: los suyos si su moneda es el peso, los que lleva en `OtraMoneda` (escritos si se emitió con
+ * `exchangeRate`) o, si no lleva, los suyos convertidos con la opción `exchangeRate`. Un monto en pesos que no es
+ * entero se rechaza: un documento emitido en otra parte cuyo `OtraMoneda` trae decimales se lleva al libro con una
+ * línea escrita a mano. Una exportación sin pago (`FmaPagExp` 21) entra con su monto exento y un total de cero, que
+ * el libro informa como un total que no calza con su fórmula (y rechaza con `strictTotals`). Su receptor extranjero
+ * (`Extranjero`) tampoco se infiere.
+ * @throws {DteError} EN: `INVALID_RUT`; `INVALID_OPTION` with `creditNoteSign` in `details.field` for a `negative` sign on a credit note with a deposit guarantee or with a VAT withholding of a sale line, which `DepEnvase`, `IVARetTotal` and `IVARetParcial` (`MontoType`) cannot carry negated; `MISSING_FIELD` on `totals.withholdings`, with the code in `details.taxCode`, for a VAT withholding of a sale line other than code 15 without its rate, which cannot be told whole or partial; `MISSING_FIELD` with `exchangeRate` in `details.field` and the type in `details.type` for an export document without its totals in pesos and without the option; `INVALID_AMOUNT` with `exchangeRate` in `details.field` for a rate `createDocument` would refuse, and, for an amount in pesos that is not a whole safe integer, with the amount in `details.field`: `totals.exemptAmount` or `totals.totalAmount` for a document in pesos, `otherCurrency.exemptAmount` or `otherCurrency.totalAmount` for its `OtraMoneda`, and `exemptAmount` or `totalAmount` with `converted` in `details.kind` for one converted with the option; `INVALID_OPTION` with `exchangeRate` in `details.field` for a rate on a document that is not an export one, or that, rounded, differs from the one an export document carries. The book RUT is checked first. ES: `INVALID_RUT`; `INVALID_OPTION` con `creditNoteSign` en `details.field` ante un signo `negative` en una nota de crédito con garantía por depósito de envases o con una retención de IVA de una línea de venta, que `DepEnvase`, `IVARetTotal` e `IVARetParcial` (`MontoType`) no admiten negadas; `MISSING_FIELD` en `totals.withholdings`, con el código en `details.taxCode`, ante una retención de IVA de una línea de venta distinta del código 15 sin su tasa, que no se puede decir total ni parcial; `MISSING_FIELD` con `exchangeRate` en `details.field` y el tipo en `details.type` ante un documento de exportación sin sus totales en pesos y sin la opción; `INVALID_AMOUNT` con `exchangeRate` en `details.field` ante un tipo de cambio que `createDocument` rechazaría, y, ante un monto en pesos que no es un entero seguro, con el monto en `details.field`: `totals.exemptAmount` o `totals.totalAmount` en un documento en pesos, `otherCurrency.exemptAmount` u `otherCurrency.totalAmount` en su `OtraMoneda`, y `exemptAmount` o `totalAmount` con `converted` en `details.kind` en uno convertido con la opción; `INVALID_OPTION` con `exchangeRate` en `details.field` ante un tipo de cambio en un documento que no es de exportación, o que, redondeado, difiere del que lleva un documento de exportación. El RUT del libro se revisa primero.
  */
 export const bookEntryFromDocument = (document: Document, options: BookEntryFromDocumentOptions): BookEntryInput => {
   const { type, folio, issueDate, issuer, receiver } = document.header
@@ -137,14 +141,23 @@ export const bookEntryFromDocument = (document: Document, options: BookEntryFrom
   // `IVARetParcial` for a lesser one.
   const ownField = (item: Withholding): boolean =>
     options.operation === 'sale' && RETENTION_TAX_CODES.includes(item.taxCode)
-  const whole = (item: Withholding): boolean =>
-    item.taxCode === WITHHOLDING_TAX_CODES.totalVatWithholding || item.rate >= (totals.vatRate ?? VAT_RATE)
+  // A withholding without its rate cannot be told whole or partial, and each goes in a field of its own: it is refused
+  // rather than booked in the wrong one. Only code 15 is whole by its code.
+  const whole = (item: Withholding): boolean => {
+    if (item.taxCode === WITHHOLDING_TAX_CODES.totalVatWithholding) return true
+    if (item.rate === undefined)
+      throw new DteError('MISSING_FIELD', { field: 'totals.withholdings', taxCode: item.taxCode })
+    return item.rate >= (totals.vatRate ?? VAT_RATE)
+  }
   const withheld = (items: readonly Withholding[]): number | undefined =>
     items.reduce((total, item) => total + item.amount, 0) || undefined
   const own = withholdings.filter(ownField)
+  // `IVARetTotal` and `IVARetParcial` are a `MontoType`, from zero up, as `DepEnvase` is: a negated withholding has no
+  // field to go in. The other taxes (`MntImp`, a `ValorType`) take the sign of the line.
+  if (negate && own.length > 0) throw new DteError('INVALID_OPTION', { field: 'creditNoteSign' })
   const otherTaxes = withholdings
     .filter((item) => !ownField(item))
-    .map((item) => ({ code: item.taxCode, rate: item.rate, amount: item.amount }))
+    .map((item) => compact({ code: item.taxCode, rate: item.rate, amount: signed(item.amount) }))
   return compact({
     type,
     folio,

@@ -263,8 +263,8 @@ export type SiiTransporte = {
 export type SiiImptoReten = {
   /** EN: Additional tax or withholding code (15 = full VAT withholding). ES: `TipoImp` — Tipo de impuesto adicional o retención. */
   readonly TipoImp: number
-  /** EN: Tax rate, percent. ES: `TasaImp` — Tasa del impuesto. */
-  readonly TasaImp: number
+  /** EN: Tax rate, percent; optional in the schema. ES: `TasaImp` — Tasa del impuesto; opcional en el esquema. */
+  readonly TasaImp?: number
   /** EN: Tax amount. ES: `MontoImp` — Monto del impuesto. */
   readonly MontoImp: number
 }

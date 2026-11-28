@@ -1,6 +1,15 @@
-import { VAT_RATE, WITHHOLDING_TAX_CODES } from '../catalogs/codes'
+import { ADDITIONAL_TAXES, isAdditionalTaxCode, type AdditionalTaxCode } from '../catalogs/additional-taxes'
+import { VAT_RATE, WITHHOLDING_TAX_CODES, type ExemptIndicator } from '../catalogs/codes'
 import { carriesDepositGuarantee, isExport, isReceipt, type DocumentType } from '../catalogs/document-types'
-import type { CommissionLineInput, GlobalAdjustment, LineItem, Totals } from '../model/document'
+import { DteError } from '../errors'
+import type {
+  AdditionalTaxInput,
+  CommissionLineInput,
+  GlobalAdjustment,
+  LineItem,
+  Totals,
+  Withholding,
+} from '../model/document'
 import { divide, held, pow10, unitsOf, ZERO } from './exact'
 import { calculateExportTotals } from './export'
 
@@ -96,6 +105,8 @@ export type TotalsOptions = {
   readonly commissions?: readonly Pick<CommissionLineInput, 'netValue' | 'exemptValue' | 'vatValue'>[]
   /** EN: An export document without payment (`FmaPagExp` 21), whose total is zero; read only on an export document. ES: Un documento de exportación sin pago (`FmaPagExp` 21), cuyo total es cero; solo se lee en un documento de exportación. */
   readonly withoutPayment?: boolean
+  /** EN: The rate or the amount of an additional tax or withholding the lines carry (`CodImpAdic`), at most one entry per code, each for a code a line carries. A code is worked out as Formato DTE 2.5 defines `MontoImp` (field 117): its rate by the sum of the lines that carry it, rounded once, half away from zero, over decimal digits; the rate is the caller's or, without one, the one the table of codes gives (`ADDITIONAL_TAXES`). The caller gives the amount of a code whose amount is not the rate by its lines (the VAT on a trading margin, 14 and 50, the specific taxes on diesel and gasoline, 28 and 35, and the advance VAT on slaughter, 17, over its own base) and of one whose rate neither gives; with an amount, a rate is needed too, written as `TasaImp`, except on a specific tax (28, 35, 51, 52), whose rate field 116 lets out ("En el caso de impuesto específicos se puede omitir"). A tax that works out to zero is not written (field 117 c, "Valor numérico en otros casos > 0"), and a code whose lines add up to zero needs neither rate nor amount; its lines keep the code. Code 15 is not given while the whole VAT is withheld (`withholdVat`), which works it out. ES: `ImptoReten` — La tasa o el monto de un impuesto adicional o retención que llevan las líneas (`CodImpAdic`), a lo más una entrada por código, cada una de un código que lleva una línea. Un código se calcula como define `MontoImp` el Formato DTE 2.5 (campo 117): su tasa por la suma de las líneas que lo llevan, redondeada una vez, la mitad lejos de cero, sobre dígitos decimales; la tasa es la del llamador o, sin ella, la que da la tabla de códigos (`ADDITIONAL_TAXES`). El llamador entrega el monto de un código cuyo monto no es la tasa por sus líneas (el IVA de margen de comercialización, 14 y 50, los impuestos específicos al diésel y a la gasolina, 28 y 35, y el IVA anticipado faenamiento carne, 17, sobre su propia base) y el de uno cuya tasa ninguno da; con un monto hace falta también una tasa, que se escribe como `TasaImp`, salvo en un impuesto específico (28, 35, 51, 52), cuya tasa el campo 116 permite omitir ("En el caso de impuesto específicos se puede omitir"). Un impuesto que resulta cero no se escribe (campo 117 c, "Valor numérico en otros casos > 0"), y un código cuyas líneas suman cero no necesita tasa ni monto; sus líneas conservan el código. El código 15 no se entrega mientras se retiene todo el IVA (`withholdVat`), que lo calcula. */
+  readonly additionalTaxes?: readonly AdditionalTaxInput[]
 }
 
 type Bases = {
@@ -145,10 +156,14 @@ export const adjustmentShare = (amount: number, adjustment: Pick<GlobalAdjustmen
     0,
   )
 
+// The base a global adjustment applies to, by its `IndExeDR`.
+type AdjustedBase = 'affected' | 'exempt' | 'nonBillable'
+const adjustedBaseOf = (adjustment: GlobalAdjustment): AdjustedBase =>
+  adjustment.exemptIndicator === 1 ? 'exempt' : adjustment.exemptIndicator === 2 ? 'nonBillable' : 'affected'
+
 const applyAdjustments = (bases: Bases, adjustments: readonly GlobalAdjustment[]): Bases =>
   adjustments.reduce<Bases>((acc, adjustment) => {
-    const key =
-      adjustment.exemptIndicator === 1 ? 'exempt' : adjustment.exemptIndicator === 2 ? 'nonBillable' : 'affected'
+    const key = adjustedBaseOf(adjustment)
     const delta = adjustmentShare(acc[key], adjustment)
     const signed = adjustment.kind === 'discount' ? -delta : delta
     return { ...acc, [key]: acc[key] + signed }
@@ -179,6 +194,149 @@ const sumCommissions = (lines: NonNullable<TotalsOptions['commissions']>, vatRat
   return { netValue, exemptValue, vatValue }
 }
 
+type TaxedItem = Pick<LineItem, 'amount' | 'exemptIndicator' | 'additionalTaxCodes'>
+
+// The lines a global adjustment applies to, by its `IndExeDR` (Formato DTE 2.5, section D): the affected lines, the
+// exempt ones (1), or the non-billable ones (2), which `MontoNF` sums with those of `IndExe` 6.
+const ADJUSTED_LINES: Readonly<Record<AdjustedBase, readonly (ExemptIndicator | undefined)[]>> = {
+  affected: [undefined],
+  exempt: [1],
+  nonBillable: [2, 6],
+}
+
+// Formato DTE 2.5, field 117: `MontoImp` is the rate by the sum of the lines with the code "excepto Diesel, Gasolina,
+// margen de comercialización e 'Iva anticipado faenamiento carne'", the last over the slaughter base instead.
+const NOT_FROM_LINES: readonly number[] = [14, 17, 28, 35, 50]
+// `TasaImp` is a `PctType` of `SiiTypes_v10.xsd`, from 0.01 to 999.99, here in hundredths.
+const MIN_RATE = BigInt(1)
+const MAX_RATE = BigInt(99999)
+
+type LineTax = {
+  readonly taxCode: AdditionalTaxCode
+  readonly firstLine: number
+  readonly base: number
+  readonly indicators: readonly (ExemptIndicator | undefined)[]
+}
+
+// The type whose codes a document takes. The table of codes (Formato DTE 2.5, section 4, "Documentos en que se aplica")
+// names the invoices, purchase invoices and their notes; the field table marks `CodImpAdic` (page 41) and `ImptoReten`
+// (page 30) conditional on an exempt invoice (34) and optional on a dispatch guide (52), which take the codes of a sale
+// invoice (33). It marks `CodImpAdic` 0, not applicable, on a settlement invoice (43), which the table does not name
+// either, and neither names a receipt or an export document.
+const tableTypeOf = (type: DocumentType): DocumentType => (type === 34 || type === 52 ? 33 : type)
+
+// The codes the lines carry, in the order they first appear, each with the sum of the lines that carry it. Code 15 is
+// the withholding of the whole VAT when the totals withhold it, on any type, as the lines that bring none get it; beside
+// it no other code is taken.
+const lineTaxes = (items: readonly TaxedItem[], type: DocumentType, withholdVat: boolean): readonly LineTax[] => {
+  const found = new Map<number, LineTax>()
+  const tableType = tableTypeOf(type)
+  items.forEach((item, index) => {
+    for (const taxCode of item.additionalTaxCodes ?? []) {
+      const refuse = (field: string): never => {
+        throw new DteError('INVALID_OPTION', { field, taxCode })
+      }
+      const line = `items[${index}].additionalTaxCodes`
+      if (withholdVat && taxCode === WITHHOLDING_TAX_CODES.totalVatWithholding) continue
+      if (!isAdditionalTaxCode(taxCode) || !ADDITIONAL_TAXES[taxCode].documents.includes(tableType)) return refuse(line)
+      if (withholdVat) refuse('withholdVat')
+      const tax = ADDITIONAL_TAXES[taxCode]
+      // Field 124 takes off the total the VAT withheld "en caso de facturas de compra": a withholding on a sale (codes
+      // 46 and 53, which the table gives a 33) has no side of the total the format states.
+      if (tax.kind === 'withholding' && !tax.documents.includes(46)) refuse(line)
+      const known = found.get(taxCode)
+      found.set(taxCode, {
+        taxCode,
+        firstLine: known?.firstLine ?? index,
+        base: (known?.base ?? 0) + item.amount,
+        indicators: [...(known?.indicators ?? []), item.exemptIndicator],
+      })
+    }
+  })
+  return [...found.values()]
+}
+
+type GivenTax = { readonly entry: AdditionalTaxInput; readonly index: number }
+
+const givenTaxes = (
+  given: unknown,
+  carried: readonly LineTax[],
+  withholdVat: boolean,
+): ReadonlyMap<number, GivenTax> => {
+  if (!Array.isArray(given)) throw new DteError('INVALID_OPTION', { field: 'additionalTaxes' })
+  return (given as readonly unknown[]).reduce<Map<number, GivenTax>>((acc, value, index) => {
+    const path = `additionalTaxes[${index}]`
+    if (typeof value !== 'object' || value === null) throw new DteError('INVALID_OPTION', { field: path })
+    const entry = value as AdditionalTaxInput
+    const { taxCode, rate, amount } = entry
+    if (withholdVat && taxCode === WITHHOLDING_TAX_CODES.totalVatWithholding)
+      throw new DteError('INVALID_OPTION', { field: 'withholdVat', taxCode })
+    if (acc.has(taxCode) || !carried.some((tax) => tax.taxCode === taxCode))
+      throw new DteError('INVALID_OPTION', { field: `${path}.taxCode`, taxCode })
+    if (rate !== undefined && !(typeof rate === 'number' && Number.isFinite(rate)))
+      throw new DteError('INVALID_AMOUNT', { field: `${path}.rate`, taxCode })
+    if (amount !== undefined && !(Number.isSafeInteger(amount) && amount > 0))
+      throw new DteError('INVALID_AMOUNT', { field: `${path}.amount`, taxCode })
+    return new Map([...acc, [taxCode, { entry, index }]])
+  }, new Map<number, GivenTax>())
+}
+
+// Each code as `ImptoReten`: the amount given, or its rate by the sum of its lines, rounded once (field 117). A tax that
+// works out to zero is none: field 117 c) asks for a value "> 0", and the line keeps its code. A specific tax given by
+// its amount may leave out its rate (field 116, "En el caso de impuesto específicos se puede omitir"); every other code
+// is written with it.
+//
+// Section D of the format says of the global discounts and surcharges that "Estos aumentan o disminuyen la base del
+// impuesto", and that when "en la Zona de Detalle hayan ítems con distintos códigos de impuesto o retenciones, el campo
+// 'tipo de valor' del descuento debe ser %". It says the base of a code changes, and how an adjustment must be written
+// then, but not how a code's share of the adjustment is taken nor rounded: a tax is not worked out beside an adjustment
+// that applies to one of its lines, and its amount is given instead.
+const resolveTaxes = (
+  carried: readonly LineTax[],
+  options: TotalsOptions,
+  withholdVat: boolean,
+): readonly Withholding[] => {
+  const given = givenTaxes(options.additionalTaxes ?? [], carried, withholdVat)
+  // Formato DTE 2.5, field 10 of the header: `MntBruto` is "sólo para documentos sin impuestos adicionales".
+  if (carried.length > 0 && options.pricesIncludeVat)
+    throw new DteError('INVALID_OPTION', { field: 'pricesIncludeVat', taxCode: carried[0].taxCode })
+  return carried.flatMap(({ taxCode, firstLine, base, indicators }): readonly Withholding[] => {
+    const { entry, index } = given.get(taxCode) ?? {}
+    const touching = (options.globalAdjustments ?? []).findIndex((adjustment) =>
+      ADJUSTED_LINES[adjustedBaseOf(adjustment)].some((indicator) => indicators.includes(indicator)),
+    )
+    // Lines that add up to nothing, with no adjustment on them, give no tax whatever its rate.
+    if (entry?.amount === undefined && base === 0 && touching < 0) return []
+    const tax = ADDITIONAL_TAXES[taxCode]
+    const rate = entry?.rate ?? tax.rate
+    const units = rate === undefined ? undefined : unitsOf(rate, 2)
+    if (units !== undefined && !(units >= MIN_RATE && units <= MAX_RATE))
+      throw new DteError('INVALID_AMOUNT', {
+        field: entry?.rate === undefined ? `items[${firstLine}].additionalTaxCodes` : `additionalTaxes[${index}].rate`,
+        taxCode,
+      })
+    if (entry?.amount !== undefined) {
+      if (units !== undefined) return [{ taxCode, rate: held(units, 2), amount: entry.amount }]
+      if (tax.kind === 'specific') return [{ taxCode, amount: entry.amount }]
+      throw new DteError('MISSING_FIELD', { field: `additionalTaxes[${index}].rate`, taxCode })
+    }
+    if (units === undefined || NOT_FROM_LINES.includes(taxCode))
+      throw new DteError('MISSING_FIELD', { field: 'additionalTaxes', taxCode })
+    if (touching >= 0) throw new DteError('INVALID_OPTION', { field: `globalAdjustments[${touching}]`, taxCode })
+    const amount = held(divide(unitsOf(base, 0) * units, pow10(4)), 0)
+    return amount === 0 ? [] : [{ taxCode, rate: held(units, 2), amount }]
+  })
+}
+
+// Formato DTE 2.5, field 124: the additional, specific and advance taxes and the VAT on a margin add to the total; the
+// VAT withheld comes off it.
+const taxesTotal = (taxes: readonly Withholding[]): number =>
+  taxes.reduce(
+    (sum, { taxCode, amount }) =>
+      ADDITIONAL_TAXES[taxCode as AdditionalTaxCode].kind === 'withholding' ? sum - amount : sum + amount,
+    0,
+  )
+
 /**
  * EN: Computes `Totales` from detail lines: net, exempt, VAT (derived from the gross when `pricesIncludeVat`), the
  * non-billable amount, which is the lines with `IndExe` 2 less the lines with `IndExe` 6 and may be negative (Formato
@@ -194,7 +352,21 @@ const sumCommissions = (lines: NonNullable<TotalsOptions['commissions']>, vatRat
  * SII expects. On a settlement invoice (43) the net, the exempt amount, the VAT and the total keep their sign, so the
  * total may be zero or negative, and non-billable lines are not totalled, because `Liquidacion` declares no `MontoNF`.
  * An export document (110, 111, 112) has the totals of `calculateExportTotals`: its exempt amount and its total, in
- * its currency with four decimals.
+ * its currency with four decimals. Each code of additional tax or withholding the lines carry (`CodImpAdic`) becomes
+ * one `ImptoReten` in the order the codes first appear, worked out or given as `additionalTaxes` says (Formato DTE 2.5,
+ * field 117), and the total adds the additional, specific and advance taxes and the VAT on a margin and takes off the
+ * withholdings (field 124); a tax that works out to zero is not written. Code 15 on a document that withholds the whole
+ * VAT is that withholding, on any type, whether the line brings it or gets it. Which codes a type takes rests on two
+ * tables of the format: the table of codes (section 4, "Documentos en que se aplica") gives each code to invoices,
+ * purchase invoices and their notes (33, 46, 56, 61); the field table marks `CodImpAdic` (page 41) and `ImptoReten`
+ * (page 30) conditional on an exempt invoice (34) and optional on a dispatch guide (52), which take the codes the table
+ * gives a 33, and marks `CodImpAdic` not applicable on a settlement invoice (43), where a code is refused as on a
+ * receipt and an export document. A code is refused, besides, when it is a withholding on a sale (46, 53), whose side
+ * of the total field 124 does not state, beside the whole VAT withheld, beside VAT-included prices (`MntBruto`, field
+ * 10 of the header, "sólo para documentos sin impuestos adicionales"), and, when it is worked out from its lines,
+ * beside a global adjustment that applies to one of them: section D says the adjustments "aumentan o disminuyen la
+ * base del impuesto" and that, with "ítems con distintos códigos de impuesto o retenciones", their value "debe ser %",
+ * but not how a code's share of one is taken nor rounded, so the caller gives that tax's amount.
  * ES: Calcula `Totales` desde las líneas: neto, exento, IVA (derivado del bruto con `pricesIncludeVat`), el monto no
  * facturable, que son las líneas con `IndExe` 2 menos las líneas con `IndExe` 6 y puede ser negativo (Formato DTE 2.5,
  * campo 125), la garantía por depósito de envases, las líneas con `IndExe` 3 (campo 120), la retención en facturas de
@@ -209,13 +381,27 @@ const sumCommissions = (lines: NonNullable<TotalsOptions['commissions']>, vatRat
  * se omiten, tal como espera el SII. En una liquidación factura (43) el neto, el exento, el IVA y el total conservan
  * su signo, así que el total puede ser cero o negativo, y las líneas no facturables no se totalizan, porque
  * `Liquidacion` no declara `MontoNF`. Un documento de exportación (110, 111, 112) tiene los totales de
- * `calculateExportTotals`: su monto exento y su total, en su moneda con cuatro decimales.
- * @throws {DteError} EN: `INVALID_AMOUNT` for a global adjustment value, or an amount it applies to, that is not finite or is 10^21 or more, and for a share with more digits than a number holds, with it in `details.value`; on an export document, what `calculateExportTotals` throws. ES: `INVALID_AMOUNT` ante el valor de un ajuste global, o un monto al que se aplica, que no es finito o es 10^21 o más, y ante una parte con más dígitos de los que guarda un número, con él en `details.value`; en un documento de exportación, lo que lanza `calculateExportTotals`.
+ * `calculateExportTotals`: su monto exento y su total, en su moneda con cuatro decimales. Cada código de impuesto
+ * adicional o retención que llevan las líneas (`CodImpAdic`) pasa a ser un `ImptoReten`, en el orden en que aparecen
+ * los códigos, calculado o entregado según `additionalTaxes` (Formato DTE 2.5, campo 117), y el total suma los
+ * impuestos adicionales, específicos y anticipados y el IVA de margen y resta las retenciones (campo 124); un impuesto
+ * que resulta cero no se escribe. El código 15 en un documento que retiene todo el IVA es esa retención, en cualquier
+ * tipo, lo traiga la línea o lo reciba. Qué códigos lleva un tipo descansa en dos tablas del formato: la tabla de
+ * códigos (punto 4, "Documentos en que se aplica") da cada código a facturas, facturas de compra y sus notas (33, 46,
+ * 56, 61); la tabla de campos marca `CodImpAdic` (página 41) e `ImptoReten` (página 30) condicionales en una factura
+ * exenta (34) y opcionales en una guía de despacho (52), que llevan los códigos que la tabla da a un 33, y marca
+ * `CodImpAdic` no aplicable en una liquidación factura (43), donde un código se rechaza como en una boleta y en un
+ * documento de exportación. Se rechaza además una retención en una venta (46, 53), cuyo lado del total el campo 124
+ * no dice, un código junto a la retención de todo el IVA, junto a precios con IVA incluido (`MntBruto`, campo 10 del
+ * encabezado, "sólo para documentos sin impuestos adicionales") y, si se calcula desde sus líneas, junto a un ajuste
+ * global que se aplica a una de ellas: la sección D dice que los ajustes "aumentan o disminuyen la base del impuesto"
+ * y que, con "ítems con distintos códigos de impuesto o retenciones", su valor "debe ser %", pero no cómo se toma ni se
+ * redondea la parte de un código, así que el llamador entrega el monto de ese impuesto.
+ * @throws {DteError} EN: `INVALID_AMOUNT` for a global adjustment value, or an amount it applies to, that is not finite or is 10^21 or more, and for a share with more digits than a number holds, with it in `details.value`; on an export document, what `calculateExportTotals` throws. For the codes of the lines, with the code in `details.taxCode` and the field in `details.field`: `INVALID_OPTION` for a code refused on `items[i].additionalTaxCodes`, `withholdVat` (code 15 given in `additionalTaxes` included), `pricesIncludeVat` or `globalAdjustments[i]`, and for an `additionalTaxes[i].taxCode` no line carries or given twice; `INVALID_OPTION` also, without a code, for `additionalTaxes` that is not a list and for an `additionalTaxes[i]` that is not an object; `MISSING_FIELD` on `additionalTaxes` for a code whose amount is not worked out from its lines or whose rate neither the caller nor the table gives, and on `additionalTaxes[i].rate` for an amount without any rate on a code that is not a specific tax; `INVALID_AMOUNT` for a rate that is not a finite number or is outside 0.01 to 999.99 (`TasaImp`; the table's 0 % of code 49 included) and for an `additionalTaxes[i].amount` that is not a whole number above zero. ES: `INVALID_AMOUNT` ante el valor de un ajuste global, o un monto al que se aplica, que no es finito o es 10^21 o más, y ante una parte con más dígitos de los que guarda un número, con él en `details.value`; en un documento de exportación, lo que lanza `calculateExportTotals`. Por los códigos de las líneas, con el código en `details.taxCode` y el campo en `details.field`: `INVALID_OPTION` por un código rechazado en `items[i].additionalTaxCodes`, `withholdVat` (incluido el código 15 entregado en `additionalTaxes`), `pricesIncludeVat` o `globalAdjustments[i]`, y por un `additionalTaxes[i].taxCode` que no lleva ninguna línea o que viene dos veces; `INVALID_OPTION` también, sin código, por `additionalTaxes` que no es una lista y por un `additionalTaxes[i]` que no es un objeto; `MISSING_FIELD` en `additionalTaxes` por un código cuyo monto no se calcula desde sus líneas o cuya tasa no dan ni el llamador ni la tabla, y en `additionalTaxes[i].rate` por un monto sin tasa alguna en un código que no es impuesto específico; `INVALID_AMOUNT` por una tasa que no es un número finito o está fuera de 0,01 a 999,99 (`TasaImp`; incluido el 0 % que da la tabla al código 49) y por un `additionalTaxes[i].amount` que no es un entero mayor que cero.
  */
-export const calculateTotals = (
-  items: readonly Pick<LineItem, 'amount' | 'exemptIndicator'>[],
-  options: TotalsOptions,
-): Totals => {
+export const calculateTotals = (items: readonly TaxedItem[], options: TotalsOptions): Totals => {
+  const withholdVat = options.withholdVat ?? options.type === 46
+  const taxes = resolveTaxes(lineTaxes(items, options.type, withholdVat), options, withholdVat)
   if (isExport(options.type))
     return calculateExportTotals(items, {
       globalAdjustments: options.globalAdjustments,
@@ -224,7 +410,6 @@ export const calculateTotals = (
   const vatRate = options.vatRate ?? VAT_RATE
   const receipt = isReceipt(options.type)
   const settlement = options.type === 43
-  const withholdVat = options.withholdVat ?? options.type === 46
   const bases = applyAdjustments(sumBases(items), options.globalAdjustments ?? [])
   const { affected, exempt } = bases
   const nonBillable = settlement ? 0 : bases.nonBillable
@@ -237,13 +422,14 @@ export const calculateTotals = (
   const shown = (amount: number): boolean => (settlement ? amount !== 0 : amount > 0)
   const round = settlement ? roundSigned : Math.round
 
-  if (!shown(affected) && !shown(exempt) && nonBillable === 0 && guarantee === 0 && !hasCharges) {
+  const taxed = taxes.length > 0
+  if (!shown(affected) && !shown(exempt) && nonBillable === 0 && guarantee === 0 && !hasCharges && !taxed) {
     return receipt ? { totalAmount: 0 } : { vatRate, totalAmount: 0 }
   }
 
   const net = options.pricesIncludeVat ? round(affected / (1 + vatRate / 100)) : affected
   const vat = options.pricesIncludeVat ? affected - net : round((net * vatRate) / 100)
-  const total = (withholdVat ? net + exempt : net + vat + exempt) + guarantee - chargesTotal
+  const total = (withholdVat ? net + exempt : net + vat + exempt) + guarantee - chargesTotal + taxesTotal(taxes)
 
   return {
     ...(shown(net) ? { netAmount: net } : {}),
@@ -253,6 +439,8 @@ export const calculateTotals = (
     ...(withholdVat && vat > 0
       ? { withholdings: [{ taxCode: WITHHOLDING_TAX_CODES.totalVatWithholding, rate: vatRate, amount: vat }] }
       : {}),
+    // Beside the whole VAT withheld no other code is taken, so the two never meet.
+    ...(taxed ? { withholdings: taxes } : {}),
     ...(guarantee > 0 ? { depositGuarantee: guarantee } : {}),
     ...(hasCharges
       ? {

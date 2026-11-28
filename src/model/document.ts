@@ -161,7 +161,7 @@ export type LineItemInput = {
   readonly wholeShares?: boolean
   /** EN: Item codes. ES: `CdgItem` — Códigos del ítem (hasta 5). */
   readonly codes?: readonly ItemCode[]
-  /** EN: Additional tax codes; refused on a receipt. A VAT-affected line that brings none gets code 15 when the document withholds the whole VAT; an empty list keeps it without one. ES: `CodImpAdic` — Códigos de impuesto adicional (hasta 2); se rechazan en una boleta. Una línea afecta que no trae ninguno recibe el código 15 cuando el documento retiene todo el IVA; una lista vacía la deja sin código. */
+  /** EN: Additional tax or withholding codes, at most 2; refused on a receipt. Each code is a tax of the totals: worked out by `createDocument` (see `TotalsOptions.additionalTaxes`), and required in totals given by hand unless the line's amount is zero. A VAT-affected line that brings none gets code 15 when the document withholds the whole VAT; an empty list keeps it without one. ES: `CodImpAdic` — Códigos de impuesto adicional o retención, hasta 2; se rechazan en una boleta. Cada código es un impuesto de los totales: lo calcula `createDocument` (ver `TotalsOptions.additionalTaxes`), y se exige en los totales entregados a mano salvo que el monto de la línea sea cero. Una línea afecta que no trae ninguno recibe el código 15 cuando el documento retiene todo el IVA; una lista vacía la deja sin código. */
   readonly additionalTaxCodes?: readonly number[]
   /** EN: Type of the settled document (max 3): required on a settlement invoice (43), refused on any other type. ES: `TpoDocLiq` — Tipo del documento liquidado, máximo 3; obligatorio en liquidación factura (43) y rechazado en cualquier otro tipo. */
   readonly settledDocumentType?: string
@@ -229,10 +229,28 @@ export type LineItem = {
 export type Withholding = {
   /** EN: Tax code. ES: `TipoImp` — Código del impuesto (15 = IVA retenido total). */
   readonly taxCode: number
-  /** EN: Rate percent. ES: `TasaImp` — Tasa en porcentaje. */
-  readonly rate: number
+  /** EN: Rate percent; absent only on a specific tax, whose rate Formato DTE 2.5 lets out (field 116). ES: `TasaImp` — Tasa en porcentaje; falta solo en un impuesto específico, cuya tasa el Formato DTE 2.5 permite omitir (campo 116). */
+  readonly rate?: number
   /** EN: Withheld amount. ES: `MontoImp` — Monto retenido. */
   readonly amount: number
+}
+
+/**
+ * EN: What the caller gives of one additional tax or withholding its lines carry (`CodImpAdic`), when the table of
+ * Formato DTE 2.5 does not give it all: its rate, which takes the place of the table's, or its amount, which is taken as
+ * it comes. A code the lines carry and this does not name is worked out with the table's rate.
+ * ES: `ImptoReten` — Lo que el llamador entrega de un impuesto adicional o retención que llevan sus líneas
+ * (`CodImpAdic`), cuando la tabla del Formato DTE 2.5 no lo da entero: su tasa, que reemplaza a la de la tabla, o su
+ * monto, que se toma tal como viene. Un código que llevan las líneas y que esto no nombra se calcula con la tasa de la
+ * tabla.
+ */
+export type AdditionalTaxInput = {
+  /** EN: Code of the tax or withholding, one a line carries. ES: `TipoImp` — Código del impuesto o retención, uno que lleva una línea. */
+  readonly taxCode: number
+  /** EN: Rate in percent, from 0.01 to 999.99, rounded to two decimals; without it, the table's. Beside an amount, a specific tax may leave it out (Formato DTE 2.5, field 116), and no `TasaImp` is written. ES: `TasaImp` — Tasa en porcentaje, de 0,01 a 999,99, redondeada a dos decimales; sin ella, la de la tabla. Junto a un monto, un impuesto específico puede omitirla (Formato DTE 2.5, campo 116), y no se escribe `TasaImp`. */
+  readonly rate?: number
+  /** EN: Amount in whole pesos above zero, taken as it comes; without it, the rate by the sum of the lines that carry the code. ES: `MontoImp` — Monto en pesos enteros mayor que cero, tomado tal como viene; sin él, la tasa por la suma de las líneas que llevan el código. */
+  readonly amount?: number
 }
 
 /**
@@ -271,7 +289,7 @@ export type Totals = {
   readonly ownVatAmount?: number
   /** EN: Third-party VAT (settlement invoices); refused on a receipt. ES: `IVATerc` — IVA de terceros (liquidaciones); se rechaza en una boleta. */
   readonly thirdPartyVatAmount?: number
-  /** EN: Withholdings; refused on a receipt. ES: `ImptoReten` — Retenciones; se rechazan en una boleta. */
+  /** EN: Additional taxes and withholdings, at most 20, as the schema declares; refused on a receipt. ES: `ImptoReten` — Impuestos adicionales y retenciones, 20 como máximo, como declara el esquema; se rechazan en una boleta. */
   readonly withholdings?: readonly Withholding[]
   /** EN: VAT not withheld: the VAT less the VAT withheld by product (Formato DTE 2.5, field 118), on a purchase invoice (46) that withholds part of the VAT and on the notes that reference one (56, 61); a whole number above zero, written as given, where a given zero is none and no `IVANoRet` is written; refused on any other type. ES: `IVANoRet` — IVA no retenido: el IVA menos el IVA retenido por producto (Formato DTE 2.5, campo 118), en una factura de compra (46) que retiene parte del IVA y en las notas que referencian una (56, 61); un entero mayor que cero, escrito tal como viene, donde uno entregado en cero no cuenta y no se escribe `IVANoRet`; se rechaza en cualquier otro tipo. */
   readonly vatNotWithheld?: number
@@ -279,7 +297,7 @@ export type Totals = {
   readonly depositGuarantee?: number
   /** EN: Totals of the commission and other charge lines; refused on a receipt. ES: `Comisiones` — Totales de las líneas de comisiones y otros cargos; se rechazan en una boleta. */
   readonly commissions?: CommissionTotals
-  /** EN: Document total: net + VAT + exempt (VAT excluded when withheld) + the deposit guarantee, less the commissions and other charges (Formato DTE 2.5, field 124); zero or negative only on a settlement invoice (43), and on an export document the exempt amount, or zero without payment. `createDocument` refuses one that does not add up, unless the totals carry a tax code other than 15. ES: `MntTotal` — Monto total: neto + IVA + exento (sin IVA si está retenido) + la garantía por depósito de envases, menos las comisiones y otros cargos (Formato DTE 2.5, campo 124); cero o negativo solo en una liquidación factura (43), y en un documento de exportación el monto exento, o cero sin pago. `createDocument` rechaza uno que no cuadra, salvo que los totales traigan un código de impuesto distinto del 15. */
+  /** EN: Document total: net + VAT + exempt (VAT excluded when withheld) + the deposit guarantee + the additional, specific and advance taxes and the VAT on a margin, less the other withholdings and the commissions and other charges (Formato DTE 2.5, field 124); zero or negative only on a settlement invoice (43), and on an export document the exempt amount, or zero without payment. `createDocument` refuses one that does not add up, unless the totals carry a tax code other than 15. ES: `MntTotal` — Monto total: neto + IVA + exento (sin IVA si está retenido) + la garantía por depósito de envases + los impuestos adicionales, específicos y anticipados y el IVA de margen, menos las demás retenciones y las comisiones y otros cargos (Formato DTE 2.5, campo 124); cero o negativo solo en una liquidación factura (43), y en un documento de exportación el monto exento, o cero sin pago. `createDocument` rechaza uno que no cuadra, salvo que los totales traigan un código de impuesto distinto del 15. */
   readonly totalAmount: number
   /** EN: Non-billable amount: the lines with `IndExe` 2 less the lines with `IndExe` 6 (Formato DTE 2.5, field 125), so it may be negative; refused on a settlement invoice (43), whose root has no `MontoNF`. ES: `MontoNF` — Monto no facturable: las líneas con `IndExe` 2 menos las líneas con `IndExe` 6 (Formato DTE 2.5, campo 125), así que puede ser negativo; se rechaza en una liquidación factura (43), cuya raíz no tiene `MontoNF`. */
   readonly nonBillableAmount?: number
@@ -306,7 +324,7 @@ export type ReferenceInput = {
   readonly code?: ReferenceCode
   /** EN: Reason (max 90). ES: `RazonRef` — Razón de la referencia, máximo 90. */
   readonly reason?: string
-  /** EN: Global reference (`IndGlobal=1`). ES: `IndGlobal` — Referencia global. */
+  /** EN: Global reference (`IndGlobal=1`), whose `folio` is 0 (Formato DTE 2.5, field 4 of the references): one with another folio is built and listed in `Document.warnings`. ES: `IndGlobal` — Referencia global, cuyo `folio` es 0 (Formato DTE 2.5, campo 4 de las referencias): una con otro folio se construye y se informa en `Document.warnings`. */
   readonly global?: boolean
   /** EN: RUT of another issuer; refused on a settlement invoice (43). ES: `RUTOtr` — RUT de otro contribuyente; se rechaza en una liquidación factura (43). */
   readonly otherRut?: string
@@ -737,7 +755,9 @@ export type Header = {
  * percent written without its amount, by the field of the detail of Formato DTE 2.5 that asks a percent for its amount
  * ("Si va el descuento en %, debe ir el monto correspondiente"): the schema's element holds whole numbers only, so a
  * share with decimals has no amount to be written as, and the format leaves that amount optional on an export
- * document.
+ * document. And by the rule it goes against, what the SII's sources ask without making it a rejection, or field
+ * behaviour shows: a global reference whose folio is not zero, an internal transfer to a receiver whose RUT is not the
+ * issuer's, and an export document without its totals in pesos.
  * ES: Lo que `createDocument` arma y el SII puede reparar. De los totales, lo que el SII acepta con reparo, por el
  * número de su validación en "Nuevas validaciones a la IECV, DTE y DJ 3327 y 3328": 10, un monto total en cero en una
  * factura, una factura exenta, una liquidación factura o una factura de compra (33, 34, 43, 46), y 12, un monto neto en
@@ -746,7 +766,9 @@ export type Header = {
  * exportación, un porcentaje escrito sin su monto, por el campo del detalle del Formato DTE 2.5 que le pide a un
  * porcentaje su monto ("Si va el descuento en %, debe ir el monto correspondiente"): el elemento del esquema admite
  * solo enteros, así que una parte con decimales no tiene monto con que escribirse, y el formato deja ese monto
- * opcional en un documento de exportación.
+ * opcional en un documento de exportación. Y por la regla contra la que va, lo que las fuentes del SII piden sin hacerlo
+ * rechazo, o muestra la práctica: una referencia global cuyo folio no es cero, un traslado interno a un receptor cuyo
+ * RUT no es el del emisor, y un documento de exportación sin sus totales en pesos.
  */
 export type DocumentWarning =
   | {
@@ -759,6 +781,12 @@ export type DocumentWarning =
       /** EN: The field of the detail of Formato DTE 2.5 that asks the percent for its amount: 30 for a discount, 34 for a surcharge. ES: `DescuentoMonto` (30) o `RecargoMonto` (34) — El campo del detalle del Formato DTE 2.5 que le pide al porcentaje su monto: 30 para un descuento, 34 para un recargo. */
       readonly formatField: 30 | 34
       /** EN: The percent written without its amount: `items[i].discountPercent` or `items[i].surchargePercent`, with the line's position from 0. ES: `DescuentoPct` o `RecargoPct` — El porcentaje escrito sin su monto: `items[i].discountPercent` o `items[i].surchargePercent`, con la posición de la línea desde 0. */
+      readonly field: string
+    }
+  | {
+      /** EN: The rule the document goes against: `globalReferenceFolio`, a global reference whose folio is not zero (Formato DTE 2.5, field 4 of the references: the folio "Debe ser cero sólo si el documento tiene encendido el Indicador de referencia global"); `internalTransferReceiver`, a dispatch guide of an internal transfer (`transferType` 5) whose receiver's RUT is not the issuer's (the SII's instructions for the dispatch-guide test set: "los datos del receptor deben coincidir con los del emisor"); `exportWithoutPesos`, an export document without its totals in pesos, which the format leaves optional and, as field behaviour, the SII has rejected an export document without. ES: `FolioRef` con `IndGlobal`, `RUTRecep` con `IndTraslado` 5, `OtraMoneda` — La regla contra la que va el documento: `globalReferenceFolio`, una referencia global cuyo folio no es cero (Formato DTE 2.5, campo 4 de las referencias: el folio "Debe ser cero sólo si el documento tiene encendido el Indicador de referencia global"); `internalTransferReceiver`, una guía de despacho de traslado interno (`transferType` 5) cuyo receptor no tiene el RUT del emisor (instrucciones del SII para el set de guías de despacho: "los datos del receptor deben coincidir con los del emisor"); `exportWithoutPesos`, un documento de exportación sin sus totales en pesos, que el formato deja opcionales y que el SII ha rechazado en la práctica. */
+      readonly rule: 'globalReferenceFolio' | 'internalTransferReceiver' | 'exportWithoutPesos'
+      /** EN: The field to change: `references[i].folio` (to 0, or the reference not global), `receiver.rut` (to the issuer's), or `exchangeRate` (to give it), with a reference's position from 0. ES: `FolioRef`, `RUTRecep` o `TpoCambio` — El campo que cambiar: `references[i].folio` (a 0, o la referencia no global), `receiver.rut` (al del emisor) o `exchangeRate` (entregarlo), con la posición de la referencia desde 0. */
       readonly field: string
     }
 
@@ -778,7 +806,7 @@ export type Document = {
   readonly receiptReferences: readonly ReceiptReference[]
   /** EN: Commission lines (settlement invoices only). ES: `Comisiones` — Líneas de comisión (solo 43). */
   readonly commissions: readonly CommissionLine[]
-  /** EN: What the SII may object to, as `createDocument` found it: totals it accepts with an objection, and on an export document each percent of a line written without its amount; absent when there is nothing, and never written to the XML. ES: Lo que el SII puede reparar, tal como lo encontró `createDocument`: totales que acepta con reparo, y en un documento de exportación cada porcentaje de una línea escrito sin su monto; ausente si no hay nada, y nunca se escribe en el XML. */
+  /** EN: What the SII may object to, as `createDocument` found it: totals it accepts with an objection, on an export document each percent of a line written without its amount and the totals in pesos left out, a global reference with a folio, and an internal transfer to another RUT; absent when there is nothing, and never written to the XML. ES: Lo que el SII puede reparar, tal como lo encontró `createDocument`: totales que acepta con reparo, en un documento de exportación cada porcentaje de una línea escrito sin su monto y los totales en pesos omitidos, una referencia global con folio, y un traslado interno a otro RUT; ausente si no hay nada, y nunca se escribe en el XML. */
   readonly warnings?: readonly DocumentWarning[]
 }
 
@@ -800,8 +828,9 @@ export type DocumentInput = {
   readonly softwareProviderRut?: string
   /** EN: Detail lines: at least one, at most 60, and at most 1,000 on a receipt. ES: `Detalle` — Líneas de detalle: al menos una, 60 como máximo, y 1.000 como máximo en una boleta. */
   readonly items: readonly LineItemInput[]
+  /** EN: References to other documents, at most 40, as each root of `DTE_v10.xsd` declares; refused on a receipt. ES: `Referencia` — Referencias a otros documentos, 40 como máximo, como declara cada raíz de `DTE_v10.xsd`; se rechazan en una boleta. */
   readonly references?: readonly ReferenceInput[]
-  /** EN: References of a receipt (39, 41); `references` is for every other type. ES: `Referencia` — Referencias de una boleta (39, 41); `references` es para los demás tipos. */
+  /** EN: References of a receipt (39, 41), at most 40, as `EnvioBOLETA_v11.xsd` declares; `references` is for every other type. ES: `Referencia` — Referencias de una boleta (39, 41), 40 como máximo, como declara `EnvioBOLETA_v11.xsd`; `references` es para los demás tipos. */
   readonly receiptReferences?: readonly ReceiptReferenceInput[]
   /** EN: Global discounts and surcharges; refused on a settlement invoice (43) and on a credit note that corrects a text (a reference with `code` 2), whose lines are zero. ES: `DscRcgGlobal` — Descuentos y recargos globales; se rechazan en una liquidación factura (43) y en una nota de crédito que corrige un texto (una referencia con `code` 2), cuyas líneas son cero. */
   readonly globalAdjustments?: readonly GlobalAdjustmentInput[]
@@ -815,12 +844,14 @@ export type DocumentInput = {
   readonly pricesIncludeVat?: boolean
   /** EN: Withhold the whole VAT (`ImptoReten` 15, total without VAT); true by default on purchase invoices, settable on the notes that affect one, and refused on a receipt when true. ES: `ImptoReten` — Retener todo el IVA (código 15, total sin IVA); true por defecto en facturas de compra (46), se puede fijar en las notas que las afectan, y en true se rechaza en una boleta. */
   readonly withholdVat?: boolean
+  /** EN: The rate or the amount of an additional tax or withholding the lines carry, for the totals worked out here: see `TotalsOptions.additionalTaxes`. Refused with explicit `totals`, which carry the taxes themselves. ES: `ImptoReten` — La tasa o el monto de un impuesto adicional o retención que llevan las líneas, para los totales que se calculan aquí: ver `TotalsOptions.additionalTaxes`. Se rechaza con `totals` explícitos, que llevan ellos mismos los impuestos. */
+  readonly additionalTaxes?: readonly AdditionalTaxInput[]
   /** EN: On a settlement invoice (43), write the VAT split in own and third-party, as Formato DTE 2.5 lets a company that sells on behalf of a principal do (fields 113 and 114): the VAT of the commissions is the own VAT and the rest of the VAT is the third parties'. A document without VAT has no split, and neither has one whose commissions' VAT is negative or above the VAT, since the format holds each part within the VAT. Refused on any other type and with explicit `totals`, which carry `ownVatAmount` and `thirdPartyVatAmount` themselves. ES: `IVAProp`, `IVATerc` — En una liquidación factura (43), escribir el IVA separado en propio y de terceros, como el Formato DTE 2.5 permite a una empresa que vende por cuenta de un mandante (campos 113 y 114): el IVA de las comisiones es el IVA propio y el resto del IVA es el de terceros. Un documento sin IVA no lleva separación, ni uno cuyo IVA de comisiones es negativo o mayor que el IVA, porque el formato mantiene cada parte dentro del IVA. Se rechaza en cualquier otro tipo y con `totals` explícitos, que llevan ellos mismos `ownVatAmount` y `thirdPartyVatAmount`. */
   readonly splitVat?: boolean
   /** EN: Explicit totals (advanced), written as given; computed when omitted. ES: `Totales` — Totales explícitos (uso avanzado), escritos tal como vienen; se calculan si se omiten. */
   readonly totals?: Totals
   /** EN: Currency of the amounts of an export document, required there and refused on any other type. ES: `TpoMoneda` — Moneda de los montos de un documento de exportación, obligatoria en él y rechazada en cualquier otro tipo. */
   readonly currency?: Currency
-  /** EN: Exchange rate of the currency to Chilean pesos on the issue date, above zero, rounded to four decimals: an export document with one carries its totals in pesos (`OtraMoneda`, `PESO CL`), each `convertToPesos` of its amount. Refused on any other type. ES: `TpoCambio` — Tipo de cambio de la moneda a pesos chilenos a la fecha de emisión, mayor que cero, redondeado a cuatro decimales: un documento de exportación que lo trae lleva sus totales en pesos (`OtraMoneda`, `PESO CL`), cada uno el `convertToPesos` de su monto. Se rechaza en cualquier otro tipo. */
+  /** EN: Exchange rate of the currency to Chilean pesos on the issue date, above zero, rounded to four decimals: an export document with one carries its totals in pesos (`OtraMoneda`, `PESO CL`), each `convertToPesos` of its amount; one issued without it is built without them and listed in `Document.warnings`. Refused on any other type. ES: `TpoCambio` — Tipo de cambio de la moneda a pesos chilenos a la fecha de emisión, mayor que cero, redondeado a cuatro decimales: un documento de exportación que lo trae lleva sus totales en pesos (`OtraMoneda`, `PESO CL`), cada uno el `convertToPesos` de su monto; uno emitido sin él se construye sin ellos y se informa en `Document.warnings`. Se rechaza en cualquier otro tipo. */
   readonly exchangeRate?: number
 }

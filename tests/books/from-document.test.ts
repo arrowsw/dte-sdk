@@ -241,6 +241,68 @@ describe('bookEntryFromDocument', () => {
     expect(bookEntryFromDocument(createDocument(base), { ...sale, creditNoteSign: 'negative' }).netAmount).toBe(100000)
   })
 
+  test('a negative credit note negates its other taxes too, and its line adds up', () => {
+    const note = createDocument({
+      ...base,
+      type: 61,
+      items: [{ name: 'Vino tinto reserva', quantity: 3, unitPrice: 1234, additionalTaxCodes: [25] }],
+      references: [{ documentType: 33, folio: '10', date: '2026-10-15', code: 3, reason: 'Devolución' }],
+    })
+    const entry = bookEntryFromDocument(note, { ...sale, creditNoteSign: 'negative' })
+    expect(entry).toMatchObject({
+      netAmount: -3702,
+      vatAmount: -703,
+      otherTaxes: [{ code: 25, rate: 20.5, amount: -759 }],
+      totalAmount: -5164,
+    })
+    expect(createPurchaseSalesBook({ cover: saleCover, entries: [entry] }).totalMismatches).toEqual([])
+  })
+
+  // `IVARetTotal` and `IVARetParcial` are a `MontoType` of `LibroCV_v10.xsd`, from zero up: a withholding of a credit
+  // note booked in its own field cannot be negated.
+  test('a negative sign is refused on a credit note whose withholding takes a field of the sales detail', () => {
+    const note = createDocument({
+      ...base,
+      type: 61,
+      withholdVat: true,
+      items: [{ name: 'Chatarra', quantity: 10, unitPrice: 1000 }],
+      references: [{ documentType: 46, folio: '10', date: '2026-10-15', code: 3, reason: 'Devolución' }],
+    })
+    expect(() => bookEntryFromDocument(note, { ...sale, creditNoteSign: 'negative' })).toThrow(
+      expect.objectContaining({ code: 'INVALID_OPTION', details: { field: 'creditNoteSign' } }),
+    )
+    expect(bookEntryFromDocument(note, { ...purchase, creditNoteSign: 'negative' })).toMatchObject({
+      otherTaxes: [{ code: 15, rate: 19, amount: -1900 }],
+      totalAmount: -10000,
+    })
+  })
+
+  test('a specific tax with no rate books with none, and a withholding with none is refused on a sale', () => {
+    const diesel = createDocument({
+      ...base,
+      items: [{ name: 'Petróleo diésel', quantity: 100, unitPrice: 800, additionalTaxCodes: [28] }],
+      additionalTaxes: [{ taxCode: 28, amount: 6400 }],
+    })
+    const entry = bookEntryFromDocument(diesel, sale)
+    expect(entry.otherTaxes).toEqual([{ code: 28, amount: 6400 }])
+    expect(createPurchaseSalesBook({ cover: saleCover, entries: [entry] }).totalMismatches).toEqual([])
+    const partial = createDocument({
+      ...base,
+      type: 46,
+      receiver: { ...receiver, rut: SUPPLIER_RUT, businessName: 'Hortalizas del Maule Ltda' },
+      totals: {
+        netAmount: 100000,
+        vatRate: 19,
+        vatAmount: 19000,
+        withholdings: [{ taxCode: 33, amount: 8000 }],
+        totalAmount: 111000,
+      },
+    })
+    expect(() => bookEntryFromDocument(partial, { bookRut: SUPPLIER_RUT, operation: 'sale' })).toThrow(
+      expect.objectContaining({ code: 'MISSING_FIELD', details: { field: 'totals.withholdings', taxCode: 33 } }),
+    )
+  })
+
   test('its result builds a book without mismatches', () => {
     const entries = [bookEntryFromDocument(createDocument(base), sale)]
     expect(createPurchaseSalesBook({ cover: saleCover, entries }).totalMismatches).toEqual([])

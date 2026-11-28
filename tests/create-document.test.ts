@@ -1,5 +1,5 @@
 import { buildDocumentXml } from '../src/document/build-xml'
-import { createDocument, FIELD_LIMITS } from '../src/document/create'
+import { createDocument, FIELD_LIMITS, findTextProblems } from '../src/document/create'
 import { fromSiiDocument, toSiiDocument } from '../src/model/codec'
 import { DteError } from '../src/errors'
 import { calculateLineAmount } from '../src/totals/calculate'
@@ -457,13 +457,20 @@ test('withholdVat withholds the whole VAT on a note that affects a purchase invo
     withholdings: [{ taxCode: 15, rate: 19, amount: 1900 }],
     totalAmount: 10000,
   })
-  expect(createDocument({ ...base, type: 61 }).header.totals).toEqual({
+  // A line that carries code 15 claims a withholding: without the whole VAT withheld, its rate is the caller's to give.
+  expectError(() => createDocument({ ...base, type: 61 }), 'MISSING_FIELD', { field: 'additionalTaxes', taxCode: 15 })
+  expectError(() => createDocument({ ...base, type: 46, withholdVat: false }), 'MISSING_FIELD', {
+    field: 'additionalTaxes',
+    taxCode: 15,
+  })
+  const plain = { ...base, items: [{ name: 'Chatarra', quantity: 10, unitPrice: 1000 }] }
+  expect(createDocument({ ...plain, type: 61 }).header.totals).toEqual({
     netAmount: 10000,
     vatRate: 19,
     vatAmount: 1900,
     totalAmount: 11900,
   })
-  expect(createDocument({ ...base, type: 46, withholdVat: false }).header.totals.totalAmount).toBe(11900)
+  expect(createDocument({ ...plain, type: 46, withholdVat: false }).header.totals.totalAmount).toBe(11900)
 })
 
 // Formato DTE 2.5: `GrntDep` is the sum of the lines with `IndExe` 3 (field 120), `MntTotal` adds it (field 124), and
@@ -658,10 +665,14 @@ describe('the lines of a document that withholds the whole VAT', () => {
   test('a line that brings its own codes keeps them, an empty list included', () => {
     const doc = purchase([
       { name: 'Chatarra', unitPrice: 1000, additionalTaxCodes: [15] },
-      { name: 'Carne', unitPrice: 1000, additionalTaxCodes: [17] },
       { name: 'Otro', unitPrice: 1000, additionalTaxCodes: [] },
     ])
-    expect(codes(doc)).toEqual([[15], [17], []])
+    expect(codes(doc)).toEqual([[15], []])
+    // A code the table gives a sale alone has no place on a purchase invoice, whose totals would not carry it.
+    expectError(() => purchase([{ name: 'Carne', unitPrice: 1000, additionalTaxCodes: [17] }]), 'INVALID_OPTION', {
+      field: 'items[0].additionalTaxCodes',
+      taxCode: 17,
+    })
   })
 
   test('without a withholding no line gets the code', () => {
@@ -673,6 +684,159 @@ describe('the lines of a document that withholds the whole VAT', () => {
   test('totals given by the caller leave the lines as they came', () => {
     const totals = { netAmount: 1000, vatRate: 19, vatAmount: 190, totalAmount: 1190 }
     expect(codes(purchase([{ name: 'Chatarra', unitPrice: 1000 }], { totals }))).toEqual([undefined])
+  })
+})
+
+// Formato DTE 2.5, fields 115 to 117 and 124: the totals carry the code of every additional tax or withholding a line
+// carries (`CodImpAdic`, field 37 of the detail), with its amount, and the total adds or takes it.
+describe('the additional taxes and withholdings of the lines', () => {
+  const invoice = (extra: Partial<DocumentInput>) =>
+    createDocument({ type: 33, folio: 1, issueDate: '2026-11-15', issuer, receiver, items, ...extra })
+  const wine = { name: 'Vino tinto reserva', quantity: 10, unitPrice: 5000, additionalTaxCodes: [25] }
+  const glasses = { name: 'Copas de cristal', quantity: 6, unitPrice: 2000 }
+
+  test('a code on one line is worked out into the totals and the total, and written as ImptoReten', () => {
+    const doc = invoice({ items: [wine, glasses] })
+    expect(doc.header.totals).toEqual({
+      netAmount: 62000,
+      vatRate: 19,
+      vatAmount: 11780,
+      withholdings: [{ taxCode: 25, rate: 20.5, amount: 10250 }],
+      totalAmount: 84030,
+    })
+    expect(doc.items.map((item) => item.additionalTaxCodes)).toEqual([[25], undefined])
+    expect(buildDocumentXml(doc)).toContain(
+      '<IVA>11780</IVA><ImptoReten><TipoImp>25</TipoImp><TasaImp>20.5</TasaImp><MontoImp>10250</MontoImp></ImptoReten><MntTotal>84030</MntTotal>',
+    )
+    expect(doc.warnings).toBeUndefined()
+  })
+
+  test('the amount or the rate of a code is the caller’s to give', () => {
+    const diesel = { name: 'Petróleo diésel', quantity: 1000, unitPrice: 800, additionalTaxCodes: [28] }
+    const doc = invoice({ items: [diesel], additionalTaxes: [{ taxCode: 28, rate: 1.5, amount: 64000 }] })
+    expect(doc.header.totals.withholdings).toEqual([{ taxCode: 28, rate: 1.5, amount: 64000 }])
+    expect(doc.header.totals.totalAmount).toBe(800000 + 152000 + 64000)
+    expectError(() => invoice({ items: [diesel] }), 'MISSING_FIELD', { field: 'additionalTaxes', taxCode: 28 })
+  })
+
+  test('a specific tax given by its amount alone is written without TasaImp, and maps back', () => {
+    const diesel = { name: 'Petróleo diésel', quantity: 1000, unitPrice: 800, additionalTaxCodes: [28] }
+    const doc = invoice({ items: [diesel], additionalTaxes: [{ taxCode: 28, amount: 64000 }] })
+    expect(doc.header.totals.withholdings).toEqual([{ taxCode: 28, amount: 64000 }])
+    expect(buildDocumentXml(doc)).toContain('<ImptoReten><TipoImp>28</TipoImp><MontoImp>64000</MontoImp></ImptoReten>')
+    expect(fromSiiDocument(toSiiDocument(doc)).header.totals).toEqual(doc.header.totals)
+  })
+
+  test('a sale dispatch guide and an exempt invoice carry the codes of a sale', () => {
+    const guide = createDocument({
+      type: 52,
+      folio: 1,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver,
+      items: [wine],
+      options: { transferType: 1 },
+    })
+    expect(guide.header.totals.withholdings).toEqual([{ taxCode: 25, rate: 20.5, amount: 10250 }])
+    const exempt = createDocument({
+      type: 34,
+      folio: 1,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver,
+      items: [{ name: 'Petróleo diésel', unitPrice: 8000, additionalTaxCodes: [28] }],
+      additionalTaxes: [{ taxCode: 28, amount: 640 }],
+    })
+    expect(exempt.header.totals).toEqual({
+      exemptAmount: 8000,
+      withholdings: [{ taxCode: 28, amount: 640 }],
+      totalAmount: 8640,
+    })
+  })
+
+  test.each([33, 43, 52] as const)(
+    'code 15 brought by a line beside withholdVat on a %p is the same document',
+    (type) => {
+      const line = {
+        name: 'Venta',
+        quantity: 2,
+        unitPrice: 5000,
+        ...(type === 43 ? { settledDocumentType: '33' } : {}),
+      }
+      const issue = (item: LineItemInput) =>
+        createDocument({
+          type,
+          folio: 1,
+          issueDate: '2026-11-15',
+          issuer,
+          receiver,
+          items: [item],
+          withholdVat: true,
+          ...(type === 52 ? { options: { transferType: 1 as const } } : {}),
+        })
+      const implicit = issue(line)
+      expect(issue({ ...line, additionalTaxCodes: [15] })).toEqual(implicit)
+      expect(implicit.items[0].additionalTaxCodes).toEqual([15])
+    },
+  )
+
+  test('a tax that works out to zero writes no ImptoReten, and the line keeps its code', () => {
+    const doc = invoice({ items: [{ name: 'Agua mineral', quantity: 1, unitPrice: 4, additionalTaxCodes: [27] }] })
+    expect(doc.header.totals).toEqual({ netAmount: 4, vatRate: 19, vatAmount: 1, totalAmount: 5 })
+    expect(doc.items[0].additionalTaxCodes).toEqual([27])
+    expect(buildDocumentXml(doc)).not.toContain('ImptoReten')
+  })
+
+  test('a line admits two codes, as the schema declares', () => {
+    expect(invoice({ items: [{ ...wine, additionalTaxCodes: [25, 27] }] }).items[0].additionalTaxCodes).toEqual([
+      25, 27,
+    ])
+    expectError(() => invoice({ items: [glasses, { ...wine, additionalTaxCodes: [25, 27, 24] }] }), 'INVALID_OPTION', {
+      field: 'items[1].additionalTaxCodes',
+    })
+  })
+
+  test('totals given by hand carry the code of every line, or the document is refused', () => {
+    const totals = { netAmount: 62000, vatRate: 19, vatAmount: 11780, totalAmount: 73780 }
+    expectError(() => invoice({ items: [wine, glasses], totals }), 'MISSING_FIELD', {
+      field: 'totals.withholdings',
+      taxCode: 25,
+    })
+    const withholdings = [{ taxCode: 25, rate: 20.5, amount: 10250 }]
+    const given = invoice({ items: [wine, glasses], totals: { ...totals, withholdings, totalAmount: 84030 } })
+    expect(given.header.totals.withholdings).toEqual(withholdings)
+    // A line at zero adds nothing to its tax, and keeps its code without one.
+    const atZero = { name: 'Vino de muestra', amount: 0, additionalTaxCodes: [25] }
+    const sample = invoice({
+      items: [glasses, atZero],
+      totals: { ...totals, netAmount: 12000, vatAmount: 2280, totalAmount: 14280 },
+    })
+    expect(sample.items[1].additionalTaxCodes).toEqual([25])
+  })
+
+  test('additionalTaxes are refused beside totals given by hand, which carry the taxes themselves', () => {
+    const totals = { netAmount: 50000, vatRate: 19, vatAmount: 9500, totalAmount: 59500 }
+    expectError(
+      () => invoice({ items: [glasses], totals, additionalTaxes: [{ taxCode: 25, rate: 20.5 }] }),
+      'INVALID_OPTION',
+      { field: 'additionalTaxes' },
+    )
+  })
+
+  test('the totals admit 20 taxes and withholdings, the most the schema declares', () => {
+    const withholdings = (count: number) =>
+      Array.from({ length: count }, () => ({ taxCode: 25, rate: 20.5, amount: 1 }))
+    const totals = (count: number) => ({
+      netAmount: 12000,
+      vatRate: 19,
+      vatAmount: 2280,
+      withholdings: withholdings(count),
+      totalAmount: 14280,
+    })
+    expect(invoice({ items: [glasses], totals: totals(20) }).header.totals.withholdings).toHaveLength(20)
+    expectError(() => invoice({ items: [glasses], totals: totals(21) }), 'INVALID_OPTION', {
+      field: 'totals.withholdings',
+    })
   })
 })
 
@@ -2188,6 +2352,8 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
       references: [{ documentType: 110, folio: 1, date: '2026-11-10', code: 3 }],
       ...overrides,
     })
+  // Without an exchange rate an export document carries no totals in pesos, and is told so.
+  const withoutPesos = { rule: 'exportWithoutPesos', field: 'exchangeRate' } as const
 
   // Formato DTE 2.5, page 10: the zone "Información Referencia" is code 1 on the notes of export too.
   test.each([111, 112] as const)('a %p with no reference is refused, and an export invoice needs none', (type) => {
@@ -2205,7 +2371,7 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
     expect(doc.header.receiver).toEqual(foreign)
     expect(doc.header.transport).toEqual({ customs })
     expect(doc.header.otherCurrency).toBeUndefined()
-    expect(doc.warnings).toBeUndefined()
+    expect(doc.warnings).toEqual([withoutPesos])
   })
 
   test('with an exchange rate it carries its totals in pesos, each rounded half away from zero to a whole peso', () => {
@@ -2259,7 +2425,7 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
     expect(xml).toContain('<PrcItem>94</PrcItem><RecargoPct>10</RecargoPct><MontoItem>103.4</MontoItem>')
     expect(xml).not.toContain('RecargoMonto')
     // The format asks a percent for its amount (field 34): the caller is told it went without one.
-    expect(doc.warnings).toEqual([{ formatField: 34, field: 'items[0].surchargePercent' }])
+    expect(doc.warnings).toEqual([{ formatField: 34, field: 'items[0].surchargePercent' }, withoutPesos])
   })
 
   // `DescuentoMonto` and `RecargoMonto` hold whole numbers only. A line may ask for the share of its percent as one,
@@ -2269,7 +2435,7 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
     const goods = { name: 'Ciruelas', quantity: 1036, unit: 'KN', unitPrice: 194, discountPercent: 5 }
     const whole = exportOf({ items: [{ ...goods, wholeShares: true }] })
     expect(whole.items[0]).toMatchObject({ discountPercent: 5, discountAmount: 10049, amount: 190935 })
-    expect(whole).not.toHaveProperty('warnings')
+    expect(whole.warnings).toEqual([withoutPesos])
     expect(buildDocumentXml(whole)).toContain(
       '<DescuentoPct>5</DescuentoPct><DescuentoMonto>10049</DescuentoMonto><MontoItem>190935</MontoItem>',
     )
@@ -2312,9 +2478,10 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
     expect(doc.warnings).toEqual([
       { formatField: 34, field: 'items[0].surchargePercent' },
       { formatField: 30, field: 'items[1].discountPercent' },
+      withoutPesos,
     ])
     const whole = exportOf({ items: [{ name: 'Queso', quantity: 2, unit: 'KN', unitPrice: 50, discountPercent: 10 }] })
-    expect(whole.warnings).toBeUndefined()
+    expect(whole.warnings).toEqual([withoutPesos])
   })
 
   test.each<[string, LineItemInput]>([
@@ -2847,5 +3014,472 @@ describe('what the schema admits on an export document (110, 111, 112)', () => {
   test('it admits 60 lines', () => {
     expect(exportOf({ items: Array.from({ length: 60 }, () => line) }).items).toHaveLength(60)
     expectError(() => exportOf({ items: Array.from({ length: 61 }, () => line) }), 'INVALID_OPTION', { field: 'items' })
+  })
+
+  // Formato DTE 2.5 leaves `OtraMoneda` optional on the three export documents; in the field, the SII has rejected one
+  // that came without it.
+  test.each([110, 111, 112] as const)(
+    'a %p without an exchange rate is built as before and listed in the warnings',
+    (type) => {
+      const doc = type === 110 ? exportOf() : note(type)
+      expect(doc.header.otherCurrency).toBeUndefined()
+      expect(doc.warnings).toEqual([withoutPesos])
+      const inPesos = type === 110 ? exportOf({ exchangeRate: 950 }) : note(type, { exchangeRate: 950 })
+      expect(inPesos.warnings).toBeUndefined()
+    },
+  )
+})
+
+// `DTE_v10.xsd` declares `Referencia` from none to 40 under `Documento`, `Liquidacion` and `Exportaciones`, and
+// `EnvioBOLETA_v11.xsd` the same 40 under a receipt's own `Documento`.
+describe('the references a document admits', () => {
+  const invoice = (overrides: Partial<DocumentInput> = {}) =>
+    createDocument({ type: 33, folio: 1, issueDate: '2026-11-15', issuer, receiver, items, ...overrides })
+  const cited = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({ documentType: 52, folio: index + 1, date: '2026-11-01' }))
+
+  test('an invoice admits 40 references and refuses a 41st', () => {
+    expect(invoice({ references: cited(40) }).references).toHaveLength(40)
+    expectError(() => invoice({ references: cited(41) }), 'INVALID_OPTION', { field: 'references' })
+  })
+
+  test('a settlement invoice and an export document hold to the same 40', () => {
+    const settlement: Partial<DocumentInput> = {
+      type: 43,
+      items: [{ name: 'Venta liquidada', unitPrice: 10000, settledDocumentType: '33' }],
+    }
+    expect(invoice({ ...settlement, references: cited(40) }).references).toHaveLength(40)
+    expectError(() => invoice({ ...settlement, references: cited(41) }), 'INVALID_OPTION', { field: 'references' })
+    const exported: Partial<DocumentInput> = {
+      type: 111,
+      receiver: { rut: FOREIGN_RECEIVER_RUT, businessName: 'Andes Trading LLC', address: '1200 Harbor Blvd' },
+      currency: 'DOLAR USA',
+      items: [{ name: 'Diferencia', amount: 10.5 }],
+      exchangeRate: 950,
+    }
+    expect(invoice({ ...exported, references: cited(40) }).references).toHaveLength(40)
+    expectError(() => invoice({ ...exported, references: cited(41) }), 'INVALID_OPTION', { field: 'references' })
+  })
+
+  test('a receipt admits 40 references of its own and refuses a 41st', () => {
+    const own = (count: number) => Array.from({ length: count }, (_, index) => ({ code: 'CAJA', reason: `R${index}` }))
+    const receipt = (count: number) =>
+      createDocument({
+        type: 39,
+        folio: 1,
+        issueDate: '2026-11-15',
+        issuer,
+        items: [{ name: 'Café', unitPrice: 1500 }],
+        pricesIncludeVat: true,
+        receiptReferences: own(count),
+      })
+    expect(receipt(40).receiptReferences).toHaveLength(40)
+    expectError(() => receipt(41), 'INVALID_OPTION', { field: 'receiptReferences' })
+  })
+
+  // Formato DTE 2.5, page 46, field 4 of the references (`FolioRef`): "Debe ser cero sólo si el documento tiene
+  // encendido el Indicador de referencia global".
+  test('a global reference with a folio other than zero is built and listed in the warnings', () => {
+    const global = (folio: number | string) =>
+      invoice({ references: [{ documentType: 52, folio, date: '2026-11-01', global: true }] })
+    const doc = global(5)
+    expect(doc.references[0]).toMatchObject({ global: true, folio: '5' })
+    expect(doc.warnings).toEqual([{ rule: 'globalReferenceFolio', field: 'references[0].folio' }])
+    expect(global(0).warnings).toBeUndefined()
+    expect(global('0').warnings).toBeUndefined()
+    // A folio of zeros alone is zero however many it holds; one with another digit among them is not.
+    expect(global('000').warnings).toBeUndefined()
+    expect(global('010').warnings).toEqual([{ rule: 'globalReferenceFolio', field: 'references[0].folio' }])
+    expect(invoice({ references: cited(2) }).warnings).toBeUndefined()
+  })
+})
+
+// The SII's instructions for the dispatch-guide test set: "cuando una Guía de Despacho Electrónica señala un Traslado
+// Interno, los datos del receptor deben coincidir con los del emisor".
+describe('the receiver of an internal transfer', () => {
+  const guide = (transferType: 1 | 5, rut: string) =>
+    createDocument({
+      type: 52,
+      folio: 1,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver: { ...receiver, rut },
+      items: [{ name: 'Pallet', quantity: 2, unit: 'UN', unitPrice: 1000 }],
+      options: { transferType },
+    })
+
+  test('an internal transfer to another RUT is built and listed in the warnings', () => {
+    const doc = guide(5, RECEIVER_RUT)
+    expect(doc.header.receiver.rut).toBe(RECEIVER_RUT)
+    expect(doc.warnings).toEqual([{ rule: 'internalTransferReceiver', field: 'receiver.rut' }])
+  })
+
+  test("one to the issuer's own RUT, in any shape, and a transfer of another kind carry no warning", () => {
+    expect(guide(5, ISSUER_RUT).warnings).toBeUndefined()
+    expect(guide(5, '76.543.210-3').warnings).toBeUndefined()
+    expect(guide(1, RECEIVER_RUT).warnings).toBeUndefined()
+  })
+})
+
+// Every text of a document is checked before any is refused: a caller fixing a form sees all of them at once.
+describe('every text problem of a document at once', () => {
+  const OMEGA = 'Ω'.codePointAt(0)
+  const unsupported = (path: string, field: string, index: number) => ({
+    code: 'ENCODING_UNSUPPORTED_CHAR',
+    path,
+    details: { field, index, codePoint: OMEGA },
+  })
+  const tooLong = (path: string, field: string, maxLength: number) => {
+    const value = 'x'.repeat(maxLength + 1)
+    const problem = { code: 'FIELD_TOO_LONG', path, details: { field, maxLength, length: maxLength + 1, value } }
+    return [value, problem] as const
+  }
+  // What `createDocument` throws: the first problem, with its own details, and the whole list.
+  const thrown = (input: DocumentInput): DteError => {
+    try {
+      createDocument(input)
+    } catch (error) {
+      return error as DteError
+    }
+    throw new Error('expected DteError')
+  }
+  const expectAll = (
+    input: DocumentInput,
+    problems: readonly { code: string; details: object }[],
+    stoppedBy: { code: string; details: object } | null = null,
+  ) => {
+    const error = thrown(input)
+    expect(error).toBeInstanceOf(DteError)
+    expect(error.code).toBe(problems[0].code)
+    expect(error.details).toEqual({ ...problems[0].details, problems })
+    expect(findTextProblems(input)).toEqual({ problems, stoppedBy })
+  }
+  const invoiceOf = (): DocumentInput => ({ type: 33, folio: 1, issueDate: '2026-11-15', issuer, receiver, items })
+
+  test('an invoice: the issuer, the receiver, a line, a reference, a global adjustment and the transport', () => {
+    const [receiverName, receiverProblem] = tooLong('receiver.businessName', 'RznSocRecep', 100)
+    const [reason, reasonProblem] = tooLong('references[0].reason', 'RazonRef', 90)
+    const [glosa, glosaProblem] = tooLong('globalAdjustments[0].description', 'GlosaDR', 45)
+    const [plate, plateProblem] = tooLong('transport.licensePlate', 'Patente', 8)
+    expectAll(
+      {
+        ...invoiceOf(),
+        issuer: { ...issuer, businessName: 'Comercial Ω SpA' },
+        receiver: { ...receiver, businessName: receiverName },
+        items: [items[0], { ...items[1], name: 'Horas Ω' }],
+        references: [{ documentType: 801, folio: '45', date: '2026-11-01', reason }],
+        globalAdjustments: [{ kind: 'discount', valueType: 'percent', value: 5, description: glosa }],
+        transport: { licensePlate: plate },
+      },
+      [
+        unsupported('issuer.businessName', 'RznSoc', 10),
+        receiverProblem,
+        unsupported('items[1].name', 'NmbItem', 6),
+        reasonProblem,
+        glosaProblem,
+        plateProblem,
+      ],
+    )
+  })
+
+  test('a settlement invoice: the receiver, a line and a commission', () => {
+    const [activity, activityProblem] = tooLong('receiver.businessActivity', 'GiroRecep', 40)
+    const [glosa, glosaProblem] = tooLong('commissions[0].description', 'Glosa', 60)
+    expectAll(
+      {
+        ...invoiceOf(),
+        type: 43,
+        receiver: { ...receiver, businessActivity: activity },
+        items: [{ ...items[0], description: 'Ωmega', settledDocumentType: '33' }],
+        commissions: [{ kind: 'commission', description: glosa, rate: 10, netValue: 1000 }],
+      },
+      [activityProblem, unsupported('items[0].description', 'DscItem', 0), glosaProblem],
+    )
+  })
+
+  const foreignReceiver = {
+    rut: FOREIGN_RECEIVER_RUT,
+    businessName: 'Andes Trading LLC',
+    address: '1200 Harbor Blvd',
+    city: 'Miami',
+  }
+  const exportCustoms = {
+    saleModality: 1,
+    saleClause: 2,
+    saleClauseTotal: 1250,
+    transportRoute: 1,
+    receiverCountry: 225,
+  }
+  const exportOf = (): DocumentInput => ({
+    ...invoiceOf(),
+    type: 110,
+    receiver: foreignReceiver,
+    currency: 'DOLAR USA',
+    items: [{ name: 'Uva', quantity: 100, unit: 'KN', unitPrice: 12.5 }],
+    transport: { customs: exportCustoms },
+  })
+
+  test('an export invoice: the foreign receiver, a line and the customs, each text once', () => {
+    const [carrier, carrierProblem] = tooLong('transport.customs.carrierName', 'NomCiaTransp', 40)
+    // An export invoice of goods asks each line for its unit, which is read once for that and once to be written.
+    const [unit, unitProblem] = tooLong('items[0].unit', 'UnmdItem', 4)
+    expectAll(
+      {
+        ...exportOf(),
+        receiver: { ...foreignReceiver, foreign: { nationality: 'Ω' } },
+        items: [{ name: 'Uva Ω', quantity: 100, unit, unitPrice: 12.5 }],
+        transport: { customs: { ...exportCustoms, carrierName: carrier } },
+      },
+      [
+        unsupported('receiver.foreign.nationality', 'Nacionalidad', 0),
+        unitProblem,
+        unsupported('items[0].name', 'NmbItem', 4),
+        carrierProblem,
+      ],
+    )
+  })
+
+  const receiptOf = (): DocumentInput => ({
+    type: 39,
+    folio: 1,
+    issueDate: '2026-11-15',
+    issuer,
+    items: [{ name: 'Café', unitPrice: 1500 }],
+    pricesIncludeVat: true,
+  })
+
+  test('a receipt: the issuer, a line, a reference and a subtotal', () => {
+    const [address, addressProblem] = tooLong('issuer.address', 'DirOrigen', 70)
+    const [reason, reasonProblem] = tooLong('receiptReferences[0].reason', 'RazonRef', 90)
+    const [glosa, glosaProblem] = tooLong('subtotals[0].description', 'GlosaSTI', 40)
+    expectAll(
+      {
+        ...receiptOf(),
+        issuer: { ...issuer, address },
+        items: [{ name: 'Café Ω', unitPrice: 1500 }],
+        receiptReferences: [{ code: 'CAJA', reason }],
+        subtotals: [{ number: 1, description: glosa, totalAmount: 1500 }],
+      },
+      [addressProblem, unsupported('items[0].name', 'NmbItem', 5), reasonProblem, glosaProblem],
+    )
+  })
+
+  test('the same problem on two lines or two references is told apart by its path', () => {
+    const lines = Array.from({ length: 10 }, (_, index) => ({
+      name: index === 2 || index === 6 ? 'Ω' : `Línea ${index}`,
+      unitPrice: 1000,
+    }))
+    const reference = (reason: string) => ({ documentType: 801, folio: '45', date: '2026-11-01', reason })
+    expectAll({ ...invoiceOf(), items: lines, references: [reference('Ω'), reference('Ω')] }, [
+      unsupported('items[2].name', 'NmbItem', 0),
+      unsupported('items[6].name', 'NmbItem', 0),
+      unsupported('references[0].reason', 'RazonRef', 0),
+      unsupported('references[1].reason', 'RazonRef', 0),
+    ])
+  })
+
+  // Each text the builder reads, set to a character with no form in ISO-8859-1 in a document that takes it, is
+  // reported with its own path.
+  test.each<[string, DocumentInput]>([
+    ...[
+      'issuer.commune',
+      'issuer.businessName',
+      'issuer.businessActivity',
+      'issuer.branch',
+      'issuer.address',
+      'issuer.city',
+      'issuer.salespersonCode',
+      'receiver.address',
+      'receiver.commune',
+      'receiver.city',
+      'receiver.internalCode',
+      'receiver.businessName',
+      'receiver.businessActivity',
+      'receiver.contact',
+      'receiver.postalAddress',
+      'receiver.postalCommune',
+      'receiver.postalCity',
+      'items[0].name',
+      'items[0].description',
+      'items[0].referenceUnit',
+      'items[0].unit',
+      'references[0].reason',
+      'globalAdjustments[0].description',
+      'subtotals[0].description',
+      'transport.licensePlate',
+      'transport.trailerLicensePlate',
+      'transport.driver.name',
+      'transport.destinationAddress',
+      'transport.destinationCommune',
+      'transport.destinationCity',
+    ].map((path): [string, DocumentInput] => [
+      path,
+      {
+        ...invoiceOf(),
+        references: [{ documentType: 801, folio: '45', date: '2026-11-01', reason: 'Orden' }],
+        globalAdjustments: [{ kind: 'discount', valueType: 'percent', value: 5, description: 'Promo' }],
+        subtotals: [{ number: 1, description: 'Bienes', totalAmount: 1 }],
+        transport: { driver: { rut: RECEIVER_RUT, name: 'Juan Soto' } },
+      },
+    ]),
+    ...['items[0].settledDocumentType', 'commissions[0].description'].map((path): [string, DocumentInput] => [
+      path,
+      {
+        ...invoiceOf(),
+        type: 43,
+        items: [{ ...items[0], settledDocumentType: '33' }],
+        commissions: [{ kind: 'commission', description: 'Comisión', rate: 10, netValue: 1000 }],
+      },
+    ]),
+    ...[
+      'issuer.additionalBranchCode',
+      'issuer.additionalId',
+      'receiver.foreign.id',
+      'receiver.foreign.nationality',
+      'receiver.foreign.additionalId',
+      'items[0].unit',
+      'references[0].otherAdditionalId',
+      'transport.customs.transportName',
+      'transport.customs.carrierName',
+      'transport.customs.carrierAdditionalId',
+      'transport.customs.booking',
+      'transport.customs.operator',
+      'transport.customs.loadingPortAdditionalId',
+      'transport.customs.unloadingPortAdditionalId',
+      'transport.customs.packages[0].marks',
+      'transport.customs.packages[0].containerId',
+      'transport.customs.packages[0].seal',
+      'transport.customs.packages[0].sealIssuer',
+    ].map((path): [string, DocumentInput] => [
+      path,
+      {
+        ...exportOf(),
+        references: [{ documentType: 807, folio: '123', date: '2026-11-10' }],
+        transport: { customs: { ...exportCustoms, totalPackages: 1, packages: [{ code: 75, count: 1 }] } },
+      },
+    ]),
+    ...[
+      'receiptReferences[0].documentType',
+      'receiptReferences[0].folio',
+      'receiptReferences[0].code',
+      'receiptReferences[0].reason',
+      'subtotals[0].description',
+    ].map((path): [string, DocumentInput] => [
+      path,
+      {
+        ...receiptOf(),
+        receiptReferences: [{ code: 'CAJA', reason: 'Venta' }],
+        subtotals: [{ number: 1, totalAmount: 1500 }],
+      },
+    ]),
+  ])('the text at %s is reported with its path', (path, base) => {
+    // Sets the text at `path` on a copy of the input.
+    const input = structuredClone(base) as unknown as Record<string, unknown>
+    const keys = path.replace(/\[(\d+)\]/g, '.$1').split('.')
+    const parent = keys.slice(0, -1).reduce<Record<string, unknown>>((node, key) => {
+      node[key] ??= {}
+      return node[key] as Record<string, unknown>
+    }, input)
+    parent[keys[keys.length - 1]] = 'Ω'
+    const found = findTextProblems(input as unknown as DocumentInput)
+    expect(found.problems).toEqual([expect.objectContaining({ code: 'ENCODING_UNSUPPORTED_CHAR', path })])
+    expect(found.stoppedBy).toBeNull()
+  })
+
+  test('one problem throws what it threw alone, with a list of one', () => {
+    const [name, problem] = tooLong('issuer.businessName', 'RznSoc', 100)
+    const error = thrown({ ...invoiceOf(), issuer: { ...issuer, businessName: name } })
+    expect(error.code).toBe('FIELD_TOO_LONG')
+    expect(error.details).toEqual({ ...problem.details, problems: [problem] })
+  })
+
+  test('texts that are fine give no problem, with every text read', () => {
+    expect(findTextProblems(invoiceOf())).toEqual({ problems: [], stoppedBy: null })
+  })
+
+  test('a refusal of another kind ends the reading, and the result says what stopped it', () => {
+    const badIssuer = { ...issuer, businessName: 'Ω' }
+    // Met before any text, it is thrown as before, and no text is read.
+    const unnumbered = { ...invoiceOf(), folio: 0, issuer: badIssuer }
+    expectError(() => createDocument(unnumbered), 'INVALID_FOLIO', { folio: 0 })
+    expect(findTextProblems(unnumbered)).toEqual({
+      problems: [],
+      stoppedBy: { code: 'INVALID_FOLIO', details: { folio: 0 } },
+    })
+    for (const input of [{}, { ...invoiceOf(), type: 99 }])
+      expect(findTextProblems(input as DocumentInput)).toEqual({
+        problems: [],
+        stoppedBy: { code: 'INVALID_DOCUMENT_TYPE', details: { type: (input as { type?: number }).type } },
+      })
+    // Met after a text problem, it stops the reading there: the texts past it are not read.
+    expectAll(
+      { ...invoiceOf(), issuer: badIssuer, receiver: undefined, items: [{ ...items[0], name: 'Ω' }] },
+      [unsupported('issuer.businessName', 'RznSoc', 0)],
+      { code: 'MISSING_FIELD', details: { field: 'receiver' } },
+    )
+    expectAll(
+      {
+        ...invoiceOf(),
+        issuer: badIssuer,
+        items: [
+          { ...items[0], quantity: -1 },
+          { ...items[1], name: 'Ω' },
+        ],
+      },
+      [unsupported('issuer.businessName', 'RznSoc', 0)],
+      { code: 'INVALID_AMOUNT', details: { field: 'items[0].quantity' } },
+    )
+  })
+
+  // What a text throws that is not a text problem is the caller's own error, and is thrown as it was.
+  test('an error a text throws of its own is thrown as before, not listed', () => {
+    const mine = new Error('mine')
+    const throwing = {
+      toString: () => {
+        throw mine
+      },
+    } as unknown as string
+    for (const businessName of [throwing, Object.create(null) as string]) {
+      const input = { ...invoiceOf(), issuer: { ...issuer, businessName } }
+      for (const run of [() => createDocument(input), () => findTextProblems(input)]) {
+        let caught: unknown
+        try {
+          run()
+        } catch (error) {
+          caught = error
+        }
+        expect(caught).not.toBeInstanceOf(DteError)
+        if (businessName === throwing) expect(caught).toBe(mine)
+        else expect(caught).toBeInstanceOf(TypeError)
+      }
+    }
+    expect(() => findTextProblems(null as unknown as DocumentInput)).toThrow(TypeError)
+  })
+
+  // A document built while another is being built, from a getter of its input, keeps the problems of each to itself.
+  test('a document built inside the build of another keeps its problems apart', () => {
+    const good = invoiceOf()
+    const bad = { ...invoiceOf(), receiver: { ...receiver, businessName: 'Ω' } }
+    const outer = (base: DocumentInput, inner: DocumentInput): DocumentInput => {
+      const input = { ...base }
+      Object.defineProperty(input, 'items', {
+        get: () => {
+          try {
+            createDocument(inner)
+          } catch {
+            // the inner document's own refusal
+          }
+          return items
+        },
+      })
+      return input
+    }
+    // A good one inside a bad one: the outer problem is still there once the inner build has ended.
+    expect(findTextProblems(outer({ ...invoiceOf(), issuer: { ...issuer, businessName: 'Ω' } }, good))).toEqual({
+      problems: [unsupported('issuer.businessName', 'RznSoc', 0)],
+      stoppedBy: null,
+    })
+    // A bad one inside a good one: the inner problems do not reach the outer document.
+    expect(createDocument(outer(good, bad)).header.receiver.businessName).toBe(receiver.businessName.replace(/'/g, ''))
   })
 })

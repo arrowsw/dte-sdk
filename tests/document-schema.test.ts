@@ -82,6 +82,15 @@ const exportInvoiceReference = { documentType: 110, folio: 1, date: '2026-11-10'
 const VARIANTS: Record<Exclude<DocumentType, 39 | 41>, Record<string, Variant>> = {
   33: {
     plain: { items: [{ name: 'Plan anual', quantity: 2, unitPrice: 100000 }] },
+    'additional taxes worked out from the lines, and a specific tax given by its amount': {
+      items: [
+        { name: 'Vino tinto reserva', quantity: 10, unitPrice: 5000, additionalTaxCodes: [25] },
+        { name: 'Agua mineral', quantity: 24, unitPrice: 600, additionalTaxCodes: [27] },
+        { name: 'Petróleo diésel', quantity: 100, unitPrice: 800, additionalTaxCodes: [28] },
+        { name: 'Copas de cristal', quantity: 6, unitPrice: 2000 },
+      ],
+      additionalTaxes: [{ taxCode: 28, amount: 6400 }],
+    },
     'line codes, a discount, a surcharge, an exempt line and a price with decimals': {
       items: [
         {
@@ -361,6 +370,10 @@ const VARIANTS: Record<Exclude<DocumentType, 39 | 41>, Record<string, Variant>> 
       items: [{ name: 'Chatarra de fierro', quantity: 10, unitPrice: 1000, additionalTaxCodes: [15] }],
       references: [purchaseReference],
       withholdVat: true,
+    },
+    'withholds part of the VAT of a purchase invoice, worked out from its code': {
+      items: [{ name: 'Trigo', quantity: 10, unitPrice: 1000, additionalTaxCodes: [34] }],
+      references: [purchaseReference],
     },
   },
   110: {
