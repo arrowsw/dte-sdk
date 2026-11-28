@@ -44,6 +44,9 @@ import { page, quotaForm, STAMP_ENTRY } from '../support/portal-pages'
 const plan = fullPlan()
 // Every test that is not about every case sends fewer documents: each envelope is verified before it is sent.
 const slim = slimPlan()
+// One pass over the plan, for the tests that are not about the passes; and, besides, always issued anew.
+const ONE_PASS = { simulationMinimum: 0 }
+const ANEW = { ...ONE_PASS, resendUnanswered: false }
 const entry = get('pe_avance1', ...repeat(page('entry'), 200))
 const avance5 = get('pe_avance5', ...repeat(page('p5'), 100))
 const simulation = { trackId: '777', date: TODAY, sentAt: 'x' }
@@ -64,29 +67,36 @@ const AT_EXCHANGE = progressPage('INTERCAMBIO', { 'SET SIMULACION': 'REVISADO CO
 const IN_SIMULATION = progressPage('SIMULACION', { 'SET SIMULACION': 'EN REVISION' })
 
 describe('sendSimulation', () => {
-  test('fresh CAFs for every type, one envelope with every case, the artefacts, the send', async () => {
+  test('fresh CAFs for every type, one envelope with every case of every pass, the artefacts, the send', async () => {
     const harness = await certificationHarness([...stampingRoutes(), uploadRoute(reception('777'))])
     const result = await sendSimulation(harness.deps, stateWith({ plan, cafs: [] }))
     expect(result.outcome).toBe('sent')
     expect(result.state.simulation).toEqual({ trackId: '777', date: TODAY, sentAt: '2026-11-15T18:30:00.000Z' })
     expect(result.state.cafs).toHaveLength(6)
-    expect(result.state.usedFolios.length).toBeGreaterThan(10)
+    // Eighteen documents a pass: two passes, 36 documents, within what the declaration takes, so nothing is logged.
+    expect(result.state.usedFolios).toHaveLength(36)
+    const envelope = (await harness.store.readArtefact('simulacion/envio-simulacion.xml'))!
+    expect(envelope.match(/<DTE /g)).toHaveLength(36)
     const names = await harness.store.listArtefacts()
-    expect(names).toContain('simulacion/envio-simulacion.xml')
     expect(names).toContain('simulacion/dtes/dte-33-000001.xml')
+    expect(names.filter((name) => name.startsWith('simulacion/dtes/'))).toHaveLength(36)
     expect(harness.steps().filter((step) => step === 'CAF_OK')).toHaveLength(6)
     expect(harness.steps().slice(-2)).toEqual(['SIM_SENDING', 'SIM_OK'])
     expect(harness.events[0]).toEqual({ step: 'SIM_START' })
-    // Eighteen documents: fewer than the declaration of the simulation takes, logged and sent all the same.
-    expect(harness.warnedWith('certification simulation size outside 20 to 100 documents')).toEqual([{ documents: 18 }])
+    expect(harness.warnedWith('certification simulation size outside 20 to 100 documents')).toEqual([])
   })
 
   test('says the size is outside 20 to 100 before any folio of the simulation is asked for', async () => {
-    // No stamping page: asking for the first folio fails, and the size was said before it.
+    // No stamping page: asking for the first folio fails, and the size was said before it. One pass, as asked.
     const harness = await certificationHarness([])
-    await failure(sendSimulation(harness.deps, stateWith({ plan, cafs: [] })))
+    await failure(sendSimulation(harness.deps, stateWith({ plan, cafs: [] }), { simulationMinimum: 0 }))
     expect(harness.warnedWith('certification simulation size outside 20 to 100 documents')).toEqual([{ documents: 18 }])
     expect(harness.steps()).not.toContain('CAF_OK')
+    // A minimum that is not one stops the step before any folio, and before the size is said.
+    const other = await certificationHarness([])
+    const error = await failure(sendSimulation(other.deps, stateWith({ plan, cafs: [] }), { simulationMinimum: 101 }))
+    expect(error.details).toEqual({ field: 'minimumDocuments' })
+    expect(other.urls()).toEqual([])
   })
 
   test('beforeUpload is handed the envelope of the simulation, and one that throws sends nothing', async () => {
@@ -95,6 +105,7 @@ describe('sendSimulation', () => {
     const result = await sendSimulation(
       { ...harness.deps, beforeUpload: (upload) => void seen.push(upload) },
       stateWith({ plan: slim, cafs: [] }),
+      ONE_PASS,
     )
     expect(result.outcome).toBe('sent')
     expect(seen.map(({ kind, name }) => [kind, name])).toEqual([['simulation', 'simulation']])
@@ -102,7 +113,7 @@ describe('sendSimulation', () => {
     const refusing = await certificationHarness([...stampingRoutes(), uploadRoute(reception('778'))])
     const refuse = (): Promise<void> => Promise.reject(new DteError('INVALID_OPTION', { field: 'schema' }))
     const error = await failure(
-      sendSimulation({ ...refusing.deps, beforeUpload: refuse }, stateWith({ plan: slim, cafs: [] })),
+      sendSimulation({ ...refusing.deps, beforeUpload: refuse }, stateWith({ plan: slim, cafs: [] }), ONE_PASS),
     )
     expect(error.code).toBe('INVALID_OPTION')
     expect(refusing.urls().filter((url) => url === UPLOAD)).toEqual([])
@@ -122,6 +133,7 @@ describe('sendSimulation', () => {
       sendSimulation(
         { ...harness.deps, certificate, beforeUpload: (upload) => void seen.push(upload) },
         stateWith({ plan: slim, cafs: [] }),
+        ONE_PASS,
       ),
     )
     expect(error.code).toBe('SIGNATURE_INVALID')
@@ -136,7 +148,7 @@ describe('sendSimulation', () => {
   test('the sets’ CAFs are never reused, and a failed send still marks the folios', async () => {
     const harness = await certificationHarness([...stampingRoutes(), uploadRoute({ status: 500, body: 'down' })])
     const before = stateWith({ plan: slim, cafs: [] })
-    const error = await failure(sendSimulation(harness.deps, before))
+    const error = await failure(sendSimulation(harness.deps, before, { simulationMinimum: 0 }))
     expect(error.code).toBe('SII_HTTP_ERROR')
     const saved = (await harness.store.load())!
     expect(saved.simulation).toBeUndefined()
@@ -187,7 +199,7 @@ describe('a simulation that is tried again', () => {
 
   test('the CAFs of an attempt that never got to send are in hand at the next one, which asks only for the rest', async () => {
     const harness = await certificationHarness([...stamping(61), uploadRoute(reception('777'))])
-    const first = await failure(sendSimulation(harness.deps, stateWith({ plan: slim, cafs: [] })))
+    const first = await failure(sendSimulation(harness.deps, stateWith({ plan: slim, cafs: [] }), ONE_PASS))
     expect(first.code).toBe('SII_PORTAL_UNEXPECTED_PAGE')
     expect(first.details).toMatchObject({ operation: 'requestCafExact', step: 'of_confirma_folio' })
     const stopped = (await harness.store.load())!
@@ -197,7 +209,7 @@ describe('a simulation that is tried again', () => {
     expect(stopped.usedFolios).toEqual([])
     const before = requests(harness)
 
-    const second = await sendSimulation(harness.deps, stopped)
+    const second = await sendSimulation(harness.deps, stopped, ONE_PASS)
     expect(second.outcome).toBe('sent')
     // One more request, for the type that was missing; the five CAFs in hand are the ones issued with.
     expect(requests(harness) - before).toBe(1)
@@ -213,11 +225,11 @@ describe('a simulation that is tried again', () => {
       ...stamping(),
       uploadRoute({ status: 500, body: 'down' }, reception('777')),
     ])
-    await failure(sendSimulation(harness.deps, stateWith({ plan: slim, cafs: [] })))
+    await failure(sendSimulation(harness.deps, stateWith({ plan: slim, cafs: [] }), ANEW))
     const failed = (await harness.store.load())!
     expect(failed.simulationCafs).toEqual([])
     expect(requests(harness)).toBe(6)
-    const second = await sendSimulation(harness.deps, failed)
+    const second = await sendSimulation(harness.deps, failed, ANEW)
     expect(second.outcome).toBe('sent')
     expect(requests(harness)).toBe(12)
     expect(second.state.cafs).toHaveLength(12)
@@ -226,7 +238,7 @@ describe('a simulation that is tried again', () => {
   test('the CAFs of the sets are still never the simulation’s', async () => {
     const harness = await certificationHarness([...stamping(), uploadRoute(reception('777'))])
     const sets = [33, 34, 46, 52, 56, 61].map((type) => cafXml(type, { from: 1, to: 100 }))
-    const result = await sendSimulation(harness.deps, stateWith({ plan: slim, cafs: sets }))
+    const result = await sendSimulation(harness.deps, stateWith({ plan: slim, cafs: sets }), ONE_PASS)
     expect(requests(harness)).toBe(6)
     expect(result.state.cafs).toHaveLength(12)
     const stats = await harness.registry.stats({ companyRut: '76543210-3', type: 33, environment: 'certification' })

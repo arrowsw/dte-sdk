@@ -19,6 +19,7 @@ import {
   obtainTestSet,
   sendSimulation,
   sendTestSet,
+  settleUnansweredSets,
   waitForSimulationApproval,
   waitForTestSetsApproval,
   type UnreadLinesPolicy,
@@ -41,6 +42,10 @@ export type RunCertificationOptions = {
   readonly samples?: readonly PrintedSampleFile[] | (() => Promise<readonly PrintedSampleFile[]>)
   /** EN: What the run does, before any folio is asked for, with a line of a case of a set not yet sent that the reader of the test set did not use (`checkTestSetText`, `UnreadLinesPolicy`): every such line is logged, and the run stops on any of them (`stop`), on one shaped like a row of items (`stopOnRows`, the default), or never (`warn`). ES: Qué hace la corrida, antes de pedir cualquier folio, con una línea de un caso de un set aún no enviado que el lector del set de pruebas no usó (`checkTestSetText`, `UnreadLinesPolicy`): cada línea así se registra, y la corrida se detiene ante cualquiera (`stop`), ante una con forma de fila de ítems (`stopOnRows`, por defecto), o nunca (`warn`). */
   readonly unreadLines?: UnreadLinesPolicy
+  /** EN: Send again an envelope of a set or of the simulation whose upload request left for the SII in an earlier run and got no answer that could be read (`CertificationState.unanswered`), in place of issuing it anew with new folios; true by default. Before any folio is asked for, its folios are held in the folio registry for it (`FolioRegistry.hold`), and it is sent again only when they all could be, its artefact is there, its documents carry the date a document issued now would, the simulation's holds as many documents as `simulationMinimum` now asks for, the certificate of its own signature is the run's, its cover names the run's resolution, and it still verifies as the SII reads it; otherwise it is issued anew, and the portal client's logger says why (`IssuedAnewReason`). False issues anew every time, as before. ES: Enviar de nuevo un sobre de un set o de la simulación cuya petición de subida salió hacia el SII en una corrida anterior y no tuvo una respuesta legible (`CertificationState.unanswered`), en vez de emitirlo otra vez con folios nuevos; true por defecto. Antes de pedir cualquier folio, sus folios se retienen para él en el registro de folios (`FolioRegistry.hold`), y se envía de nuevo solo cuando todos se pudieron retener, su artefacto está, sus documentos llevan la fecha que llevaría un documento emitido ahora, el de la simulación trae tantos documentos como pide ahora `simulationMinimum`, el certificado de su propia firma es el de la corrida, su carátula nombra la resolución de la corrida, y aún verifica como lo lee el SII; si no, se emite otra vez, y el logger del cliente del portal dice por qué (`IssuedAnewReason`). False emite otra vez cada vez, como antes. */
+  readonly resendUnanswered?: boolean
+  /** EN: The fewest documents the envelope of the simulation holds: a pass over the plan that holds fewer is repeated whole until it does, never past 100 (`issueSimulation`, `minimumDocuments`); 20 by default, what the "Declarar avance" form takes as field behaviour, and 0 issues one pass. ES: La menor cantidad de documentos que trae el sobre de la simulación: una pasada por el plan que trae menos se repite entera hasta alcanzarla, nunca más de 100 (`issueSimulation`, `minimumDocuments`); 20 por defecto, lo que toma el formulario "Declarar avance" como comportamiento de campo, y 0 emite una pasada. */
+  readonly simulationMinimum?: number
   /** EN: Send the books of the test set as regular ones, as the run did before: the sales and purchase books `MENSUAL` with no notification folio, the guide book with folio 3 (`runBooks`). By default each book is `ESPECIAL` with the attention number of its own set as its notification folio, as the SII's review takes them. ES: `TipoLibro`, `FolioNotificacion` — Enviar los libros del set de pruebas como regulares, como lo hacía la corrida antes: los de ventas y de compras `MENSUAL` sin folio de notificación, el de guías con folio 3 (`runBooks`). Por defecto cada libro es `ESPECIAL` con el número de atención de su propio set como folio de notificación, como los toma la revisión del SII. */
   readonly monthlyBooks?: boolean
   /** EN: Answer the exchange set with a receipt of goods for every document, the ones addressed to another RUT included, as the run did before; by default only the documents addressed to the company get one, as field behaviour passes the stage. A set with no document addressed to the company gets a receipt for every document either way, and the run says so in the portal client's logger. ES: `Recibo` — Responder el set de intercambio con un recibo de mercaderías por cada documento, también los dirigidos a otro RUT, como lo hacía la corrida antes; por defecto solo los documentos dirigidos a la empresa llevan uno, como el comportamiento de campo supera la etapa. Un set sin documentos dirigidos a la empresa lleva un recibo por cada documento de todos modos, y la corrida lo dice en el logger del cliente del portal. */
@@ -135,8 +140,11 @@ const resolutionOf = async (
  * not sent again, a book approved is skipped, a confirmed exchange is not answered again. A refusal, a block or a
  * time-out comes back as data with the state saved; a `DteError` of the portal, of the SII or of the folios propagates
  * after the state is saved, with a `CERT_ERROR` event. Every envelope of documents is checked as the SII reads it
- * (`verifyTransmittedEnvelope`) before it is handed to `beforeUpload` and sent. A self-signed signing certificate is
- * said once, when the run starts, in the portal client's logger.
+ * (`verifyTransmittedEnvelope`) before it is handed to `beforeUpload` and sent. An envelope of a set or of the
+ * simulation that an earlier run kept with no track id from the SII is sent again, asking for no folio, when it is safe
+ * (`resendUnanswered`); the envelopes of the sets that will not be are dropped before the folios of the sets are asked
+ * for, so their sets get folios to be issued anew with. A self-signed signing certificate is said once, when the run
+ * starts, in the portal client's logger.
  * ES: El lado HTML de la certificación, en el orden del campo, retomado desde el estado guardado: el set de pruebas
  * (descargado una vez), las líneas del set que el lector no usó, registradas o, según `unreadLines`, una detención
  * (`checkTestSetText`), la revisión de los sets de exportación que trae el texto (`checkExportSets`), los folios, cada
@@ -148,8 +156,11 @@ const resolutionOf = async (
  * no se vuelve a enviar, un libro aprobado se omite, un intercambio confirmado no se responde de nuevo. Un rechazo, un
  * bloqueo o un timeout vuelven como datos con el estado guardado; un `DteError` del portal, del SII o de los folios se
  * propaga después de guardar el estado, con un evento `CERT_ERROR`. Cada sobre de documentos se chequea como lo lee el
- * SII (`verifyTransmittedEnvelope`) antes de entregarlo a `beforeUpload` y enviarlo. Un certificado de firma
- * autofirmado se dice una vez, al empezar la corrida, en el logger del cliente del portal.
+ * SII (`verifyTransmittedEnvelope`) antes de entregarlo a `beforeUpload` y enviarlo. Un sobre de un set o de la
+ * simulación que una corrida anterior guardó sin track id del SII se envía de nuevo, sin pedir folios, cuando es
+ * seguro (`resendUnanswered`); los sobres de los sets que no se enviarán se quitan antes de pedir los folios de los
+ * sets, así sus sets reciben folios con que emitirse otra vez. Un certificado de firma autofirmado se dice una vez, al
+ * empezar la corrida, en el logger del cliente del portal.
  * @param dependencies EN: the dependencies. ES: las dependencias.
  * @param options EN: where to stop, which optional sets, the exchange set and the samples. ES: dónde detenerse, qué sets opcionales, el set de intercambio y las muestras.
  * @returns EN: the state and why it stopped. ES: el estado y por qué se detuvo.
@@ -176,6 +187,7 @@ export const runCertification = async (
     stopped,
     ...(detail === undefined ? {} : { detail }),
   })
+  const resendOption = options.resendUnanswered === undefined ? {} : { resendUnanswered: options.resendUnanswered }
   const reachedUntil = (): boolean => options.until !== undefined && past(state.stage, options.until)
   try {
     if (state.stage === 'testSets') {
@@ -191,6 +203,9 @@ export const runCertification = async (
       await checkTestSetText(deps, state, options.unreadLines === undefined ? {} : { unreadLines: options.unreadLines })
       // An export set that cannot be issued stops the run before its folios are asked for.
       await checkExportSets(deps, state)
+      // An envelope kept from an earlier run is settled before the folios: one sent again needs none. With
+      // `resendUnanswered` false the settling drops them all, so the sends below find none to send again.
+      state = await settleUnansweredSets(deps, state, resendOption)
       state = (await prepareFolios(deps, state)).state
       for (const kind of SENT_SET_KEYS) {
         if (state.plan![kind] === undefined || state.sets[kind] !== undefined) continue
@@ -224,7 +239,13 @@ export const runCertification = async (
     }
     if (reachedUntil()) return stop('until')
     if (state.stage === 'simulation') {
-      if (state.simulation === undefined) state = (await sendSimulation(deps, state)).state
+      if (state.simulation === undefined)
+        state = (
+          await sendSimulation(deps, state, {
+            ...resendOption,
+            ...(options.simulationMinimum === undefined ? {} : { simulationMinimum: options.simulationMinimum }),
+          })
+        ).state
       if (state.simulation!.confirmed !== true) {
         const declared = await declareSimulation(deps, state)
         state = declared.state

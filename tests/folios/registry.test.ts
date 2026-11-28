@@ -32,6 +32,27 @@ test('the fingerprint tells two files apart', () => {
   expect(cafFingerprint('a')).toBe(cafFingerprint('a'))
 })
 
+test('hold: a free folio is held for its holder, one held for it stays held, any other folio is left as it is', async () => {
+  const registry = createMemoryFolioRegistry(() => FIXED_NOW)
+  const hold = registry.hold!
+  await expect(hold(scope, 1, 'a')).resolves.toBe(true)
+  await expect(hold(scope, 1, 'a')).resolves.toBe(true)
+  await expect(hold(scope, 1, 'b')).resolves.toBe(false)
+  // An empty holder holds nothing, not even a free folio, which stays free.
+  await expect(hold(scope, 5, '')).resolves.toBe(false)
+  // Reserved by a document, sent with no holder, annulled, outside the range: none is held.
+  await expect(registry.reserve(scope, { lowestFree: true })).resolves.toBe(2)
+  await expect(hold(scope, 2, 'a')).resolves.toBe(false)
+  await registry.markSent(scope, 3)
+  await expect(hold(scope, 3, 'a')).resolves.toBe(false)
+  await registry.markAnnulled(scope, [4])
+  await expect(hold(scope, 4, 'a')).resolves.toBe(false)
+  await expect(hold(scope, 6, 'a')).resolves.toBe(false)
+  // A held folio counts as used: the next folio handed out is past it.
+  await expect(registry.reserve(scope, { lowestFree: true })).resolves.toBe(5)
+  expect((await registry.stats({ companyRut: scope.companyRut, type: 33 })).totalSent).toBe(2)
+})
+
 test('the registry passes `lowestFree` on: by default the pointer moves on, with it the lowest free folio goes out', async () => {
   const wide = { ...scope, range: { from: 1, to: 9 } }
   const registry = createMemoryFolioRegistry(() => FIXED_NOW)

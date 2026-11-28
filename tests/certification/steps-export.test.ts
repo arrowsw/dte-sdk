@@ -335,7 +335,7 @@ describe('the simulation of a run that sent the export sets', () => {
   test('with the rates it issues their six documents in the envelope of the simulation', async () => {
     const harness = await certificationHarness([...stampingRoutes(), uploadRoute(reception('902'))])
     const deps = { ...harness.deps, exportSets: { exchangeRates: RATES } }
-    const result = await sendSimulation(deps, stateWith({ plan: exportPlan, cafs: [] }))
+    const result = await sendSimulation(deps, stateWith({ plan: exportPlan, cafs: [] }), { simulationMinimum: 0 })
     expect(result.outcome).toBe('sent')
     const names = await harness.store.listArtefacts()
     expect(names.filter((name) => /simulacion\/dtes\/dte-11[012]-/.test(name))).toHaveLength(6)

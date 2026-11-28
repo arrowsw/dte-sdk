@@ -303,7 +303,10 @@ describe('issuing the settlement set', () => {
 describe('the settlement set in the simulation', () => {
   test('each settlement invoice comes again with its lines, its commissions and its totals, and no SET reference', async () => {
     const set = await issueTestSet(plan, issueOptions([cafFor(43)]))
-    const simulation = await issueSimulation({ settlement: plan }, issueOptions([cafFor(43)]))
+    const simulation = await issueSimulation(
+      { settlement: plan },
+      { ...issueOptions([cafFor(43)]), minimumDocuments: 0 },
+    )
     expect(simulation.cases.map((issued) => [issued.caseId, issued.type])).toEqual(
       set.cases.map((issued) => [issued.caseId, issued.type]),
     )
@@ -331,6 +334,6 @@ describe('the settlement set in the simulation', () => {
     expect(simulationFolioNeeds(full)).toMatchObject({ 33: 3, 43: 4 })
     expect(simulationFolioNeeds(fullPlan())).not.toHaveProperty('43')
     // Without the settlement set the simulation is the one of the four sets, as before.
-    expect((await issueSimulation(fullPlan(), issueOptions())).cases).toHaveLength(18)
+    expect((await issueSimulation(fullPlan(), { ...issueOptions(), minimumDocuments: 0 })).cases).toHaveLength(18)
   })
 })

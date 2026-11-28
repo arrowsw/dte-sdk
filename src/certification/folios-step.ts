@@ -19,7 +19,14 @@ import { queryFolioQuota, type FolioQuota, type ObtainedCaf } from '../portal/st
 import { folioReceived } from '../sii/status'
 import type { FolioSource } from './folios'
 import type { CertificationPlan } from './set-plan'
-import { SENT_SET_KEYS, type CertificationState } from './state'
+import { simulationPasses } from './simulation'
+import {
+  ISSUED_ANEW,
+  SENT_SET_KEYS,
+  type CertificationState,
+  type IssuedAnewReason,
+  type UnansweredEnvelope,
+} from './state'
 import { runtime, saveState, type CertificationDependencies, type Runtime, type StepResult } from './runtime'
 
 /**
@@ -95,6 +102,77 @@ export const registryFolioSource = (registry: FolioRegistry, held: readonly Held
   },
 })
 
+// Holds every folio of a kept envelope that can be held for it, and says why one could not, the first reason found.
+// Every folio is tried, so the ones of an envelope that is dropped stay used: its earlier request may have reached
+// the SII with them.
+const holdEnvelope = async (
+  hold: NonNullable<FolioRegistry['hold']>,
+  held: readonly HeldCaf[],
+  envelope: UnansweredEnvelope,
+): Promise<IssuedAnewReason | null> => {
+  let reason: IssuedAnewReason | null = null
+  for (const c of envelope.cases) {
+    const caf = held.find(
+      (h) => h.caf.documentType === c.type && c.folio >= h.caf.range.from && c.folio <= h.caf.range.to,
+    )
+    const outcome = caf === undefined ? 'folios' : (await hold(caf.scope, c.folio, envelope.holder)) ? null : 'taken'
+    reason ??= outcome
+  }
+  return reason
+}
+
+/**
+ * EN: Holds in the folio registry every folio of every envelope kept to be sent again (`unanswered` of the state),
+ * for that envelope (`FolioRegistry.hold`), so no other document is handed one of them whatever registry the run is
+ * given: one the run wrote to when the upload failed, or another that never saw those folios. An envelope that cannot
+ * be held is dropped from the state, said in the portal client's logger with its reason, and issued anew: a folio of
+ * it in no CAF the run holds unexpired (`folios`), a folio the registry holds for another document (`taken`), or a
+ * registry without `hold` or an entry with no holder (`ledger`). Every folio of it that can be held is, even when it is dropped: an earlier
+ * request may have reached the SII with them, so no other document is handed them, until the SII says it did not
+ * receive them: they stay among the run's used folios, which `prepareFolios` gives back when the SII never received
+ * them. Called before any folio
+ * is asked for or handed out: by `settleUnansweredSets`, `prepareFolios`, `sendTestSet` and `sendSimulation`. Two runs resumed at once from
+ * one state on one registry hold the same folios for the same envelope, so both may send it (the SII answers the
+ * second with the first's track id) while each saves a state the other does not see; on two registries neither holds
+ * against the other's documents. Internal.
+ * ES: Retiene en el registro de folios cada folio de cada sobre guardado para enviarse de nuevo (`unanswered` del
+ * estado), para ese sobre (`FolioRegistry.hold`), así ningún otro documento recibe uno de ellos sea cual sea el
+ * registro que recibe la corrida: uno en que la corrida escribió cuando falló la subida, u otro que nunca vio esos
+ * folios. Un sobre que no se puede retener se quita del estado, se dice en el logger del cliente del portal con su
+ * razón, y se emite otra vez: un folio suyo en ningún CAF vigente que tenga la corrida (`folios`), un folio que el
+ * registro retiene para otro documento (`taken`), o un registro sin `hold` o una entrada sin tenedor (`ledger`). Cada folio suyo que se puede
+ * retener se retiene, aunque se quite: una petición anterior pudo llegar al SII con ellos, así que no se entregan a
+ * otro documento, hasta que el SII diga que no los recibió: siguen entre los folios usados de la corrida, que
+ * `prepareFolios` devuelve cuando el SII nunca los recibió. Se llama antes de pedir o entregar cualquier folio: desde `settleUnansweredSets`, `prepareFolios`, `sendTestSet` y
+ * `sendSimulation`. Dos corridas retomadas a la vez desde un mismo estado sobre un mismo registro retienen los mismos
+ * folios para el mismo sobre, así que ambas pueden enviarlo (el SII responde al segundo con el track id del primero)
+ * mientras cada una guarda un estado que la otra no ve; sobre dos registros ninguna retiene frente a los documentos de
+ * la otra. Interno.
+ */
+export const holdUnansweredFolios = async (rt: Runtime, state: CertificationState): Promise<CertificationState> => {
+  const unanswered = Object.entries(state.unanswered ?? {})
+  if (unanswered.length === 0) return state
+  const held = heldCafs(state.cafs, rt.now())
+  const registry = rt.registry
+  const dropped: string[] = []
+  for (const [key, envelope] of unanswered) {
+    // An entry with no holder (a field a store dropped) cannot tell its own marks from another document's: its folios
+    // are held under a name of their own, so they stay used, and it is issued anew.
+    const owned = typeof envelope.holder === 'string' && envelope.holder !== ''
+    const holder = owned ? envelope.holder : `${key}@no-holder`
+    const outcome =
+      registry.hold === undefined
+        ? 'ledger'
+        : await holdEnvelope((scope, folio, name) => registry.hold!(scope, folio, name), held, { ...envelope, holder })
+    const reason = owned ? outcome : 'ledger'
+    if (reason === null) continue
+    rt.portal.logger.warn(ISSUED_ANEW, { envelope: key, reason })
+    dropped.push(key)
+  }
+  if (dropped.length === 0) return state
+  return saveState(rt, state, { unanswered: Object.fromEntries(unanswered.filter(([key]) => !dropped.includes(key))) })
+}
+
 const addNeed = (needs: Record<number, number>, type: number, count: number): void => {
   if (count > 0) needs[type] = (needs[type] ?? 0) + count
 }
@@ -116,10 +194,27 @@ export const setFolioNeeds = (plan: CertificationPlan, sent: readonly string[]):
 }
 
 /**
- * EN: The folios the simulation needs: one per case, by type.
- * ES: Los folios que necesita la simulación: uno por caso, por tipo.
+ * EN: The folios the simulation needs: one per case of every pass over the plan it issues (`simulationPasses`), by
+ * type.
+ * ES: Los folios que necesita la simulación: uno por caso de cada pasada por el plan que emite (`simulationPasses`),
+ * por tipo.
+ * @param plan EN: the plan. ES: el plan.
+ * @param minimumDocuments EN: as for `issueSimulation`; 20 by default. ES: como en `issueSimulation`; 20 por defecto.
+ * @throws {DteError} EN: `INVALID_OPTION { field: 'minimumDocuments' }`, as `issueSimulation`. ES: `INVALID_OPTION { field: 'minimumDocuments' }`, como `issueSimulation`.
  */
-export const simulationFolioNeeds = (plan: CertificationPlan): Readonly<Record<number, number>> => {
+export const simulationFolioNeeds = (
+  plan: CertificationPlan,
+  minimumDocuments?: number,
+): Readonly<Record<number, number>> => {
+  const pass = onePassNeeds(plan)
+  const passes = simulationPasses(
+    Object.values(pass).reduce((sum, count) => sum + count, 0),
+    minimumDocuments,
+  )
+  return Object.fromEntries(Object.entries(pass).map(([type, count]) => [type, count * passes]))
+}
+
+const onePassNeeds = (plan: CertificationPlan): Readonly<Record<number, number>> => {
   const needs: Record<number, number> = {}
   for (const set of [plan.basic, plan.exempt]) {
     if (set === undefined) continue
@@ -144,7 +239,7 @@ export const simulationFolioNeeds = (plan: CertificationPlan): Readonly<Record<n
  * ES: Opciones de `prepareFolios`.
  */
 export type PrepareFoliosOptions = {
-  /** EN: Folios needed per type; the sets not yet sent by default. ES: Folios necesarios por tipo; por defecto los sets aún no enviados. */
+  /** EN: Folios needed per type; by default those of the sets not yet sent and whose envelope is not kept to be sent again (`unanswered` of the state). ES: Folios necesarios por tipo; por defecto los de los sets aún no enviados y cuyo sobre no está guardado para enviarse de nuevo (`unanswered` del estado). */
   readonly needs?: Readonly<Record<number, number>>
   /** EN: Leave the CAFs of the run aside (the simulation never reuses the sets' CAFs): the ones in hand are those an earlier attempt with `fresh` obtained and no send was tried with (`simulationCafs` of the state), and the rest is requested. ES: Dejar de lado los CAF de la corrida (la simulación nunca reutiliza los CAF de los sets): los que están en mano son los que un intento anterior con `fresh` obtuvo y con los que no se intentó ningún envío (`simulationCafs` del estado), y el resto se pide. */
   readonly fresh?: boolean
@@ -163,11 +258,18 @@ type Used = readonly { readonly type: number; readonly folio: number }[]
 
 // Folios this run marked sent whose envelope the SII never received (a failed send) come back: the field learnt it after
 // six retries burned 66 folios. At most 30 checks per CAF.
-const recoverUnreceived = async (rt: Runtime, held: readonly HeldCaf[], used: Used): Promise<Used> => {
+// The folios of an envelope kept to be sent again are never given back: the envelope still carries them.
+const recoverUnreceived = async (
+  rt: Runtime,
+  held: readonly HeldCaf[],
+  used: Used,
+  kept: ReadonlySet<string>,
+): Promise<Used> => {
   const released = new Set<string>()
   for (const h of held) {
     const candidates = used
       .filter((u) => u.type === h.caf.documentType && u.folio >= h.caf.range.from && u.folio <= h.caf.range.to)
+      .filter((u) => !kept.has(`${u.type}-${u.folio}`))
       .slice(0, MAX_RECEIPT_CHECKS)
     const free: number[] = []
     for (const candidate of candidates) {
@@ -261,7 +363,8 @@ const shortage = (type: number, required: number, available: number, result: Fol
 
 /**
  * EN: Makes sure the run holds the folios each type needs, as the field does it. The CAFs in hand first: an expired one
- * is skipped, folios of this run the SII never received are given back, and folios the SII already received are marked
+ * is skipped, folios of this run the SII never received are given back (never those of an envelope kept to be sent
+ * again, `unanswered` of the state), and folios the SII already received are marked
  * used so they are skipped. Then the quota: a refusal or a failure reading it is not a stop, the run goes on with no
  * maximum. A blocked quota, or a short one with unused folios at the SII, re-obtains them for the whole need of the
  * type: a whole answer ends the type and is what it is issued with; a short one is kept, in place of the CAFs in hand,
@@ -279,7 +382,8 @@ const shortage = (type: number, required: number, available: number, result: Fol
  * re-obtaining, or an annulment, stopped by a failure end the step with that failure's code too, with the kind of
  * refusal when the SII refused, once what they brought and was kept, or what was annulled, is in the state.
  * ES: Asegura que la corrida tenga los folios que necesita cada tipo, como lo hace el campo. Primero los CAF en mano:
- * uno vencido se omite, los folios de esta corrida que el SII nunca recibió se devuelven, y los que el SII ya recibió
+ * uno vencido se omite, los folios de esta corrida que el SII nunca recibió se devuelven (nunca los de un sobre
+ * guardado para enviarse de nuevo, `unanswered` del estado), y los que el SII ya recibió
  * se marcan como usados para saltarlos. Luego el cupo: un rechazo o un fallo al leerlo no detiene, la corrida sigue sin
  * tope. Un cupo bloqueado, o corto con folios sin usar en el SII, los reobtiene para toda la necesidad del tipo: una
  * respuesta completa cierra el tipo y es con lo que se emite; una corta se conserva, en lugar de los CAF en mano, solo
@@ -300,12 +404,19 @@ const shortage = (type: number, required: number, available: number, result: Fol
  */
 export const prepareFolios = async (
   deps: CertificationDependencies,
-  state: CertificationState,
+  given: CertificationState,
   options: PrepareFoliosOptions = {},
 ): Promise<PrepareFoliosResult> => {
   const rt = runtime(deps)
-  if (options.needs === undefined && state.plan === undefined) throw new DteError('MISSING_FIELD', { field: 'plan' })
-  const needs = options.needs ?? setFolioNeeds(state.plan!, Object.keys(state.sets))
+  if (options.needs === undefined && given.plan === undefined) throw new DteError('MISSING_FIELD', { field: 'plan' })
+  // Before any folio is asked for, the folios of the envelopes kept to be sent again are held in this registry.
+  const state = await holdUnansweredFolios(rt, given)
+  const unanswered = state.unanswered ?? {}
+  // A set whose envelope is kept to be sent again needs no folio.
+  const needs = options.needs ?? setFolioNeeds(state.plan!, [...Object.keys(state.sets), ...Object.keys(unanswered)])
+  const kept = new Set(
+    Object.values(unanswered).flatMap((envelope) => envelope.cases.map((c) => `${c.type}-${c.folio}`)),
+  )
   // With `fresh` the CAFs in hand are the ones an earlier attempt of the same step obtained and no send was tried
   // with, never the others of the run.
   let inHand: readonly string[] = options.fresh ? (state.simulationCafs ?? []) : state.cafs
@@ -341,7 +452,7 @@ export const prepareFolios = async (
       for (const h of held()) sum += await rt.registry.remaining(h.scope)
       return sum
     }
-    usedFolios = await recoverUnreceived(rt, held(), usedFolios)
+    usedFolios = await recoverUnreceived(rt, held(), usedFolios, kept)
     await skipReceivedFolios(rt, held(), usedFolios, required)
     let missing = required - (await available())
     let last: FolioFlowResult | null = null
