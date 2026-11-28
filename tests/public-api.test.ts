@@ -366,6 +366,7 @@ const PORTAL_EXPORTS = [
   'portalRejectionMessage',
   'queryCertificationSets',
   'queryFolioQuota',
+  'reconcilePeriodDocuments',
   'registerDocumentCode',
   'reobtainCaf',
   'reobtainFolios',

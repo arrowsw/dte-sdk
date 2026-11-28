@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Reconciling the register with the caller's records** (`reconcilePeriodDocuments`, `dte-sdk/portal`).
+  `listPeriodDocuments` gives the documents the purchase and sales register holds for a period, and what comes next
+  is setting them against the caller's own records; the library had nothing for that. The new function takes those
+  documents and the caller's records of the same period (`PeriodRecord`: type, folio, RUT of the other party, and
+  optionally the issue date and the exempt, net, VAT and total amounts) and returns the ones that agree, the ones that
+  differ with every field that differs and its two values, the ones in the register alone and in the records alone,
+  the keys held by more than one entry on a side (`duplicates`, never collapsed into one), the register's documents
+  without a key that reads (`unreadable`), the totals of each side and whether the two balance. A document is the
+  same on both sides when its type, the RUT of the other party and its folio agree, the RUT compared in the SII's
+  shape, so dots, the case of a K and the hyphen do not matter; an amount or a date the caller leaves out is not
+  compared. It is pure: no network and no clock.
+
 ## [0.17.0] - 2026-11-26
 
 ### Added
