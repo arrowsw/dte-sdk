@@ -247,26 +247,26 @@ const withoutUnanswered = (state: CertificationState, key: UnansweredKey): Unans
   Object.fromEntries(Object.entries(state.unanswered ?? {}).filter(([name]) => name !== key))
 
 // The failures after which the request of an upload may have reached the SII with no answer that can be read: the
-// network failed or timed out, or was cut, or the SII answered with an HTTP error or a body that is no reception. A
-// failure that is not a `DteError` comes from a transport of the caller's, as a network failure would.
+// network failed or timed out, or was cut, or the SII answered with a body that is no reception. An HTTP error is
+// judged by its status (`NO_ANSWER_STATUS`). A failure that is not a `DteError` comes from a transport of the
+// caller's, as a network failure would. A TLS failure is not one: the handshake failed before the file was sent.
 const NO_READABLE_ANSWER: ReadonlySet<string> = new Set([
   'TRANSPORT_FAILED',
   'REQUEST_TIMEOUT',
   'REQUEST_ABORTED',
-  'SII_HTTP_ERROR',
   'SII_RESPONSE_INVALID',
 ])
 
 /**
  * EN: Uploads an envelope of documents as the run does (`uploadForTrackId`), and says afterwards whether its request
- * left this machine. Everything `uploadEnvelope` does before the request is local or goes elsewhere: the file and its
+ * left this machine and whether the SII answered it with a track id. Everything `uploadEnvelope` does before the request is local or goes elsewhere: the file and its
  * form are built (`INVALID_OPTION` for a cover that names another company or sender or for a declaration that is not
  * ISO-8859-1, `ENCODING_UNSUPPORTED_CHAR`, `MISSING_FIELD`, `INVALID_RUT`), and the token is read from the cache or
  * asked for (the seed and token services, `SII_TOKEN_FAILED` and the transport codes of those requests). The request
  * leaves when the client's transport is called with the URL of `DTEUpload`; only then can the SII have the file.
  * Internal.
  * ES: Sube un sobre de documentos como lo hace la corrida (`uploadForTrackId`), y dice después si su petición salió de
- * esta máquina. Todo lo que `uploadEnvelope` hace antes de la petición es local o va a otra parte: se arman el archivo
+ * esta máquina y si el SII la respondió con un track id. Todo lo que `uploadEnvelope` hace antes de la petición es local o va a otra parte: se arman el archivo
  * y su formulario (`INVALID_OPTION` por una carátula que nombra otra empresa u otro remitente o por una declaración que
  * no es ISO-8859-1, `ENCODING_UNSUPPORTED_CHAR`, `MISSING_FIELD`, `INVALID_RUT`), y el token se lee del caché o se pide
  * (los servicios de semilla y token, `SII_TOKEN_FAILED` y los códigos de transporte de esas peticiones). La petición
@@ -276,8 +276,12 @@ const NO_READABLE_ANSWER: ReadonlySet<string> = new Set([
 export const watchedUpload = (
   rt: Runtime,
   xml: string,
-): { readonly upload: () => Promise<string>; readonly left: () => boolean } => {
+): {
+  readonly upload: () => Promise<string>
+  readonly outcome: () => { readonly left: boolean; readonly answered: boolean }
+} => {
   const urls: string[] = []
+  const box = { answered: false }
   const sii = {
     ...rt.sii,
     transport: (request: Parameters<typeof rt.sii.transport>[0]) => {
@@ -286,12 +290,15 @@ export const watchedUpload = (
     },
   }
   return {
-    upload: () =>
-      uploadForTrackId(
+    upload: async () => {
+      const trackId = await uploadForTrackId(
         (overrides) => uploadEnvelope(sii, { envelope: { kind: 'dte', xml } }, overrides),
         'uploadEnvelope',
-      ),
-    left: () => urls.includes(rt.sii.endpoints.soap.upload),
+      )
+      box.answered = true
+      return trackId
+    },
+    outcome: () => ({ left: urls.includes(rt.sii.endpoints.soap.upload), answered: box.answered }),
   }
 }
 
@@ -302,12 +309,27 @@ export const watchedUpload = (
 // have reached the SII.
 const keptAfter = (
   error: unknown,
-  left: boolean,
+  upload: { readonly left: boolean; readonly answered: boolean },
   again: UnansweredEnvelope | null,
   fresh: UnansweredEnvelope,
 ): UnansweredEnvelope | null => {
-  if (!left) return again
-  return !isDteError(error) || NO_READABLE_ANSWER.has(error.code) ? (again ?? fresh) : null
+  // The SII gave a track id and something failed after it: the envelope is kept, so the next attempt sends the same
+  // bytes and reads its first track id from the SII's answer.
+  if (upload.answered) return again ?? fresh
+  if (!upload.left) return again
+  return mayHaveReached(error) ? (again ?? fresh) : null
+}
+
+// The HTTP statuses after which the SII may hold the file or could not answer: a timeout of the request, too many
+// requests, and an error of the server; with 405, which the client retries as the SII's transient state. Any other
+// status is an answer: the SII did not take the file.
+const NO_ANSWER_STATUS = (status: number): boolean =>
+  status === 405 || status === 408 || status === 429 || status >= 500
+
+const mayHaveReached = (error: unknown): boolean => {
+  if (!isDteError(error)) return true
+  if (error.code === 'SII_HTTP_ERROR') return NO_ANSWER_STATUS(Number(error.details.httpStatus))
+  return NO_READABLE_ANSWER.has(error.code)
 }
 
 const unansweredWith = (
@@ -323,18 +345,23 @@ const failedMark = (sentAt: string, kept: UnansweredEnvelope | null) =>
 
 /**
  * EN: Settles, before the folios of the sets are asked for, which envelopes of the sets kept to be sent again
- * (`unanswered` of the state) will be: each that `envelopeToSendAgain` does not take, or every one when
- * `resendUnanswered` is false, is dropped from the state, so its set is issued anew and its folios asked for. Internal.
+ * (`unanswered` of the state) will be: the folios of every kept envelope are held first (`holdUnansweredFolios`), then
+ * each that `envelopeToSendAgain` does not take, or every one when `resendUnanswered` is false, is dropped from the
+ * state, so its set is issued anew and its folios asked for, while the folios it carried stay held. Internal.
  * ES: Resuelve, antes de pedir los folios de los sets, qué sobres de los sets guardados para enviarse de nuevo
- * (`unanswered` del estado) se enviarán: cada uno que `envelopeToSendAgain` no toma, o todos cuando
- * `resendUnanswered` es false, se quita del estado, así su set se emite otra vez y se piden sus folios. Interno.
+ * (`unanswered` del estado) se enviarán: primero se retienen los folios de cada sobre guardado
+ * (`holdUnansweredFolios`), luego cada uno que `envelopeToSendAgain` no toma, o todos cuando `resendUnanswered` es
+ * false, se quita del estado, así su set se emite otra vez y se piden sus folios, mientras los folios que llevaba
+ * siguen retenidos. Interno.
  */
 export const settleUnansweredSets = async (
   deps: CertificationDependencies,
-  state: CertificationState,
+  given: CertificationState,
   options: { readonly resendUnanswered?: boolean } = {},
 ): Promise<CertificationState> => {
   const rt = runtime(deps)
+  // The folios of every kept envelope are held first, so none is dropped with its folios free in this registry.
+  const state = await holdUnansweredFolios(rt, given)
   const kept = Object.keys(state.unanswered ?? {}).filter((key) => key !== 'simulation') as SentSetKey[]
   const dropped: SentSetKey[] = []
   for (const key of kept)
@@ -397,8 +424,12 @@ export const sendTestSet = async (
   const plan = given.plan?.[options.kind] as IssuableSetPlan | undefined
   if (plan === undefined) throw new DteError('MISSING_FIELD', { field: 'plan', kind: options.kind })
   rt.emit({ step: 'SET_START', set: options.kind })
-  // Before a folio is handed out, the folios of every envelope kept are held in this registry.
-  const state = await holdUnansweredFolios(rt, given)
+  // Before a folio is handed out, the folios of every envelope kept are held in this registry. A hold that fails ends
+  // the step as its other failures do.
+  let state = await holdUnansweredFolios(rt, given).catch((error: unknown) => {
+    rt.emit({ step: 'SET_ERROR', set: options.kind, error: errorMessage(error) })
+    throw error
+  })
   const held = heldCafs(state.cafs, rt.now())
   const again =
     options.resendUnanswered === false
@@ -412,6 +443,9 @@ export const sendTestSet = async (
     xml = again.xml
     cases = again.entry.cases
   } else {
+    // A kept envelope that is not sent again leaves the state now, before its artefact is written over.
+    if (state.unanswered?.[options.kind] !== undefined)
+      state = await saveState(rt, state, { unanswered: withoutUnanswered(state, options.kind) })
     const issued = await issueTestSet(plan, {
       issuer: rt.issuer,
       receiver: rt.receiver,
@@ -457,7 +491,7 @@ export const sendTestSet = async (
       holder: `${options.kind}@${sentAt}`,
       cases,
     }
-    const kept = keptAfter(error, watch.left(), again?.entry ?? null, fresh)
+    const kept = keptAfter(error, watch.outcome(), again?.entry ?? null, fresh)
     await markSent(rt, held, cases, failedMark(sentAt, kept))
     await saveState(rt, state, { usedFolios, unanswered: unansweredWith(state, options.kind, kept) })
     rt.emit({ step: 'SET_ERROR', set: options.kind, error: errorMessage(error) })
@@ -951,7 +985,7 @@ export const sendSimulation = async (
       holder: `simulation@${sentAt}`,
       cases,
     }
-    const kept = keptAfter(error, watch.left(), again?.entry ?? null, fresh)
+    const kept = keptAfter(error, watch.outcome(), again?.entry ?? null, fresh)
     await markSent(rt, held, cases, failedMark(sentAt, kept))
     await saveState(rt, current, {
       usedFolios,

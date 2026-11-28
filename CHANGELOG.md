@@ -42,15 +42,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so in the portal client's logger (`certification envelope sent again`). The upload already reads the SII's answer to
   a file it holds (`STATUS` 7 with its `TRACKID`) as that file's first track id.
   - An envelope is kept only when its upload request left this machine and got no answer that can be read: a failure
-    of the network, an HTTP error, an answer that is no reception. One the SII refused is not kept, and neither is one
-    that never left: the check before the upload, a `beforeUpload` that throws, a refusal of the upload client (a
-    cover that names another company or sender, a character outside the encoding, a missing field), or a failure
-    getting the token. The run then does what it did before: the folios count as used and the next run issues anew,
-    with what the caller corrected in the meantime.
-  - Before any folio is asked for or handed out, every folio of every kept envelope is held for it in the folio
-    registry the run has now (`FolioRegistry.hold`, which `createFolioRegistry` implements), so a set issued with
-    another registry, or with a ledger that lost them, never takes them. An envelope whose folio the registry holds for
-    another document is issued anew and never sent, and its other folios stay held.
+    of the network, an HTTP status that says the SII may hold the file or could not answer (405, 408, 429 or 5xx, the
+    statuses the client retries, with 408), an answer that is no reception. One the SII refused is not kept (another
+    HTTP status included), and neither is one that never left: the check before the upload, a `beforeUpload` that
+    throws, a refusal of the upload client (a cover that names another company or sender, a character outside the
+    encoding, a missing field), a TLS failure, or a failure getting the token. The run then does what it did before:
+    the folios count as used and the next run issues anew, with what the caller corrected in the meantime. An envelope
+    the SII answered with a track id is kept whatever fails after the answer (the ledger, the state store), so the next
+    attempt sends the same bytes and reads its first track id from the SII.
+  - Before any folio is asked for or handed out, and before any kept envelope is dropped, every folio of every kept
+    envelope is held for it in the folio registry the run has now (`FolioRegistry.hold`, which `createFolioRegistry`
+    implements), so a set issued with another registry, or with a ledger that lost them, never takes them. An
+    envelope whose folio the registry holds for another document, or whose entry names no holder, is issued anew and
+    never sent, and its other folios stay held. The ledger marks a failed upload leaves on a kept envelope's folios now
+    name its holder (`extra.heldFor` of the folio's sent record), and a successful send replaces them with the track
+    id: a caller that reads its ledger sees them.
   - It is sent again only when it is safe, and otherwise issued anew with the reason logged (`certification envelope
     issued anew`, with an `IssuedAnewReason`): its folios could all be held, in CAFs the run holds unexpired; the
     artefact is still there; its documents carry the date a document issued now would (the sets are dated on the

@@ -127,9 +127,9 @@ const holdEnvelope = async (
  * given: one the run wrote to when the upload failed, or another that never saw those folios. An envelope that cannot
  * be held is dropped from the state, said in the portal client's logger with its reason, and issued anew: a folio of
  * it in no CAF the run holds unexpired (`folios`), a folio the registry holds for another document (`taken`), or a
- * registry without `hold` (`ledger`). Every folio of it that can be held is, even when it is dropped: an earlier
+ * registry without `hold` or an entry with no holder (`ledger`). Every folio of it that can be held is, even when it is dropped: an earlier
  * request may have reached the SII with them, so they are never handed to another document. Called before any folio
- * is asked for or handed out: by `prepareFolios`, `sendTestSet` and `sendSimulation`. Two runs resumed at once from
+ * is asked for or handed out: by `settleUnansweredSets`, `prepareFolios`, `sendTestSet` and `sendSimulation`. Two runs resumed at once from
  * one state on one registry hold the same folios for the same envelope, so both may send it (the SII answers the
  * second with the first's track id) while each saves a state the other does not see; on two registries neither holds
  * against the other's documents. Internal.
@@ -138,9 +138,9 @@ const holdEnvelope = async (
  * registro que recibe la corrida: uno en que la corrida escribió cuando falló la subida, u otro que nunca vio esos
  * folios. Un sobre que no se puede retener se quita del estado, se dice en el logger del cliente del portal con su
  * razón, y se emite otra vez: un folio suyo en ningún CAF vigente que tenga la corrida (`folios`), un folio que el
- * registro retiene para otro documento (`taken`), o un registro sin `hold` (`ledger`). Cada folio suyo que se puede
+ * registro retiene para otro documento (`taken`), o un registro sin `hold` o una entrada sin tenedor (`ledger`). Cada folio suyo que se puede
  * retener se retiene, aunque se quite: una petición anterior pudo llegar al SII con ellos, así que nunca se entregan a
- * otro documento. Se llama antes de pedir o entregar cualquier folio: desde `prepareFolios`, `sendTestSet` y
+ * otro documento. Se llama antes de pedir o entregar cualquier folio: desde `settleUnansweredSets`, `prepareFolios`, `sendTestSet` y
  * `sendSimulation`. Dos corridas retomadas a la vez desde un mismo estado sobre un mismo registro retienen los mismos
  * folios para el mismo sobre, así que ambas pueden enviarlo (el SII responde al segundo con el track id del primero)
  * mientras cada una guarda un estado que la otra no ve; sobre dos registros ninguna retiene frente a los documentos de
@@ -153,10 +153,15 @@ export const holdUnansweredFolios = async (rt: Runtime, state: CertificationStat
   const registry = rt.registry
   const dropped: string[] = []
   for (const [key, envelope] of unanswered) {
-    const reason =
+    // An entry with no holder (a field a store dropped) cannot tell its own marks from another document's: its folios
+    // are held under a name of their own, so they stay used, and it is issued anew.
+    const owned = typeof envelope.holder === 'string' && envelope.holder !== ''
+    const holder = owned ? envelope.holder : `${key}@no-holder`
+    const outcome =
       registry.hold === undefined
         ? 'ledger'
-        : await holdEnvelope((scope, folio, holder) => registry.hold!(scope, folio, holder), held, envelope)
+        : await holdEnvelope((scope, folio, name) => registry.hold!(scope, folio, name), held, { ...envelope, holder })
+    const reason = owned ? outcome : 'ledger'
     if (reason === null) continue
     rt.portal.logger.warn(ISSUED_ANEW, { envelope: key, reason })
     dropped.push(key)
