@@ -52,5 +52,6 @@ export const loadCertificateFromPem = (
     subject: parsed.subject,
     notBefore: parsed.notBefore,
     notAfter: parsed.notAfter,
+    selfSigned: parsed.selfSigned,
   }
 }

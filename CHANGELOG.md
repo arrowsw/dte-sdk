@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **An envelope verified as it will travel** (`verifyTransmittedEnvelope`). Field behaviour is that the SII checks
+  each `<DTE>` of an envelope on its own, cut from the text of the file: a `<DTE>` that verifies inside the parsed
+  envelope, because it inherits the envelope's namespace, is rejected ("Firma DTE Incorrecta") when the text gives it
+  no `xmlns` of its own, and a stamp is objected to ("Firma Timbre Electrónico Incorrecta") when the bytes of its `DD`
+  in the file are not the ones signed (an empty element written `<RSR/>` where `<RSR></RSR>` was signed).
+  `verifyReceivedDocuments` reads each document from the parsed tree and cannot see either. The new function takes an
+  `EnvioDTE` or `EnvioBOLETA` exactly as it will be sent and reports, for each `<DTE>…</DTE>` cut from the text,
+  whether its signature verifies on that fragment alone and whether the `FRMT` of its stamp verifies over the `DD` as
+  written, with the key of the CAF the stamp carries; whether the envelope's own signature verifies; and one verdict.
+  A failed check is a result, not an error. Pure: no clock, no network.
+- **Whether a certificate is self-signed** (`Certificate.selfSigned`, `ParsedCertificate.selfSigned`): true when the
+  certificate names itself as its issuer. Nothing refuses one. Field behaviour is that the SII takes no seed signed
+  with a certificate no authority it knows issued, so `runCertification` says so once, when it starts, in the portal
+  client's logger.
+  - **What to change:** code that builds a `Certificate` of its own, as a test double does, must give it `selfSigned`.
+
+### Changed
+
+- **The certification run verifies every envelope of documents before it uploads it** (`dte-sdk/portal`). The test
+  sets, the simulation and the receipts set (`sendReceiptsSet`) are checked with `verifyTransmittedEnvelope` before
+  `beforeUpload` is called and before anything is sent; one that does not verify stops the step with
+  `SIGNATURE_INVALID`, whose details name the document (`index`, `type`, `folio`) and the check (`signature`,
+  `stamp`) or the envelope (`check: 'envelope'`). The state afterwards is the one a `beforeUpload` that throws leaves:
+  the envelope kept as an artefact, its folios counted as used, nothing sent. It cannot be turned off.
+- **The glosses of the states of an upload follow the SII's table.** The SII's "Manual de Desarrollador Externo -
+  Consulta de Estado de Upload Dte" (OI2004_CEUPDTE_MDE 1.10, `estado_envio.pdf`), 3.3 "Estados de Salida", glosses
+  `SOK` "Schema Validado", `CRT` "Carátula OK", `FOK` "Firma de Envió Validada" and `PDR` "Envió en Proceso";
+  `uploadStatusMessage` glossed them "Schema validado, validando firma", "Carátula validada, finalizando proceso",
+  "Firma validada, procesando envío" and "Envío en proceso, validando". It now gives the SII's wording, in sentence
+  case and with its accents. The classes do not change.
+  - **What to change:** code that compares the text of these glosses.
+
 ## [0.17.0] - 2026-11-26
 
 ### Added

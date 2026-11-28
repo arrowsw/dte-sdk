@@ -34,7 +34,9 @@ import {
   progressPage,
   STANDARD_ROWS,
 } from '../support/certification-pages'
+import { certificateBase64 } from '../../src/crypto/x509'
 import { DteError } from '../../src/errors'
+import { fixtureText } from '../support/fixtures'
 import type { FakeRoute } from '../support/fake-sii'
 import { failure } from '../support/portal'
 import { page, quotaForm, STAMP_ENTRY } from '../support/portal-pages'
@@ -93,6 +95,28 @@ describe('sendSimulation', () => {
     expect(error.code).toBe('INVALID_OPTION')
     expect(refusing.urls().filter((url) => url === UPLOAD)).toEqual([])
     const saved = (await refusing.store.load())!
+    expect(saved.simulation).toBeUndefined()
+    expect(saved.usedFolios.length).toBeGreaterThan(10)
+  })
+
+  test('an envelope that does not verify as the SII reads it is not sent, as when beforeUpload throws', async () => {
+    const harness = await certificationHarness([...stampingRoutes(), uploadRoute(reception('779'))])
+    const certificate = {
+      ...harness.deps.certificate,
+      certificateBase64: certificateBase64(fixtureText('tls-localhost.pem')),
+    }
+    const seen: unknown[] = []
+    const error = await failure(
+      sendSimulation(
+        { ...harness.deps, certificate, beforeUpload: (upload) => void seen.push(upload) },
+        stateWith({ plan, cafs: [] }),
+      ),
+    )
+    expect(error.code).toBe('SIGNATURE_INVALID')
+    expect(error.details).toMatchObject({ field: 'DTE', index: 0, check: 'signature' })
+    expect(seen).toEqual([])
+    expect(harness.urls().filter((url) => url === UPLOAD)).toEqual([])
+    const saved = (await harness.store.load())!
     expect(saved.simulation).toBeUndefined()
     expect(saved.usedFolios.length).toBeGreaterThan(10)
   })

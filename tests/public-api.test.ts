@@ -214,6 +214,7 @@ const ROOT_EXPORTS = [
   'cafEnvironment',
   'verifyDocumentSignature',
   'verifyEnvelopeSignature',
+  'verifyTransmittedEnvelope',
   'verifyEnveloped',
   'verifyFolioConsumptionSignature',
   'verifyGuideBookSignature',

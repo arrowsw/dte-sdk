@@ -27,6 +27,8 @@ describe('loadCertificateFromPkcs12', () => {
     expect(cert.chainPem).toBe(cert.certificatePem)
     expect(cert.certificateBase64).not.toMatch(/\s/)
     expect(cert.publicKey.exponent).toBe('AQAB')
+    // The fixture names itself as its issuer.
+    expect(cert.selfSigned).toBe(true)
   })
 
   test('wrong password', () => {
@@ -112,6 +114,7 @@ describe('loadCertificateFromPkcs12', () => {
     const cert = loadCertificateFromPkcs12(bytes, 'pw', { now: FIXED_NOW })
     expect(cert.commonName).toBe('Leaf')
     expect(cert.rut).toBeNull()
+    expect(cert.selfSigned).toBe(false)
     const pems = cert.chainPem.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g) ?? []
     expect(pems.length).toBe(3)
     expect(pems.map((pem) => forge.pki.certificateFromPem(pem).subject.getField('CN').value)).toEqual([
@@ -160,6 +163,7 @@ describe('loadCertificateFromPem', () => {
     const cert = loadCertificateFromPem({ privateKeyPem, certificatePem }, { now: FIXED_NOW })
     expect(cert.rut).toBe('76543210-3')
     expect(cert.chainPem).toBe(certificatePem)
+    expect(cert.selfSigned).toBe(true)
     expect(loadCertificateFromPem({ privateKeyPem, certificatePem }).rut).toBe('76543210-3')
     expect(
       loadCertificateFromPem({ privateKeyPem, certificatePem, chainPem: 'CHAIN' }, { now: FIXED_NOW }).chainPem,

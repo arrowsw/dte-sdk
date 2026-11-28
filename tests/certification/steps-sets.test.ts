@@ -10,6 +10,7 @@ import {
   waitForTestSetsApproval,
 } from '../../src/certification/steps'
 import type { CertificationUpload } from '../../src/certification/runtime'
+import { certificateBase64 } from '../../src/crypto/x509'
 import { DteError } from '../../src/errors'
 import { cafFingerprint } from '../../src/folios/registry'
 import { fullPlan } from '../support/certification-fixtures'
@@ -43,7 +44,7 @@ import {
   STANDARD_ROWS,
 } from '../support/certification-pages'
 import type { FakeReply } from '../support/fake-sii'
-import { fixturePath } from '../support/fixtures'
+import { fixturePath, fixtureText } from '../support/fixtures'
 import { siiFixture } from '../support/sii-client'
 import { failure } from '../support/portal'
 import {
@@ -64,6 +65,8 @@ import {
 import { ATTENTION, FULL_SET_TEXT } from '../support/test-set-samples'
 
 const plan = fullPlan()
+// A certificate other than the one whose key signs: what is signed with the key does not verify with it.
+const OTHER_CERTIFICATE = certificateBase64(fixtureText('tls-localhost.pem'))
 const CAF_XML = readFileSync(fixturePath('caf-33.xml'), 'latin1')
 const OLD_CAF_XML = readFileSync(fixturePath('caf-33-old.xml'), 'latin1')
 const entry = get('pe_avance1', ...repeat(page('entry'), 40))
@@ -1072,6 +1075,26 @@ describe('sendTestSet', () => {
     expect((await harness.store.load())?.sets).toEqual({})
     const stats = await harness.registry.stats({ companyRut: '76543210-3', type: 52, environment: 'certification' })
     expect(stats.totalSent).toBe(plan.guide!.guides.length)
+  })
+
+  test('an envelope that does not verify as the SII reads it is sent to no one, not even to beforeUpload', async () => {
+    const harness = await certificationHarness([uploadRoute(reception())])
+    const state = stateWith({ plan, cafs: certificationCafXmls() })
+    // The documents and the envelope are signed with the key of the certificate but carry another certificate.
+    const certificate = { ...harness.deps.certificate, certificateBase64: OTHER_CERTIFICATE }
+    const seen: CertificationUpload[] = []
+    const beforeUpload = (upload: CertificationUpload): void => void seen.push(upload)
+    const error = await failure(sendTestSet({ ...harness.deps, certificate, beforeUpload }, state, { kind: 'basic' }))
+    expect(error.code).toBe('SIGNATURE_INVALID')
+    expect(error.details).toEqual({ field: 'DTE', index: 0, type: 33, folio: 1, check: 'signature' })
+    expect(seen).toEqual([])
+    expect(harness.urls()).toEqual([])
+    expect(harness.steps()).toEqual(['SET_START', 'SET_ERROR'])
+    // As with a beforeUpload that throws: the envelope is kept and its folios count as used.
+    expect(await harness.store.listArtefacts()).toContain('sets-prueba/envio-set-basico.xml')
+    const kept = (await harness.store.readArtefact('sets-prueba/envio-set-basico.xml'))!
+    expect((await harness.store.load())?.usedFolios).toHaveLength(kept.match(/<DTE /g)!.length)
+    expect((await harness.store.load())?.sets).toEqual({})
   })
 
   test('the customers of the dependencies take turns in the set, each completed from the test receiver', async () => {
