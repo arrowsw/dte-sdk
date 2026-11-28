@@ -7,8 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Whether a document is assigned, and who holds it** (`unstable_queryAssignmentState`,
+  `unstable_queryRelatedAssignmentState`). The registry of credit transfers answers two questions about a document
+  besides the state of an upload, and neither was asked. `unstable_queryAssignmentState` asks `getEstCesion` of
+  `wsRPETCConsulta` whether a 33, 34, 46 or 43 is assigned: `assigned` is true when the registry answers 0, and with the
+  key of the assignment (`accessKey`) the answer also carries who holds the document, when its last entry was written,
+  who collects it and where, and whether a sworn statement goes with it. `unstable_queryRelatedAssignmentState` asks
+  `getEstCesionRelac` the same for a company linked to the document, as its holder or its receiver, with no key. Any
+  result but 0 comes back in `code` and `message`; a token the registry refuses (3, 4 and 5) is renewed once, and an
+  internal error of the service (6, 7 and 8) is repeated and, if it stays, is `SII_QUERY_ERROR`. Functions, parameters,
+  answers and results are the ones of the SII's manual of the service (WS Consulta de Estado – RPETC, version 1.2 of
+  2008-02-05) and of its WSDL; the manual names the types 33 and 34, and both functions take the four an assignment
+  file can carry. Neither has run against the SII, so both carry `unstable_`.
+
 ### Changed
 
+- **The state of an assignment upload** (`unstable_queryAssignmentUploadStatus`). It returned `ESTADO` and `GLOSA` of
+  the answer as the state of the upload. By the SII's manual of the service those are the result of the query, 0 when
+  the registry took it, and the state of the upload is in the body: `ESTADO_ENVIO` and `DESC_ESTADO`. The answer now
+  carries them as `uploadState` and `description`, and `status` reads the state as the manual lists it: `accepted`
+  (`EOK`), `rejected` (`RSC`, `RFS`, `RCR`, `RDC`, `RCS`), `annulled` (`EAN`), `pending` (`UPL`, `RCP`, `SOK`, `FSO`,
+  `COK`, `VDC`, `VCS`) or `unknown`. A token the registry refuses is renewed once and an internal error of the service
+  is repeated, where both came back as a code to read.
+  - **What to change:** read `status`, or `uploadState`, where the code was read as the state of the upload: `code` 0
+    says the query was taken, not that the upload was accepted. Catch `SII_TOKEN_INVALID` and `SII_QUERY_ERROR` where
+    the results 3 to 8 were read from `code`.
+- **A later assignment holds the earlier ones to the document and to each other** (`unstable_createReassignment`). A
+  previous file whose signatures all verified was taken whatever its assignments said, beyond their numbering and the
+  last assignee. Each earlier assignment must now name the document the file carries, by its type, issuer, receiver,
+  folio, date and total (`INVALID_OPTION`, `IdDTE`), the first must be made by the creditor of the document and each
+  later one by the assignee of the one before it (`INVALID_OPTION`, `Cedente`).
+  - **What to change:** nothing for a file `unstable_createAssignment` and `unstable_createReassignment` built. A file
+    from elsewhere whose assignments name another document, or do not follow each other, is now refused.
 - **A credit note's line in the folio consumption report.** `createFolioConsumption` reports credit notes (61) since
   0.17.0, but `folioConsumptionEntryFromDocument`, which derives a line of the report from an issued document, took a
   receipt alone and refused a 61 (`INVALID_DOCUMENT_TYPE`), so the line of a credit note was built by hand. It now

@@ -471,8 +471,22 @@ export type {
   ReceiverAnswer,
   ReceiverAnswerResult,
 } from './sii/claims'
-export { unstable_uploadAssignment, unstable_queryAssignmentUploadStatus } from './sii/assignment'
-export type { AssignmentUploadInput, AssignmentUploadStatusInput, AssignmentUploadStatus } from './sii/assignment'
+export {
+  unstable_uploadAssignment,
+  unstable_queryAssignmentUploadStatus,
+  unstable_queryAssignmentState,
+  unstable_queryRelatedAssignmentState,
+} from './sii/assignment'
+export type {
+  AssignmentUploadInput,
+  AssignmentUploadStatusInput,
+  AssignmentUploadStatus,
+  AssignmentUploadStatusClass,
+  AssignedDocumentQuery,
+  AssignmentStateInput,
+  RelatedAssignmentStateInput,
+  AssignmentState,
+} from './sii/assignment'
 export { queryAuthorizedIssuer } from './sii/issuer-registry'
 export type { AuthorizedIssuer, IssuerRegistryClient } from './sii/issuer-registry'
 export type { AuthorizedDocumentType, IssuerRegistryEntry } from './portal/pages/issuer-registry'
