@@ -48,9 +48,11 @@ const MAX_LOCK_STALE_MS = 3 * MAX_TIMER_MS
 // that much older than it is, so no age below it is ever taken for staleness.
 const COARSE_MTIME_MS = 2000
 const BOOT_ID_FILE = '/proc/sys/kernel/random/boot_id'
-// Where every registry of this process, and every copy of this library loaded in it, keeps the tokens of the locks it
-// holds right now: a lock that names this process with a token not kept here belongs to a change that has ended.
-const HELD_TOKENS = Symbol.for('dte-sdk.folio-ledger.held-tokens')
+// Where every registry of this process, and every copy of this library loaded in it, keeps a random identifier of this
+// process instance, written in every lock, and the tokens of the locks it holds right now: a lock that carries this
+// instance's identifier with a token not kept here belongs to a change that has ended. A process id alone proves
+// nothing: two containers on one volume can share a host name and a process id.
+const PROCESS_STATE = Symbol.for('dte-sdk.folio-ledger.process')
 const FIRST_RETRY_MS = 2
 const LAST_RETRY_MS = 100
 
@@ -61,11 +63,13 @@ const errorCodeOf = (error: unknown): unknown => (error as { code?: unknown } | 
 const isMissingFile = (error: unknown): boolean => errorCodeOf(error) === 'ENOENT'
 const nothing = (): null => null
 
-const heldTokens = (): Set<string> => {
-  const shared = globalThis as { [HELD_TOKENS]?: Set<string> }
-  shared[HELD_TOKENS] ??= new Set()
-  return shared[HELD_TOKENS]
+type ProcessState = { readonly instance: string; readonly tokens: Set<string> }
+const processState = (): ProcessState => {
+  const shared = globalThis as { [PROCESS_STATE]?: ProcessState }
+  shared[PROCESS_STATE] ??= { instance: crypto.randomUUID(), tokens: new Set() }
+  return shared[PROCESS_STATE]
 }
+const heldTokens = (): Set<string> => processState().tokens
 
 /**
  * EN: The `LockSystem` of a machine, from its `os` module, a `kill` and its boot identifier: a process exists when a
@@ -131,6 +135,7 @@ type Holder = {
   readonly host: string
   readonly uptime: number
   readonly bootId?: string
+  readonly instance?: string
 }
 type Identity = { readonly dev: bigint; readonly ino: bigint }
 type Fs = NodeFsModules['fs']
@@ -150,7 +155,8 @@ const holderOf = (text: string): Holder | null => {
       typeof value.host === 'string' &&
       typeof value.uptime === 'number' &&
       Number.isFinite(value.uptime) &&
-      (value.bootId === undefined || typeof value.bootId === 'string')
+      (value.bootId === undefined || typeof value.bootId === 'string') &&
+      (value.instance === undefined || typeof value.instance === 'string')
     return known ? (value as Holder) : null
   } catch {
     return null
@@ -168,8 +174,9 @@ type DirectoryLock = {
 /**
  * Exclusive across the processes of one host through a file next to the ledger that names its holder from the instant
  * it exists (a token, the process id, the host name, how long the machine had been up and, on Linux, the identifier of
- * its boot): written whole to a file of its own and linked to the name, which fails if the name exists. A lock that
- * names this process with a token no change of it holds belongs to a change that has ended, and is taken at once.
+ * its boot, and the identifier of this process instance): written whole to a file of its own and linked to the name,
+ * which fails if the name exists. A lock that carries this instance's identifier with a token no change of it holds
+ * belongs to a change that has ended, and is taken at once; one that only names this process id is judged as any other.
  * Another lock is taken over only when it is older than the stale limit and its holder is known not to exist (a process
  * of this host that is gone, or a lock written before this machine started), or cannot be known (another host, content
  * that does not read): a holder that is stopped or blocked keeps its lock. A lock is removed under a second file, also
@@ -216,7 +223,9 @@ const directoryLock = (
     const here = await system()
     // Another host's process cannot be asked after: there, only the age decides.
     if (holder.host !== here.host) return { removable: old, identity: stats }
-    if (holder.pid === process.pid && !heldTokens().has(holder.token))
+    // A lock this very instance wrote, for a change of it that has ended: nothing else needs telling. A lock that only
+    // names this process id may be another process's of the same id, and goes through the rule of every other lock.
+    if (holder.instance === processState().instance && !heldTokens().has(holder.token))
       return { removable: true, pid: holder.pid, identity: stats }
     // The machine has certainly started again since the lock was written when it names another boot, or when it has
     // now been up for less time than it had then.
@@ -233,7 +242,8 @@ const directoryLock = (
   const holderText = async (token: string): Promise<string> => {
     const here = await system()
     const boot = here.bootId === null ? {} : { bootId: here.bootId }
-    const holder = { token, pid: process.pid, host: here.host, uptime: here.uptime(), ...boot }
+    const { instance } = processState()
+    const holder = { token, pid: process.pid, host: here.host, uptime: here.uptime(), instance, ...boot }
     return JSON.stringify({ ...holder, acquiredAt: new Date().toISOString() })
   }
   // Creates `file` exclusively, already naming its holder: the content goes to a file of its own, linked to the name,
@@ -347,8 +357,8 @@ const directoryLock = (
     } finally {
       clearInterval(renewal)
       holding.identity = { dev: -1n, ino: -1n }
-      // A change that was written keeps its result. A lock that could not be removed names this process with a token
-      // it no longer holds, so the next change of this process takes it at once.
+      // A change that was written keeps its result. A lock that could not be removed carries this instance's
+      // identifier with a token it no longer holds, so the next change of this process takes it at once.
       await release(fs, lock, own).catch(nothing)
       heldTokens().delete(token)
       await handle.close().catch(nothing)
@@ -372,8 +382,12 @@ const directoryLock = (
  *
  * A lock whose holder is a process of this host that still exists is never taken over, whatever its age: a stopped or
  * blocked holder keeps its lock, and nobody writes under it. Every registry of a process, and every copy of this
- * library loaded in it, shares the tokens of the locks the process holds right now, so a lock that names this process
- * with a token none of its changes holds belongs to a change that has ended and is taken at once by any of them. A
+ * library loaded in it, shares a random identifier of this process instance, written in every lock and takeover file,
+ * and the tokens of the locks the process holds right now, so a lock that carries this instance's identifier with a
+ * token none of its changes holds belongs to a change that has ended and is taken at once by any of them. The
+ * identifier is what proves that this very process wrote the lock: a process id does not, since two processes of
+ * another table of process ids (containers on one volume) can share it and a host name, and a lock that only names
+ * this process id, with another identifier or none, goes through the age and existence tests like any other. A
  * lock is taken over once older than `lockStaleMs` plus two seconds when its holder is known not to exist (its process
  * is gone, or the lock was written before this machine last started), or when its holder cannot be known: another
  * host's name, or content that does not read. The machine has started again when the lock names another boot (Linux),
@@ -420,19 +434,24 @@ const directoryLock = (
  * `FOLIO_LEDGER_LOCKED`, cuyo `holderPid` es el id del proceso dueño cuando se conoce.
  *
  * Un lock cuyo dueño es un proceso de este equipo que todavía existe nunca se toma, sea cual sea su edad: un dueño
- * detenido o bloqueado conserva su lock, y nadie escribe bajo él. Todos los registros de un proceso, y todas las
- * copias de esta biblioteca cargadas en él, comparten los tokens de los locks que el proceso tiene en ese momento, así
- * que un lock que nombra a este proceso con un token que ninguno de sus cambios tiene es de un cambio que terminó y
- * cualquiera de ellos lo toma de inmediato. Un lock se toma cuando es más viejo que `lockStaleMs` más dos segundos y se
- * sabe que su dueño no existe (su proceso terminó, o el lock se escribió antes del último arranque de este equipo), o
- * cuando no se puede saber quién es: el nombre de otro equipo, o un contenido que no se lee. El equipo arrancó de nuevo
- * cuando el lock nombra otro arranque (Linux), o cuando el equipo lleva ahora encendido menos tiempo del que llevaba al
- * escribirse el lock; ninguna de las dos cosas se mueve con el reloj. Lo que eso no ve es un equipo que arrancó de
- * nuevo y lleva desde entonces más tiempo encendido del que llevaba, donde no hay identificador de arranque: decide
- * entonces la prueba del proceso, y un proceso que recibió el mismo id conserva el lock. Un dueño que murió y que su
- * padre todavía no recogió sigue existiendo para esa prueba, así que su lock queda hasta que lo recojan. Procesos que
- * comparten nombre de equipo pero no tabla de ids de proceso (contenedores sobre un mismo volumen) prueban el id del
- * dueño en la tabla equivocada: el lock es para los procesos de un mismo equipo y una misma tabla de ids de proceso.
+ * detenido o bloqueado conserva su lock, y nadie escribe bajo él. Todos los registros de un proceso, y todas las copias
+ * de esta biblioteca cargadas en él, comparten un identificador al azar de esta instancia del proceso, que se escribe
+ * en cada lock y archivo de toma, y los tokens de los locks que el proceso tiene en ese momento, así que un lock que
+ * lleva el identificador de esta instancia con un token que ninguno de sus cambios tiene es de un cambio que terminó y
+ * cualquiera de ellos lo toma de inmediato. El identificador es lo que prueba que este mismo proceso escribió el lock:
+ * un id de proceso no lo prueba, porque dos procesos de otra tabla de ids de proceso (contenedores sobre un mismo
+ * volumen) pueden compartirlo junto con el nombre del equipo, y un lock que solo nombra este id de proceso, con otro
+ * identificador o ninguno, pasa por las pruebas de edad y de existencia como cualquier otro. Un lock se toma cuando es
+ * más viejo que `lockStaleMs` más dos segundos y se sabe que su dueño no existe (su proceso terminó, o el lock se
+ * escribió antes del último arranque de este equipo), o cuando no se puede saber quién es: el nombre de otro equipo, o
+ * un contenido que no se lee. El equipo arrancó de nuevo cuando el lock nombra otro arranque (Linux), o cuando el
+ * equipo lleva ahora encendido menos tiempo del que llevaba al escribirse el lock; ninguna de las dos cosas se mueve
+ * con el reloj. Lo que eso no ve es un equipo que arrancó de nuevo y lleva desde entonces más tiempo encendido del que
+ * llevaba, donde no hay identificador de arranque: decide entonces la prueba del proceso, y un proceso que recibió el
+ * mismo id conserva el lock. Un dueño que murió y que su padre todavía no recogió sigue existiendo para esa prueba, así
+ * que su lock queda hasta que lo recojan. Procesos que comparten nombre de equipo pero no tabla de ids de proceso
+ * (contenedores sobre un mismo volumen) prueban el id del dueño en la tabla equivocada: el lock es para los procesos de
+ * un mismo equipo y una misma tabla de ids de proceso.
  *
  * Cuando no se puede saber quién es el dueño decide solo la edad, y ese es el caso que este lock no deja seguro: un
  * directorio compartido entre equipos vuelve a la edad, con los límites de relojes que difieren y de horas de

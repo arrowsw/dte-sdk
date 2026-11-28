@@ -51,8 +51,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one handle, and removed only while its name is still that file.
   - A lock whose holder is a process of this host that still exists is never taken over, whatever its age, so a holder
     that is stopped or blocked keeps its lock and nobody writes under it. Every registry of a process, and every copy
-    of the library loaded in it, shares the tokens of the locks the process holds right now: a lock that names this
-    process with a token none of its changes holds belongs to a change that has ended, and is taken at once.
+    of the library loaded in it, shares a random identifier of this process instance, written in every lock, and the
+    tokens of the locks the process holds right now: a lock that carries this instance's identifier with a token none
+    of its changes holds belongs to a change that has ended, and is taken at once. A lock that only names this process
+    id, with another identifier or none, may be another process's of the same id (containers on one volume that share a
+    host name) and goes through the age and existence tests like any other, so that unsupported case blocks instead of
+    giving a folio twice.
   - Another lock is taken over once older than `lockStaleMs` (10 000 ms by default, from 1 000 to about 74 days) plus
     the two seconds that the coarsest modification times in use (FAT) can hide, when its process is gone or it was
     written before the machine last started, and when its holder cannot be known: another host's name, or content that

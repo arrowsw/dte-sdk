@@ -212,12 +212,14 @@ describe('createDirectoryFolioRegistry', () => {
       return JSON.stringify({ token: 'someone', host: hostname(), uptime: here.uptime(), ...boot, ...fields })
     }
     // The tokens this process holds right now, shared by every registry and copy of the library in it.
-    const heldTokens = (): Set<string> => {
-      const shared = globalThis as Record<symbol, Set<string> | undefined>
-      const key = Symbol.for('dte-sdk.folio-ledger.held-tokens')
-      shared[key] ??= new Set()
+    type ProcessState = { readonly instance: string; readonly tokens: Set<string> }
+    const processState = (): ProcessState => {
+      const shared = globalThis as Record<symbol, ProcessState | undefined>
+      const key = Symbol.for('dte-sdk.folio-ledger.process')
+      shared[key] ??= { instance: crypto.randomUUID(), tokens: new Set() }
       return shared[key]
     }
+    const heldTokens = (): Set<string> => processState().tokens
     // A holder of this host that exists and is not this process: a child that sleeps until the test ends.
     const withLiveChild = async (body: (pid: number) => Promise<void>): Promise<void> => {
       const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'])
@@ -385,6 +387,7 @@ describe('createDirectoryFolioRegistry', () => {
           pid: process.pid,
           host: hostname(),
           uptime: expect.any(Number),
+          instance: processState().instance,
           ...((await loadLockSystem()).bootId === null ? {} : { bootId: (await loadLockSystem()).bootId }),
           acquiredAt: expect.any(String),
         },
@@ -907,6 +910,45 @@ describe('createDirectoryFolioRegistry', () => {
       expect((await failure(registry.reserve(scope))).details).toMatchObject({ kind: 'wait' })
       expect(once.done).toBe(true)
       expect(readFileSync(lockOf(dir), 'utf8')).toBe('')
+    })
+
+    describe('a lock that names this process id but was not written by this instance', () => {
+      test.each([
+        ['another instance', { instance: 'another-instance' }],
+        ['no instance, as a lock of an earlier version', { instance: undefined }],
+      ])('with %s and a token not held is never taken, at any age', async (_, fields) => {
+        const dir = tempDir()
+        const content = await holderLock({ pid: process.pid, token: 'not-held', ...fields })
+        writeFileSync(lockOf(dir), content)
+        const waits = async () => {
+          const error = await failure(createDirectoryFolioRegistry({ dir, lockWaitMs: 60 }).reserve(scope))
+          expect(error.details).toMatchObject({ kind: 'wait', holderPid: process.pid })
+        }
+        await waits()
+        utimesSync(lockOf(dir), anHourAgo(), anHourAgo())
+        await waits()
+        expect(readFileSync(lockOf(dir), 'utf8')).toBe(content)
+      })
+
+      test('a takeover file with this process id and another instance is never taken', async () => {
+        const dir = tempDir()
+        writeFileSync(lockOf(dir), 'held')
+        const guard = await holderLock({ pid: process.pid, token: 'not-held', instance: 'another-instance' })
+        writeFileSync(guardOf(dir), guard)
+        for (const file of [lockOf(dir), guardOf(dir)]) utimesSync(file, anHourAgo(), anHourAgo())
+        expect((await failure(createDirectoryFolioRegistry({ dir, lockWaitMs: 60 }).reserve(scope))).code).toBe(
+          'FOLIO_LEDGER_LOCKED',
+        )
+        expect(readFileSync(guardOf(dir), 'utf8')).toBe(guard)
+        expect(readFileSync(lockOf(dir), 'utf8')).toBe('held')
+      })
+
+      test('a lock of this instance names it, and one whose token is not held is taken at once', async () => {
+        const dir = tempDir()
+        const content = await holderLock({ pid: process.pid, token: 'not-held', instance: processState().instance })
+        writeFileSync(lockOf(dir), content)
+        await expect(createDirectoryFolioRegistry({ dir, lockWaitMs: 60 }).reserve(scope)).resolves.toBe(1)
+      })
     })
 
     describe('a lock this process could not remove', () => {
