@@ -7,7 +7,7 @@ import {
 } from '../../src/certification/receipts-send'
 import { parseReceiptsTestSet } from '../../src/certification/receipts-set'
 import { DteError } from '../../src/errors'
-import { cafFor, certificate, issuer, resolution } from '../support/certification-fixtures'
+import { cafFor, issuer, resolution, signingCertificate } from '../support/certification-fixtures'
 import {
   certificationHarness,
   estUp,
@@ -69,22 +69,34 @@ const stateReply = (code: string, trackId: string, gloss: string | null): FakeRe
 })
 const NOT_AUTHORIZED = 'Rut No Autorizado a Firmar'
 
-let issued: IssuedReceiptsSet
-beforeAll(async () => {
-  issued = await issueReceiptsSet(parseReceiptsTestSet(RECEIPTS_SET_TEXT), {
+const issueSet = (cases: ReturnType<typeof parseReceiptsTestSet>): Promise<IssuedReceiptsSet> =>
+  issueReceiptsSet(cases, {
     issuer,
-    certificate,
+    certificate: signingCertificate,
     folios: createFolioAllocator([cafFor(39, { from: 21, to: 30 })]),
     resolution,
     now: () => FIXED_NOW,
   })
+
+// The whole set, and a set of its first case alone for the tests that are about the replies and not the receipts:
+// every envelope is verified before it is uploaded, one signature and one stamp per receipt.
+let issued: IssuedReceiptsSet
+let single: IssuedReceiptsSet
+beforeAll(async () => {
+  issued = await issueSet(parseReceiptsTestSet(RECEIPTS_SET_TEXT))
+  single = await issueSet(parseReceiptsTestSet(RECEIPTS_SET_TEXT).slice(0, 1))
 })
 
-const run = async (uploads: readonly FakeReply[], statuses: readonly FakeReply[], sequence?: number) => {
+const run = async (
+  uploads: readonly FakeReply[],
+  statuses: readonly FakeReply[],
+  sequence?: number,
+  set: IssuedReceiptsSet = single,
+) => {
   const harness = await certificationHarness([uploadRoute(...uploads), estUpRoute(...statuses)])
   const sleeps: number[] = []
   const events: ReceiptsProgressEvent[] = []
-  const result = await sendReceiptsSet(harness.deps.sii, issued, {
+  const result = await sendReceiptsSet(harness.deps.sii, set, {
     ...(sequence === undefined ? {} : { sequence }),
     sleep: async (ms) => void sleeps.push(ms),
     onProgress: (event) => void events.push(event),
@@ -98,6 +110,8 @@ describe('sendReceiptsSet', () => {
     const { result, sleeps, steps, uploaded } = await run(
       [reception('111'), reception('222')],
       [estUp('EPR', '111'), estUp('EPR', '222')],
+      undefined,
+      issued,
     )
     expect(result).toMatchObject({
       outcome: 'sent',
@@ -125,6 +139,16 @@ describe('sendReceiptsSet', () => {
     expect(report).toContain('<Inicial>21</Inicial>')
     expect(report).toContain('<Final>24</Final>')
     await expect(validateAgainstXsd(report, 'ConsumoFolio')).resolves.toEqual([])
+  })
+
+  test('an envelope that does not verify as the SII reads it is not uploaded', async () => {
+    const harness = await certificationHarness([uploadRoute(reception('111'))])
+    const xml = single.envelope.xml.replace(/<NroResol>\d+<\/NroResol>/, '<NroResol>99</NroResol>')
+    expect(xml).not.toBe(single.envelope.xml)
+    const error = await failure(sendReceiptsSet(harness.deps.sii, { envelope: { ...single.envelope, xml } }))
+    expect(error.code).toBe('SIGNATURE_INVALID')
+    expect(error.details).toEqual({ field: 'EnvioBOLETA', check: 'envelope' })
+    expect(harness.fake.requests.filter((request) => request.url.endsWith('DTEUpload'))).toEqual([])
   })
 
   test('a STATUS 7 envelope with a track id is a sent one: it waits, reads its status and goes on', async () => {
@@ -176,14 +200,14 @@ describe('sendReceiptsSet', () => {
     ['a STATUS 0 whose track id is not in an element', RECEIVED_TRACK_IN_TEXT],
   ])('%s is a failure of the envelope upload, and nothing else is sent', async (_name, reply) => {
     const harness = await certificationHarness([uploadRoute(reply), estUpRoute()])
-    const error = await failure(sendReceiptsSet(harness.deps.sii, issued, { sleep: async () => undefined }))
+    const error = await failure(sendReceiptsSet(harness.deps.sii, single, { sleep: async () => undefined }))
     expect(error.code).toBe('SII_UPLOAD_REJECTED')
     expect(harness.fake.requests).toHaveLength(1)
   })
 
   test('the STATUS 99 of an envelope says its status, even when it names the track id of the first upload', async () => {
     const harness = await certificationHarness([uploadRoute(STATUS_99)])
-    const error = await failure(sendReceiptsSet(harness.deps.sii, issued, { sleep: async () => undefined }))
+    const error = await failure(sendReceiptsSet(harness.deps.sii, single, { sleep: async () => undefined }))
     expect(error.details).toMatchObject({ status: 99, operation: 'uploadEnvelope', fileName: 'EnvioBOLETA.xml' })
   })
 
@@ -401,7 +425,7 @@ describe('sendReceiptsSet', () => {
   test('a refused connection is not sent again, for the envelope or for the report', async () => {
     const refusedConnection = new DteError('TRANSPORT_FAILED', { reason: 'ECONNREFUSED' })
     const harness = await certificationHarness([uploadRoute(refusedConnection, reception('111'))])
-    await expect(sendReceiptsSet(harness.deps.sii, issued, { sleep: async () => undefined })).rejects.toMatchObject({
+    await expect(sendReceiptsSet(harness.deps.sii, single, { sleep: async () => undefined })).rejects.toMatchObject({
       code: 'TRANSPORT_FAILED',
       details: { reason: 'ECONNREFUSED' },
     })
@@ -421,7 +445,7 @@ describe('sendReceiptsSet', () => {
       uploadRoute(reception('111'), reception('222')),
       estUpRoute(estUp('EPR', '111'), estUp('EPR', '222')),
     ])
-    await expect(sendReceiptsSet(harness.deps.sii, issued)).resolves.toMatchObject({ outcome: 'sent' })
+    await expect(sendReceiptsSet(harness.deps.sii, single)).resolves.toMatchObject({ outcome: 'sent' })
     const empty = {
       envelope: { ...issued.envelope, xml: '<EnvioBOLETA><SetDTE ID="X"><Caratula/></SetDTE></EnvioBOLETA>' },
     }

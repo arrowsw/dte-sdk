@@ -28,6 +28,8 @@ export type Certificate = {
   readonly notBefore: Date
   /** EN: Validity end. ES: Fin de vigencia. */
   readonly notAfter: Date
+  /** EN: The certificate's issuer name is its subject name, compared as the two are encoded, byte for byte: it names itself as its issuer. It says nothing of which key signed it, and the same name encoded another way (a UTF8String in one and a PrintableString in the other) counts as another name. It is not refused, but field behaviour is that the SII takes no seed signed with a certificate no authority it knows issued. ES: El nombre del emisor del certificado es su nombre de sujeto, comparados tal como vienen codificados, byte a byte: se nombra a sí mismo como emisor. No dice nada de qué llave lo firmó, y el mismo nombre codificado de otra forma (un UTF8String en uno y un PrintableString en el otro) cuenta como otro nombre. No se rechaza, pero el comportamiento de campo es que el SII no acepta una semilla firmada con un certificado que no emitió una entidad que conoce. */
+  readonly selfSigned: boolean
 }
 
 /**

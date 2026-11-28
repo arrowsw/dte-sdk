@@ -89,6 +89,7 @@ const past = (stage: CertificationStage, other: CertificationStage): boolean =>
 // The stages that still send an envelope, and so write a cover.
 const WRITES_COVER: readonly CertificationStage[] = ['testSets', 'books', 'simulation']
 const NOT_READ = 'certification resolution not read from the SII'
+const SELF_SIGNED = 'certification certificate is self-signed: the SII takes no seed it signs'
 
 // The cover of an envelope names the resolution of the company in the environment it goes to, and the SII refuses an
 // envelope that names another ("Error en Carátula"). The portal shows the date of the one of the certification
@@ -124,7 +125,9 @@ const resolutionOf = async (
  * `declareCompliance: true`, because that declaration cannot be undone. Nothing is repeated: a set with a track id is
  * not sent again, a book approved is skipped, a confirmed exchange is not answered again. A refusal, a block or a
  * time-out comes back as data with the state saved; a `DteError` of the portal, of the SII or of the folios propagates
- * after the state is saved, with a `CERT_ERROR` event.
+ * after the state is saved, with a `CERT_ERROR` event. Every envelope of documents is checked as the SII reads it
+ * (`verifyTransmittedEnvelope`) before it is handed to `beforeUpload` and sent. A self-signed signing certificate is
+ * said once, when the run starts, in the portal client's logger.
  * ES: El lado HTML de la certificación, en el orden del campo, retomado desde el estado guardado: el set de pruebas
  * (descargado una vez), la revisión de los sets de exportación que trae el texto (`checkExportSets`), los folios, cada
  * set aún no enviado (el de liquidación y los dos de exportación al final, cada set de exportación en su propio sobre),
@@ -134,7 +137,9 @@ const resolutionOf = async (
  * solo con `declareCompliance: true`, porque esa declaración no se puede deshacer. Nada se repite: un set con track id
  * no se vuelve a enviar, un libro aprobado se omite, un intercambio confirmado no se responde de nuevo. Un rechazo, un
  * bloqueo o un timeout vuelven como datos con el estado guardado; un `DteError` del portal, del SII o de los folios se
- * propaga después de guardar el estado, con un evento `CERT_ERROR`.
+ * propaga después de guardar el estado, con un evento `CERT_ERROR`. Cada sobre de documentos se chequea como lo lee el
+ * SII (`verifyTransmittedEnvelope`) antes de entregarlo a `beforeUpload` y enviarlo. Un certificado de firma
+ * autofirmado se dice una vez, al empezar la corrida, en el logger del cliente del portal.
  * @param dependencies EN: the dependencies. ES: las dependencias.
  * @param options EN: where to stop, which optional sets, the exchange set and the samples. ES: dónde detenerse, qué sets opcionales, el set de intercambio y las muestras.
  * @returns EN: the state and why it stopped. ES: el estado y por qué se detuvo.
@@ -145,6 +150,9 @@ export const runCertification = async (
   options: RunCertificationOptions = {},
 ): Promise<RunCertificationResult> => {
   const rt = runtime(dependencies)
+  // Field behaviour: the SII takes no seed signed with a certificate no authority it knows issued. It is said, not
+  // refused: whether the SII knows the authority is the SII's to say.
+  if (rt.certificate.selfSigned) rt.portal.logger.warn(SELF_SIGNED)
   const companyRut = rt.portal.companyRut ?? rt.issuer.rut
   let state = (await rt.store.load()) ?? createCertificationState(companyRut, rt.now())
   // A resolution left out is settled once, when the run starts: every envelope of the run carries it, whatever day its

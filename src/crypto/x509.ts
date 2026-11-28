@@ -26,6 +26,8 @@ export type ParsedCertificate = {
   readonly base64: string
   /** EN: Public key parts. ES: Partes de la clave pública. */
   readonly publicKey: RsaPublicKeyParts
+  /** EN: The issuer's name is the subject's, byte for byte as encoded: the certificate names itself as its issuer. ES: El nombre del emisor es el del sujeto, byte a byte tal como viene codificado: el certificado se nombra a sí mismo como emisor. */
+  readonly selfSigned: boolean
 }
 
 const asSiiRut = (candidate: string | undefined): SiiRut | null => {
@@ -118,6 +120,8 @@ export const parseCertificatePem = (certificatePem: string): ParsedCertificate =
     rut: rutFromCertificate(certificate),
     base64: certificateBase64(forge.pki.certificateToPem(certificate)),
     publicKey: { modulus: bigIntToBase64(publicKey.n), exponent: bigIntToBase64(publicKey.e) },
+    // forge hashes the encoded issuer and subject names as it reads them.
+    selfSigned: certificate.issuer.hash === certificate.subject.hash,
   }
 }
 

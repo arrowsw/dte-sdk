@@ -1,4 +1,5 @@
 import {
+  assertTransmittable,
   FIELD_UPLOAD_RETRY,
   isFieldNetworkError,
   uploadAsField,
@@ -9,6 +10,7 @@ import type { CallOverrides } from '../../src/sii/client'
 import { uploadEnvelope } from '../../src/sii/upload'
 import type { FakeReply } from '../support/fake-sii'
 import { failure } from '../support/portal'
+import { envelopeAround, envelopeOf, issued, signedCaf, stampedWith } from '../support/received-fixtures'
 import { cachedSii, siiFixture } from '../support/sii-client'
 
 const CGI = 'https://maullin.sii.cl/cgi_dte/UPL/DTEUpload'
@@ -151,5 +153,22 @@ describe('the reception of a file as the run reads it', () => {
   test('with a track id `uploadForTrackId` returns it', async () => {
     const { upload } = run(reception('reception-ok.xml', TRACK_ID, '55'))
     expect(await uploadForTrackId(upload, 'uploadEnvelope')).toBe('55')
+  })
+})
+
+describe('assertTransmittable', () => {
+  test('lets through an envelope that verifies as the SII reads it', () => {
+    expect(() => assertTransmittable(envelopeOf([issued(1)]))).not.toThrow()
+  })
+
+  test('names the stamp of a document whose DD was written again after it was signed', () => {
+    const signed = stampedWith(4, signedCaf(), { fields: { receiverName: '' } })
+    const xml = envelopeAround([signed.xml.replace('<RSR></RSR>', '<RSR/>')])
+    expect(() => assertTransmittable(xml)).toThrow(
+      expect.objectContaining({
+        code: 'SIGNATURE_INVALID',
+        details: { field: 'DTE', index: 0, type: 33, folio: 4, check: 'stamp' },
+      }),
+    )
   })
 })

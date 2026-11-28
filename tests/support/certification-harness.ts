@@ -10,7 +10,7 @@ import type { CertificationDependencies, CertificationProgressEvent } from '../.
 import { createMemoryFolioRegistry, type FolioRegistry } from '../../src/folios/registry'
 import { createPortalClient } from '../../src/portal/client'
 import { createSiiClient } from '../../src/sii/client'
-import { certificate, issuer, receiver, resolution } from './certification-fixtures'
+import { certificate, issuer, receiver, resolution, signingCertificate } from './certification-fixtures'
 import { createFakeSii, type FakeReply, type FakeRoute, type FakeSii, type RecordedRequest } from './fake-sii'
 import { FIXED_NOW, fixtureText, ISSUER_RUT } from './fixtures'
 import { seedSession } from './portal'
@@ -146,7 +146,7 @@ export const certificationHarness = async (routes: readonly FakeRoute[]): Promis
     registry,
     issuer,
     receiver,
-    certificate,
+    certificate: signingCertificate,
     resolution,
     now: () => FIXED_NOW,
     sleep: async (ms) => {

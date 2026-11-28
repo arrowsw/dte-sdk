@@ -7,7 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **An envelope verified as it will travel** (`verifyTransmittedEnvelope`). It takes an `EnvioDTE` or `EnvioBOLETA`
+  exactly as it will be sent and reports, for each `<DTE>…</DTE>` cut from the text, whether its signature verifies on
+  that fragment alone and whether the `FRMT` of its stamp verifies, with the key of the CAF the stamp carries; whether
+  the envelope's own signature verifies; and one verdict. A failed check is a result, not an error. Pure: no clock, no
+  network. `verifyReceivedDocuments` reads each document from the parsed tree and can see neither of the two faults
+  this finds.
+  - The signature: field behaviour is that the SII checks each `<DTE>` on its own, cut from the text of the file, and
+    rejects ("Firma DTE Incorrecta") one that verifies inside the parsed envelope only because it inherits the
+    envelope's namespace, when the text gives it no `xmlns` of its own.
+  - The stamp: the SII's "Instructivo Emisión DTE" (A.2.4, pages 19 to 21) says the stamp is signed and verified over
+    the string left once "los caracteres de fin de línea y los blancos y/o tab entre TAGS, así como la referencia a
+    NameSpaces" are removed, "sin modificar la información que va entre el tag de inicio y el tag de fin de los
+    elementos terminales", and "de lo contrario la verificación del timbre electrónico resultará incorrecta". The
+    `FRMT` must verify over the `DD` as written or over that string. A stamp whose content was written again after it
+    was signed (an empty element `<RSR/>` where `<RSR></RSR>` was signed) changes that string, and fails.
+  - The cut: a text with a comment, a CDATA section or a processing instruction past its XML declaration is refused
+    (`XML_PARSE_FAILED`, `field` naming which), since each could hold text that spells a `DTE`; a closing tag may
+    carry blanks before its `>`; and each cut must hold the `ID`, the type and the folio of the element it stands for.
+
+- **Whether a certificate is self-signed** (`Certificate.selfSigned`, `ParsedCertificate.selfSigned`): true when the
+  certificate's issuer name is its subject name, compared as the two are encoded. It says nothing of which key signed
+  the certificate. Nothing refuses one. Field behaviour is that the SII takes no seed signed with a certificate no
+  authority it knows issued, so `runCertification` says so once, when it starts, in the portal client's logger.
+  - **What to change:** code that builds a `Certificate` of its own, as a test double does, must give it `selfSigned`.
+
 ### Changed
+
+- **The certification run verifies every envelope of documents before it uploads it** (`dte-sdk/portal`), with
+  `verifyTransmittedEnvelope`. One that does not verify throws `SIGNATURE_INVALID`, whose details name the document
+  (`index`, `type`, `folio`) and the check (`signature`, `stamp`) or the envelope (`check: 'envelope'`), and nothing is
+  sent. It cannot be turned off.
+  - The test sets and the simulation are checked before `beforeUpload` is called, and the step ends as when a
+    `beforeUpload` throws: the envelope kept as an artefact, its folios counted as used.
+  - `sendReceiptsSet` checks the receipts envelope before it uploads anything, and throws.
+
+- **The glosses of the states of an upload follow the SII's table.** The SII's "Manual de Desarrollador Externo -
+  Consulta de Estado de Upload Dte" (OI2004_CEUPDTE_MDE 1.10, `estado_envio.pdf`), 3.3 "Estados de Salida", glosses
+  `SOK` "Schema Validado", `CRT` "Carátula OK", `FOK` "Firma de Envió Validada" and `PDR` "Envió en Proceso";
+  `uploadStatusMessage` glossed them "Schema validado, validando firma", "Carátula validada, finalizando proceso",
+  "Firma validada, procesando envío" and "Envío en proceso, validando". It now gives the SII's wording, in sentence
+  case and with its accents. The classes do not change.
+  - **What to change:** code that compares the text of these glosses.
 
 - **A credit note's line in the folio consumption report.** `createFolioConsumption` reports credit notes (61) since
   0.17.0, but `folioConsumptionEntryFromDocument`, which derives a line of the report from an issued document, took a
