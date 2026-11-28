@@ -33,22 +33,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **What to change:** code that builds an `IssuedSimulation` of its own must give it `outsideDeclarableSize`.
 
 - **An envelope the SII never answered is sent again** (`resendUnanswered` of `runCertification`, `sendTestSet` and
-  `sendSimulation`, `CertificationState.unanswered`, `UnansweredEnvelope`, `IssuedAnewReason`; `dte-sdk/portal`). A
-  set or a simulation whose upload failed before the SII gave a track id had its folios counted as used, and the next
-  run issued it again with new folios: in certification the SII hands out few, and each network failure cost a set's
-  worth. The state now keeps such an envelope (its artefact, the issue date of its documents and its cases), and the
-  next run uploads the same bytes in place of issuing anew, asks for no folio, and says so in the portal client's
-  logger (`certification envelope sent again`). The upload already reads the SII's answer to a file it holds
-  (`STATUS` 7 with its `TRACKID`) as that file's first track id. It does so only when it is safe, and otherwise issues
-  anew and logs why (`certification envelope issued anew`, with an `IssuedAnewReason`): the artefact is still there;
-  its documents carry the date a document issued now would (the sets are dated on the Chile day of the run, "Agregue
-  fecha del día" in the SII's instructions for the set; the simulation on the local day); the certificate in the
-  envelope's own signature is the run's; its cover names the run's resolution; every folio is in a CAF the run holds
-  unexpired; and it still verifies as the SII reads it (`verifyTransmittedEnvelope`). An envelope the SII refused
-  (`SII_UPLOAD_REJECTED`) or that did not verify is not kept; one a `beforeUpload` stopped is, and is handed to it
-  again. The envelopes of the sets are settled before their folios are asked for, a set whose envelope is kept needs
-  none, and its folios are never given back as unreceived. A state stored before this change has nothing to send
-  again. `resendUnanswered: false` issues anew every time, as before. The receipts set is unchanged.
+  `sendSimulation`, `SendTestSetOptions`, `SendSimulationOptions`, `CertificationState.unanswered`,
+  `UnansweredEnvelope`, `UnansweredEnvelopes`, `IssuedAnewReason`, `FolioRegistry.hold`; `dte-sdk/portal`). A set or a
+  simulation whose upload failed before the SII gave a track id had its folios counted as used, and the next run
+  issued it again with new folios: in certification the SII hands out few, and each network failure cost a set's
+  worth. The state now keeps such an envelope (its artefact, the issue date of its documents, its cases and who its
+  folios are held for), and the next run uploads the same bytes in place of issuing anew, asks for no folio, and says
+  so in the portal client's logger (`certification envelope sent again`). The upload already reads the SII's answer to
+  a file it holds (`STATUS` 7 with its `TRACKID`) as that file's first track id.
+  - An envelope is kept only when its upload request left this machine and got no answer that can be read: a failure
+    of the network, an HTTP error, an answer that is no reception. One the SII refused is not kept, and neither is one
+    that never left: the check before the upload, a `beforeUpload` that throws, a refusal of the upload client (a
+    cover that names another company or sender, a character outside the encoding, a missing field), or a failure
+    getting the token. The run then does what it did before: the folios count as used and the next run issues anew,
+    with what the caller corrected in the meantime.
+  - Before any folio is asked for or handed out, every folio of every kept envelope is held for it in the folio
+    registry the run has now (`FolioRegistry.hold`, which `createFolioRegistry` implements), so a set issued with
+    another registry, or with a ledger that lost them, never takes them. An envelope whose folio the registry holds for
+    another document is issued anew and never sent, and its other folios stay held.
+  - It is sent again only when it is safe, and otherwise issued anew with the reason logged (`certification envelope
+    issued anew`, with an `IssuedAnewReason`): its folios could all be held, in CAFs the run holds unexpired; the
+    artefact is still there; its documents carry the date a document issued now would (the sets are dated on the
+    Chile day of the run, "Agregue fecha del día" in the SII's instructions for the set; the simulation on the local
+    day); a simulation holds as many documents as `simulationMinimum` now asks for, which is validated on every path;
+    the certificate in the envelope's own signature is the run's; its cover names the run's resolution, date and
+    number; and it still verifies as the SII reads it (`verifyTransmittedEnvelope`).
+  - The envelopes of the sets that will not be sent again are dropped before the sets' folios are asked for, a set
+    whose envelope is kept needs none, and its folios are never given back as unreceived. A state stored before this
+    change has nothing to send again. `resendUnanswered: false` issues anew every time, as before. The receipts set is
+    unchanged.
+  - Two runs resumed at once from one state on one registry hold the same folios for the same envelope and may both
+    send it (the SII answers the second with the first's track id); on two registries neither holds against the
+    other's documents. A state written by this version and then run by an earlier one keeps its `unanswered` entries
+    untouched, and this version would send such an envelope if that set were ever run again.
+  - **What to change:** a caller of `sendTestSet` or `sendSimulation` that wants an attempt after a failed upload to
+    issue anew with new folios, as before, passes `resendUnanswered: false`. A registry of its own sends no kept
+    envelope again until it implements `hold`.
 
 - **An envelope verified as it will travel** (`verifyTransmittedEnvelope`). It takes an `EnvioDTE` or `EnvioBOLETA`
   exactly as it will be sent and reports, for each `<DTE>…</DTE>` cut from the text, whether its signature verifies on
@@ -77,7 +97,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The simulation repeats its pass over the plan until it holds 20 documents** (`minimumDocuments` of
+- **The simulation repeats its pass over the plan until it holds 20 documents** (`IssueSimulationOptions`, `minimumDocuments` of
   `issueSimulation`, `simulationMinimum` of `runCertification` and `sendSimulation`, `IssuedSimulation.passes`,
   `simulationFolioNeeds`; `dte-sdk/portal`). Field behaviour is that the "Declarar avance" form takes a simulation
   envelope of 20 to 100 documents, and the basic set alone holds eight: a company whose sets added up to fewer sent a

@@ -20,7 +20,13 @@ import { folioReceived } from '../sii/status'
 import type { FolioSource } from './folios'
 import type { CertificationPlan } from './set-plan'
 import { simulationPasses } from './simulation'
-import { SENT_SET_KEYS, type CertificationState } from './state'
+import {
+  ISSUED_ANEW,
+  SENT_SET_KEYS,
+  type CertificationState,
+  type IssuedAnewReason,
+  type UnansweredEnvelope,
+} from './state'
 import { runtime, saveState, type CertificationDependencies, type Runtime, type StepResult } from './runtime'
 
 /**
@@ -95,6 +101,69 @@ export const registryFolioSource = (registry: FolioRegistry, held: readonly Held
     throw new DteError('FOLIO_OUT_OF_RANGE', { type })
   },
 })
+
+// Holds every folio of a kept envelope that can be held for it, and says why one could not, the first reason found.
+// Every folio is tried, so the ones of an envelope that is dropped stay used: its earlier request may have reached
+// the SII with them.
+const holdEnvelope = async (
+  hold: NonNullable<FolioRegistry['hold']>,
+  held: readonly HeldCaf[],
+  envelope: UnansweredEnvelope,
+): Promise<IssuedAnewReason | null> => {
+  let reason: IssuedAnewReason | null = null
+  for (const c of envelope.cases) {
+    const caf = held.find(
+      (h) => h.caf.documentType === c.type && c.folio >= h.caf.range.from && c.folio <= h.caf.range.to,
+    )
+    const outcome = caf === undefined ? 'folios' : (await hold(caf.scope, c.folio, envelope.holder)) ? null : 'taken'
+    reason ??= outcome
+  }
+  return reason
+}
+
+/**
+ * EN: Holds in the folio registry every folio of every envelope kept to be sent again (`unanswered` of the state),
+ * for that envelope (`FolioRegistry.hold`), so no other document is handed one of them whatever registry the run is
+ * given: one the run wrote to when the upload failed, or another that never saw those folios. An envelope that cannot
+ * be held is dropped from the state, said in the portal client's logger with its reason, and issued anew: a folio of
+ * it in no CAF the run holds unexpired (`folios`), a folio the registry holds for another document (`taken`), or a
+ * registry without `hold` (`ledger`). Every folio of it that can be held is, even when it is dropped: an earlier
+ * request may have reached the SII with them, so they are never handed to another document. Called before any folio
+ * is asked for or handed out: by `prepareFolios`, `sendTestSet` and `sendSimulation`. Two runs resumed at once from
+ * one state on one registry hold the same folios for the same envelope, so both may send it (the SII answers the
+ * second with the first's track id) while each saves a state the other does not see; on two registries neither holds
+ * against the other's documents. Internal.
+ * ES: Retiene en el registro de folios cada folio de cada sobre guardado para enviarse de nuevo (`unanswered` del
+ * estado), para ese sobre (`FolioRegistry.hold`), así ningún otro documento recibe uno de ellos sea cual sea el
+ * registro que recibe la corrida: uno en que la corrida escribió cuando falló la subida, u otro que nunca vio esos
+ * folios. Un sobre que no se puede retener se quita del estado, se dice en el logger del cliente del portal con su
+ * razón, y se emite otra vez: un folio suyo en ningún CAF vigente que tenga la corrida (`folios`), un folio que el
+ * registro retiene para otro documento (`taken`), o un registro sin `hold` (`ledger`). Cada folio suyo que se puede
+ * retener se retiene, aunque se quite: una petición anterior pudo llegar al SII con ellos, así que nunca se entregan a
+ * otro documento. Se llama antes de pedir o entregar cualquier folio: desde `prepareFolios`, `sendTestSet` y
+ * `sendSimulation`. Dos corridas retomadas a la vez desde un mismo estado sobre un mismo registro retienen los mismos
+ * folios para el mismo sobre, así que ambas pueden enviarlo (el SII responde al segundo con el track id del primero)
+ * mientras cada una guarda un estado que la otra no ve; sobre dos registros ninguna retiene frente a los documentos de
+ * la otra. Interno.
+ */
+export const holdUnansweredFolios = async (rt: Runtime, state: CertificationState): Promise<CertificationState> => {
+  const unanswered = Object.entries(state.unanswered ?? {})
+  if (unanswered.length === 0) return state
+  const held = heldCafs(state.cafs, rt.now())
+  const registry = rt.registry
+  const dropped: string[] = []
+  for (const [key, envelope] of unanswered) {
+    const reason =
+      registry.hold === undefined
+        ? 'ledger'
+        : await holdEnvelope((scope, folio, holder) => registry.hold!(scope, folio, holder), held, envelope)
+    if (reason === null) continue
+    rt.portal.logger.warn(ISSUED_ANEW, { envelope: key, reason })
+    dropped.push(key)
+  }
+  if (dropped.length === 0) return state
+  return saveState(rt, state, { unanswered: Object.fromEntries(unanswered.filter(([key]) => !dropped.includes(key))) })
+}
 
 const addNeed = (needs: Record<number, number>, type: number, count: number): void => {
   if (count > 0) needs[type] = (needs[type] ?? 0) + count
@@ -327,11 +396,13 @@ const shortage = (type: number, required: number, available: number, result: Fol
  */
 export const prepareFolios = async (
   deps: CertificationDependencies,
-  state: CertificationState,
+  given: CertificationState,
   options: PrepareFoliosOptions = {},
 ): Promise<PrepareFoliosResult> => {
   const rt = runtime(deps)
-  if (options.needs === undefined && state.plan === undefined) throw new DteError('MISSING_FIELD', { field: 'plan' })
+  if (options.needs === undefined && given.plan === undefined) throw new DteError('MISSING_FIELD', { field: 'plan' })
+  // Before any folio is asked for, the folios of the envelopes kept to be sent again are held in this registry.
+  const state = await holdUnansweredFolios(rt, given)
   const unanswered = state.unanswered ?? {}
   // A set whose envelope is kept to be sent again needs no folio.
   const needs = options.needs ?? setFolioNeeds(state.plan!, [...Object.keys(state.sets), ...Object.keys(unanswered)])

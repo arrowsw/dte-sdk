@@ -1,10 +1,13 @@
-import { prepareFolios } from '../../src/certification/folios-step'
+import { heldCafs, prepareFolios } from '../../src/certification/folios-step'
+import { createMemoryFolioRegistry } from '../../src/folios/registry'
+import { toSiiRut } from '../../src/model/rut'
 import { runCertification } from '../../src/certification/runner'
 import type { CertificationState } from '../../src/certification/state'
 import { sendSimulation, sendTestSet, settleUnansweredSets } from '../../src/certification/steps'
 import { DteError } from '../../src/errors'
 import { fullPlan } from '../support/certification-fixtures'
 import {
+  cafXml,
   certificationCafXmls,
   certificationHarness,
   EST_DTE,
@@ -18,9 +21,10 @@ import {
   uploadRoute,
   type CertificationHarness,
 } from '../support/certification-harness'
-import type { FakeReply } from '../support/fake-sii'
-import { ISSUER_RUT } from '../support/fixtures'
+import type { FakeReply, FakeRoute } from '../support/fake-sii'
+import { FIXED_NOW, ISSUER_RUT } from '../support/fixtures'
 import { failure } from '../support/portal'
+import { quotaForm, STAMP_ENTRY } from '../support/portal-pages'
 import { siiFixture } from '../support/sii-client'
 import { signerOf } from '../support/trust-fixtures'
 
@@ -40,6 +44,21 @@ const uploaded = (harness: CertificationHarness): readonly string[] =>
   harness.fake.requests
     .filter((request) => request.url === UPLOAD)
     .map((request) => request.parts.find((part) => part.fileName !== null)!.value)
+
+// The documents of an envelope, as `type-folio`.
+const foliosOf = (xml: string): readonly string[] =>
+  [...xml.matchAll(/<TipoDTE>(\d+)<\/TipoDTE>\s*<Folio>(\d+)<\/Folio>/g)].map((match) => `${match[1]}-${match[2]}`)
+
+// The stamping pages, handing out guide CAFs from this folio on.
+const stampingFrom = (from: number): FakeRoute[] => [
+  { url: `${MAULLIN}/of_solicita_folios`, method: 'GET', reply: () => ({ body: STAMP_ENTRY }) },
+  {
+    url: `${MAULLIN}/of_solicita_folios_dcto`,
+    method: 'POST',
+    reply: () => ({ body: quotaForm(undefined, undefined, 52) }),
+  },
+  { url: `${MAULLIN}/of_confirma_folio`, method: 'POST', reply: () => ({ body: cafXml(52, { from, to: 100 }) }) },
+]
 
 const typeStats = (harness: CertificationHarness, type: number) =>
   harness.registry.stats({ companyRut: ISSUER_RUT, type, environment: 'certification' })
@@ -92,7 +111,7 @@ describe('a test set the SII never answered', () => {
     expect(uploaded(harness)[1]).toBe(uploaded(harness)[0])
   })
 
-  test('is handed to beforeUpload again, and one that beforeUpload stopped is kept as well', async () => {
+  test('one that beforeUpload stopped never left: nothing is kept, and a corrected issuer reaches the SII', async () => {
     const harness = await certificationHarness([uploadRoute(reception('56'))])
     const stop = (): void => {
       throw new DteError('INVALID_OPTION', { field: 'schema' })
@@ -100,13 +119,55 @@ describe('a test set the SII never answered', () => {
     const start = stateWith({ plan, cafs: certificationCafXmls() })
     await failure(sendTestSet({ ...harness.deps, beforeUpload: stop }, start, { kind: 'guide' }))
     const state = (await harness.store.load())!
-    expect(state.unanswered?.guide?.cases).toHaveLength(3)
+    expect(state.unanswered).toEqual({})
+    expect(state.usedFolios).toHaveLength(3)
+    const issuer = { ...harness.deps.issuer, address: 'Calle Corregida 77' }
+    const second = await sendTestSet({ ...harness.deps, issuer }, state, { kind: 'guide' })
+    expect(second.state.sets.guide?.cases.map((c) => c.folio)).toEqual([4, 5, 6])
+    expect(uploaded(harness)).toHaveLength(1)
+    expect(uploaded(harness)[0]).toContain('Calle Corregida 77')
+    expect(harness.warnedWith(SENT_AGAIN)).toEqual([])
+  })
+
+  test('one the upload client refused before its request left is not kept either', async () => {
+    const harness = await certificationHarness([uploadRoute(reception('57'))])
+    // The client speaks for another company than the one the cover names: refused here, nothing sent.
+    const sii = { ...harness.deps.sii, companyRut: toSiiRut('11111111-1') }
+    const error = await failure(
+      sendTestSet({ ...harness.deps, sii }, stateWith({ plan, cafs: certificationCafXmls() }), { kind: 'guide' }),
+    )
+    expect(error).toMatchObject({ code: 'INVALID_OPTION', details: { field: 'companyRut' } })
+    expect(harness.urls()).toEqual([])
+    expect((await harness.store.load())!.unanswered).toEqual({})
+  })
+
+  test('kept after a network failure, an unreadable answer or a failure of a transport of the caller’s', async () => {
+    for (const reply of [
+      new DteError('TRANSPORT_FAILED', { reason: 'ECONNREFUSED' }),
+      { body: 'no es una recepción' },
+      new Error('socket closed'),
+    ] as const) {
+      const harness = await certificationHarness([uploadRoute(reply)])
+      await failure(sendTestSet(harness.deps, stateWith({ plan, cafs: certificationCafXmls() }), { kind: 'guide' }))
+      expect((await harness.store.load())!.unanswered?.guide?.cases).toHaveLength(3)
+    }
+  })
+
+  test('sent again and stopped before its request left, it stays kept: an earlier request may have reached the SII', async () => {
+    const { harness, state } = await guideFailedOnce(reception('58'))
+    const stop = (): void => {
+      throw new DteError('INVALID_OPTION', { field: 'schema' })
+    }
+    await failure(sendTestSet({ ...harness.deps, beforeUpload: stop }, state, { kind: 'guide' }))
+    const stopped = (await harness.store.load())!
+    expect(stopped.unanswered).toEqual(state.unanswered)
     const seen: string[] = []
-    const second = await sendTestSet({ ...harness.deps, beforeUpload: ({ xml }) => void seen.push(xml) }, state, {
+    const third = await sendTestSet({ ...harness.deps, beforeUpload: ({ xml }) => void seen.push(xml) }, stopped, {
       kind: 'guide',
     })
-    expect(second.state.sets.guide?.trackId).toBe('56')
+    expect(third.state.sets.guide?.trackId).toBe('58')
     expect(seen).toEqual([await harness.store.readArtefact(GUIDE_ARTEFACT)])
+    expect(uploaded(harness)[1]).toBe(uploaded(harness)[0])
   })
 
   test('the SII’s refusal, or an envelope that does not verify, keeps nothing to send again', async () => {
@@ -294,6 +355,20 @@ describe('a run with an envelope the SII never answered', () => {
     expect(harness.warnedWith(SENT_AGAIN)).toHaveLength(1)
   })
 
+  test('a kept envelope that will not be sent again is dropped before the sets’ folios are asked for', async () => {
+    // A CAF of three guides, the three the first run spends; the portal stamps the next range.
+    const harness = await certificationHarness([uploadRoute(DOWN, reception('91')), ...stampingFrom(4)])
+    await harness.store.save(stateWith({ plan: guidePlan, cafs: [cafXml(52, { from: 1, to: 3 })] }))
+    await failure(runCertification(harness.deps))
+    expect((await harness.store.load())!.unanswered?.guide).toBeDefined()
+    // Another resolution: the kept envelope is issued anew, and the folios to issue it with are asked for first.
+    const resolution = { number: 0, date: '2026-02-02' }
+    await runCertification({ ...harness.deps, resolution }).catch(() => undefined)
+    expect(uploaded(harness)).toHaveLength(2)
+    expect(foliosOf(uploaded(harness)[1])).toEqual(['52-4', '52-5', '52-6'])
+    expect(harness.warnedWith(ISSUED_ANEW)).toEqual([{ envelope: 'guide', reason: 'cover' }])
+  })
+
   test('the simulation: its minimum and resendUnanswered reach the step', async () => {
     const harness = await certificationHarness([...stampingRoutes(), uploadRoute(DOWN, DOWN, DOWN)])
     const at = stateWith({ plan: guidePlan, stage: 'simulation', sets: {}, setsApproved: true })
@@ -309,5 +384,131 @@ describe('a run with an envelope the SII never answered', () => {
     await full.store.save(at)
     await failure(runCertification(full.deps))
     expect((await full.store.load())!.usedFolios).toHaveLength(21)
+  })
+})
+
+describe('the folios of a kept envelope, whatever registry the run is given', () => {
+  test('a set issued with a registry that never saw them does not take them, and the kept envelope goes as it was', async () => {
+    const harness = await certificationHarness([uploadRoute(DOWN, reception('81'), reception('82'))])
+    await failure(sendTestSet(harness.deps, stateWith({ plan, cafs: certificationCafXmls() }), { kind: 'basic' }))
+    const state = (await harness.store.load())!
+    // Another machine, a lost ledger file: a registry with nothing in it.
+    const deps = { ...harness.deps, registry: createMemoryFolioRegistry(() => FIXED_NOW) }
+    const prepared = await prepareFolios(deps, state)
+    const exempt = await sendTestSet(deps, prepared.state, { kind: 'exempt' })
+    await sendTestSet(deps, exempt.state, { kind: 'basic' })
+    const [basic, other, again] = uploaded(harness)
+    expect(again).toBe(basic)
+    expect(foliosOf(basic)).toHaveLength(8)
+    expect(foliosOf(other).filter((folio) => foliosOf(basic).includes(folio))).toEqual([])
+    expect(harness.warnedWith(SENT_AGAIN)).toEqual([{ envelope: 'basic', documents: 8 }])
+  })
+
+  test('one whose folio the registry holds for another document is issued anew and never sent', async () => {
+    const { harness, state, first } = await guideFailedOnce(reception('83'))
+    const registry = createMemoryFolioRegistry(() => FIXED_NOW)
+    const guides = heldCafs(state.cafs, FIXED_NOW).find((h) => h.caf.documentType === 52)!
+    await registry.markSent(guides.scope, 2)
+    const second = await sendTestSet({ ...harness.deps, registry }, state, { kind: 'guide' })
+    expect(harness.warnedWith(ISSUED_ANEW)).toEqual([{ envelope: 'guide', reason: 'taken' }])
+    expect(uploaded(harness)).toHaveLength(2)
+    expect(uploaded(harness)[1]).not.toBe(first)
+    // The folios of the dropped envelope stay held: the new one takes none of them.
+    expect(second.state.sets.guide?.cases.map((c) => c.folio)).toEqual([4, 5, 6])
+    expect(second.state.unanswered).toEqual({})
+  })
+
+  test('a registry that cannot hold folios sends no kept envelope again', async () => {
+    const { harness, state, first } = await guideFailedOnce(reception('84'))
+    const { hold, ...registry } = harness.registry
+    void hold
+    await sendTestSet({ ...harness.deps, registry }, state, { kind: 'guide' })
+    expect(harness.warnedWith(ISSUED_ANEW)).toEqual([{ envelope: 'guide', reason: 'ledger' }])
+    expect(uploaded(harness)[1]).not.toBe(first)
+  })
+
+  test('one with a folio in a CAF that expired is issued anew, before its day is looked at', async () => {
+    // The purchase set: a type whose CAFs expire, six months after they were authorized.
+    const harness = await certificationHarness([uploadRoute(DOWN)])
+    await failure(sendTestSet(harness.deps, stateWith({ plan, cafs: certificationCafXmls() }), { kind: 'purchase' }))
+    const state = (await harness.store.load())!
+    const later = new Date('2027-06-01T18:30:00.000Z')
+    const error = await failure(sendTestSet({ ...harness.deps, now: () => later }, state, { kind: 'purchase' }))
+    expect(error.code).toBe('FOLIO_OUT_OF_RANGE')
+    expect(harness.warnedWith(ISSUED_ANEW)).toEqual([{ envelope: 'purchase', reason: 'folios' }])
+  })
+})
+
+describe('what nothing else checks of a kept envelope', () => {
+  test('a cover that names another resolution number, with the same date', async () => {
+    const { harness, state, first } = await guideFailedOnce(reception('85'))
+    const resolution = { number: 7, date: harness.deps.resolution!.date! }
+    await sendTestSet({ ...harness.deps, resolution }, state, { kind: 'guide' })
+    expect(harness.warnedWith(ISSUED_ANEW)).toEqual([{ envelope: 'guide', reason: 'cover' }])
+    expect(uploaded(harness)[1]).not.toBe(first)
+  })
+
+  test('the sets are dated on the day in Chile, the simulation on the local day, when the two differ', async () => {
+    // A machine fourteen hours ahead of UTC: at the fixed clock it is already the next day there, the 15th in Chile.
+    const ahead = (at: Date): Date => new Date(at.getTime() + 14 * 3600 * 1000)
+    const spies = [
+      jest.spyOn(Date.prototype, 'getFullYear').mockImplementation(function (this: Date) {
+        return ahead(this).getUTCFullYear()
+      }),
+      jest.spyOn(Date.prototype, 'getMonth').mockImplementation(function (this: Date) {
+        return ahead(this).getUTCMonth()
+      }),
+      jest.spyOn(Date.prototype, 'getDate').mockImplementation(function (this: Date) {
+        return ahead(this).getUTCDate()
+      }),
+    ]
+    try {
+      const sets = await guideFailedOnce(reception('86'))
+      expect(sets.state.unanswered?.guide?.issueDate).toBe(TODAY)
+      await sendTestSet(sets.harness.deps, sets.state, { kind: 'guide' })
+      expect(sets.harness.warnedWith(SENT_AGAIN)).toHaveLength(1)
+      const harness = await certificationHarness([...stampingRoutes(), uploadRoute(DOWN, reception('87'))])
+      await failure(sendSimulation(harness.deps, stateWith({ plan: guidePlan, cafs: [] }), ONE_PASS))
+      const state = (await harness.store.load())!
+      expect(state.unanswered?.simulation?.issueDate).toBe('2026-11-16')
+      await sendSimulation(harness.deps, state, ONE_PASS)
+      expect(harness.warnedWith(SENT_AGAIN)).toHaveLength(1)
+    } finally {
+      for (const spy of spies) spy.mockRestore()
+    }
+  })
+})
+
+describe('a kept simulation and what the run now asks of it', () => {
+  const keptWithOnePass = async (...after: readonly FakeReply[]) => {
+    const harness = await certificationHarness([...stampingRoutes(), uploadRoute(DOWN, ...after)])
+    await failure(sendSimulation(harness.deps, stateWith({ plan: guidePlan, cafs: [] }), ONE_PASS))
+    return { harness, state: (await harness.store.load())! }
+  }
+
+  test('a minimum that is not one is refused before anything, sent again or not', async () => {
+    const { harness, state } = await keptWithOnePass(reception('88'))
+    const error = await failure(sendSimulation(harness.deps, state, { simulationMinimum: 101 }))
+    expect(error).toMatchObject({ code: 'INVALID_OPTION', details: { field: 'minimumDocuments' } })
+    expect(uploaded(harness)).toHaveLength(1)
+  })
+
+  test('one that holds fewer documents than the minimum now asks for is issued anew', async () => {
+    const { harness, state } = await keptWithOnePass(reception('89'))
+    const second = await sendSimulation(harness.deps, state)
+    expect(second.state.simulation?.trackId).toBe('89')
+    expect(harness.warnedWith(ISSUED_ANEW)).toEqual([{ envelope: 'simulation', reason: 'size' }])
+    expect(foliosOf(uploaded(harness)[1])).toHaveLength(21)
+  })
+
+  test('one issued anew leaves the state at once, even when the step stops before it issues', async () => {
+    const { harness, state } = await keptWithOnePass()
+    // A portal that answers nothing: the folios of the new simulation cannot be asked for.
+    const silent = await certificationHarness([])
+    const tomorrow = new Date('2026-11-16T18:30:00.000Z')
+    await expect(
+      sendSimulation({ ...harness.deps, portal: silent.deps.portal, now: () => tomorrow }, state, ONE_PASS),
+    ).rejects.toBeDefined()
+    expect((await harness.store.load())!.unanswered).toEqual({})
   })
 })

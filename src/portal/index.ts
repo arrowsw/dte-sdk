@@ -238,6 +238,7 @@ export type {
   EnvelopeDiagnosis,
   UnansweredEnvelope,
   UnansweredEnvelopes,
+  IssuedAnewReason,
 } from '../certification/state'
 export { createDirectoryCertificationStore } from '../certification/node-store'
 export type { DirectoryCertificationStoreOptions } from '../certification/node-store'
@@ -328,12 +329,7 @@ export type { UploadPrintedSamplesInput, SamplesOutcome } from '../certification
 export type { PrintedSampleFile } from '../pdf/samples'
 export { runCertification } from '../certification/runner'
 export type { RunCertificationOptions, RunCertificationResult, RunStop } from '../certification/runner'
-export type {
-  UnreadLinesPolicy,
-  SendTestSetOptions,
-  SendSimulationOptions,
-  IssuedAnewReason,
-} from '../certification/steps'
+export type { UnreadLinesPolicy, SendTestSetOptions, SendSimulationOptions } from '../certification/steps'
 
 // Phase 5c-2: the certification of receipts (the receipts portal).
 export { RECEIPTS_PORTAL } from '../catalogs/certification'
