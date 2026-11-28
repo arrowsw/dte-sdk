@@ -15,6 +15,8 @@ import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { preProcessFile } from 'typescript'
+import { createDirectoryFolioRegistry } from '../src/folios/node-registry'
+import { loadNodeFs } from '../src/sii/node-fs'
 
 /**
  * Smoke test for the built `dist/` artefacts and their `package.json` wiring. Jest cannot `require()` an ES module, so
@@ -402,6 +404,56 @@ console.log(JSON.stringify(folios))`
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  test('a process waits on a lock this one could not remove, and goes on when a change here takes it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dte-sdk-folio-left-'))
+    const scope = {
+      companyRut: '76543210-3',
+      type: 33,
+      range: { from: 1, to: 60 },
+      environment: 'certification' as const,
+    }
+    try {
+      const modules = await loadNodeFs()
+      const once = { done: false }
+      const leaving = createDirectoryFolioRegistry({ dir }, async () => ({
+        ...modules,
+        fs: {
+          ...modules.fs,
+          rm: async (file: string, options: Parameters<typeof modules.fs.rm>[1]) => {
+            if (file.endsWith('.lock') && !once.done) {
+              once.done = true
+              throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' })
+            }
+            return modules.fs.rm(file, options)
+          },
+        } as typeof modules.fs,
+      }))
+      await expect(leaving.reserve(scope)).resolves.toBe(1)
+      const other = (lockWaitMs: number) =>
+        execFileAsync(process.execPath, [
+          '--input-type=module',
+          '-e',
+          `const { createDirectoryFolioRegistry } = await import(${JSON.stringify(href(entryFile('node')))})
+const registry = createDirectoryFolioRegistry({ dir: ${JSON.stringify(dir)}, lockWaitMs: ${lockWaitMs} })
+try {
+  console.log(await registry.reserve(${JSON.stringify(scope)}))
+} catch (error) {
+  console.log(JSON.stringify([error.details.kind, error.details.holderPid]))
+}`,
+        ])
+      // The other process cannot tell an ended change of a living process from one under way: it waits.
+      expect(JSON.parse((await other(300)).stdout)).toEqual(['wait', process.pid])
+      // A change here takes the lock at once, as its token is held by none of this process's changes.
+      const waiting = other(10_000)
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      await expect(createDirectoryFolioRegistry({ dir }).reserve(scope)).resolves.toBe(2)
+      expect((await waiting).stdout).toBe('3\n')
+      expect(readdirSync(dir)).toEqual(['folios.json'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 20_000)
 
   // A holder stopped past the stale limit is alive: the other process must wait, never write under it. It is stopped
   // the instant its lock exists (after the link that names it), or inside its change (after it wrote the new ledger).

@@ -15,7 +15,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { hostname, tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import type { FolioScope } from '../../src/folios/ledger'
-import { createDirectoryFolioRegistry, loadLockSystem, lockSystemOf } from '../../src/folios/node-registry'
+import { createDirectoryFolioRegistry, loadLockSystem, lockSystemOf, readBootId } from '../../src/folios/node-registry'
 import { cafFingerprint, createFolioRegistry, createMemoryFolioRegistry } from '../../src/folios/registry'
 import { loadNodeFs } from '../../src/sii/node-fs'
 import { FIXED_NOW } from '../support/fixtures'
@@ -205,9 +205,28 @@ describe('createDirectoryFolioRegistry', () => {
     const lockOf = (dir: string): string => join(dir, 'folios.json.lock')
     const guardOf = (dir: string): string => join(dir, 'folios.json.lock.takeover')
     const anHourAgo = (): Date => new Date(Date.now() - 3_600_000)
-    // The lock of a holder of this host, as a registry writes it; `boot` is this machine's start unless said otherwise.
-    const holderLock = async (fields: Readonly<Record<string, unknown>>): Promise<string> =>
-      JSON.stringify({ token: 'someone', host: hostname(), boot: (await loadLockSystem()).boot, ...fields })
+    // The lock of a holder of this host, as a registry writes it: written now, in this boot, unless said otherwise.
+    const holderLock = async (fields: Readonly<Record<string, unknown>>): Promise<string> => {
+      const here = await loadLockSystem()
+      const boot = here.bootId === null ? {} : { bootId: here.bootId }
+      return JSON.stringify({ token: 'someone', host: hostname(), uptime: here.uptime(), ...boot, ...fields })
+    }
+    // The tokens this process holds right now, shared by every registry and copy of the library in it.
+    const heldTokens = (): Set<string> => {
+      const shared = globalThis as Record<symbol, Set<string> | undefined>
+      const key = Symbol.for('dte-sdk.folio-ledger.held-tokens')
+      shared[key] ??= new Set()
+      return shared[key]
+    }
+    // A holder of this host that exists and is not this process: a child that sleeps until the test ends.
+    const withLiveChild = async (body: (pid: number) => Promise<void>): Promise<void> => {
+      const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'])
+      try {
+        await body(child.pid as number)
+      } finally {
+        child.kill()
+      }
+    }
     const elsewhere = async () => ({ ...(await loadLockSystem()), host: 'another-host' })
     // A process id that was in use and is certainly free now: that of a child that has ended.
     const endedPid = (): number => spawnSync(process.execPath, ['-e', '']).pid as number
@@ -365,7 +384,8 @@ describe('createDirectoryFolioRegistry', () => {
           token: expect.stringMatching(/^[0-9a-f-]{36}$/),
           pid: process.pid,
           host: hostname(),
-          boot: expect.any(Number),
+          uptime: expect.any(Number),
+          ...((await loadLockSystem()).bootId === null ? {} : { bootId: (await loadLockSystem()).bootId }),
           acquiredAt: expect.any(String),
         },
       })
@@ -594,9 +614,12 @@ describe('createDirectoryFolioRegistry', () => {
       async (_, child) => {
         const dir = tempDir()
         const running = child ? spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)']) : null
+        // This process holds the lock while one of its changes holds the token.
+        const token = 'under-way'
+        heldTokens().add(token)
         try {
           const pid = running?.pid ?? process.pid
-          const content = await holderLock({ pid })
+          const content = await holderLock({ pid, token })
           writeFileSync(lockOf(dir), content)
           utimesSync(lockOf(dir), anHourAgo(), anHourAgo())
           const error = await failure(createDirectoryFolioRegistry({ dir, lockWaitMs: 60 }).reserve(scope))
@@ -605,6 +628,7 @@ describe('createDirectoryFolioRegistry', () => {
           expect(readFileSync(lockOf(dir), 'utf8')).toBe(content)
           expect(existsSync(join(dir, 'folios.json'))).toBe(false)
         } finally {
+          heldTokens().delete(token)
           running?.kill()
         }
       },
@@ -620,14 +644,16 @@ describe('createDirectoryFolioRegistry', () => {
       expect(readdirSync(dir)).toEqual(['folios.json'])
     })
 
-    test('a lock written before this machine started is taken over once stale, even if its pid now lives', async () => {
-      const dir = tempDir()
-      const boot = (await loadLockSystem()).boot - 86_400_000
-      writeFileSync(lockOf(dir), await holderLock({ pid: process.pid, boot }))
-      const young = await failure(createDirectoryFolioRegistry({ dir, lockWaitMs: 60 }).reserve(scope))
-      expect(young.details).toMatchObject({ kind: 'wait' })
-      utimesSync(lockOf(dir), anHourAgo(), anHourAgo())
-      await expect(createDirectoryFolioRegistry({ dir }).reserve(scope)).resolves.toBe(1)
+    test('a lock written when the machine had been up longer than now is taken once stale, its pid alive or not', async () => {
+      await withLiveChild(async (pid) => {
+        const dir = tempDir()
+        const uptime = (await loadLockSystem()).uptime() + 86_400_000
+        writeFileSync(lockOf(dir), await holderLock({ pid, uptime }))
+        const young = await failure(createDirectoryFolioRegistry({ dir, lockWaitMs: 60 }).reserve(scope))
+        expect(young.details).toMatchObject({ kind: 'wait', holderPid: pid })
+        utimesSync(lockOf(dir), anHourAgo(), anHourAgo())
+        await expect(createDirectoryFolioRegistry({ dir }).reserve(scope)).resolves.toBe(1)
+      })
     })
 
     test.each([
@@ -635,7 +661,9 @@ describe('createDirectoryFolioRegistry', () => {
       ['whose pid does not read', { pid: 'one' }],
       ['whose pid is not a process', { pid: 0 }],
       ['without a host', { host: undefined }],
-      ['without a boot', { boot: undefined }],
+      ['without an uptime', { uptime: undefined }],
+      ['with a boot identifier that is not text', { bootId: 7 }],
+      ['without a token', { token: undefined }],
     ])('a lock %s falls back to its age', async (_, fields) => {
       const dir = tempDir()
       writeFileSync(lockOf(dir), await holderLock({ pid: process.pid, ...fields }))
@@ -648,12 +676,14 @@ describe('createDirectoryFolioRegistry', () => {
     test('a takeover file of a taker that still exists is left alone, and the change waits', async () => {
       const dir = tempDir()
       writeFileSync(lockOf(dir), 'held')
-      writeFileSync(guardOf(dir), await holderLock({ pid: process.pid }))
-      for (const file of [lockOf(dir), guardOf(dir)]) utimesSync(file, anHourAgo(), anHourAgo())
-      expect((await failure(createDirectoryFolioRegistry({ dir, lockWaitMs: 60 }).reserve(scope))).code).toBe(
-        'FOLIO_LEDGER_LOCKED',
-      )
-      expect(readdirSync(dir).sort()).toEqual(['folios.json.lock', 'folios.json.lock.takeover'])
+      await withLiveChild(async (pid) => {
+        writeFileSync(guardOf(dir), await holderLock({ pid }))
+        for (const file of [lockOf(dir), guardOf(dir)]) utimesSync(file, anHourAgo(), anHourAgo())
+        expect((await failure(createDirectoryFolioRegistry({ dir, lockWaitMs: 60 }).reserve(scope))).code).toBe(
+          'FOLIO_LEDGER_LOCKED',
+        )
+        expect(readdirSync(dir).sort()).toEqual(['folios.json.lock', 'folios.json.lock.takeover'])
+      })
     })
 
     test('a lock that cannot be read after it was seen is not removed', async () => {
@@ -756,7 +786,7 @@ describe('createDirectoryFolioRegistry', () => {
       }))
       await expect(registry.reserve(scope)).resolves.toBe(1)
       expect(exclusive).toEqual([])
-      const holder = { token: expect.any(String), pid: process.pid, host: hostname(), boot: expect.any(Number) }
+      const holder = { token: expect.any(String), pid: process.pid, host: hostname(), uptime: expect.any(Number) }
       // The takeover file, then the lock.
       expect(seen).toEqual([expect.objectContaining(holder), expect.objectContaining(holder)])
       expect(readdirSync(dir)).toEqual(['folios.json'])
@@ -879,16 +909,228 @@ describe('createDirectoryFolioRegistry', () => {
       expect(readFileSync(lockOf(dir), 'utf8')).toBe('')
     })
 
+    describe('a lock this process could not remove', () => {
+      // The removal of the lock fails once, as a busy file does: the lock stays, naming this process.
+      const leaveLockBehind = async (dir: string) => {
+        const modules = await loadNodeFs()
+        const once = { done: false }
+        const registry = createDirectoryFolioRegistry({ dir, lockWaitMs: 4000 }, async () => ({
+          ...modules,
+          fs: {
+            ...modules.fs,
+            rm: async (file: string, options: Parameters<typeof modules.fs.rm>[1]) => {
+              if (file.endsWith('.lock') && !once.done) {
+                once.done = true
+                throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' })
+              }
+              return modules.fs.rm(file, options)
+            },
+          } as typeof modules.fs,
+        }))
+        await expect(registry.reserve(scope)).resolves.toBe(1)
+        expect(JSON.parse(readFileSync(lockOf(dir), 'utf8'))).toMatchObject({ pid: process.pid })
+        return registry
+      }
+      const quickly = async (pending: Promise<number>): Promise<number> => {
+        const started = Date.now()
+        const folio = await pending
+        expect(Date.now() - started).toBeLessThan(1000)
+        return folio
+      }
+
+      test('is taken at once by the same registry', async () => {
+        const dir = tempDir()
+        const registry = await leaveLockBehind(dir)
+        await expect(quickly(registry.reserve(scope))).resolves.toBe(2)
+        expect(readdirSync(dir)).toEqual(['folios.json'])
+      })
+
+      test('is taken at once by another registry of the process, and by another copy of the library', async () => {
+        const dir = tempDir()
+        await leaveLockBehind(dir)
+        await expect(quickly(createDirectoryFolioRegistry({ dir, lockWaitMs: 4000 }).reserve(scope))).resolves.toBe(2)
+        await leaveLockBehind(tempDir())
+        const copy: { create?: typeof createDirectoryFolioRegistry } = {}
+        await jest.isolateModulesAsync(async () => {
+          copy.create = (await import('../../src/folios/node-registry')).createDirectoryFolioRegistry
+        })
+        expect(copy.create).not.toBe(createDirectoryFolioRegistry)
+        const other = tempDir()
+        await leaveLockBehind(other)
+        await expect(quickly(copy.create!({ dir: other, lockWaitMs: 4000 }).reserve(scope))).resolves.toBe(2)
+      })
+
+      test('is never taken while a change of this process holds its token', async () => {
+        const dir = tempDir()
+        const modules = await loadNodeFs()
+        const gate: { open?: () => void } = {}
+        const slow = createDirectoryFolioRegistry({ dir }, async () => ({
+          ...modules,
+          fs: {
+            ...modules.fs,
+            writeFile: async (...args: Parameters<typeof modules.fs.writeFile>) => {
+              await new Promise<void>((resolve) => (gate.open = resolve))
+              return modules.fs.writeFile(...args)
+            },
+          } as typeof modules.fs,
+        }))
+        const first = slow.reserve(scope)
+        while (gate.open === undefined) await new Promise((resolve) => setTimeout(resolve, 5))
+        const error = await failure(createDirectoryFolioRegistry({ dir, lockWaitMs: 60 }).reserve(scope))
+        expect(error.details).toMatchObject({ kind: 'wait', holderPid: process.pid })
+        gate.open()
+        await expect(first).resolves.toBe(1)
+      })
+
+      test('a takeover file whose removal failed does not fail the change, and is gone when it ends', async () => {
+        const dir = tempDir()
+        writeFileSync(lockOf(dir), 'held')
+        utimesSync(lockOf(dir), anHourAgo(), anHourAgo())
+        const modules = await loadNodeFs()
+        const once = { done: false }
+        const registry = createDirectoryFolioRegistry({ dir }, async () => ({
+          ...modules,
+          fs: {
+            ...modules.fs,
+            rm: async (file: string, options: Parameters<typeof modules.fs.rm>[1]) => {
+              if (file.endsWith('.takeover') && !once.done) {
+                once.done = true
+                throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' })
+              }
+              return modules.fs.rm(file, options)
+            },
+          } as typeof modules.fs,
+        }))
+        await expect(registry.reserve(scope)).resolves.toBe(1)
+        expect(once.done).toBe(true)
+        expect(readdirSync(dir)).toEqual(['folios.json'])
+      })
+    })
+
+    test.each([-86_400_000, -600_000, -360_000, -1000, 1000, 360_000, 600_000, 86_400_000])(
+      'a step of the wall clock of %p ms never takes the lock of a live holder',
+      async (step) => {
+        await withLiveChild(async (pid) => {
+          const dir = tempDir()
+          writeFileSync(lockOf(dir), await holderLock({ pid }))
+          utimesSync(lockOf(dir), anHourAgo(), anHourAgo())
+          const now = Date.now
+          const stepped = jest.spyOn(Date, 'now').mockImplementation(() => now() + step)
+          try {
+            const error = await failure(createDirectoryFolioRegistry({ dir, lockWaitMs: 60 }).reserve(scope))
+            expect(error.details).toMatchObject({ kind: 'wait', holderPid: pid })
+          } finally {
+            stepped.mockRestore()
+          }
+        })
+      },
+    )
+
+    test.each([
+      ['an uptime equal to its own', { uptime: 5000 }, { uptime: () => 5000 }, false],
+      ['an uptime one millisecond smaller than its own', { uptime: 5001 }, { uptime: () => 5000 }, true],
+      ['the same boot identifier', { bootId: 'boot-a' }, { bootId: 'boot-a' }, false],
+      ['another boot identifier', { bootId: 'boot-a' }, { bootId: 'boot-b' }, true],
+      ['no boot identifier where the lock has one', { bootId: 'boot-a' }, { bootId: null }, false],
+      ['a boot identifier where the lock has none', { bootId: undefined }, { bootId: 'boot-b' }, false],
+    ])(
+      'a machine that has %s takes a live holder for one written before this start: %p, %p, %p',
+      async (_, lockFields, systemFields, taken) => {
+        await withLiveChild(async (pid) => {
+          const dir = tempDir()
+          writeFileSync(lockOf(dir), await holderLock({ pid, uptime: 1000, ...lockFields }))
+          utimesSync(lockOf(dir), anHourAgo(), anHourAgo())
+          const here = async () => ({ ...(await loadLockSystem()), uptime: () => 9000, ...systemFields })
+          // A short wait only where the lock must be waited for: a takeover under load may take longer than that.
+          const lockWaitMs = taken ? 5000 : 60
+          const reserved = createDirectoryFolioRegistry({ dir, lockWaitMs }, undefined, here).reserve(scope)
+          if (taken) await expect(reserved).resolves.toBe(1)
+          else expect((await failure(reserved)).details).toMatchObject({ kind: 'wait', holderPid: pid })
+        })
+      },
+    )
+
+    test('the boot identifier is read from one file, and is null where there is none', async () => {
+      await expect(readBootId(async () => 'b9e0c6e2-boot\n')).resolves.toBe('b9e0c6e2-boot')
+      await expect(readBootId(async () => '\n')).resolves.toBeNull()
+      await expect(
+        readBootId(async () => {
+          throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
+        }),
+      ).resolves.toBeNull()
+    })
+
+    test.each([
+      ['an empty lock, being created in place', ''],
+      ['a lock whose holder is gone', 'gone'],
+    ])('%s is not taken before the stale limit plus two seconds', async (_, kind) => {
+      const dir = tempDir()
+      writeFileSync(lockOf(dir), kind === '' ? '' : await holderLock({ pid: endedPid() }))
+      const aged = (ms: number) => utimesSync(lockOf(dir), new Date(Date.now() - ms), new Date(Date.now() - ms))
+      aged(2000)
+      const young = createDirectoryFolioRegistry({ dir, lockStaleMs: 1000, lockWaitMs: 60 })
+      expect((await failure(young.reserve(scope))).details).toMatchObject({ kind: 'wait' })
+      aged(4000)
+      await expect(createDirectoryFolioRegistry({ dir, lockStaleMs: 1000 }).reserve(scope)).resolves.toBe(1)
+    })
+
+    test('without hard links, with modification times of two seconds, a lock being created is never taken', async () => {
+      const dir = tempDir()
+      const modules = await loadNodeFs()
+      const coarse = (handle: Awaited<ReturnType<typeof modules.fs.open>>) =>
+        Object.assign(Object.create(handle), {
+          stat: async (options: { bigint: true }) => {
+            const stats = await handle.stat(options)
+            return Object.assign(Object.create(stats), { mtimeMs: (stats.mtimeMs / 2000n) * 2000n })
+          },
+          readFile: (encoding: BufferEncoding) => handle.readFile(encoding),
+          close: () => handle.close(),
+        })
+      // A FAT volume: no hard links, modification times rounded down to two seconds, and a lock that is empty for a
+      // moment after it is created in place.
+      const fat = (lockStaleMs: number) =>
+        createDirectoryFolioRegistry({ dir, lockStaleMs }, async () => ({
+          ...modules,
+          fs: {
+            ...modules.fs,
+            link: async () => {
+              throw Object.assign(new Error('ENOTSUP'), { code: 'ENOTSUP' })
+            },
+            open: async (...args: Parameters<typeof modules.fs.open>) => {
+              const handle = await modules.fs.open(...args)
+              if (args[0] !== lockOf(dir)) return handle
+              if (args[1] === 'r') return coarse(handle)
+              return Object.assign(Object.create(handle), {
+                writeFile: async (...data: Parameters<typeof handle.writeFile>) => {
+                  await new Promise((resolve) => setTimeout(resolve, 300))
+                  return handle.writeFile(...data)
+                },
+                utimes: (...times: Parameters<typeof handle.utimes>) => handle.utimes(...times),
+                stat: (options: { bigint: true }) => handle.stat(options),
+                close: () => handle.close(),
+              })
+            },
+          } as typeof modules.fs,
+        }))
+      // Start where the rounding hides most: late in a two-second step, so the empty lock looks over a second old.
+      while (Date.now() % 2000 < 1300) await new Promise((resolve) => setTimeout(resolve, 20))
+      const first = fat(1000).reserve(scope)
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      const second = fat(1000).reserve(scope)
+      await expect(Promise.all([first, second])).resolves.toEqual([1, 2])
+      expect(readdirSync(dir)).toEqual(['folios.json'])
+    }, 20_000)
+
     test('the process test: a process that exists, one refused for lack of permission, one that is gone', () => {
       const os = { hostname: () => 'here', uptime: () => 60 }
       const refusing = (code: string) => () => {
         throw Object.assign(new Error(code), { code })
       }
-      expect(lockSystemOf(os, () => true).exists(7)).toBe(true)
-      expect(lockSystemOf(os, refusing('EPERM')).exists(7)).toBe(true)
-      expect(lockSystemOf(os, refusing('ESRCH')).exists(7)).toBe(false)
-      expect(lockSystemOf(os, () => true).host).toBe('here')
-      expect(Math.abs(lockSystemOf(os, () => true).boot - (Date.now() - 60_000))).toBeLessThan(1000)
+      expect(lockSystemOf(os, () => true, null).exists(7)).toBe(true)
+      expect(lockSystemOf(os, refusing('EPERM'), null).exists(7)).toBe(true)
+      expect(lockSystemOf(os, refusing('ESRCH'), null).exists(7)).toBe(false)
+      expect(lockSystemOf(os, () => true, 'boot-a')).toMatchObject({ host: 'here', bootId: 'boot-a' })
+      expect(lockSystemOf(os, () => true, null).uptime()).toBe(60_000)
     })
 
     test.each([
