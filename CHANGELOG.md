@@ -26,8 +26,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **What to change:** nothing in a call. Code that expects `warnings` to be absent on an export document issued
     without `exchangeRate` will find the new warning there; code that reads the warnings by their keys gets a third
     shape, `{ rule, field }`.
+- **The additional taxes and withholdings of the lines are worked out into the totals** (`calculateTotals`,
+  `createDocument`, new option `additionalTaxes` with `AdditionalTaxInput`). A line could carry a code
+  (`additionalTaxCodes`, `CodImpAdic`) that the totals worked out left out: a 33 whose first line carried code 25 was
+  issued with the code on the line, no `ImptoReten` and a total without the tax. Formato DTE 2.5 defines the amount,
+  field 117 (page 31), as "Tasa* (Suma de líneas de detalle con código de Impuesto adicional o retención)", and the
+  total, field 124 (page 32), as the net, exempt and VAT amounts "+ Impuestos Adicionales + Impuestos Específicos + Iva
+  Margen Comercialización +IVA Anticipado" and the deposit guarantee, less "IVA Retenido productos (en caso de
+  facturas de compra)" and the commissions. Each code now becomes one `ImptoReten` (`TipoImp`, `TasaImp`, `MontoImp`):
+  its rate, the caller's or the one `ADDITIONAL_TAXES` holds, by the sum of the lines that carry it, rounded once, half
+  away from zero, over decimal digits; and the total adds it, or takes it off for a withholding. That 33 now totals
+  84 030 with code 25 at 20.5 %. The caller gives the amount of a code field 117 excepts from that sum (14, 17, 28, 35,
+  50) or whose rate neither the caller nor the table gives, with a rate, since every withholding is written with its
+  `TasaImp`. Code 15 on a document that withholds the whole VAT (`withholdVat`, a 46) is that withholding as before.
+  - **What to change:** nothing in a call whose lines carry no code. One whose lines carry codes gets their taxes in
+    its totals, or one of the refusals below.
 
 ### Changed
+
+- **Codes of additional tax or withholding the totals cannot carry are refused** before a folio is stamped, each with
+  the code in `details.taxCode`:
+  - On the totals worked out: a code the table of Formato DTE 2.5 (section 4, "Documentos en que se aplica") does not
+    give the document type, or that it does not hold (`INVALID_OPTION`, `items[i].additionalTaxCodes`); a withholding
+    on a sale (46, 53), whose side of the total field 124 does not state (same field); any code but 15 on a document
+    that withholds the whole VAT (`withholdVat`); any code beside `pricesIncludeVat`, since `MntBruto` is "Sólo para
+    documentos sin impuestos adicionales" (field 10 of the header, page 13); a code worked out from lines a global
+    adjustment applies to (`globalAdjustments[i]`): section D (page 44) says the adjustments "aumentan o disminuyen la
+    base del impuesto", not how a code's share is rounded, so its amount is given instead; a code that needs its amount
+    and has none (`MISSING_FIELD`, `additionalTaxes`), an amount without any rate (`additionalTaxes[i].rate`), and a
+    rate outside the 0.01 to 999.99 of `PctType` (`INVALID_AMOUNT`), the 0 % the table gives code 49 included.
+  - On explicit totals: totals that leave out the code of a line with an amount (`MISSING_FIELD`,
+    `totals.withholdings`), and `additionalTaxes` beside them (`INVALID_OPTION`). A line at zero adds nothing to a tax
+    and keeps its code.
+  - On any document: more than 2 codes on a line and more than 20 `ImptoReten`, the `maxOccurs` of `CodImpAdic` and
+    `ImptoReten` in `DTE_v10.xsd` (`INVALID_OPTION`, `items[i].additionalTaxCodes`, `totals.withholdings`).
+  - **What to change:** a line with code 15 on a document that does not withhold the whole VAT, which was issued
+    without the withholding, now needs its rate: `additionalTaxes: [{ taxCode: 15, rate: 19 }]`, or `withholdVat`. A
+    purchase invoice whose lines carry a withholding code of their own sets `withholdVat: false`. Explicit totals list
+    the codes of their lines in `withholdings`.
 
 - **More than 40 references are refused** (`INVALID_OPTION`, `details.field` `references` or `receiptReferences`).
   `DTE_v10.xsd` declares `Referencia` with `maxOccurs="40"` under `Documento`, `Liquidacion` and `Exportaciones`, and

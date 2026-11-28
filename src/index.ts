@@ -122,6 +122,7 @@ export type {
   LineItemInput,
   WithholdingAgentLine,
   Withholding,
+  AdditionalTaxInput,
   CommissionTotals,
   Totals,
   ReceiptReference,

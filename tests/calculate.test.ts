@@ -444,6 +444,258 @@ describe('calculateTotals with commissions and other charges', () => {
   })
 })
 
+// Formato DTE 2.5, field 117: the amount of an additional tax or withholding is its rate by the sum of the lines that
+// carry its code; field 124: the additional, specific and advance taxes and the VAT on a margin add to the total, and
+// the VAT a purchase invoice withholds comes off it.
+describe('calculateTotals with additional taxes and withholdings', () => {
+  const taxed = (amount: number, codes: readonly number[], exemptIndicator?: 1 | 2) => ({
+    amount,
+    exemptIndicator,
+    additionalTaxCodes: codes,
+  })
+  const refusal = (code: string, details: Record<string, unknown>) => expect.objectContaining({ code, details })
+
+  test('a code on one line only is the rate by that line, and adds to the total', () => {
+    expect(calculateTotals([taxed(50000, [25]), line(12000)], { type: 33 })).toEqual({
+      netAmount: 62000,
+      vatRate: 19,
+      vatAmount: 11780,
+      withholdings: [{ taxCode: 25, rate: 20.5, amount: 10250 }],
+      totalAmount: 84030,
+    })
+  })
+
+  test('mixed codes, one line with two of them: each code is its rate by the lines that carry it', () => {
+    const totals = calculateTotals([taxed(10000, [24]), taxed(5000, [27]), taxed(3000, [24, 27])], { type: 33 })
+    expect(totals).toEqual({
+      netAmount: 18000,
+      vatRate: 19,
+      vatAmount: 3420,
+      withholdings: [
+        { taxCode: 24, rate: 31.5, amount: 4095 },
+        { taxCode: 27, rate: 10, amount: 800 },
+      ],
+      totalAmount: 26315,
+    })
+  })
+
+  test('the amount is rounded once, half away from zero, over decimal digits', () => {
+    // 10 % of 1005 is 100.5, and rounds to 101.
+    expect(calculateTotals([taxed(1005, [27])], { type: 33 }).withholdings).toEqual([
+      { taxCode: 27, rate: 10, amount: 101 },
+    ])
+    // 9.2 % of 375 is 34.5, which binary floating point makes 34.49999999999999.
+    const given = calculateTotals([taxed(375, [27])], { type: 33, additionalTaxes: [{ taxCode: 27, rate: 9.2 }] })
+    expect(given.withholdings).toEqual([{ taxCode: 27, rate: 9.2, amount: 35 }])
+  })
+
+  test('a code on an exempt line takes that line into its base', () => {
+    expect(calculateTotals([taxed(1000, [27], 1)], { type: 33 })).toEqual({
+      exemptAmount: 1000,
+      withholdings: [{ taxCode: 27, rate: 10, amount: 100 }],
+      totalAmount: 1100,
+    })
+  })
+
+  test('a withholding beside an additional tax: the tax adds to the total and the withholding comes off it', () => {
+    expect(calculateTotals([taxed(1000, [18]), taxed(2000, [34])], { type: 61 })).toEqual({
+      netAmount: 3000,
+      vatRate: 19,
+      vatAmount: 570,
+      withholdings: [
+        { taxCode: 18, rate: 5, amount: 50 },
+        { taxCode: 34, rate: 4, amount: 80 },
+      ],
+      totalAmount: 3540,
+    })
+  })
+
+  test('a purchase invoice that does not withhold the whole VAT withholds the part its code gives', () => {
+    expect(calculateTotals([taxed(10000, [34])], { type: 46, withholdVat: false })).toEqual({
+      netAmount: 10000,
+      vatRate: 19,
+      vatAmount: 1900,
+      withholdings: [{ taxCode: 34, rate: 4, amount: 400 }],
+      totalAmount: 11500,
+    })
+  })
+
+  test('code 15 outside a withholding of the whole VAT is worked out with the rate the caller gives', () => {
+    const totals = calculateTotals([taxed(10000, [15])], { type: 61, additionalTaxes: [{ taxCode: 15, rate: 19 }] })
+    expect(totals.withholdings).toEqual([{ taxCode: 15, rate: 19, amount: 1900 }])
+    expect(totals.totalAmount).toBe(10000)
+  })
+
+  test('a rate the caller gives takes the place of the table’s, written with the two decimals TasaImp holds', () => {
+    const totals = calculateTotals([taxed(1000, [51])], { type: 33, additionalTaxes: [{ taxCode: 51, rate: 1.005 }] })
+    expect(totals.withholdings).toEqual([{ taxCode: 51, rate: 1.01, amount: 10 }])
+    expect(totals.totalAmount).toBe(1000 + 190 + 10)
+  })
+
+  test('an amount the caller gives is taken as it comes, with the rate of the table or the caller', () => {
+    const totals = calculateTotals([taxed(100000, [28]), taxed(2000, [17])], {
+      type: 33,
+      additionalTaxes: [
+        { taxCode: 28, rate: 1.5, amount: 6300 },
+        { taxCode: 17, amount: 75 },
+      ],
+    })
+    expect(totals.withholdings).toEqual([
+      { taxCode: 28, rate: 1.5, amount: 6300 },
+      { taxCode: 17, rate: 5, amount: 75 },
+    ])
+    expect(totals.totalAmount).toBe(102000 + 19380 + 6300 + 75)
+  })
+
+  test('a given amount needs no base, so a global adjustment beside it is applied as ever', () => {
+    const totals = calculateTotals([taxed(1000, [27])], {
+      type: 33,
+      globalAdjustments: [{ lineNumber: 1, kind: 'discount', valueType: 'percent', value: 10 }],
+      additionalTaxes: [{ taxCode: 27, amount: 90 }],
+    })
+    expect(totals).toMatchObject({ netAmount: 900, vatAmount: 171, totalAmount: 1161 })
+  })
+
+  test('an adjustment of exempt lines does not touch a code carried by affected ones', () => {
+    const totals = calculateTotals([taxed(1000, [27]), line(500, 1)], {
+      type: 33,
+      globalAdjustments: [{ lineNumber: 1, kind: 'discount', valueType: 'amount', value: 100, exemptIndicator: 1 }],
+    })
+    expect(totals).toMatchObject({ exemptAmount: 400, withholdings: [{ taxCode: 27, rate: 10, amount: 100 }] })
+  })
+
+  test('a code on lines of zero still writes its tax, at zero', () => {
+    expect(calculateTotals([taxed(0, [27])], { type: 33 })).toEqual({
+      withholdings: [{ taxCode: 27, rate: 10, amount: 0 }],
+      totalAmount: 0,
+    })
+  })
+
+  test('a code the table does not hold, or that it does not give the type, is refused', () => {
+    expect(() => calculateTotals([line(1000), taxed(1000, [16])], { type: 33 })).toThrow(
+      refusal('INVALID_OPTION', { field: 'items[1].additionalTaxCodes', taxCode: 16 }),
+    )
+    expect(() => calculateTotals([taxed(1000, [30])], { type: 33 })).toThrow(
+      refusal('INVALID_OPTION', { field: 'items[0].additionalTaxCodes', taxCode: 30 }),
+    )
+    expect(() => calculateTotals([taxed(1000, [25])], { type: 34 })).toThrow(
+      refusal('INVALID_OPTION', { field: 'items[0].additionalTaxCodes', taxCode: 25 }),
+    )
+    expect(() => calculateTotals([taxed(1000, [27])], { type: 110 })).toThrow(
+      refusal('INVALID_OPTION', { field: 'items[0].additionalTaxCodes', taxCode: 27 }),
+    )
+  })
+
+  test('a withholding the format does not take off a sale’s total is refused', () => {
+    expect(() => calculateTotals([taxed(1000, [53])], { type: 33 })).toThrow(
+      refusal('INVALID_OPTION', { field: 'items[0].additionalTaxCodes', taxCode: 53 }),
+    )
+  })
+
+  test('a code other than 15 beside a withholding of the whole VAT is refused', () => {
+    expect(() => calculateTotals([taxed(1000, [34])], { type: 46 })).toThrow(
+      refusal('INVALID_OPTION', { field: 'withholdVat', taxCode: 34 }),
+    )
+  })
+
+  test('a code whose rate neither the caller nor the table gives, or that is not the rate by its lines, needs its amount', () => {
+    for (const taxCode of [28, 14, 15])
+      expect(() => calculateTotals([taxed(1000, [taxCode])], { type: taxCode === 15 ? 61 : 33 })).toThrow(
+        refusal('MISSING_FIELD', { field: 'additionalTaxes', taxCode }),
+      )
+    // Code 17 has a rate, over the slaughter base and not over the lines (field 117, b).
+    expect(() =>
+      calculateTotals([taxed(1000, [17])], { type: 33, additionalTaxes: [{ taxCode: 17, rate: 5 }] }),
+    ).toThrow(refusal('MISSING_FIELD', { field: 'additionalTaxes', taxCode: 17 }))
+  })
+
+  test('an amount without any rate is refused: every withholding is written with its TasaImp', () => {
+    expect(() =>
+      calculateTotals([taxed(1000, [28])], { type: 33, additionalTaxes: [{ taxCode: 28, amount: 60 }] }),
+    ).toThrow(refusal('MISSING_FIELD', { field: 'additionalTaxes[0].rate', taxCode: 28 }))
+  })
+
+  test('a rate TasaImp cannot hold is refused: the table’s 0 % of code 49, or a caller’s outside 0.01 to 999.99', () => {
+    expect(() => calculateTotals([taxed(1000, [49])], { type: 46, withholdVat: false })).toThrow(
+      refusal('INVALID_AMOUNT', { field: 'items[0].additionalTaxCodes', taxCode: 49 }),
+    )
+    for (const rate of [0.004, 1000, Number.NaN])
+      expect(() =>
+        calculateTotals([taxed(1000, [27])], { type: 33, additionalTaxes: [{ taxCode: 27, rate }] }),
+      ).toThrow(expect.objectContaining({ code: 'INVALID_AMOUNT' }))
+    expect(() =>
+      calculateTotals([taxed(1000, [27])], { type: 33, additionalTaxes: [{ taxCode: 27, rate: -1 }] }),
+    ).toThrow(refusal('INVALID_AMOUNT', { field: 'additionalTaxes[0].rate', taxCode: 27 }))
+  })
+
+  test.each([0, -5, 1.5, Number.NaN])('a given amount of %p is refused', (amount) => {
+    expect(() =>
+      calculateTotals([taxed(1000, [27])], { type: 33, additionalTaxes: [{ taxCode: 27, amount }] }),
+    ).toThrow(refusal('INVALID_AMOUNT', { field: 'additionalTaxes[0].amount', taxCode: 27 }))
+  })
+
+  test('a global adjustment that touches the lines of a tax worked out from them is refused', () => {
+    const globalAdjustments = [
+      {
+        lineNumber: 1,
+        kind: 'surcharge' as const,
+        valueType: 'amount' as const,
+        value: 10,
+        exemptIndicator: 1 as const,
+      },
+      { lineNumber: 2, kind: 'discount' as const, valueType: 'percent' as const, value: 10 },
+    ]
+    expect(() => calculateTotals([taxed(1000, [27]), line(500, 1)], { type: 33, globalAdjustments })).toThrow(
+      refusal('INVALID_OPTION', { field: 'globalAdjustments[1]', taxCode: 27 }),
+    )
+    expect(() =>
+      calculateTotals([taxed(1000, [27], 2)], {
+        type: 33,
+        globalAdjustments: [{ lineNumber: 1, kind: 'discount', valueType: 'amount', value: 10, exemptIndicator: 2 }],
+      }),
+    ).toThrow(refusal('INVALID_OPTION', { field: 'globalAdjustments[0]', taxCode: 27 }))
+  })
+
+  test('prices with VAT included are refused beside an additional tax: MntBruto is for documents without them', () => {
+    expect(() => calculateTotals([taxed(1190, [27])], { type: 33, pricesIncludeVat: true })).toThrow(
+      refusal('INVALID_OPTION', { field: 'pricesIncludeVat', taxCode: 27 }),
+    )
+  })
+
+  test('a given code no line carries, or given twice, is refused', () => {
+    expect(() =>
+      calculateTotals([taxed(1000, [27])], { type: 33, additionalTaxes: [{ taxCode: 25, rate: 20 }] }),
+    ).toThrow(refusal('INVALID_OPTION', { field: 'additionalTaxes[0].taxCode', taxCode: 25 }))
+    expect(() =>
+      calculateTotals([taxed(1000, [27])], {
+        type: 33,
+        additionalTaxes: [
+          { taxCode: 27, rate: 10 },
+          { taxCode: 27, amount: 100 },
+        ],
+      }),
+    ).toThrow(refusal('INVALID_OPTION', { field: 'additionalTaxes[1].taxCode', taxCode: 27 }))
+  })
+
+  test('a purchase invoice that withholds the whole VAT, with code 15 on its lines, comes out as before', () => {
+    expect(calculateTotals([taxed(10000, [15]), line(500, 1)], { type: 46 })).toEqual({
+      netAmount: 10000,
+      exemptAmount: 500,
+      vatRate: 19,
+      vatAmount: 1900,
+      withholdings: [{ taxCode: 15, rate: 19, amount: 1900 }],
+      totalAmount: 10500,
+    })
+    expect(calculateTotals([line(10000), taxed(500, [], 1)], { type: 33 })).toEqual({
+      netAmount: 10000,
+      exemptAmount: 500,
+      vatRate: 19,
+      vatAmount: 1900,
+      totalAmount: 12400,
+    })
+  })
+})
+
 // Formato DTE 2.5 admits negative values on a settlement invoice for `MntNeto`, `MntExe`, `IVA` and `MntTotal`, and
 // `Liquidacion` declares them as signed values and has no `MontoNF`.
 describe('calculateTotals on a settlement invoice (43)', () => {
