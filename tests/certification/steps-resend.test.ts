@@ -3,7 +3,7 @@ import { createMemoryFolioRegistry } from '../../src/folios/registry'
 import { toSiiRut } from '../../src/model/rut'
 import { runCertification } from '../../src/certification/runner'
 import type { CertificationState } from '../../src/certification/state'
-import { sendSimulation, sendTestSet, settleUnansweredSets } from '../../src/certification/steps'
+import { obtainTestSet, sendSimulation, sendTestSet, settleUnansweredSets } from '../../src/certification/steps'
 import { DteError } from '../../src/errors'
 import { fullPlan } from '../support/certification-fixtures'
 import {
@@ -11,7 +11,9 @@ import {
   certificationCafXmls,
   certificationHarness,
   EST_DTE,
+  get,
   MAULLIN,
+  post,
   reception,
   stampingRoutes,
   stateWith,
@@ -21,6 +23,7 @@ import {
   uploadRoute,
   type CertificationHarness,
 } from '../support/certification-harness'
+import { SET_ENTRY, setDownloadPage, setGenerationForm } from '../support/certification-pages'
 import type { FakeReply, FakeRoute } from '../support/fake-sii'
 import { FIXED_NOW, ISSUER_RUT } from '../support/fixtures'
 import { failure } from '../support/portal'
@@ -535,5 +538,268 @@ describe('a kept simulation and what the run now asks of it', () => {
       sendSimulation({ ...harness.deps, portal: silent.deps.portal, now: () => tomorrow }, state, ONE_PASS),
     ).rejects.toBeDefined()
     expect((await harness.store.load())!.unanswered).toEqual({})
+  })
+})
+
+// The stamping pages, handing out a CAF of the type asked for from this folio on.
+const stampingAnyFrom = (from: number): FakeRoute[] => {
+  const box = { type: 33 }
+  return [
+    { url: `${MAULLIN}/of_solicita_folios`, method: 'GET', reply: () => ({ body: STAMP_ENTRY }) },
+    {
+      url: `${MAULLIN}/of_solicita_folios_dcto`,
+      method: 'POST',
+      reply: (request) => {
+        const type = /COD_DOCTO=(\d+)/.exec(request.text)
+        if (type !== null) box.type = Number(type[1])
+        return { body: quotaForm(undefined, undefined, box.type) }
+      },
+    },
+    {
+      url: `${MAULLIN}/of_confirma_folio`,
+      method: 'POST',
+      reply: () => ({ body: cafXml(box.type, { from, to: 100 }) }),
+    },
+  ]
+}
+
+// Runs with a machine fourteen hours ahead of UTC: at the fixed clock its day is the 16th, the 15th in Chile.
+const withMachineAhead = async (run: () => Promise<void>): Promise<void> => {
+  const ahead = (at: Date): Date => new Date(at.getTime() + 14 * 3600 * 1000)
+  const spies = [
+    jest.spyOn(Date.prototype, 'getFullYear').mockImplementation(function (this: Date) {
+      return ahead(this).getUTCFullYear()
+    }),
+    jest.spyOn(Date.prototype, 'getMonth').mockImplementation(function (this: Date) {
+      return ahead(this).getUTCMonth()
+    }),
+    jest.spyOn(Date.prototype, 'getDate').mockImplementation(function (this: Date) {
+      return ahead(this).getUTCDate()
+    }),
+  ]
+  try {
+    await run()
+  } finally {
+    for (const spy of spies) spy.mockRestore()
+  }
+}
+
+const LEDGER_DOWN = new DteError('INVALID_OPTION', { field: 'ledger' })
+
+describe('the folios of a kept envelope are held on every path before anything drops it', () => {
+  test.each([true, false])(
+    'the runner with a registry that never saw them, resendUnanswered %s: the new set takes none of them',
+    async (resendUnanswered) => {
+      const harness = await certificationHarness([uploadRoute(DOWN, reception('95'))])
+      await harness.store.save(stateWith({ plan: guidePlan, cafs: certificationCafXmls() }))
+      await failure(runCertification(harness.deps))
+      // Another resolution: the kept envelope is dropped by the settling, whatever the option says.
+      const registry = createMemoryFolioRegistry(() => FIXED_NOW)
+      const resolution = { number: 0, date: '2026-02-02' }
+      await runCertification({ ...harness.deps, registry, resolution }, { resendUnanswered }).catch(() => undefined)
+      const [first, second] = uploaded(harness)
+      expect(foliosOf(first)).toEqual(['52-1', '52-2', '52-3'])
+      expect(foliosOf(second)).toEqual(['52-4', '52-5', '52-6'])
+    },
+  )
+
+  test('prepareFolios holds them, so it asks for the folios the next set needs (CAFs sized to the sets)', async () => {
+    const harness = await certificationHarness([
+      ...stampingAnyFrom(10),
+      uploadRoute(DOWN, reception('96'), reception('97')),
+    ])
+    const cafs = [
+      cafXml(33, { from: 1, to: 3 }),
+      cafXml(61, { from: 1, to: 3 }),
+      cafXml(56, { from: 1, to: 2 }),
+      cafXml(34),
+    ]
+    const sets = { basic: plan.basic, exempt: plan.exempt }
+    await failure(sendTestSet(harness.deps, stateWith({ plan: sets, cafs }), { kind: 'basic' }))
+    const deps = { ...harness.deps, registry: createMemoryFolioRegistry(() => FIXED_NOW) }
+    const prepared = await prepareFolios(deps, (await harness.store.load())!)
+    const exempt = await sendTestSet(deps, prepared.state, { kind: 'exempt' })
+    await sendTestSet(deps, exempt.state, { kind: 'basic' })
+    const [basic, other, again] = uploaded(harness)
+    expect(again).toBe(basic)
+    expect(foliosOf(other).filter((folio) => foliosOf(basic).includes(folio))).toEqual([])
+  })
+
+  test('sendSimulation holds them: a kept simulation whose folio is another document’s is issued anew', async () => {
+    const harness = await certificationHarness([...stampingRoutes(), uploadRoute(DOWN, reception('98'))])
+    await failure(sendSimulation(harness.deps, stateWith({ plan: guidePlan, cafs: [] }), ONE_PASS))
+    const state = (await harness.store.load())!
+    const registry = createMemoryFolioRegistry(() => FIXED_NOW)
+    const guides = heldCafs(state.cafs, FIXED_NOW).find((h) => h.caf.documentType === 52)!
+    await registry.markSent(guides.scope, state.unanswered!.simulation!.cases[1].folio, { trackId: '1' })
+    await sendSimulation({ ...harness.deps, registry }, state, ONE_PASS)
+    expect(harness.warnedWith(ISSUED_ANEW)).toEqual([{ envelope: 'simulation', reason: 'taken' }])
+    expect(uploaded(harness)[1]).not.toBe(uploaded(harness)[0])
+  })
+
+  test('an entry with no holder, or an empty one, is issued anew and never sent', async () => {
+    for (const holder of [undefined, '']) {
+      const { harness, state, first } = await guideFailedOnce(reception('99'))
+      const entry = { ...state.unanswered!.guide!, holder } as unknown as NonNullable<typeof state.unanswered>['guide']
+      await sendTestSet(harness.deps, { ...state, unanswered: { guide: entry } }, { kind: 'guide' })
+      expect(harness.warnedWith(ISSUED_ANEW)).toEqual([{ envelope: 'guide', reason: 'ledger' }])
+      expect(uploaded(harness)[1]).not.toBe(first)
+      expect(foliosOf(uploaded(harness)[1])).toEqual(['52-4', '52-5', '52-6'])
+    }
+  })
+
+  test('a hold that fails ends the step with SET_ERROR', async () => {
+    const { harness, state } = await guideFailedOnce()
+    const registry = {
+      ...harness.registry,
+      hold: async (): Promise<boolean> => {
+        throw LEDGER_DOWN
+      },
+    }
+    const error = await failure(sendTestSet({ ...harness.deps, registry }, state, { kind: 'guide' }))
+    expect(error.details).toEqual({ field: 'ledger' })
+    expect(harness.steps().slice(-2)).toEqual(['SET_START', 'SET_ERROR'])
+  })
+})
+
+describe('an envelope the SII answered with a track id, and something failed after it', () => {
+  test('a ledger that fails keeps it, and the next attempt reads its first track id from the SII', async () => {
+    const harness = await certificationHarness([
+      uploadRoute(reception('77'), { body: siiFixture('reception-duplicate-7.xml') }),
+    ])
+    const registry = {
+      ...harness.registry,
+      markSent: async (...args: Parameters<typeof harness.registry.markSent>): Promise<void> => {
+        if (args[2]?.trackId !== undefined) throw LEDGER_DOWN
+        return harness.registry.markSent(...args)
+      },
+    }
+    const start = stateWith({ plan, cafs: certificationCafXmls() })
+    await failure(sendTestSet({ ...harness.deps, registry }, start, { kind: 'guide' }))
+    const state = (await harness.store.load())!
+    expect(state.sets).toEqual({})
+    expect(state.unanswered?.guide?.cases).toHaveLength(3)
+    const second = await sendTestSet(harness.deps, state, { kind: 'guide' })
+    expect(second.state.sets.guide?.trackId).toBe(TRACK_ID)
+    expect(uploaded(harness)[1]).toBe(uploaded(harness)[0])
+  })
+
+  test('a state store that fails keeps it as well', async () => {
+    const harness = await certificationHarness([
+      uploadRoute(reception('78'), { body: siiFixture('reception-duplicate-7.xml') }),
+    ])
+    const box = { failed: false }
+    const store = {
+      ...harness.store,
+      save: async (state: CertificationState): Promise<void> => {
+        if (state.sets.guide !== undefined && !box.failed) {
+          box.failed = true
+          throw LEDGER_DOWN
+        }
+        return harness.store.save(state)
+      },
+    }
+    await failure(
+      sendTestSet({ ...harness.deps, store }, stateWith({ plan, cafs: certificationCafXmls() }), { kind: 'guide' }),
+    )
+    const state = (await harness.store.load())!
+    expect(state.unanswered?.guide?.cases).toHaveLength(3)
+    await sendTestSet(harness.deps, state, { kind: 'guide' })
+    expect(uploaded(harness)[1]).toBe(uploaded(harness)[0])
+  })
+})
+
+describe('which answers of the SII leave an envelope kept', () => {
+  test('an HTTP status that says the SII may hold the file keeps it; any other status, and a TLS failure, do not', async () => {
+    const outcomes: [string, boolean][] = []
+    for (const [name, reply] of [
+      ['400', { status: 400, body: 'bad' }],
+      ['403', { status: 403, body: 'forbidden' }],
+      ['404', { status: 404, body: 'not found' }],
+      ['405', { status: 405, body: 'not allowed' }],
+      ['408', { status: 408, body: 'timeout' }],
+      ['429', { status: 429, body: 'slow down' }],
+      ['503', { status: 503, body: 'down' }],
+      ['tls', new DteError('TRANSPORT_TLS', { reason: 'handshake' })],
+    ] as const) {
+      const harness = await certificationHarness([uploadRoute(reply)])
+      await failure(sendTestSet(harness.deps, stateWith({ plan, cafs: certificationCafXmls() }), { kind: 'guide' }))
+      outcomes.push([name, (await harness.store.load())!.unanswered?.guide !== undefined])
+    }
+    expect(outcomes).toEqual([
+      ['400', false],
+      ['403', false],
+      ['404', false],
+      ['405', true],
+      ['408', true],
+      ['429', true],
+      ['503', true],
+      ['tls', false],
+    ])
+  })
+})
+
+describe('the entry of a kept set', () => {
+  test('one issued anew leaves the state at once, even when the step stops before its upload', async () => {
+    const { harness, state } = await guideFailedOnce()
+    const store = {
+      ...harness.store,
+      writeArtefact: async (name: string, content: string): Promise<void> => {
+        if (name.includes('/dtes/')) throw LEDGER_DOWN
+        return harness.store.writeArtefact(name, content)
+      },
+    }
+    const tomorrow = new Date('2026-11-16T18:30:00.000Z')
+    await failure(sendTestSet({ ...harness.deps, store, now: () => tomorrow }, state, { kind: 'guide' }))
+    expect((await harness.store.load())!.unanswered).toEqual({})
+  })
+
+  test('sent again and failed again, it keeps its first entry, holder included', async () => {
+    const { harness, state } = await guideFailedOnce(DOWN)
+    const later = new Date(FIXED_NOW.getTime() + 3600 * 1000)
+    await failure(sendTestSet({ ...harness.deps, now: () => later }, state, { kind: 'guide' }))
+    expect((await harness.store.load())!.unanswered).toEqual(state.unanswered)
+  })
+
+  test('sent again with success, its hold mark gives way to the track id', async () => {
+    const { harness, state } = await guideFailedOnce(reception('79'))
+    const guides = heldCafs(state.cafs, FIXED_NOW).find((h) => h.caf.documentType === 52)!
+    const holder = state.unanswered!.guide!.holder
+    await expect(harness.registry.hold!(guides.scope, 1, holder)).resolves.toBe(true)
+    await sendTestSet(harness.deps, state, { kind: 'guide' })
+    await expect(harness.registry.hold!(guides.scope, 1, holder)).resolves.toBe(false)
+  })
+
+  test('the runner settles it on the day in Chile, where the machine’s day is another', async () => {
+    const harness = await certificationHarness([uploadRoute(DOWN, DOWN)])
+    await harness.store.save(stateWith({ plan: guidePlan, cafs: certificationCafXmls() }))
+    await failure(runCertification(harness.deps))
+    await withMachineAhead(async () => {
+      await failure(runCertification(harness.deps))
+    })
+    expect(harness.warnedWith(SENT_AGAIN)).toHaveLength(1)
+    expect(uploaded(harness)[1]).toBe(uploaded(harness)[0])
+  })
+})
+
+describe('a plan obtained again while an envelope is kept', () => {
+  test('the kept folios are held before the new plan drops the entry: no other document takes them', async () => {
+    const { harness, state, first } = await guideFailedOnce(reception('71'))
+    // A registry that never saw the kept folios, and a set generated again at the SII.
+    const registry = createMemoryFolioRegistry(() => FIXED_NOW)
+    const setPages = await certificationHarness([
+      get('pe_generar', SET_ENTRY),
+      post('pe_generar1', setGenerationForm()),
+      post('pe_generar2', setDownloadPage()),
+    ])
+    const deps = { ...harness.deps, registry, portal: setPages.deps.portal }
+    const obtained = await obtainTestSet(deps, state)
+    expect(obtained.outcome).toBe('regenerated')
+    expect(obtained.state.unanswered).toBeUndefined()
+    const prepared = await prepareFolios({ ...harness.deps, registry }, obtained.state, { needs: {} })
+    await sendTestSet({ ...harness.deps, registry }, prepared.state, { kind: 'guide' })
+    const kept = foliosOf(first)
+    expect(kept).toEqual(['52-1', '52-2', '52-3'])
+    expect(foliosOf(uploaded(harness)[1]).filter((folio) => kept.includes(folio))).toEqual([])
   })
 })

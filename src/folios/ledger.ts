@@ -199,11 +199,12 @@ export const markSentInLedger = (
 /**
  * EN: Holds a folio for a holder: a folio of the range that is neither used nor annulled is recorded as sent for it
  * (`extra.heldFor`) and is held; a folio already sent for that holder is held as it is; any other folio (reserved, sent
- * for another document or for none, annulled, outside the range) is not, and the ledger is left as it was.
+ * for another document or for none, annulled, outside the range), and any folio for an empty holder, is not, and the
+ * ledger is left as it was.
  * ES: Retiene un folio para un tenedor: un folio del rango que no está usado ni anulado se registra como enviado para él
  * (`extra.heldFor`) y queda retenido; un folio ya enviado para ese tenedor queda retenido tal como está; cualquier otro
- * folio (reservado, enviado para otro documento o para ninguno, anulado, fuera del rango) no, y el libro queda como
- * estaba.
+ * folio (reservado, enviado para otro documento o para ninguno, anulado, fuera del rango), y cualquier folio para un
+ * tenedor vacío, no, y el libro queda como estaba.
  */
 export const holdInLedger = (
   ledger: FolioLedger,
@@ -212,7 +213,8 @@ export const holdInLedger = (
   holder: string,
   at: string,
 ): { readonly ledger: FolioLedger; readonly held: boolean } => {
-  if (!inRange(scope, folio) || annulledFolios(ledger, scope).has(folio)) return { ledger, held: false }
+  if (holder === '' || !inRange(scope, folio) || annulledFolios(ledger, scope).has(folio))
+    return { ledger, held: false }
   const entry = ledger.entries[keyOf(scope)]
   if (entry?.used.includes(folio) === true)
     return { ledger, held: entry.sent[String(folio)]?.extra?.heldFor === holder }
