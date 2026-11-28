@@ -81,7 +81,7 @@ const MESSAGES: Readonly<Record<DteErrorCode, string>> = {
   CAF_TYPE_MISMATCH: 'CAF document type does not match the document',
   CAF_ISSUER_MISMATCH: 'CAF issuer RUT does not match the document issuer',
   FOLIO_OUT_OF_RANGE: 'Folio is outside the CAF range',
-  FOLIO_LEDGER_LOCKED: 'Folio ledger stayed locked by another process or registry',
+  FOLIO_LEDGER_LOCKED: 'Folio ledger lock is held by another process or registry',
   CERT_INVALID: 'Certificate is not valid',
   CERT_PASSWORD_WRONG: 'Certificate password is wrong',
   CERT_EXPIRED: 'Certificate has expired',

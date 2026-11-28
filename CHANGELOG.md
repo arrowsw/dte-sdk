@@ -9,12 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`FOLIO_LEDGER_LOCKED`**, a new error code: a change of the directory folio registry waited `lockWaitMs` for the
-  lock of the ledger and did not get it. `details` carry `lockWaitMs` and `attempts`.
+- **`FOLIO_LEDGER_LOCKED`**, a new error code: a change of the directory folio registry did not hold the lock of the
+  ledger. `details.kind` says why: `wait` when it waited `lockWaitMs` for it (with `lockWaitMs` and `attempts`), `lost`
+  when its lock was taken over before its write landed, which then did not.
 
 - **`lock` of `FolioLedgerStore`** (`dte-sdk/portal`), optional: a store that gives it has every change of
   `createFolioRegistry` run inside it, its read, its change and its write, so that the store can make the change
-  exclusive beyond one registry. A store without it behaves as before.
+  exclusive beyond one registry. The registry expects it to call the function once, return its result and release on
+  every path; a `lock` that never settles holds up every later change. With a `lock`, `remaining` and `stats` no longer
+  wait their turn behind the changes of the registry, so the store must replace its ledger whole. A store without it
+  behaves as before.
 
 ### Changed
 
@@ -37,15 +41,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   registries on one directory in one process 25 out of 50; a folio given twice ends in two documents with the same
   folio, and the SII rejects the second. Every change (`reserve`, `markSent`, `markAnnulled`, `release`) now reads,
   changes and writes the ledger holding `folios.json.lock`, a file created exclusively in the directory, readable by
-  its owner only and removed when the change ends, a failed one included. Whoever finds it held waits, with a growing
-  pause and some jitter, up to `lockWaitMs` (15 000 ms by default), and then fails with `FOLIO_LEDGER_LOCKED`. A lock
-  older than `lockStaleMs` (10 000 ms by default), left by a process that died, is taken over, under a second file
-  created exclusively, so that two processes that find it stale at once never remove the lock of whoever took it next.
-  `remaining` and `stats` take no lock: the ledger is replaced whole, so they read it before or after a change. The
-  order of the calls of one registry, and the memory registry, do not change. A reservation costs one lock file more:
-  200 in a row went from about 55 ms to about 100 ms on a local disk.
-  - **What to change:** nothing. A process that holds a change for more than `lockStaleMs` must raise it, and the
-    directory must be on a file system that honours an exclusive create, as a local disk does.
+  its owner only, touched every third of `lockStaleMs` while the change runs, and removed when it ends, a failed one
+  included. Whoever finds it held waits, with a growing pause and some jitter, up to `lockWaitMs` (15 000 ms by
+  default), and then fails with `FOLIO_LEDGER_LOCKED`. A lock older than `lockStaleMs` (10 000 ms by default, at
+  least 1 000), left by a process that died, is taken over, under a second file created exclusively, so that two
+  processes that find it stale at once never remove the lock of whoever took it next; if the taker dies in that step,
+  recovery takes up to two stale periods. Just before its write lands, a holder checks that the lock is still its own,
+  and if it was taken over while the process was stopped it does not write (`FOLIO_LEDGER_LOCKED`, `kind: 'lost'`). A
+  lock that cannot be removed after a change was written does not undo the change's result: it goes stale by itself.
+  `remaining` and `stats` take no lock and do not wait behind a change, even one of their own registry: the ledger is
+  replaced whole, so they read it before or after a change. The order of the changes of one registry, and the memory
+  registry, do not change. The lock is for the processes of one host on a local file system: its staleness compares
+  this host's clock with the file's modification time. A reservation costs one lock file more: 200 in a row went from
+  about 55 ms to about 100 ms on a local disk.
+  - **What to change:** nothing, unless a process stays stopped inside a change for longer than `lockStaleMs`, which
+    must then be raised. The directory must not be shared between hosts.
 
 ## [0.17.0] - 2026-11-26
 

@@ -67,6 +67,13 @@ test('calls run one after another, so concurrent reservations never repeat', asy
   expect(folios).toEqual([1, 2, 3, 4, 5])
 })
 
+test('in memory, a read made after a change sees it', async () => {
+  const registry = createMemoryFolioRegistry()
+  const reserved = registry.reserve(scope)
+  await expect(registry.remaining(scope)).resolves.toBe(4)
+  await expect(reserved).resolves.toBe(1)
+})
+
 test('a failed call does not stop the next one', async () => {
   const registry = createMemoryFolioRegistry()
   expect((await failure(registry.markSent(scope, 99))).code).toBe('FOLIO_OUT_OF_RANGE')
@@ -245,7 +252,7 @@ describe('createDirectoryFolioRegistry', () => {
       writeFileSync(lockOf(dir), 'held')
       const error = await failure(createDirectoryFolioRegistry({ dir, lockWaitMs: 50 }).reserve(scope))
       expect(error.code).toBe('FOLIO_LEDGER_LOCKED')
-      expect(error.details).toEqual({ lockWaitMs: 50, attempts: expect.any(Number) })
+      expect(error.details).toEqual({ kind: 'wait', lockWaitMs: 50, attempts: expect.any(Number) })
       expect(readFileSync(lockOf(dir), 'utf8')).toBe('held')
       expect(existsSync(join(dir, 'folios.json'))).toBe(false)
     })
@@ -272,10 +279,11 @@ describe('createDirectoryFolioRegistry', () => {
     test('the stale limit is an option: a lock younger than it is waited for, older is taken over', async () => {
       const dir = tempDir()
       writeFileSync(lockOf(dir), 'held')
+      const halfAMinuteAgo = new Date(Date.now() - 30_000)
+      utimesSync(lockOf(dir), halfAMinuteAgo, halfAMinuteAgo)
       const young = createDirectoryFolioRegistry({ dir, lockWaitMs: 40, lockStaleMs: 60_000 })
       expect((await failure(young.reserve(scope))).code).toBe('FOLIO_LEDGER_LOCKED')
-      await new Promise((resolve) => setTimeout(resolve, 30))
-      await expect(createDirectoryFolioRegistry({ dir, lockStaleMs: 10 }).reserve(scope)).resolves.toBe(1)
+      await expect(createDirectoryFolioRegistry({ dir, lockStaleMs: 20_000 }).reserve(scope)).resolves.toBe(1)
     })
 
     test('while another takes a stale lock over, the lock is not touched and the operation waits', async () => {
@@ -442,6 +450,103 @@ describe('createDirectoryFolioRegistry', () => {
       expect(readdirSync(dir)).toEqual(['folios.json'])
     })
 
+    test('a holder slower than the stale limit renews its lock, so it is never taken over', async () => {
+      const dir = tempDir()
+      const modules = await loadNodeFs()
+      const ages: number[] = []
+      const slow = createDirectoryFolioRegistry({ dir, lockStaleMs: 1000 }, async () => ({
+        ...modules,
+        fs: {
+          ...modules.fs,
+          writeFile: async (...args: Parameters<typeof modules.fs.writeFile>) => {
+            await new Promise((resolve) => setTimeout(resolve, 1300))
+            ages.push(Date.now() - statSync(lockOf(dir)).mtimeMs)
+            return modules.fs.writeFile(...args)
+          },
+        } as typeof modules.fs,
+      }))
+      const first = slow.reserve(scope)
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      const second = createDirectoryFolioRegistry({ dir, lockStaleMs: 1000, lockWaitMs: 5000 }).reserve(scope)
+      await expect(Promise.all([first, second])).resolves.toEqual([1, 2])
+      expect(ages[0]).toBeLessThan(1000)
+      expect(readdirSync(dir)).toEqual(['folios.json'])
+    })
+
+    test.each([
+      ['a taker that has finished', false],
+      ['a taker that still holds it', true],
+    ])(
+      'a holder whose lock was taken over by %s does not write, and the ledger keeps what the taker wrote',
+      async (_, holding) => {
+        const dir = tempDir()
+        const modules = await loadNodeFs()
+        const taker = createDirectoryFolioRegistry({ dir })
+        const once = { done: false }
+        const robbed = createDirectoryFolioRegistry({ dir }, async () => ({
+          ...modules,
+          fs: {
+            ...modules.fs,
+            writeFile: async (...args: Parameters<typeof modules.fs.writeFile>) => {
+              if (!once.done) {
+                once.done = true
+                // The holder stops for longer than the stale limit and its renewal does not run: the taker sees it stale.
+                utimesSync(lockOf(dir), anHourAgo(), anHourAgo())
+                await expect(taker.reserve(scope)).resolves.toBe(1)
+                if (holding) writeFileSync(lockOf(dir), 'taker')
+              }
+              return modules.fs.writeFile(...args)
+            },
+          } as typeof modules.fs,
+        }))
+        const error = await failure(robbed.reserve(scope))
+        expect(error.code).toBe('FOLIO_LEDGER_LOCKED')
+        expect(error.details).toEqual({ kind: 'lost' })
+        await expect(taker.remaining(scope)).resolves.toBe(4)
+        expect(readdirSync(dir).sort()).toEqual(holding ? ['folios.json', 'folios.json.lock'] : ['folios.json'])
+        if (holding) expect(readFileSync(lockOf(dir), 'utf8')).toBe('taker')
+      },
+    )
+
+    test('a read does not wait behind a change of its own registry that waits for the lock', async () => {
+      const dir = tempDir()
+      const registry = createDirectoryFolioRegistry({ dir, lockWaitMs: 5000 })
+      await registry.reserve(scope)
+      writeFileSync(lockOf(dir), 'held')
+      const change = registry.reserve(scope)
+      const read = registry.remaining(scope)
+      expect(await settled(read)).toBe(true)
+      await expect(read).resolves.toBe(4)
+      expect(await settled(change)).toBe(false)
+      rmSync(lockOf(dir))
+      await expect(change).resolves.toBe(2)
+    })
+
+    test('a lock that cannot be removed on the way out does not undo a change that was written', async () => {
+      const dir = tempDir()
+      const modules = await loadNodeFs()
+      const registry = createDirectoryFolioRegistry({ dir }, async () => ({
+        ...modules,
+        fs: {
+          ...modules.fs,
+          rm: async (file: string, options: Parameters<typeof modules.fs.rm>[1]) => {
+            if (file.endsWith('.lock')) throw Object.assign(new Error('rm refused'), { code: 'EACCES' })
+            return modules.fs.rm(file, options)
+          },
+        } as typeof modules.fs,
+      }))
+      await expect(registry.reserve(scope)).resolves.toBe(1)
+      expect(readdirSync(dir).sort()).toEqual(['folios.json', 'folios.json.lock'])
+    })
+
+    test('a takeover file a dead taker left behind is removed by the next change once stale, stale lock or not', async () => {
+      const dir = tempDir()
+      writeFileSync(guardOf(dir), '')
+      utimesSync(guardOf(dir), anHourAgo(), anHourAgo())
+      await expect(createDirectoryFolioRegistry({ dir }).reserve(scope)).resolves.toBe(1)
+      expect(readdirSync(dir)).toEqual(['folios.json'])
+    })
+
     test.each([
       ['lockWaitMs', 0],
       ['lockWaitMs', -1],
@@ -449,6 +554,7 @@ describe('createDirectoryFolioRegistry', () => {
       ['lockWaitMs', Number.POSITIVE_INFINITY],
       ['lockWaitMs', '100'],
       ['lockStaleMs', 0],
+      ['lockStaleMs', 999],
       ['lockStaleMs', Number.POSITIVE_INFINITY],
       ['lockStaleMs', '100'],
     ])('the option %s = %p is refused', (field, value) => {
