@@ -92,6 +92,18 @@ export type {
   RegisterSummary,
   RegisterSummaryRow,
 } from './pages/rcv'
+export { reconcilePeriodDocuments } from './reconcile'
+export type {
+  PeriodDifference,
+  PeriodDuplicate,
+  PeriodMatch,
+  PeriodMismatch,
+  PeriodReconciliation,
+  PeriodReconciliationTotals,
+  PeriodRecord,
+  PeriodRecordField,
+  PeriodTotals,
+} from './reconcile'
 export { listAccreditationDocuments, unstable_fetchActivityVerification } from './activity-verification'
 export type { ActivityVerificationInput } from './activity-verification'
 export type {
