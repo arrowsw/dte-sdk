@@ -89,7 +89,7 @@ const VARIANTS: Record<Exclude<DocumentType, 39 | 41>, Record<string, Variant>> 
         { name: 'Petróleo diésel', quantity: 100, unitPrice: 800, additionalTaxCodes: [28] },
         { name: 'Copas de cristal', quantity: 6, unitPrice: 2000 },
       ],
-      additionalTaxes: [{ taxCode: 28, rate: 1.5, amount: 6400 }],
+      additionalTaxes: [{ taxCode: 28, amount: 6400 }],
     },
     'line codes, a discount, a surcharge, an exempt line and a price with decimals': {
       items: [

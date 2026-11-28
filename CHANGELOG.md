@@ -36,41 +36,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   facturas de compra)" and the commissions. Each code now becomes one `ImptoReten` (`TipoImp`, `TasaImp`, `MontoImp`):
   its rate, the caller's or the one `ADDITIONAL_TAXES` holds, by the sum of the lines that carry it, rounded once, half
   away from zero, over decimal digits; and the total adds it, or takes it off for a withholding. That 33 now totals
-  84 030 with code 25 at 20.5 %. The caller gives the amount of a code field 117 excepts from that sum (14, 17, 28, 35,
-  50) or whose rate neither the caller nor the table gives, with a rate, since every withholding is written with its
-  `TasaImp`. Code 15 on a document that withholds the whole VAT (`withholdVat`, a 46) is that withholding as before.
+  84 030 with code 25 at 20.5 %.
+  - The caller gives, in `additionalTaxes`, the amount of a code field 117 excepts from that sum (14, 17, 28, 35, 50)
+    and the rate or the amount of one whose rate the table does not give. With an amount comes a rate, written as
+    `TasaImp`, except on a specific tax (28, 35, 51, 52), whose rate field 116 lets out ("En el caso de impuesto
+    específicos se puede omitir"): none is written then.
+  - A tax that works out to zero is not written, since field 117 c) asks for a value "> 0"; a code whose lines add up
+    to zero needs neither rate nor amount. The lines keep their codes.
+  - Which codes a type takes rests on two tables of the format. The table of codes (section 4, "Documentos en que se
+    aplica", pages 51 to 54) gives each code to invoices, purchase invoices and their notes (33, 46, 56, 61). The field
+    table marks `CodImpAdic` (page 41) and `ImptoReten` (page 30) conditional on an exempt invoice (34) and optional
+    on a dispatch guide (52): those take the codes the table gives a 33. It marks `CodImpAdic` not applicable on a
+    settlement invoice (43).
+  - Code 15 on a document that withholds the whole VAT (`withholdVat`, a 46) is that withholding as before, on any
+    type, whether the line brings it or gets it.
   - **What to change:** nothing in a call whose lines carry no code. One whose lines carry codes gets their taxes in
-    its totals, or one of the refusals below.
+    its totals, or one of the refusals listed under Changed. `Withholding.rate` is now optional, absent only on a
+    specific tax: code that reads it handles `undefined`.
 
 ### Changed
 
 - **Codes of additional tax or withholding the totals cannot carry are refused** before a folio is stamped, each with
-  the code in `details.taxCode`:
-  - On the totals worked out: a code the table of Formato DTE 2.5 (section 4, "Documentos en que se aplica") does not
-    give the document type, or that it does not hold (`INVALID_OPTION`, `items[i].additionalTaxCodes`); a withholding
-    on a sale (46, 53), whose side of the total field 124 does not state (same field); any code but 15 on a document
-    that withholds the whole VAT (`withholdVat`); any code beside `pricesIncludeVat`, since `MntBruto` is "Sólo para
-    documentos sin impuestos adicionales" (field 10 of the header, page 13); a code worked out from lines a global
-    adjustment applies to (`globalAdjustments[i]`): section D (page 44) says the adjustments "aumentan o disminuyen la
-    base del impuesto", not how a code's share is rounded, so its amount is given instead; a code that needs its amount
-    and has none (`MISSING_FIELD`, `additionalTaxes`), an amount without any rate (`additionalTaxes[i].rate`), and a
-    rate outside the 0.01 to 999.99 of `PctType` (`INVALID_AMOUNT`), the 0 % the table gives code 49 included.
-  - On explicit totals: totals that leave out the code of a line with an amount (`MISSING_FIELD`,
-    `totals.withholdings`), and `additionalTaxes` beside them (`INVALID_OPTION`). A line at zero adds nothing to a tax
-    and keeps its code.
-  - On any document: more than 2 codes on a line and more than 20 `ImptoReten`, the `maxOccurs` of `CodImpAdic` and
-    `ImptoReten` in `DTE_v10.xsd` (`INVALID_OPTION`, `items[i].additionalTaxCodes`, `totals.withholdings`).
-  - **What to change:** a line with code 15 on a document that does not withhold the whole VAT, which was issued
-    without the withholding, now needs its rate: `additionalTaxes: [{ taxCode: 15, rate: 19 }]`, or `withholdVat`. A
-    purchase invoice whose lines carry a withholding code of their own sets `withholdVat: false`. Explicit totals list
-    the codes of their lines in `withholdings`.
-
+  the code in `details.taxCode`. Each of these documents was issued before, with the code on the line and the totals
+  without its tax.
+  - **A code the table of codes does not hold**, 16, 40, 54 and 55 among them, which `ImpAdicDTEType` admits and the
+    table does not describe (`INVALID_OPTION`, `items[i].additionalTaxCodes`). **What to change:** use a code of the
+    table, or give the totals by hand.
+  - **A code the type does not take** (same error): a purchase withholding (15 without `withholdVat`, 30 to 34, 36 to
+    39, 41, 47 to 49, and 301 to 481) on a 33, 34 or 52; a sale code (14, 17 to 19, 23 to 28, 35, 44 to 46, 50 to 53,
+    271) on a 46; the diesel and gasoline taxes (28, 35) on a note, since the table names only the seller's invoice;
+    and any code on a settlement invoice (43) but the code 15 of `withholdVat`.
+    Explicit totals are the caller's and skip this check. **What to change:** take the code off the line, or give the
+    totals by hand with its tax.
+  - **A withholding on a sale**, codes 46 and 53, which the table gives a 33: field 124 states the side of the total
+    of "IVA Retenido productos (en caso de facturas de compra)" alone (same error). **What to change:** give the
+    totals by hand with the withholding.
+  - **A code other than 15 beside a withholding of the whole VAT** (`INVALID_OPTION`, `withholdVat`), a purchase
+    invoice left on its default included, as a 46 whose line carries 30 or 301. Code 15 given in `additionalTaxes`
+    beside it is refused the same way: `withholdVat` works it out. **What to change:** `withholdVat: false`, and the
+    withholdings of the lines are worked out each by its code.
+  - **A code beside `pricesIncludeVat`** (`INVALID_OPTION`, `pricesIncludeVat`): `MntBruto` is "Sólo para documentos
+    sin impuestos adicionales" (field 10 of the header, page 13). **What to change:** give net prices, or the totals
+    by hand.
+  - **A code worked out from lines a global adjustment applies to** (`INVALID_OPTION`, `globalAdjustments[i]`).
+    Section D (page 44) says the adjustments "aumentan o disminuyen la base del impuesto" and that when "en la Zona de
+    Detalle hayan ítems con distintos códigos de impuesto o retenciones, el campo 'tipo de valor' del descuento debe
+    ser %". It says how such an adjustment is written, not how a code's share of it is taken nor rounded, so the
+    library does not guess the base. **What to change:** give that code's `amount` in `additionalTaxes`.
+  - **A code whose amount is not the rate by its lines**, 14 and 50 (the VAT on a margin), 17 (over the slaughter
+    base), 28 and 35 (diesel and gasoline), without an amount (`MISSING_FIELD`, `additionalTaxes`). **What to
+    change:** give its `amount`, with its `rate` for 14, 17 and 50.
+  - **A code whose rate the table does not give and the caller does not either**: 15 without `withholdVat`, 31, 38,
+    39, 41, 47, the codes of total withholding 301, 321, 331, 341, 361, 371 and 481, and the gas taxes 51 and 52 (same
+    error). **What to change:** give its `rate`, as `{ taxCode: 15, rate: 19 }`, or its `amount` with its rate; 51 and
+    52 take an amount alone.
+  - **An amount without a rate on a code that is not a specific tax** (`MISSING_FIELD`, `additionalTaxes[i].rate`).
+    **What to change:** give its `rate` too.
+  - **Code 49**, whose 0 % `TasaImp` cannot hold: `PctType` runs from 0.01 (`INVALID_AMOUNT`,
+    `items[i].additionalTaxCodes`); and a rate given outside 0.01 to 999.99 or that is not a number (`INVALID_AMOUNT`,
+    `additionalTaxes[i].rate`). **What to change:** give the totals by hand for code 49, and a rate within `PctType`.
+  - **Explicit totals that leave out the code of a line with an amount** (`MISSING_FIELD`, `totals.withholdings`). A
+    line at zero adds nothing to a tax and keeps its code. **What to change:** list the code in `withholdings`.
+  - **More than 2 codes on a line and more than 20 `ImptoReten`**, the `maxOccurs` of `CodImpAdic` and `ImptoReten` in
+    `DTE_v10.xsd` (`INVALID_OPTION`, `items[i].additionalTaxCodes`, `totals.withholdings`). **What to change:** at
+    most 2 codes a line and 20 taxes a document.
+- **Two book lines are refused that were built wrong** (`bookEntryFromDocument`). A credit note booked with
+  `creditNoteSign: 'negative'` whose VAT withholding takes a field of the sales detail (`INVALID_OPTION`,
+  `creditNoteSign`): `IVARetTotal` and `IVARetParcial` are a `MontoType`, from zero up, as `DepEnvase` is. And a VAT
+  withholding of a sale line other than code 15 without its rate (`MISSING_FIELD`, `totals.withholdings`), which
+  cannot be told whole or partial. **What to change:** book that note with the positive sign; give the withholding
+  its rate.
 - **More than 40 references are refused** (`INVALID_OPTION`, `details.field` `references` or `receiptReferences`).
   `DTE_v10.xsd` declares `Referencia` with `maxOccurs="40"` under `Documento`, `Liquidacion` and `Exportaciones`, and
   `EnvioBOLETA_v11.xsd` the same 40 under a receipt's `Documento`. `createDocument` wrote a 41st, and the document did
   not validate. It now refuses it before a folio is stamped, as it refuses more than 60 lines.
   - **What to change:** cite at most 40 documents. Formato DTE 2.5 gives `IndGlobal` to a document that refers to more
     than 20 of one type: one global reference (`global: true`, folio 0) stands for them.
+
+### Fixed
+
+- **A credit note booked with `creditNoteSign: 'negative'` negates its other taxes too** (`bookEntryFromDocument`).
+  The net, the VAT and the total were negated and `otherTaxes` was not, so the line of a 61 with code 25 read net
+  -3 702, VAT -703, other taxes +759 and total -5 164, which does not add up. `MntImp` is a `ValorType` of
+  `LibroCV_v10.xsd`, which takes a sign. A tax without a rate now travels without `TasaImp`, optional in `OtrosImp`.
+  - **What to change:** nothing. See Changed for the two refusals added beside it.
 
 ## [0.17.0] - 2026-11-26
 

@@ -229,8 +229,8 @@ export type LineItem = {
 export type Withholding = {
   /** EN: Tax code. ES: `TipoImp` — Código del impuesto (15 = IVA retenido total). */
   readonly taxCode: number
-  /** EN: Rate percent. ES: `TasaImp` — Tasa en porcentaje. */
-  readonly rate: number
+  /** EN: Rate percent; absent only on a specific tax, whose rate Formato DTE 2.5 lets out (field 116). ES: `TasaImp` — Tasa en porcentaje; falta solo en un impuesto específico, cuya tasa el Formato DTE 2.5 permite omitir (campo 116). */
+  readonly rate?: number
   /** EN: Withheld amount. ES: `MontoImp` — Monto retenido. */
   readonly amount: number
 }
@@ -247,7 +247,7 @@ export type Withholding = {
 export type AdditionalTaxInput = {
   /** EN: Code of the tax or withholding, one a line carries. ES: `TipoImp` — Código del impuesto o retención, uno que lleva una línea. */
   readonly taxCode: number
-  /** EN: Rate in percent, from 0.01 to 999.99, rounded to two decimals; without it, the table's. ES: `TasaImp` — Tasa en porcentaje, de 0,01 a 999,99, redondeada a dos decimales; sin ella, la de la tabla. */
+  /** EN: Rate in percent, from 0.01 to 999.99, rounded to two decimals; without it, the table's. Beside an amount, a specific tax may leave it out (Formato DTE 2.5, field 116), and no `TasaImp` is written. ES: `TasaImp` — Tasa en porcentaje, de 0,01 a 999,99, redondeada a dos decimales; sin ella, la de la tabla. Junto a un monto, un impuesto específico puede omitirla (Formato DTE 2.5, campo 116), y no se escribe `TasaImp`. */
   readonly rate?: number
   /** EN: Amount in whole pesos above zero, taken as it comes; without it, the rate by the sum of the lines that carry the code. ES: `MontoImp` — Monto en pesos enteros mayor que cero, tomado tal como viene; sin él, la tasa por la suma de las líneas que llevan el código. */
   readonly amount?: number

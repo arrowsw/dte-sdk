@@ -719,6 +719,74 @@ describe('the additional taxes and withholdings of the lines', () => {
     expectError(() => invoice({ items: [diesel] }), 'MISSING_FIELD', { field: 'additionalTaxes', taxCode: 28 })
   })
 
+  test('a specific tax given by its amount alone is written without TasaImp, and maps back', () => {
+    const diesel = { name: 'Petróleo diésel', quantity: 1000, unitPrice: 800, additionalTaxCodes: [28] }
+    const doc = invoice({ items: [diesel], additionalTaxes: [{ taxCode: 28, amount: 64000 }] })
+    expect(doc.header.totals.withholdings).toEqual([{ taxCode: 28, amount: 64000 }])
+    expect(buildDocumentXml(doc)).toContain('<ImptoReten><TipoImp>28</TipoImp><MontoImp>64000</MontoImp></ImptoReten>')
+    expect(fromSiiDocument(toSiiDocument(doc)).header.totals).toEqual(doc.header.totals)
+  })
+
+  test('a sale dispatch guide and an exempt invoice carry the codes of a sale', () => {
+    const guide = createDocument({
+      type: 52,
+      folio: 1,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver,
+      items: [wine],
+      options: { transferType: 1 },
+    })
+    expect(guide.header.totals.withholdings).toEqual([{ taxCode: 25, rate: 20.5, amount: 10250 }])
+    const exempt = createDocument({
+      type: 34,
+      folio: 1,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver,
+      items: [{ name: 'Petróleo diésel', unitPrice: 8000, additionalTaxCodes: [28] }],
+      additionalTaxes: [{ taxCode: 28, amount: 640 }],
+    })
+    expect(exempt.header.totals).toEqual({
+      exemptAmount: 8000,
+      withholdings: [{ taxCode: 28, amount: 640 }],
+      totalAmount: 8640,
+    })
+  })
+
+  test.each([33, 43, 52] as const)(
+    'code 15 brought by a line beside withholdVat on a %p is the same document',
+    (type) => {
+      const line = {
+        name: 'Venta',
+        quantity: 2,
+        unitPrice: 5000,
+        ...(type === 43 ? { settledDocumentType: '33' } : {}),
+      }
+      const issue = (item: LineItemInput) =>
+        createDocument({
+          type,
+          folio: 1,
+          issueDate: '2026-11-15',
+          issuer,
+          receiver,
+          items: [item],
+          withholdVat: true,
+          ...(type === 52 ? { options: { transferType: 1 as const } } : {}),
+        })
+      const implicit = issue(line)
+      expect(issue({ ...line, additionalTaxCodes: [15] })).toEqual(implicit)
+      expect(implicit.items[0].additionalTaxCodes).toEqual([15])
+    },
+  )
+
+  test('a tax that works out to zero writes no ImptoReten, and the line keeps its code', () => {
+    const doc = invoice({ items: [{ name: 'Agua mineral', quantity: 1, unitPrice: 4, additionalTaxCodes: [27] }] })
+    expect(doc.header.totals).toEqual({ netAmount: 4, vatRate: 19, vatAmount: 1, totalAmount: 5 })
+    expect(doc.items[0].additionalTaxCodes).toEqual([27])
+    expect(buildDocumentXml(doc)).not.toContain('ImptoReten')
+  })
+
   test('a line admits two codes, as the schema declares', () => {
     expect(invoice({ items: [{ ...wine, additionalTaxCodes: [25, 27] }] }).items[0].additionalTaxCodes).toEqual([
       25, 27,
