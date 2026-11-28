@@ -154,6 +154,16 @@ const asUtf8 = (text: string): string =>
 const ROOT_ELEMENT = /<(?:[A-Za-z_][\w.-]*:)?([A-Za-z_][\w.-]*)[\s/>]/
 const RECEIPT_TYPE = /<TipoDTE>\s*(?:39|41)\s*<\/TipoDTE>/
 
+// The text past the declaration, the comments, the processing instructions and the document type.
+const bodyOf = (text: string): string =>
+  text
+    .replace(/<\?[\s\S]*?\?>/g, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<!DOCTYPE[^>]*>/gi, '')
+
+// The local name of the document element, or null when there is none.
+const rootOf = (body: string): string | null => ROOT_ELEMENT.exec(body)?.[1] ?? null
+
 /**
  * EN: The schema of a document, by the name of its document element, or null when dte-sdk carries none for it. It reads
  * the first element after the declaration, the comments and the processing instructions; it validates nothing. A
@@ -168,11 +178,8 @@ const RECEIPT_TYPE = /<TipoDTE>\s*(?:39|41)\s*<\/TipoDTE>/
  * @throws {DteError} EN: `INVALID_OPTION` with `field: 'encoding'` for bytes whose declaration names a charset other than ISO-8859-1 or UTF-8. ES: `INVALID_OPTION` con `field: 'encoding'` ante bytes cuya declaración nombra un charset que no es ISO-8859-1 ni UTF-8.
  */
 export const schemaOf = (xml: string | Uint8Array): SiiSchemaName | null => {
-  const body = textOf(xml)
-    .replace(/<\?[\s\S]*?\?>/g, '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<!DOCTYPE[^>]*>/gi, '')
-  const root = ROOT_ELEMENT.exec(body)?.[1]
+  const body = bodyOf(textOf(xml))
+  const root = rootOf(body)
   if (root === SII_SCHEMAS.DTE.root && RECEIPT_TYPE.test(body)) return null
   const names = Object.keys(SII_SCHEMAS) as SiiSchemaName[]
   return names.find((name) => SII_SCHEMAS[name].root === root) ?? null
@@ -237,24 +244,51 @@ export type ValidateBeforeUploadOptions = {
   readonly load?: () => Promise<SchemaValidatorModule>
 }
 
+// The document element each kind of upload takes: the plain uploads' own kinds, and the kinds of the files the
+// certification run uploads (its test sets and its simulation are envelopes of documents).
+const UPLOAD_ROOTS: Readonly<Record<string, readonly string[]>> = {
+  dte: ['EnvioDTE'],
+  receipt: ['EnvioBOLETA'],
+  book: ['LibroCompraVenta', 'LibroGuia'],
+  folioConsumption: ['ConsumoFolios'],
+  assignment: ['AEC'],
+  testSet: ['EnvioDTE'],
+  simulation: ['EnvioDTE'],
+}
+
 /**
- * EN: A ready-made `beforeUpload`: it validates each file against its schema of the SII with `validateAgainstSchema`,
- * by the file's document element, and throws when the schema says anything against it, so the file is not sent. The
- * same function can be given to `uploadEnvelope`, `uploadBook` and `uploadFolioConsumption` and to the certification
- * run (`CertificationDependencies.beforeUpload`). Its validator is the optional peer `xmllint-wasm`, loaded on first
- * use.
- * ES: Un `beforeUpload` listo para usar: valida cada archivo contra su esquema del SII con `validateAgainstSchema`,
- * según el elemento raíz del archivo, y lanza cuando el esquema dice algo contra él, así el archivo no se envía. La
- * misma función se puede dar a `uploadEnvelope`, `uploadBook` y `uploadFolioConsumption` y a la corrida de
- * certificación (`CertificationDependencies.beforeUpload`). Su validador es el peer opcional `xmllint-wasm`, que se
- * carga en el primer uso.
+ * EN: A ready-made `beforeUpload`, an `UploadCheck`: it holds the document element of each file to what its kind of
+ * upload takes (an `EnvioDTE` for `dte` and for the run's `testSet` and `simulation`, an `EnvioBOLETA` for `receipt`, a
+ * `LibroCompraVenta` or a `LibroGuia` for `book`, a `ConsumoFolios` for `folioConsumption`, an `AEC` for
+ * `assignment`), then validates the file against its schema of the SII with `validateAgainstSchema`, and throws when
+ * either says anything against it, so the file is not sent. It can be given to `uploadEnvelope`, `uploadBook` and
+ * `uploadFolioConsumption` and to the certification run (`CertificationDependencies.beforeUpload`). Its validator is
+ * the optional peer `xmllint-wasm`, loaded on first use, and only once the element is the right one. The details of
+ * its `SCHEMA_INVALID` can quote the file: the `issues` are the validator's messages, which may repeat a value of the
+ * file or a line of it, so a caller that logs or stores them should treat them as it treats the file itself.
+ * ES: Un `beforeUpload` listo para usar, una `UploadCheck`: atiene el elemento raíz de cada archivo a lo que toma su
+ * tipo de subida (un `EnvioDTE` en `dte` y en los `testSet` y `simulation` de la corrida, un `EnvioBOLETA` en
+ * `receipt`, un `LibroCompraVenta` o un `LibroGuia` en `book`, un `ConsumoFolios` en `folioConsumption`, un `AEC` en
+ * `assignment`), luego valida el archivo contra su esquema del SII con `validateAgainstSchema`, y lanza cuando
+ * cualquiera de los dos dice algo contra él, así el archivo no se envía. Se puede dar a `uploadEnvelope`, `uploadBook`
+ * y `uploadFolioConsumption` y a la corrida de certificación (`CertificationDependencies.beforeUpload`). Su validador
+ * es el peer opcional `xmllint-wasm`, que se carga en el primer uso, y solo cuando el elemento es el correcto. Los
+ * detalles de su `SCHEMA_INVALID` pueden citar el archivo: los `issues` son los mensajes del validador, que pueden
+ * repetir un valor del archivo o una línea de él, así que quien los registre o los guarde debe tratarlos como trata al
+ * propio archivo.
  * @param options EN: the loader of the validator, for tests. ES: el cargador del validador, para tests.
- * @returns EN: the check, an `UploadCheck`. ES: la revisión, una `UploadCheck`.
- * @throws {DteError} EN: the check throws `SCHEMA_INVALID` with the `kind` and the `name` of the file and the `issues` the schema reports (which may quote the file, so they live in `details` alone), and what `validateAgainstSchema` throws. ES: la revisión lanza `SCHEMA_INVALID` con el `kind` y el `name` del archivo y los `issues` que informa el esquema (que pueden citar el archivo, así que viven solo en `details`), y lo que lance `validateAgainstSchema`.
+ * @returns EN: the check. ES: la revisión.
+ * @throws {DteError} EN: the check throws `SCHEMA_INVALID` with the `kind` and the `name` of the file and either the `element` found (null when there is none) and the ones `expected`, or the `issues` the schema reports, which can quote the file and live in `details` alone, never in the message; `INVALID_OPTION { field: 'kind' }` for a kind no upload has; and what `validateAgainstSchema` throws. ES: la revisión lanza `SCHEMA_INVALID` con el `kind` y el `name` del archivo y, o bien el `element` encontrado (null si no hay ninguno) y los `expected`, o bien los `issues` que informa el esquema, que pueden citar el archivo y viven solo en `details`, nunca en el mensaje; `INVALID_OPTION { field: 'kind' }` ante un tipo que ninguna subida tiene; y lo que lance `validateAgainstSchema`.
  */
 export const validateBeforeUpload =
   (options: ValidateBeforeUploadOptions = {}): ((file: UploadCheckFile) => Promise<void>) =>
   async (file) => {
+    if (!Object.prototype.hasOwnProperty.call(UPLOAD_ROOTS, file.kind))
+      throw new DteError('INVALID_OPTION', { field: 'kind', kind: file.kind })
+    const expected = UPLOAD_ROOTS[file.kind]
+    const element = rootOf(bodyOf(file.xml))
+    if (element === null || !expected.includes(element))
+      throw new DteError('SCHEMA_INVALID', { kind: file.kind, name: file.name, element, expected })
     const issues = await validateAgainstSchema(file.xml, { load: options.load })
     if (issues.length > 0) throw new DteError('SCHEMA_INVALID', { kind: file.kind, name: file.name, issues })
   }

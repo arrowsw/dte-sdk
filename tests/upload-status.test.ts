@@ -173,6 +173,13 @@ describe('token error statuses', () => {
 describe('what to look at for a state', () => {
   const ESTADO_ENVIO = 'Consulta de Estado de Upload Dte (OI2004_CEUPDTE_MDE 1.10), 3.3'
   const FORMATO_IECV = 'Formato de Información de Compras y Ventas 2.2'
+  // The counts come "(Solo si Estado es EPR)" in the test steps of chapter 5; the example of 3.4.1 has none accepted.
+  const ESTADO_ENVIO_EPR = 'Consulta de Estado de Upload Dte (OI2004_CEUPDTE_MDE 1.10), 3.4.1 y capítulo 5'
+  // `DoctoType` of the books' types lists no 52: a dispatch guide has no place in a purchase or sales book.
+  const BOOK_TYPES = 'LceSiiTypes_v10.xsd, DoctoType'
+  const VALIDATE =
+    'Validar el archivo contra su esquema del SII antes de enviarlo: validateBeforeUpload de dte-sdk/schemas detiene ' +
+    'la subida (validateAgainstSchema solo valida).'
 
   test('a refused signature is often the permission of the RUT that signs, which each environment keeps apart', () => {
     for (const code of ['RFR', 'LRF']) {
@@ -190,23 +197,19 @@ describe('what to look at for a state', () => {
       {
         check: 'Procesado no es aceptado: leer las cantidades de documentos aceptados, con reparos y rechazados.',
         basis: 'siiDocument',
-        source: ESTADO_ENVIO,
+        source: ESTADO_ENVIO_EPR,
       },
     ])
   })
 
   test('a schema refusal asks for the file to be validated first; a book also for the types it holds', () => {
-    expect(uploadStatusChecks('RSC')).toEqual([
-      {
-        check:
-          'Validar el archivo contra su esquema del SII antes de enviarlo (validateAgainstSchema de dte-sdk/schemas).',
-        basis: 'siiDocument',
-        source: ESTADO_ENVIO,
-      },
-    ])
+    expect(uploadStatusChecks('RSC')).toEqual([{ check: VALIDATE, basis: 'siiDocument', source: ESTADO_ENVIO }])
     const book = uploadStatusChecks('LRS')
-    expect(book.map((check) => check.basis)).toEqual(['fieldBehaviour', 'fieldBehaviour'])
-    expect(book[0].check).toBe(uploadStatusChecks('RSC')[0].check)
+    expect(book.map(({ basis, source }) => [basis, source])).toEqual([
+      ['fieldBehaviour', null],
+      ['siiDocument', BOOK_TYPES],
+    ])
+    expect(book[0].check).toBe(VALIDATE)
     expect(book[1].check).toMatch(/una guía de despacho va en el libro de guías/)
   })
 
@@ -232,7 +235,12 @@ describe('what to look at for a state', () => {
       'fieldBehaviour',
       'fieldBehaviour',
     ])
-    expect(uploadStatusChecks('LRH')[2].check).toMatch(/comisiones de una liquidación factura/)
+    // Each check stands alone: neither of the last two reads as an example of the first.
+    expect(uploadStatusChecks('LRH').map((check) => check.check)).toEqual([
+      'Visto en un libro cuyos totales no cuadran con sus líneas.',
+      'Visto en un libro de ventas que trae un campo propio del libro de compras.',
+      'Visto en un libro que deja fuera de la línea de una liquidación factura sus comisiones.',
+    ])
     expect(uploadStatusChecks('LNC')).toEqual([
       {
         check: 'Visto al enviar de nuevo un período que ya tiene un libro aceptado.',

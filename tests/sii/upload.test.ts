@@ -1266,6 +1266,22 @@ describe('a check before the upload', () => {
     expect(fake.requests).toHaveLength(0)
   })
 
+  test('a call already aborted does not run the check: it stops as an aborted call, with nothing sent', async () => {
+    const { sii, fake } = cachedSii(cgi(reception('reception-ok.xml')))
+    const beforeUpload = jest.fn()
+    const controller = new AbortController()
+    controller.abort()
+    await expectCode(
+      uploadBook(sii, { xml: libroXml, beforeUpload }, { signal: controller.signal }),
+      'REQUEST_ABORTED',
+      {
+        operation: 'uploadBook',
+      },
+    )
+    expect(beforeUpload).not.toHaveBeenCalled()
+    expect(fake.requests).toHaveLength(0)
+  })
+
   test('a check that is not a function is refused before anything is sent', async () => {
     const { sii, fake } = cachedSii(cgi(reception('reception-ok.xml')))
     const beforeUpload = 'validate' as unknown as () => void

@@ -54,11 +54,14 @@ export type UploadReceipt = {
  * EN: A file about to be uploaded, as a check before the upload receives it: what kind of file it is, its name, and the
  * exact text about to be sent. The certification run hands its own checks a file of this shape too
  * (`CertificationUpload`, whose `kind` is `testSet`, `simulation` or `book` and whose `name` is the key of the set or
- * the book), so one `UploadCheck` can be given both to an upload and to the run.
+ * the book), so a check written against this type, an `UploadCheck`, can be given both to an upload and to the run. A
+ * check written against `CertificationUpload` serves the run alone: its `kind` is narrower than an upload's.
  * ES: Un archivo que está por subirse, tal como lo recibe una revisión antes de la subida: qué tipo de archivo es, su
  * nombre y el texto exacto que está por enviarse. La corrida de certificación entrega a sus revisiones un archivo de
  * esta misma forma (`CertificationUpload`, cuyo `kind` es `testSet`, `simulation` o `book` y cuyo `name` es la clave
- * del set o del libro), así que una misma `UploadCheck` se puede dar a una subida y a la corrida.
+ * del set o del libro), así que una revisión escrita contra este tipo, una `UploadCheck`, se puede dar a una subida y a
+ * la corrida. Una revisión escrita contra `CertificationUpload` sirve solo a la corrida: su `kind` es más estrecho que
+ * el de una subida.
  */
 export type UploadCheckFile = {
   /** EN: What the file is: the `UploadKind` of an upload (`dte`, `receipt`, `book`, `folioConsumption`), or the run's own kind. ES: Qué es el archivo: el `UploadKind` de una subida (`dte`, `receipt`, `book`, `folioConsumption`), o el tipo propio de la corrida. */
@@ -100,7 +103,7 @@ export type UploadEnvelopeInput = {
   readonly senderRut?: string
   /** EN: Force a channel for receipts (`rest` or `soap`); `EnvioDTE` always uses `soap`. ES: Forzar el canal de boletas (`rest` o `soap`); `EnvioDTE` siempre usa `soap`. */
   readonly channel?: TokenChannel
-  /** EN: Run on the file once it is checked and before anything is sent, a token included; throwing stops the upload. ES: Corre sobre el archivo una vez revisado y antes de enviar nada, ni siquiera pedir un token; lanzar detiene la subida. */
+  /** EN: Run on the file once it is checked and before anything is sent, a token included, unless the call's `signal` is already aborted (`REQUEST_ABORTED`); throwing stops the upload. ES: Corre sobre el archivo una vez revisado y antes de enviar nada, ni siquiera pedir un token, salvo que el `signal` de la llamada ya esté abortado (`REQUEST_ABORTED`); lanzar detiene la subida. */
   readonly beforeUpload?: UploadCheck
 }
 
@@ -117,7 +120,7 @@ export type UploadXmlInput = {
   readonly senderRut?: string
   /** EN: Name of the multipart file; letters, digits, `_`, `.` and `-`, ending in `.xml`. Defaults to `LibroGuia.xml` for a guide book, `LibroCV.xml` for any other book and `ConsumoFolios.xml` for a report. ES: Nombre del archivo del multipart; letras, dígitos, `_`, `.` y `-`, terminado en `.xml`. Por defecto `LibroGuia.xml` en un libro de guías, `LibroCV.xml` en otro libro y `ConsumoFolios.xml` en un reporte. */
   readonly fileName?: string
-  /** EN: Run on the file once it is checked and before anything is sent, a token included; throwing stops the upload. ES: Corre sobre el archivo una vez revisado y antes de enviar nada, ni siquiera pedir un token; lanzar detiene la subida. */
+  /** EN: Run on the file once it is checked and before anything is sent, a token included, unless the call's `signal` is already aborted (`REQUEST_ABORTED`); throwing stops the upload. ES: Corre sobre el archivo una vez revisado y antes de enviar nada, ni siquiera pedir un token, salvo que el `signal` de la llamada ya esté abortado (`REQUEST_ABORTED`); lanzar detiene la subida. */
   readonly beforeUpload?: UploadCheck
 }
 
@@ -571,6 +574,8 @@ const checkedUpload = async (
 ): Promise<UploadReceipt> => {
   if (check !== undefined) {
     if (typeof check !== 'function') throw new DteError('INVALID_OPTION', { field: 'beforeUpload' })
+    // A call the caller already gave up on does not run the check either.
+    if (overrides?.signal?.aborted) throw new DteError('REQUEST_ABORTED', { operation: job.operation })
     await check({ kind: job.kind, name: job.fileName, xml: latin1Xml(xml) })
   }
   return performUpload(sii, job, overrides)

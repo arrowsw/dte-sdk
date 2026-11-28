@@ -2,7 +2,7 @@ import type { CertificationDependencies } from '../../src/certification/runtime'
 import { sendTestSet } from '../../src/certification/steps'
 import { DteError } from '../../src/errors'
 import { validateBeforeUpload, type SchemaValidatorModule } from '../../src/schemas'
-import { uploadEnvelope, type UploadCheck } from '../../src/sii/upload'
+import { uploadBook, uploadEnvelope, type UploadCheck } from '../../src/sii/upload'
 import { fullPlan } from '../support/certification-fixtures'
 import {
   certificationCafXmls,
@@ -55,13 +55,53 @@ describe('validateBeforeUpload', () => {
     // What the schema says can quote the file, so it stays in the details, out of the message.
     expect(error.message).toBe('XML does not validate against the SII schema (kind=dte)')
     expect(bad.fake.requests).toHaveLength(0)
+
+    // A valid envelope of documents is no book: handed to `uploadBook`, it is refused and nothing is sent.
+    const misplaced = received()
+    const wrong = await failure(uploadBook(misplaced.sii, { ...ruts, xml: envelope, beforeUpload: check }))
+    expect(wrong).toMatchObject({
+      code: 'SCHEMA_INVALID',
+      details: { kind: 'book', element: 'EnvioDTE', expected: ['LibroCompraVenta', 'LibroGuia'] },
+    })
+    expect(misplaced.fake.requests).toHaveLength(0)
   })
 
-  test('a file with no schema of the SII is refused as validateAgainstSchema refuses it', async () => {
-    const load = jest.fn(refusing)
-    const error = await failure(validateBeforeUpload({ load })({ kind: 'book', name: 'x.xml', xml: '<Cesion/>' }))
-    expect(error.code).toBe('INVALID_OPTION')
-    expect(error.details).toEqual({ field: 'schema' })
+  const valid = async (): Promise<SchemaValidatorModule> => ({ validateXML: async () => ({ errors: [] }) })
+  const declared = (root: string): string => `<?xml version="1.0" encoding="ISO-8859-1"?>\n<${root} version="1.0">`
+  test.each([
+    ['dte', 'EnvioDTE', 'LibroCompraVenta', ['EnvioDTE']],
+    ['receipt', 'EnvioBOLETA', 'EnvioDTE', ['EnvioBOLETA']],
+    ['book', 'LibroCompraVenta', 'EnvioDTE', ['LibroCompraVenta', 'LibroGuia']],
+    ['book', 'LibroGuia', 'ConsumoFolios', ['LibroCompraVenta', 'LibroGuia']],
+    ['folioConsumption', 'ConsumoFolios', 'RespuestaDTE', ['ConsumoFolios']],
+    ['assignment', 'AEC', 'DTE', ['AEC']],
+    ['testSet', 'EnvioDTE', 'EnvioRecibos', ['EnvioDTE']],
+    ['simulation', 'EnvioDTE', 'AEC', ['EnvioDTE']],
+  ])('a %s upload takes a %s and refuses a %s before it is validated', async (kind, right, wrong, expected) => {
+    const load = jest.fn(valid)
+    const check = validateBeforeUpload({ load })
+    await expect(check({ kind, name: 'file.xml', xml: declared(right) })).resolves.toBeUndefined()
+    expect(load).toHaveBeenCalledTimes(1)
+    const error = await failure(check({ kind, name: 'file.xml', xml: declared(wrong) }))
+    expect(error).toMatchObject({
+      code: 'SCHEMA_INVALID',
+      details: { kind, name: 'file.xml', element: wrong, expected },
+    })
+    expect(load).toHaveBeenCalledTimes(1)
+  })
+
+  test('a file with no element is refused as one with the wrong one, and a kind no upload has is an invalid option', async () => {
+    const load = jest.fn(valid)
+    const check = validateBeforeUpload({ load })
+    expect(await failure(check({ kind: 'book', name: 'x.xml', xml: 'no es xml' }))).toMatchObject({
+      code: 'SCHEMA_INVALID',
+      details: { kind: 'book', name: 'x.xml', element: null, expected: ['LibroCompraVenta', 'LibroGuia'] },
+    })
+    for (const kind of ['RespuestaDTE', 'toString'])
+      expect(await failure(check({ kind, name: 'x.xml', xml: declared('EnvioDTE') }))).toMatchObject({
+        code: 'INVALID_OPTION',
+        details: { field: 'kind', kind },
+      })
     expect(load).not.toHaveBeenCalled()
   })
 

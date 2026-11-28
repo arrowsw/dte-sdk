@@ -167,7 +167,9 @@ export type UploadStatusCheck = {
 }
 
 const ESTADO_ENVIO = 'Consulta de Estado de Upload Dte (OI2004_CEUPDTE_MDE 1.10), 3.3'
+const ESTADO_ENVIO_EPR = 'Consulta de Estado de Upload Dte (OI2004_CEUPDTE_MDE 1.10), 3.4.1 y capítulo 5'
 const FORMATO_IECV = 'Formato de Información de Compras y Ventas 2.2'
+const BOOK_TYPES = 'LceSiiTypes_v10.xsd, DoctoType'
 const sii = (check: string, source: string): UploadStatusCheck => ({ check, basis: 'siiDocument', source })
 const field = (check: string): UploadStatusCheck => ({ check, basis: 'fieldBehaviour', source: null })
 
@@ -179,11 +181,14 @@ const SIGNATURE_CHECKS: readonly UploadStatusCheck[] = [
   field('Después, la firma del archivo.'),
 ]
 const VALIDATE =
-  'Validar el archivo contra su esquema del SII antes de enviarlo (validateAgainstSchema de dte-sdk/schemas).'
+  'Validar el archivo contra su esquema del SII antes de enviarlo: validateBeforeUpload de dte-sdk/schemas detiene ' +
+  'la subida (validateAgainstSchema solo valida).'
 
 // What to look at for each state. A state's own gloss rests where the table above says; each check here says where it
-// rests. "EPR Envió Procesado" comes with the counts of the documents ("ACEPTADOS (Solo si Estado es EPR)"), and the
-// manual's own example of it reports one document rejected and none accepted. The format of the books says what a
+// rests. The manual of `QueryEstUp` gives the counts of the documents with `EPR` alone, in the test steps of its
+// chapter 5 ("ACEPTADOS (Solo si Estado es EPR)"), and its example of an `EPR` (3.4.1) reports one document rejected
+// and none accepted. The schema of the purchase and sales book (`DoctoType` of `LceSiiTypes_v10.xsd`) lists no
+// type 52, so a dispatch guide has no place there. The format of the books says what a
 // special book is ("Archivos ESPECIALES: corresponden a archivos requeridos por el SII vía una notificación", "Un
 // archivo especial se distingue de los libros regulares, en que indica el folio de la notificación en la carátula")
 // and lists `RECTIFICA` among the values of `TipoLibro`, not of `TipoEnvio`.
@@ -193,13 +198,13 @@ const UPLOAD_STATUS_CHECKS: Readonly<Record<string, readonly UploadStatusCheck[]
   EPR: [
     sii(
       'Procesado no es aceptado: leer las cantidades de documentos aceptados, con reparos y rechazados.',
-      ESTADO_ENVIO,
+      ESTADO_ENVIO_EPR,
     ),
   ],
   RSC: [sii(VALIDATE, ESTADO_ENVIO)],
   LRS: [
     field(VALIDATE),
-    field('Que cada tipo de documento sea de ese libro: una guía de despacho va en el libro de guías.'),
+    sii('Que cada tipo de documento sea de ese libro: una guía de despacho va en el libro de guías.', BOOK_TYPES),
   ],
   RCT: [
     sii('La carátula del envío.', ESTADO_ENVIO),
@@ -219,8 +224,8 @@ const UPLOAD_STATUS_CHECKS: Readonly<Record<string, readonly UploadStatusCheck[]
   ],
   LRH: [
     field('Visto en un libro cuyos totales no cuadran con sus líneas.'),
-    field('Por ejemplo, un campo del libro de compras escrito en uno de ventas.'),
-    field('O las comisiones de una liquidación factura dejadas fuera de su línea.'),
+    field('Visto en un libro de ventas que trae un campo propio del libro de compras.'),
+    field('Visto en un libro que deja fuera de la línea de una liquidación factura sus comisiones.'),
   ],
   LNC: [field('Visto al enviar de nuevo un período que ya tiene un libro aceptado.')],
 }
