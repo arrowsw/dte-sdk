@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The cut: a text with a comment, a CDATA section or a processing instruction past its XML declaration is refused
     (`XML_PARSE_FAILED`, `field` naming which), since each could hold text that spells a `DTE`; a closing tag may
     carry blanks before its `>`; and each cut must hold the `ID`, the type and the folio of the element it stands for.
+
 - **Whether a certificate is self-signed** (`Certificate.selfSigned`, `ParsedCertificate.selfSigned`): true when the
   certificate's issuer name is its subject name, compared as the two are encoded. It says nothing of which key signed
   the certificate. Nothing refuses one. Field behaviour is that the SII takes no seed signed with a certificate no
@@ -71,6 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The test sets and the simulation are checked before `beforeUpload` is called, and the step ends as when a
     `beforeUpload` throws: the envelope kept as an artefact, its folios counted as used.
   - `sendReceiptsSet` checks the receipts envelope before it uploads anything, and throws.
+
 - **The glosses of the states of an upload follow the SII's table.** The SII's "Manual de Desarrollador Externo -
   Consulta de Estado de Upload Dte" (OI2004_CEUPDTE_MDE 1.10, `estado_envio.pdf`), 3.3 "Estados de Salida", glosses
   `SOK` "Schema Validado", `CRT` "Carátula OK", `FOK` "Firma de Envió Validada" and `PDR` "Envió en Proceso";
@@ -78,6 +80,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "Firma validada, procesando envío" and "Envío en proceso, validando". It now gives the SII's wording, in sentence
   case and with its accents. The classes do not change.
   - **What to change:** code that compares the text of these glosses.
+
+- **A credit note's line in the folio consumption report.** `createFolioConsumption` reports credit notes (61) since
+  0.17.0, but `folioConsumptionEntryFromDocument`, which derives a line of the report from an issued document, took a
+  receipt alone and refused a 61 (`INVALID_DOCUMENT_TYPE`), so the line of a credit note was built by hand. It now
+  derives it, with the net, the VAT and the exempt amount of the note, and still refuses every other type. Which
+  credit notes go in a report stays the caller's to say: the function does not look at the document a note changes.
+  It refuses a note whose total is not the sum of its net, its VAT and its exempt amount (`BOOK_TOTAL_MISMATCH`,
+  `totalAmount`), which is how field 6 of the report's format defines the total of a summary: a note with withheld
+  VAT, another tax or a deposit guarantee, none of which a receipt carries. `ConsumoFolio_v10.xsd` admits the credit
+  note in a summary; the format of the report, of 2020, names the two receipts alone.
+  - **What to change:** nothing. Code that relied on the refusal of a 61 now gets its line.
 
 ## [0.17.0] - 2026-11-26
 
