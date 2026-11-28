@@ -118,13 +118,18 @@ export const guideEntryFromDocument = (document: Document): GuideEntryInput => {
 }
 
 /**
- * EN: Derives a folio consumption line from a receipt (39 or 41).
- * ES: Deriva una línea del reporte de consumo de folios desde una boleta (39 o 41).
- * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE` when the document is not a receipt. ES: `INVALID_DOCUMENT_TYPE` si el documento no es una boleta.
+ * EN: Derives a folio consumption line from a receipt (39 or 41) or a credit note (61), the three types the report
+ * takes. A credit note carries its net, its VAT and its exempt amount, as a receipt does. Which credit notes go in a
+ * report is the caller's to say: the function does not look at the document the note changes.
+ * ES: Deriva una línea del reporte de consumo de folios desde una boleta (39 o 41) o una nota de crédito (61), los tres
+ * tipos que admite el reporte. Una nota de crédito lleva su neto, su IVA y su exento, como una boleta. Qué notas de
+ * crédito van en un reporte lo decide quien llama: la función no mira el documento que la nota cambia.
+ * @throws {DteError} EN: `INVALID_DOCUMENT_TYPE` when the document is neither a receipt nor a credit note. ES: `INVALID_DOCUMENT_TYPE` si el documento no es una boleta ni una nota de crédito.
  */
 export const folioConsumptionEntryFromDocument = (document: Document): FolioConsumptionEntry => {
   const { type, folio, issueDate, totals } = document.header
-  if (type !== 39 && type !== 41) throw new DteError('INVALID_DOCUMENT_TYPE', { field: 'type', type })
+  if (type !== 39 && type !== 41 && type !== CREDIT_NOTE_TYPE)
+    throw new DteError('INVALID_DOCUMENT_TYPE', { field: 'type', type })
   return compact({
     type,
     folio,

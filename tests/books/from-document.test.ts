@@ -408,7 +408,57 @@ describe('folioConsumptionEntryFromDocument', () => {
     expect(report.summaries[0]).toMatchObject({ netAmount: 840, vatAmount: 160, totalAmount: 1000 })
   })
 
-  test('rejects a document that is not a receipt', () => {
-    expectCodeOf(() => folioConsumptionEntryFromDocument(createDocument(base)), 'INVALID_DOCUMENT_TYPE')
+  // A credit note that takes back a receipt, with a taxed line and an exempt one, so its line carries every amount.
+  const creditNote: DocumentInput = {
+    ...base,
+    type: 61,
+    folio: 7,
+    items: [
+      { name: 'Café', quantity: 1, unitPrice: 1000 },
+      { name: 'Libro', unitPrice: 500, exempt: true },
+    ],
+    references: [{ documentType: 39, folio: '3', date: '2026-10-15', code: 1, reason: 'Anula boleta' }],
+  }
+
+  test('a credit note carries its folio, date, net, VAT, exempt amount and total', () => {
+    expect(folioConsumptionEntryFromDocument(createDocument(creditNote))).toEqual({
+      type: 61,
+      folio: 7,
+      issueDate: '2026-10-15',
+      netAmount: 1000,
+      vatAmount: 190,
+      exemptAmount: 500,
+      totalAmount: 1690,
+    })
+  })
+
+  test('the line of a credit note builds a report beside the line of a receipt', () => {
+    const report = createFolioConsumption({
+      cover: reportCover,
+      entries: [receipt, creditNote].map((input) => folioConsumptionEntryFromDocument(createDocument(input))),
+    })
+    expect(report.summaries.map(({ type }) => type)).toEqual([39, 61])
+    expect(report.summaries[1]).toMatchObject({
+      netAmount: 1000,
+      vatAmount: 190,
+      exemptAmount: 500,
+      totalAmount: 1690,
+      issuedCount: 1,
+      usedRanges: [{ from: 7, to: 7 }],
+    })
+  })
+
+  test.each<[string, DocumentInput]>([
+    ['an invoice', base],
+    [
+      'a debit note',
+      {
+        ...base,
+        type: 56,
+        references: [{ documentType: 33, folio: '10', date: '2026-10-15', code: 3, reason: 'Corrige monto' }],
+      },
+    ],
+  ])('rejects %s, which the report does not take', (_name, input) => {
+    expectCodeOf(() => folioConsumptionEntryFromDocument(createDocument(input)), 'INVALID_DOCUMENT_TYPE')
   })
 })
