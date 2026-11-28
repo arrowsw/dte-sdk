@@ -1,6 +1,7 @@
 import { parseCaf } from '../src/caf/parse'
 import { createDocument } from '../src/document/create'
 import { DteError } from '../src/errors'
+import { instructivoForm } from '../src/ted/as-written'
 import { buildDdString, buildTedXml, stampDocument, verifyTed, tedText } from '../src/ted/build'
 import { fixtureText, FIXED_NOW, ISSUER_RUT, RECEIVER_RUT } from './support/fixtures'
 
@@ -171,5 +172,33 @@ describe('stampDocument', () => {
     const old = parseCaf(fixtureText('caf-33-old.xml'))
     expectCode(() => stampDocument(invoice(150), old, { now: FIXED_NOW }), 'CAF_EXPIRED')
     expect(verifyTed(stampDocument(invoice(150), old, { now: FIXED_NOW, checkExpiry: false }).ted.xml, old)).toBe(true)
+  })
+})
+
+// "Instructivo Emisión DTE" of the SII, A.2.4, pages 19 to 21: the stamp is signed over the string left once the
+// end-of-line characters and the blanks or tabs between tags, and the reference to namespaces, are removed, "sin
+// modificar la información que va entre el tag de inicio y el tag de fin de los elementos terminales".
+describe('instructivoForm', () => {
+  test('drops what lies between tags, as in the example of the Instructivo', () => {
+    const indented =
+      '<TED version="1.0">  \n\t<DD>\n\t\t<RE>11111111-1</RE>  \n\t\t<RSR>Empresas A&amp;B Limitada</RSR> \n' +
+      '\t\t<CAF version="1.0">\n\t\t<DA><RNG>\n\t\t\t<D>125</D>\n\t\t\t<H>160</H>\n\t\t</RNG></DA>\n\t</CAF>\n\t</DD>\n' +
+      '\t<FRMT algoritmo="SHA1withRSA">GkdhiwT5a4</FRMT> \n</TED>'
+    expect(instructivoForm(indented)).toBe(
+      '<TED version="1.0"><DD><RE>11111111-1</RE><RSR>Empresas A&amp;B Limitada</RSR><CAF version="1.0"><DA><RNG>' +
+        '<D>125</D><H>160</H></RNG></DA></CAF></DD><FRMT algoritmo="SHA1withRSA">GkdhiwT5a4</FRMT></TED>',
+    )
+  })
+
+  test('keeps what a terminal element holds, blanks included, and an empty element as it is written', () => {
+    expect(instructivoForm('<DD> <RSR>  </RSR>\n<IT1> A  B </IT1> <MNT/> <X a="1"/> </DD>')).toBe(
+      '<DD><RSR>  </RSR><IT1> A  B </IT1><MNT/><X a="1"/></DD>',
+    )
+  })
+
+  test('drops the reference to namespaces, and only inside tags', () => {
+    expect(instructivoForm(`<DD xmlns="http://www.sii.cl/SiiDte" xmlns:x='u'><RSR>xmlns="a"</RSR></DD>`)).toBe(
+      '<DD><RSR>xmlns="a"</RSR></DD>',
+    )
   })
 })

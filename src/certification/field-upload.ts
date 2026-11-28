@@ -139,11 +139,11 @@ export const uploadForTrackId = async (
 
 /**
  * EN: Stops the run before an envelope of documents goes to the SII unless it verifies as the SII reads it
- * (`verifyTransmittedEnvelope`): each `<DTE>` cut from the text, its stamp as written, and the envelope's own
- * signature. The first check that fails is the one named. Internal.
+ * (`verifyTransmittedEnvelope`): each `<DTE>` cut from the text, its stamp as the SII verifies it, and the envelope's
+ * own signature. The first check that fails is the one named. Internal.
  * ES: Detiene la corrida antes de que un sobre de documentos vaya al SII salvo que verifique como lo lee el SII
- * (`verifyTransmittedEnvelope`): cada `<DTE>` cortado del texto, su timbre tal como viene, y la firma del propio sobre.
- * Se nombra el primer chequeo que falla. Interno.
+ * (`verifyTransmittedEnvelope`): cada `<DTE>` cortado del texto, su timbre como lo verifica el SII, y la firma del
+ * propio sobre. Se nombra el primer chequeo que falla. Interno.
  * @param xml EN: the envelope as it will be uploaded. ES: el sobre tal como se subirá.
  * @throws {DteError} EN: `SIGNATURE_INVALID { field: 'DTE', index, type, folio, check: 'signature' | 'stamp' }` for a document, `SIGNATURE_INVALID { field: root, check: 'envelope' }` for the envelope; the codes of `verifyTransmittedEnvelope`. ES: `SIGNATURE_INVALID { field: 'DTE', index, type, folio, check: 'signature' | 'stamp' }` por un documento, `SIGNATURE_INVALID { field: raíz, check: 'envelope' }` por el sobre; los códigos de `verifyTransmittedEnvelope`.
  */
