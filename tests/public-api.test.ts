@@ -407,6 +407,7 @@ const CATALOGS_EXPORTS = [
   'CUSTOMS_UNITS',
   'customsCode',
   'customsName',
+  'unknownCustomsCodes',
 ] as const
 
 const SCHEMAS_EXPORTS = [

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The customs codes of an export document held to the tables** (`unknownCustomsCodes`, from `dte-sdk/catalogs`).
+  An export document (110, 111, 112) carries codes of the customs service's tables (Anexo 51 of the Compendio de
+  Normas Aduaneras), and `createDocument` only checks the range of each one and writes it as given, so a code no table
+  has was issued. The tables live in `dte-sdk/catalogs`, apart from the root, so the root cannot check against them.
+  `unknownCustomsCodes(document)` takes a document as `createDocument` returns it and lists, as
+  `{ field, code, table }`, each code its table does not have: the sale modality, the sale clause, the transport
+  route, the ports of loading and unloading, the units of the tare and of the gross and net weights, the type of each
+  package, the countries of the receiver and of destination, the nationality of the foreign receiver and the export
+  payment terms (`CodModVenta` to `FmaPagExp` of Formato DTE 2.5). `field` names the field as `createDocument` names it in an
+  error, as `transport.customs.packages[1].code`. It asks only whether the table has the code, not whether it fits
+  another; an absent field and a document with no customs data give nothing; it never throws and never changes the
+  document. A nationality or a payment form that is not made of digits is reported as the text it is.
+  - **What to change:** nothing. Call it before issuing, where the tables are already imported.
+
 ### Changed
 
 - **A credit note's line in the folio consumption report.** `createFolioConsumption` reports credit notes (61) since
