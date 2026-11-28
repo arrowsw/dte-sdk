@@ -1,7 +1,7 @@
 import { DteError } from '../../src/errors'
 import { runCertification } from '../../src/certification/runner'
 import type { CertificationState } from '../../src/certification/state'
-import { fullPlan } from '../support/certification-fixtures'
+import { fullPlan, slimPlan } from '../support/certification-fixtures'
 import {
   certificationCafXmls,
   certificationHarness,
@@ -396,9 +396,10 @@ describe('the resolution of a run that is given none', () => {
     post('ad_empresa2', html, html),
   ]
   const down = { url: UPLOAD, method: 'POST' as const, reply: { body: 'down' } }
-  // Runs until the first upload fails and gives back the cover of the envelope kept before it.
+  // Runs until the first upload fails and gives back the cover of the envelope kept before it: a plan with fewer
+  // documents, since only the cover is looked at and each envelope is verified before it is sent.
   const coverOf = async (routes: Parameters<typeof certificationHarness>[0], resolution?: object) => {
-    const harness = await seeded([...routes, down], stateWith({ plan, cafs: certificationCafXmls() }))
+    const harness = await seeded([...routes, down], stateWith({ plan: slimPlan(), cafs: certificationCafXmls() }))
     await failure(runCertification({ ...harness.deps, resolution }))
     const basic = (await harness.store.readArtefact('sets-prueba/envio-set-basico.xml'))!
     return {

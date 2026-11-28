@@ -4,7 +4,9 @@ import { verifyReceivedDocuments } from '../src/document/verify-received'
 import { issueDocument } from '../src/document/issue'
 import { createEnvelope } from '../src/envelope/create'
 import { signEnvelope } from '../src/envelope/sign'
+import { readReceivedStructure } from '../src/document/received-structure'
 import {
+  documentTexts,
   verifyTransmittedEnvelope,
   type TransmittedDocumentCheck,
   type TransmittedEnvelopeVerification,
@@ -18,8 +20,10 @@ import {
   issued,
   SII_NS,
   signedCaf,
+  signedElsewhere,
   stampedWith,
   TEST_SII_KEYS,
+  XSI_NS,
 } from './support/received-fixtures'
 
 const PASSED: Omit<TransmittedDocumentCheck, 'folio'> = {
@@ -173,8 +177,80 @@ describe('verifyTransmittedEnvelope: incomplete and malformed inputs', () => {
     expectFailure(() => verifyTransmittedEnvelope('<EnvioDTE><SetDTE ID="X"/></EnvioDTE>'), 'ENVELOPE_EMPTY')
   })
 
-  test('a text whose DTE cuts are not one per element is refused, so no check is made of the wrong text', () => {
-    const xml = envelopeOf([issued(1)]).replace('<SetDTE', '<!-- <DTE>x</DTE> --><SetDTE')
-    expectFailure(() => verifyTransmittedEnvelope(xml), 'XML_PARSE_FAILED', { field: 'DTE' })
+  test('a stamp found twice in the text of a document is a failed check, even when each verifies', () => {
+    const dte = issued(1).xml
+    const ted = /<TED[\s\S]*<\/TED>/.exec(dte)![0]
+    const twice = envelopeAround([dte.replace('</Documento>', () => `${ted}</Documento>`)])
+    expect(verifyTransmittedEnvelope(twice).documents[0].stampValid).toBe(false)
+  })
+})
+
+// "Instructivo Emisión DTE" of the SII, A.2.4, pages 19 to 21: "Para efecto de calcular el digest de la firma digital
+// del timbre electrónico [...] se eliminan los caracteres de fin de línea y los blancos y/o tab entre TAGS, así como la
+// referencia a NameSpaces. El digest se calcula sobre el string resultante."
+describe('verifyTransmittedEnvelope: the stamp as the Instructivo has it verified', () => {
+  test('a DD written with blanks, tabs and ends of line between its tags still verifies', () => {
+    const indent = (text: string): string =>
+      text.replace(/<DD>[\s\S]*<\/DD>/, (dd) => dd.replace(/></g, '>\n\t\t<').replace(/<RSR>/, ' \t<RSR>'))
+    const dte = signedElsewhere(issued(5), ` xmlns="${SII_NS}" xmlns:xsi="${XSI_NS}"`, indent)
+    expect(dte).toContain('<DD>\n\t\t<RE>')
+    expect(verifyTransmittedEnvelope(envelopeAround([dte])).documents).toEqual([{ ...PASSED, folio: 5 }])
+  })
+
+  test('a DD that names the SII namespace still verifies', () => {
+    // The document's namespace already is the SII's, so the declaration changes no canonical form.
+    const dte = issued(1).xml.replace('<DD>', `<DD xmlns="${SII_NS}">`)
+    expect(verifyTransmittedEnvelope(envelopeAround([dte])).documents).toEqual([{ ...PASSED, folio: 1 }])
+  })
+
+  test('a DD whose content changed fails: the empty element written <RSR/> where <RSR></RSR> was signed', () => {
+    // The Instructivo's string removes what lies between tags, "sin modificar la información que va entre el tag de
+    // inicio y el tag de fin de los elementos terminales", and says nothing of writing an element again.
+    const signed = stampedWith(1, signedCaf(), { fields: { receiverName: '' } })
+    const dte = signed.xml.replace('<RSR></RSR>', '<RSR/>').replace(/<DD>/, '<DD>\n')
+    expect(verifyTransmittedEnvelope(envelopeAround([dte])).documents[0].stampValid).toBe(false)
+  })
+})
+
+describe('verifyTransmittedEnvelope: the cut of each DTE from the text', () => {
+  test('a comment that holds a valid DTE does not stand for a tampered one closed with blanks', () => {
+    // The real document says another total than the one it signed, and closes as `</DTE >`, which XML allows.
+    const tampered = issued(2)
+      .xml.replace(/<MntTotal>\d+<\/MntTotal>/, '<MntTotal>1</MntTotal>')
+      .replace(/<\/DTE>$/, '</DTE >')
+    const xml = envelopeAround([tampered]).replace('<SetDTE', () => `<!--${issued(1).xml}--><SetDTE`)
+    expect(
+      verifyReceivedDocuments(xml, { siiKeys: TEST_SII_KEYS, environment: 'certification' }).documents[0].signature
+        .valid,
+    ).toBe(false)
+    expectFailure(() => verifyTransmittedEnvelope(xml), 'XML_PARSE_FAILED', { field: 'comment' })
+  })
+
+  test.each([
+    ['comment', '<!-- nota -->'],
+    ['CDATA', '<![CDATA[nota]]>'],
+    ['instruction', '<?nota uno?>'],
+  ])('a text with a %s, which could hide a DTE, is refused', (field, markup) => {
+    const xml = envelopeOf([issued(1)]).replace('<Caratula', () => `${markup}<Caratula`)
+    expectFailure(() => verifyTransmittedEnvelope(xml), 'XML_PARSE_FAILED', { field })
+  })
+
+  test('the XML declaration that opens the file is not an instruction that is refused', () => {
+    expect(envelopeOf([issued(1)])).toMatch(/^<\?xml /)
+    expect(verifyTransmittedEnvelope(envelopeOf([issued(1)])).valid).toBe(true)
+  })
+
+  test('a DTE closed with blanks before its > is cut whole', () => {
+    const xml = envelopeAround([issued(1).xml.replace(/<\/DTE>$/, '</DTE\n >')])
+    expect(verifyTransmittedEnvelope(xml)).toMatchObject({ documents: [{ ...PASSED, folio: 1 }], valid: true })
+  })
+
+  test('each cut must hold what its element holds, and there must be one per element', () => {
+    const xml = envelopeOf([issued(1)])
+    const other = readReceivedStructure(envelopeOf([issued(2)])).documents
+    expectFailure(() => documentTexts(xml, other), 'XML_PARSE_FAILED', { field: 'DTE', index: 0 })
+    const two = readReceivedStructure(envelopeOf([issued(1), issued(2)])).documents
+    expectFailure(() => documentTexts(xml, two), 'XML_PARSE_FAILED', { field: 'DTE' })
+    expect(documentTexts(xml, readReceivedStructure(xml).documents)).toEqual([issued(1).xml])
   })
 })
