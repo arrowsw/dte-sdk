@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **What to change:** nothing in a call. Code that expects `warnings` to be absent on an export document issued
     without `exchangeRate` will find the new warning there; code that reads the warnings by their keys gets a third
     shape, `{ rule, field }`.
+
 - **The additional taxes and withholdings of the lines are worked out into the totals** (`calculateTotals`,
   `createDocument`, new option `additionalTaxes` with `AdditionalTaxInput`). A line could carry a code
   (`additionalTaxCodes`, `CodImpAdic`) that the totals worked out left out: a 33 whose first line carried code 25 was
@@ -100,18 +101,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **More than 2 codes on a line and more than 20 `ImptoReten`**, the `maxOccurs` of `CodImpAdic` and `ImptoReten` in
     `DTE_v10.xsd` (`INVALID_OPTION`, `items[i].additionalTaxCodes`, `totals.withholdings`). **What to change:** at
     most 2 codes a line and 20 taxes a document.
+
 - **Two book lines are refused that were built wrong** (`bookEntryFromDocument`). A credit note booked with
   `creditNoteSign: 'negative'` whose VAT withholding takes a field of the sales detail (`INVALID_OPTION`,
   `creditNoteSign`): `IVARetTotal` and `IVARetParcial` are a `MontoType`, from zero up, as `DepEnvase` is. And a VAT
   withholding of a sale line other than code 15 without its rate (`MISSING_FIELD`, `totals.withholdings`), which
   cannot be told whole or partial. **What to change:** book that note with the positive sign; give the withholding
   its rate.
+
 - **More than 40 references are refused** (`INVALID_OPTION`, `details.field` `references` or `receiptReferences`).
   `DTE_v10.xsd` declares `Referencia` with `maxOccurs="40"` under `Documento`, `Liquidacion` and `Exportaciones`, and
   `EnvioBOLETA_v11.xsd` the same 40 under a receipt's `Documento`. `createDocument` wrote a 41st, and the document did
   not validate. It now refuses it before a folio is stamped, as it refuses more than 60 lines.
   - **What to change:** cite at most 40 documents. Formato DTE 2.5 gives `IndGlobal` to a document that refers to more
     than 20 of one type: one global reference (`global: true`, folio 0) stands for them.
+
+- **A credit note's line in the folio consumption report.** `createFolioConsumption` reports credit notes (61) since
+  0.17.0, but `folioConsumptionEntryFromDocument`, which derives a line of the report from an issued document, took a
+  receipt alone and refused a 61 (`INVALID_DOCUMENT_TYPE`), so the line of a credit note was built by hand. It now
+  derives it, with the net, the VAT and the exempt amount of the note, and still refuses every other type. Which
+  credit notes go in a report stays the caller's to say: the function does not look at the document a note changes.
+  It refuses a note whose total is not the sum of its net, its VAT and its exempt amount (`BOOK_TOTAL_MISMATCH`,
+  `totalAmount`), which is how field 6 of the report's format defines the total of a summary: a note with withheld
+  VAT, another tax or a deposit guarantee, none of which a receipt carries. `ConsumoFolio_v10.xsd` admits the credit
+  note in a summary; the format of the report, of 2020, names the two receipts alone.
+  - **What to change:** nothing. Code that relied on the refusal of a 61 now gets its line.
 
 ### Fixed
 
