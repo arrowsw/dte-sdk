@@ -99,6 +99,7 @@ export type {
   PeriodMatch,
   PeriodMismatch,
   PeriodReconciliation,
+  PeriodReconciliationTotals,
   PeriodRecord,
   PeriodRecordField,
   PeriodTotals,
