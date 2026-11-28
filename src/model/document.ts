@@ -161,7 +161,7 @@ export type LineItemInput = {
   readonly wholeShares?: boolean
   /** EN: Item codes. ES: `CdgItem` — Códigos del ítem (hasta 5). */
   readonly codes?: readonly ItemCode[]
-  /** EN: Additional tax codes; refused on a receipt. A VAT-affected line that brings none gets code 15 when the document withholds the whole VAT; an empty list keeps it without one. ES: `CodImpAdic` — Códigos de impuesto adicional (hasta 2); se rechazan en una boleta. Una línea afecta que no trae ninguno recibe el código 15 cuando el documento retiene todo el IVA; una lista vacía la deja sin código. */
+  /** EN: Additional tax or withholding codes, at most 2; refused on a receipt. Each code is a tax of the totals: worked out by `createDocument` (see `TotalsOptions.additionalTaxes`), and required in totals given by hand unless the line's amount is zero. A VAT-affected line that brings none gets code 15 when the document withholds the whole VAT; an empty list keeps it without one. ES: `CodImpAdic` — Códigos de impuesto adicional o retención, hasta 2; se rechazan en una boleta. Cada código es un impuesto de los totales: lo calcula `createDocument` (ver `TotalsOptions.additionalTaxes`), y se exige en los totales entregados a mano salvo que el monto de la línea sea cero. Una línea afecta que no trae ninguno recibe el código 15 cuando el documento retiene todo el IVA; una lista vacía la deja sin código. */
   readonly additionalTaxCodes?: readonly number[]
   /** EN: Type of the settled document (max 3): required on a settlement invoice (43), refused on any other type. ES: `TpoDocLiq` — Tipo del documento liquidado, máximo 3; obligatorio en liquidación factura (43) y rechazado en cualquier otro tipo. */
   readonly settledDocumentType?: string
@@ -229,10 +229,28 @@ export type LineItem = {
 export type Withholding = {
   /** EN: Tax code. ES: `TipoImp` — Código del impuesto (15 = IVA retenido total). */
   readonly taxCode: number
-  /** EN: Rate percent. ES: `TasaImp` — Tasa en porcentaje. */
-  readonly rate: number
+  /** EN: Rate percent; absent only on a specific tax, whose rate Formato DTE 2.5 lets out (field 116). ES: `TasaImp` — Tasa en porcentaje; falta solo en un impuesto específico, cuya tasa el Formato DTE 2.5 permite omitir (campo 116). */
+  readonly rate?: number
   /** EN: Withheld amount. ES: `MontoImp` — Monto retenido. */
   readonly amount: number
+}
+
+/**
+ * EN: What the caller gives of one additional tax or withholding its lines carry (`CodImpAdic`), when the table of
+ * Formato DTE 2.5 does not give it all: its rate, which takes the place of the table's, or its amount, which is taken as
+ * it comes. A code the lines carry and this does not name is worked out with the table's rate.
+ * ES: `ImptoReten` — Lo que el llamador entrega de un impuesto adicional o retención que llevan sus líneas
+ * (`CodImpAdic`), cuando la tabla del Formato DTE 2.5 no lo da entero: su tasa, que reemplaza a la de la tabla, o su
+ * monto, que se toma tal como viene. Un código que llevan las líneas y que esto no nombra se calcula con la tasa de la
+ * tabla.
+ */
+export type AdditionalTaxInput = {
+  /** EN: Code of the tax or withholding, one a line carries. ES: `TipoImp` — Código del impuesto o retención, uno que lleva una línea. */
+  readonly taxCode: number
+  /** EN: Rate in percent, from 0.01 to 999.99, rounded to two decimals; without it, the table's. Beside an amount, a specific tax may leave it out (Formato DTE 2.5, field 116), and no `TasaImp` is written. ES: `TasaImp` — Tasa en porcentaje, de 0,01 a 999,99, redondeada a dos decimales; sin ella, la de la tabla. Junto a un monto, un impuesto específico puede omitirla (Formato DTE 2.5, campo 116), y no se escribe `TasaImp`. */
+  readonly rate?: number
+  /** EN: Amount in whole pesos above zero, taken as it comes; without it, the rate by the sum of the lines that carry the code. ES: `MontoImp` — Monto en pesos enteros mayor que cero, tomado tal como viene; sin él, la tasa por la suma de las líneas que llevan el código. */
+  readonly amount?: number
 }
 
 /**
@@ -271,7 +289,7 @@ export type Totals = {
   readonly ownVatAmount?: number
   /** EN: Third-party VAT (settlement invoices); refused on a receipt. ES: `IVATerc` — IVA de terceros (liquidaciones); se rechaza en una boleta. */
   readonly thirdPartyVatAmount?: number
-  /** EN: Withholdings; refused on a receipt. ES: `ImptoReten` — Retenciones; se rechazan en una boleta. */
+  /** EN: Additional taxes and withholdings, at most 20, as the schema declares; refused on a receipt. ES: `ImptoReten` — Impuestos adicionales y retenciones, 20 como máximo, como declara el esquema; se rechazan en una boleta. */
   readonly withholdings?: readonly Withholding[]
   /** EN: VAT not withheld: the VAT less the VAT withheld by product (Formato DTE 2.5, field 118), on a purchase invoice (46) that withholds part of the VAT and on the notes that reference one (56, 61); a whole number above zero, written as given, where a given zero is none and no `IVANoRet` is written; refused on any other type. ES: `IVANoRet` — IVA no retenido: el IVA menos el IVA retenido por producto (Formato DTE 2.5, campo 118), en una factura de compra (46) que retiene parte del IVA y en las notas que referencian una (56, 61); un entero mayor que cero, escrito tal como viene, donde uno entregado en cero no cuenta y no se escribe `IVANoRet`; se rechaza en cualquier otro tipo. */
   readonly vatNotWithheld?: number
@@ -279,7 +297,7 @@ export type Totals = {
   readonly depositGuarantee?: number
   /** EN: Totals of the commission and other charge lines; refused on a receipt. ES: `Comisiones` — Totales de las líneas de comisiones y otros cargos; se rechazan en una boleta. */
   readonly commissions?: CommissionTotals
-  /** EN: Document total: net + VAT + exempt (VAT excluded when withheld) + the deposit guarantee, less the commissions and other charges (Formato DTE 2.5, field 124); zero or negative only on a settlement invoice (43), and on an export document the exempt amount, or zero without payment. `createDocument` refuses one that does not add up, unless the totals carry a tax code other than 15. ES: `MntTotal` — Monto total: neto + IVA + exento (sin IVA si está retenido) + la garantía por depósito de envases, menos las comisiones y otros cargos (Formato DTE 2.5, campo 124); cero o negativo solo en una liquidación factura (43), y en un documento de exportación el monto exento, o cero sin pago. `createDocument` rechaza uno que no cuadra, salvo que los totales traigan un código de impuesto distinto del 15. */
+  /** EN: Document total: net + VAT + exempt (VAT excluded when withheld) + the deposit guarantee + the additional, specific and advance taxes and the VAT on a margin, less the other withholdings and the commissions and other charges (Formato DTE 2.5, field 124); zero or negative only on a settlement invoice (43), and on an export document the exempt amount, or zero without payment. `createDocument` refuses one that does not add up, unless the totals carry a tax code other than 15. ES: `MntTotal` — Monto total: neto + IVA + exento (sin IVA si está retenido) + la garantía por depósito de envases + los impuestos adicionales, específicos y anticipados y el IVA de margen, menos las demás retenciones y las comisiones y otros cargos (Formato DTE 2.5, campo 124); cero o negativo solo en una liquidación factura (43), y en un documento de exportación el monto exento, o cero sin pago. `createDocument` rechaza uno que no cuadra, salvo que los totales traigan un código de impuesto distinto del 15. */
   readonly totalAmount: number
   /** EN: Non-billable amount: the lines with `IndExe` 2 less the lines with `IndExe` 6 (Formato DTE 2.5, field 125), so it may be negative; refused on a settlement invoice (43), whose root has no `MontoNF`. ES: `MontoNF` — Monto no facturable: las líneas con `IndExe` 2 menos las líneas con `IndExe` 6 (Formato DTE 2.5, campo 125), así que puede ser negativo; se rechaza en una liquidación factura (43), cuya raíz no tiene `MontoNF`. */
   readonly nonBillableAmount?: number
@@ -826,6 +844,8 @@ export type DocumentInput = {
   readonly pricesIncludeVat?: boolean
   /** EN: Withhold the whole VAT (`ImptoReten` 15, total without VAT); true by default on purchase invoices, settable on the notes that affect one, and refused on a receipt when true. ES: `ImptoReten` — Retener todo el IVA (código 15, total sin IVA); true por defecto en facturas de compra (46), se puede fijar en las notas que las afectan, y en true se rechaza en una boleta. */
   readonly withholdVat?: boolean
+  /** EN: The rate or the amount of an additional tax or withholding the lines carry, for the totals worked out here: see `TotalsOptions.additionalTaxes`. Refused with explicit `totals`, which carry the taxes themselves. ES: `ImptoReten` — La tasa o el monto de un impuesto adicional o retención que llevan las líneas, para los totales que se calculan aquí: ver `TotalsOptions.additionalTaxes`. Se rechaza con `totals` explícitos, que llevan ellos mismos los impuestos. */
+  readonly additionalTaxes?: readonly AdditionalTaxInput[]
   /** EN: On a settlement invoice (43), write the VAT split in own and third-party, as Formato DTE 2.5 lets a company that sells on behalf of a principal do (fields 113 and 114): the VAT of the commissions is the own VAT and the rest of the VAT is the third parties'. A document without VAT has no split, and neither has one whose commissions' VAT is negative or above the VAT, since the format holds each part within the VAT. Refused on any other type and with explicit `totals`, which carry `ownVatAmount` and `thirdPartyVatAmount` themselves. ES: `IVAProp`, `IVATerc` — En una liquidación factura (43), escribir el IVA separado en propio y de terceros, como el Formato DTE 2.5 permite a una empresa que vende por cuenta de un mandante (campos 113 y 114): el IVA de las comisiones es el IVA propio y el resto del IVA es el de terceros. Un documento sin IVA no lleva separación, ni uno cuyo IVA de comisiones es negativo o mayor que el IVA, porque el formato mantiene cada parte dentro del IVA. Se rechaza en cualquier otro tipo y con `totals` explícitos, que llevan ellos mismos `ownVatAmount` y `thirdPartyVatAmount`. */
   readonly splitVat?: boolean
   /** EN: Explicit totals (advanced), written as given; computed when omitted. ES: `Totales` — Totales explícitos (uso avanzado), escritos tal como vienen; se calculan si se omiten. */

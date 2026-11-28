@@ -22,7 +22,7 @@ export type BookEntryFromDocumentOptions = {
   readonly bookRut: string
   /** EN: Book side. ES: Lado del libro. */
   readonly operation: BookOperation
-  /** EN: `negative` negates exempt, net, VAT and total of a credit note (61), and refuses one with a deposit guarantee (`GrntDep`), since the book's `DepEnvase` holds no amount below zero. `positive` by default, as the format has it. ES: `negative` niega exento, neto, IVA y total de una nota de crédito (61), y rechaza una con garantía por depósito de envases (`GrntDep`), porque el `DepEnvase` del libro no admite montos bajo cero. `positive` por defecto, como dice el formato. */
+  /** EN: `negative` negates exempt, net, VAT, the other taxes and total of a credit note (61), and refuses one with a deposit guarantee (`GrntDep`) or with a VAT withholding booked in its own field of a sale line, since the book's `DepEnvase`, `IVARetTotal` and `IVARetParcial` hold no amount below zero. `positive` by default, as the format has it. ES: `negative` niega exento, neto, IVA, los otros impuestos y total de una nota de crédito (61), y rechaza una con garantía por depósito de envases (`GrntDep`) o con una retención de IVA que va en su propio campo de una línea de venta, porque `DepEnvase`, `IVARetTotal` e `IVARetParcial` del libro no admiten montos bajo cero. `positive` por defecto, como dice el formato. */
   readonly creditNoteSign?: 'positive' | 'negative'
 }
 
@@ -35,7 +35,9 @@ export type BookEntryFromDocumentOptions = {
  * The other taxes of the document travel in `otherTaxes` on both sides, and its deposit guarantee for containers
  * (`GrntDep`), which its total includes, in `containerDeposit` (`DepEnvase`). The name is truncated to 50 because the
  * document admits 100 and the book field is optional on electronic documents. `Emisor`, `IndFactCompra` and the
- * voided-document reference are not inferred: spread them into the result when the case needs them.
+ * voided-document reference are not inferred: spread them into the result when the case needs them. A tax without a
+ * rate, as a specific tax may come (Formato DTE 2.5, field 116), travels without one (`TasaImp` is optional in
+ * `OtrosImp`).
  * ES: Deriva una línea del libro desde un documento de la fase 1. La contraparte es el receptor si el dueño del libro
  * emitió el documento y el emisor en caso contrario, lo que cubre ventas, compras recibidas y facturas de compra (46) en
  * cualquier lado. El IVA que retiene una factura de compra va donde lo lleva cada lado. Una línea de venta tiene dos
@@ -45,7 +47,9 @@ export type BookEntryFromDocumentOptions = {
  * depósito de envases (`GrntDep`), que su total incluye, en `containerDeposit` (`DepEnvase`). El nombre se trunca a
  * 50 porque el documento admite 100 y el campo del libro es opcional en documentos electrónicos. `Emisor`,
  * `IndFactCompra` y la referencia al documento anulado no se infieren: se agregan al resultado si el caso los necesita.
- * @throws {DteError} EN: `INVALID_RUT`; `INVALID_OPTION` with `creditNoteSign` in `details.field` for a `negative` sign on a credit note with a deposit guarantee, which `DepEnvase` (`MontoType`) cannot carry negated. ES: `INVALID_RUT`; `INVALID_OPTION` con `creditNoteSign` en `details.field` ante un signo `negative` en una nota de crédito con garantía por depósito de envases, que `DepEnvase` (`MontoType`) no admite negada.
+ * Un impuesto sin tasa, como puede venir un impuesto específico (Formato DTE 2.5, campo 116), viaja sin ella
+ * (`TasaImp` es opcional en `OtrosImp`).
+ * @throws {DteError} EN: `INVALID_RUT`; `INVALID_OPTION` with `creditNoteSign` in `details.field` for a `negative` sign on a credit note with a deposit guarantee or with a VAT withholding of a sale line, which `DepEnvase`, `IVARetTotal` and `IVARetParcial` (`MontoType`) cannot carry negated; `MISSING_FIELD` on `totals.withholdings`, with the code in `details.taxCode`, for a VAT withholding of a sale line other than code 15 without its rate, which cannot be told whole or partial. ES: `INVALID_RUT`; `INVALID_OPTION` con `creditNoteSign` en `details.field` ante un signo `negative` en una nota de crédito con garantía por depósito de envases o con una retención de IVA de una línea de venta, que `DepEnvase`, `IVARetTotal` e `IVARetParcial` (`MontoType`) no admiten negadas; `MISSING_FIELD` en `totals.withholdings`, con el código en `details.taxCode`, ante una retención de IVA de una línea de venta distinta del código 15 sin su tasa, que no se puede decir total ni parcial.
  */
 export const bookEntryFromDocument = (document: Document, options: BookEntryFromDocumentOptions): BookEntryInput => {
   const { type, folio, issueDate, issuer, receiver, totals } = document.header
@@ -63,14 +67,23 @@ export const bookEntryFromDocument = (document: Document, options: BookEntryFrom
   // `IVARetParcial` for a lesser one.
   const ownField = (item: Withholding): boolean =>
     options.operation === 'sale' && RETENTION_TAX_CODES.includes(item.taxCode)
-  const whole = (item: Withholding): boolean =>
-    item.taxCode === WITHHOLDING_TAX_CODES.totalVatWithholding || item.rate >= (totals.vatRate ?? VAT_RATE)
+  // A withholding without its rate cannot be told whole or partial, and each goes in a field of its own: it is refused
+  // rather than booked in the wrong one. Only code 15 is whole by its code.
+  const whole = (item: Withholding): boolean => {
+    if (item.taxCode === WITHHOLDING_TAX_CODES.totalVatWithholding) return true
+    if (item.rate === undefined)
+      throw new DteError('MISSING_FIELD', { field: 'totals.withholdings', taxCode: item.taxCode })
+    return item.rate >= (totals.vatRate ?? VAT_RATE)
+  }
   const withheld = (items: readonly Withholding[]): number | undefined =>
     items.reduce((total, item) => total + item.amount, 0) || undefined
   const own = withholdings.filter(ownField)
+  // `IVARetTotal` and `IVARetParcial` are a `MontoType`, from zero up, as `DepEnvase` is: a negated withholding has no
+  // field to go in. The other taxes (`MntImp`, a `ValorType`) take the sign of the line.
+  if (negate && own.length > 0) throw new DteError('INVALID_OPTION', { field: 'creditNoteSign' })
   const otherTaxes = withholdings
     .filter((item) => !ownField(item))
-    .map((item) => ({ code: item.taxCode, rate: item.rate, amount: item.amount }))
+    .map((item) => compact({ code: item.taxCode, rate: item.rate, amount: signed(item.amount) }))
   return compact({
     type,
     folio,

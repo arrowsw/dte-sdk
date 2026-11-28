@@ -191,6 +191,23 @@ describe('withholdings and additional taxes', () => {
     expect(text).not.toContain('SIN RETENCIÓN')
   })
 
+  test('a specific tax issued without a rate prints with no percent', async () => {
+    const diesel = issue({
+      type: 33,
+      folio: 13,
+      issueDate: '2026-11-15',
+      issuer,
+      receiver,
+      items: [{ name: 'Petróleo diésel', quantity: 100, unitPrice: 800, additionalTaxCodes: [28] }],
+      additionalTaxes: [{ taxCode: 28, amount: 6_400 }],
+    })
+    const doc = parsePrintableDocuments(diesel.xml)[0]
+    expect(doc.withholdings).toEqual([{ code: '28', amount: 6_400 }])
+    const text = await textOf(doc)
+    expect(rowOf(text, 'Impuesto específico diésel').value).toBe('$6.400')
+    expect(text).not.toMatch(/diésel \(/)
+  })
+
   test('a name too long for its cell goes on over more lines, on the sheet and on the roll', async () => {
     const doc: PrintableDocument = { ...invoiceDoc, withholdings: [{ code: '51', amount: 2_000 }] }
     const label = 'Impuesto gas natural comprimido; 1,93 UTM/KM3, Art. 1°, Ley N° 20.052'

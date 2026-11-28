@@ -260,7 +260,10 @@ const toSiiTotales = (totals: Totals, receipt: boolean): SiiTotales =>
         IVA: totals.vatAmount,
         IVAProp: totals.ownVatAmount,
         IVATerc: totals.thirdPartyVatAmount,
-        ImptoReten: totals.withholdings?.map((w) => ({ TipoImp: w.taxCode, TasaImp: w.rate, MontoImp: w.amount })),
+        // A specific tax may leave out `TasaImp` (Formato DTE 2.5, field 116): none is written then.
+        ImptoReten: totals.withholdings?.map((w) =>
+          compact({ TipoImp: w.taxCode, TasaImp: w.rate, MontoImp: w.amount }),
+        ),
         // "No se registra si es igual a 0" (Formato DTE 2.5, field 118): no `IVANoRet` is written at zero.
         IVANoRet: totals.vatNotWithheld || undefined,
         // A guarantee of zero is none, as `calculateTotals` leaves it out: no `GrntDep` is written at zero.
@@ -596,7 +599,7 @@ const fromSiiTotales = (totales: SiiTotales): Totals =>
     vatAmount: totales.IVA,
     ownVatAmount: totales.IVAProp,
     thirdPartyVatAmount: totales.IVATerc,
-    withholdings: totales.ImptoReten?.map((r) => ({ taxCode: r.TipoImp, rate: r.TasaImp, amount: r.MontoImp })),
+    withholdings: totales.ImptoReten?.map((r) => compact({ taxCode: r.TipoImp, rate: r.TasaImp, amount: r.MontoImp })),
     vatNotWithheld: totales.IVANoRet,
     depositGuarantee: totales.GrntDep,
     commissions:
